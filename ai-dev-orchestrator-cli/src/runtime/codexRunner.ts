@@ -11,6 +11,7 @@ export class CodexRunner {
   constructor(
     private readonly processRunner: ProcessRunner,
     private readonly command: string,
+    private readonly baseArgs: string[],
     private readonly logger: Logger,
   ) {}
 
@@ -19,7 +20,8 @@ export class CodexRunner {
     stage: Stage,
     schema: ZodType<T>,
   ): Promise<AgentOutput<T>> {
-    const args = this.buildArgs(input);
+    const args = this.buildArgs();
+    const stdinData = this.buildStdinPayload(input);
 
     this.logger.info(
       { stage, cwd: input.workingDirectory, command: this.command },
@@ -32,6 +34,7 @@ export class CodexRunner {
       cwd: input.workingDirectory,
       env: input.env,
       timeoutMs: input.timeoutMs,
+      stdinData,
     });
 
     if (result.exitCode !== 0 && !result.stdout.includes("BEGIN_STRUCTURED_OUTPUT")) {
@@ -52,9 +55,13 @@ export class CodexRunner {
     };
   }
 
-  private buildArgs(input: AgentInput): string[] {
-    const args: string[] = ["--approval-mode", "full-auto", "-q"];
-    args.push(input.prompt);
-    return args;
+  private buildArgs(): string[] {
+    // Prompt is passed via stdin, not as a positional CLI argument, to
+    // avoid shell-length limits and leaking content through ps output.
+    return [...this.baseArgs];
+  }
+
+  private buildStdinPayload(input: AgentInput): string {
+    return input.prompt;
   }
 }

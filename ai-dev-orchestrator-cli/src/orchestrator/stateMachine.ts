@@ -23,14 +23,15 @@ function buildTransitionTable(): TransitionTable {
   add(RunState.AwaitingPlanApproval, RunEvent.PLAN_REJECTED, RunState.Planning);
   add(RunState.Implementing, RunEvent.EXECUTION_STARTED, RunState.Implementing);
   add(RunState.Implementing, RunEvent.EXECUTION_FINISHED, RunState.AIReview);
-  add(RunState.AIReview, RunEvent.REVIEW_COMPLETED, RunState.ReadyForHumanReview);
-  add(RunState.AIReview, RunEvent.REVIEW_FINDINGS_EXIST, RunState.AddressingReview);
+  add(RunState.AIReview, RunEvent.REVIEW_APPROVED, RunState.ReadyForHumanReview);
+  add(RunState.AIReview, RunEvent.REVIEW_CHANGES_REQUESTED, RunState.AddressingReview);
   add(RunState.AddressingReview, RunEvent.REMEDIATION_FINISHED, RunState.AIReview);
   add(RunState.ReadyForHumanReview, RunEvent.HUMAN_APPROVED, RunState.Done);
 
-  // Blocked transitions
+  // Blocked transitions (any active state can be blocked)
   add(RunState.Todo, RunEvent.BLOCKED, RunState.AIBlocked);
   add(RunState.Planning, RunEvent.BLOCKED, RunState.AIBlocked);
+  add(RunState.AwaitingPlanApproval, RunEvent.BLOCKED, RunState.AIBlocked);
   add(RunState.Implementing, RunEvent.BLOCKED, RunState.AIBlocked);
   add(RunState.AIReview, RunEvent.BLOCKED, RunState.AIBlocked);
   add(RunState.AddressingReview, RunEvent.BLOCKED, RunState.AIBlocked);
@@ -38,8 +39,14 @@ function buildTransitionTable(): TransitionTable {
   // Human clarification
   add(RunState.Todo, RunEvent.NEEDS_HUMAN_CLARIFICATION, RunState.HumanClarificationNeeded);
   add(RunState.Planning, RunEvent.NEEDS_HUMAN_CLARIFICATION, RunState.HumanClarificationNeeded);
+  add(RunState.AwaitingPlanApproval, RunEvent.NEEDS_HUMAN_CLARIFICATION, RunState.HumanClarificationNeeded);
 
-  // Recovery
+  // Recovery: RESET_TO_TODO always returns to Todo.
+  // V1 limitation: prior meaningful state is not preserved. A future enhancement
+  // could store previousState on the run and allow resuming from it, but that
+  // adds significant complexity to the transition model. For now, the tradeoff
+  // is acceptable — the orchestrator can simply re-trigger the appropriate stage
+  // after reset.
   add(RunState.AIBlocked, RunEvent.RESET_TO_TODO, RunState.Todo);
   add(RunState.HumanClarificationNeeded, RunEvent.RESET_TO_TODO, RunState.Todo);
 

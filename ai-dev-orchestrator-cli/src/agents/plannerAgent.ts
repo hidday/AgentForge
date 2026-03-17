@@ -37,7 +37,7 @@ export class PlannerAgent {
 
     await this.artifactRepo.create({
       runId,
-      type: "RawTranscript",
+      type: "PlannerTranscript",
       version: 1,
       payloadJson: {},
       rawText: output.raw,

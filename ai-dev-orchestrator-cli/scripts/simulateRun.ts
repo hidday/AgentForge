@@ -3,6 +3,7 @@ dotenv.config();
 
 import { PrismaClient } from "@prisma/client";
 import { logger } from "../src/utils/logger.js";
+import { parseBaseArgs } from "../src/config/env.js";
 import { RunRepository } from "../src/orchestrator/runRepository.js";
 import { ArtifactRepository } from "../src/orchestrator/artifactRepository.js";
 import { EventRepository } from "../src/orchestrator/eventRepository.js";
@@ -19,10 +20,9 @@ import { MockLinearClient } from "../src/linear/linearClient.js";
 import { MockGitHubClient } from "../src/github/githubClient.js";
 import { createMockProcessHandler } from "../src/mocks/mockCliOutputs.js";
 import { MOCK_ISSUE } from "../src/mocks/mockLinearData.js";
-import { env } from "../src/config/env.js";
 
-const DIVIDER = "═".repeat(72);
-const SECTION = "─".repeat(72);
+const DIVIDER = "=".repeat(72);
+const SECTION = "-".repeat(72);
 
 function header(title: string): void {
   console.log(`\n${DIVIDER}`);
@@ -49,8 +49,18 @@ async function simulate(): Promise<void> {
     const processRunner = new ProcessRunner("mock", logger);
     processRunner.setMockHandler(createMockProcessHandler());
 
-    const claudeCodeRunner = new ClaudeCodeRunner(processRunner, "claude", logger);
-    const codexRunner = new CodexRunner(processRunner, "codex", logger);
+    const claudeCodeRunner = new ClaudeCodeRunner(
+      processRunner,
+      "claude",
+      parseBaseArgs("--print --output-format json"),
+      logger,
+    );
+    const codexRunner = new CodexRunner(
+      processRunner,
+      "codex",
+      parseBaseArgs("--approval-mode full-auto -q"),
+      logger,
+    );
     const agentRunner = new AgentRunner(claudeCodeRunner, codexRunner, logger);
 
     const githubClient = new MockGitHubClient();
@@ -75,16 +85,24 @@ async function simulate(): Promise<void> {
       logger,
     });
 
-    // Step 1: Start run (triggers planning)
-    section("Step 1: Start Run → Planning");
+    // Step 1: Start run (planning)
+    section("Step 1: Start Run -> Planning -> AwaitingPlanApproval");
     console.log(`Issue: ${MOCK_ISSUE.id} — "${MOCK_ISSUE.title}"`);
     const run = await orchestrator.startRun(MOCK_ISSUE.id);
     console.log(`Run ID: ${run.id}`);
-    console.log(`State after planning: ${run.state}`);
+    console.log(`State: ${run.state}`);
 
-    // Step 2: Approve plan (triggers execution → review → remediation → ready)
-    section("Step 2: Approve Plan → Execution → Review → Remediation");
-    const finalRun = await orchestrator.approvePlan(run.id);
+    // Step 2: Explicit plan approval (does NOT trigger execution)
+    section("Step 2: Approve Plan -> Implementing");
+    const approvedRun = await orchestrator.approvePlan(run.id);
+    console.log(`State: ${approvedRun.state}`);
+    console.log(`Approved plan version: ${approvedRun.approvedPlanVersion}`);
+
+    // Step 3: Run execution (triggers review -> remediation -> re-review -> ready)
+    section("Step 3: Execute -> Review -> Remediation -> Re-review -> Ready");
+    console.log("This step chains: execution -> first review (changes_requested)");
+    console.log("  -> remediation -> second review (approved) -> ready for human review");
+    const finalRun = await orchestrator.runExecution(run.id);
     console.log(`Final state: ${finalRun.state}`);
 
     // Show artifacts
@@ -101,9 +119,9 @@ async function simulate(): Promise<void> {
     const events = await eventRepo.findByRunId(run.id);
     for (const e of events) {
       const payload = e.payloadJson as Record<string, unknown> | undefined;
-      const from = payload?.["from"] ?? "—";
-      const to = payload?.["to"] ?? "—";
-      console.log(`  ${e.eventType.padEnd(28)} ${String(from).padEnd(24)} → ${to}  (${e.source})`);
+      const from = payload?.["from"] ?? "-";
+      const to = payload?.["to"] ?? "-";
+      console.log(`  ${e.eventType.padEnd(30)} ${String(from).padEnd(24)} -> ${to}  (${e.source})`);
     }
 
     // Show Linear comments

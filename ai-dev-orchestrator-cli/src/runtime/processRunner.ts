@@ -42,13 +42,13 @@ export class ProcessRunner {
 
   private executeReal(options: ProcessSpawnOptions): Promise<ProcessResult> {
     const timer = startTimer();
-    const { command, args, cwd, env: extraEnv, timeoutMs } = options;
+    const { command, args, cwd, env: extraEnv, timeoutMs, stdinData } = options;
 
     return new Promise<ProcessResult>((resolve, reject) => {
       const mergedEnv = { ...process.env, ...extraEnv };
 
       this.logger.info(
-        { command, args, cwd, timeoutMs },
+        { command, args, cwd, timeoutMs, hasStdin: !!stdinData },
         "Spawning subprocess",
       );
 
@@ -57,6 +57,13 @@ export class ProcessRunner {
         env: mergedEnv,
         stdio: ["pipe", "pipe", "pipe"],
       });
+
+      if (stdinData) {
+        child.stdin.write(stdinData);
+        child.stdin.end();
+      } else {
+        child.stdin.end();
+      }
 
       const stdoutChunks: Buffer[] = [];
       const stderrChunks: Buffer[] = [];

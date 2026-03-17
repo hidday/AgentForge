@@ -11,6 +11,7 @@ export class ClaudeCodeRunner {
   constructor(
     private readonly processRunner: ProcessRunner,
     private readonly command: string,
+    private readonly baseArgs: string[],
     private readonly logger: Logger,
   ) {}
 
@@ -20,6 +21,7 @@ export class ClaudeCodeRunner {
     schema: ZodType<T>,
   ): Promise<AgentOutput<T>> {
     const args = this.buildArgs(input);
+    const stdinData = this.buildStdinPayload(input);
 
     this.logger.info(
       { stage, cwd: input.workingDirectory, command: this.command },
@@ -32,6 +34,7 @@ export class ClaudeCodeRunner {
       cwd: input.workingDirectory,
       env: input.env,
       timeoutMs: input.timeoutMs,
+      stdinData,
     });
 
     if (result.exitCode !== 0 && !result.stdout.includes("BEGIN_STRUCTURED_OUTPUT")) {
@@ -53,14 +56,19 @@ export class ClaudeCodeRunner {
   }
 
   private buildArgs(input: AgentInput): string[] {
-    const args: string[] = ["--print", "--output-format", "json"];
+    const args = [...this.baseArgs];
 
     if (input.systemPrompt) {
       args.push("--system-prompt", input.systemPrompt);
     }
 
-    args.push("-p", input.prompt);
+    // Prompt is passed via stdin, not as a CLI argument, to avoid
+    // shell-length limits and leaking content through process listings.
 
     return args;
+  }
+
+  private buildStdinPayload(input: AgentInput): string {
+    return input.prompt;
   }
 }

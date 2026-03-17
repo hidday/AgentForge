@@ -9,6 +9,7 @@ export interface Run {
   prNumber: number | null;
   state: RunState;
   planVersion: number;
+  approvedPlanVersion: number | null;
   plannerRuntime: string | null;
   executorRuntime: string | null;
   reviewerRuntime: string | null;
@@ -24,7 +25,10 @@ export type ArtifactType =
   | "ExecutionReport"
   | "Review"
   | "Remediation"
-  | "RawTranscript";
+  | "PlannerTranscript"
+  | "ExecutorTranscript"
+  | "ReviewerTranscript"
+  | "RemediationTranscript";
 
 export interface Artifact {
   id: string;

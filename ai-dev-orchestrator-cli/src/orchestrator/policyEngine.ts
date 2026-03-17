@@ -23,10 +23,22 @@ export class PolicyEngine {
         "execute_requires_implementing_state",
       );
     }
-    if (!plan || run.planVersion < 1) {
+    if (run.approvedPlanVersion == null) {
       throw new PolicyViolationError(
-        "Cannot execute without an approved plan",
-        "execute_requires_approved_plan",
+        "Cannot execute without explicit plan approval (approvedPlanVersion is not set)",
+        "execute_requires_explicit_approval",
+      );
+    }
+    if (!plan) {
+      throw new PolicyViolationError(
+        "Cannot execute without a plan artifact",
+        "execute_requires_plan_artifact",
+      );
+    }
+    if (plan.planVersion !== run.approvedPlanVersion) {
+      throw new PolicyViolationError(
+        `Plan version mismatch: plan is v${plan.planVersion} but approved version is v${run.approvedPlanVersion}`,
+        "execute_plan_version_mismatch",
       );
     }
   }
@@ -36,6 +48,12 @@ export class PolicyEngine {
       throw new PolicyViolationError(
         `Cannot review when run is in state "${run.state}"`,
         "review_requires_ai_review_state",
+      );
+    }
+    if (!run.prNumber) {
+      throw new PolicyViolationError(
+        "Cannot review without an existing PR",
+        "review_requires_pr",
       );
     }
     if (!executionReport) {
@@ -53,7 +71,19 @@ export class PolicyEngine {
         "remediate_requires_addressing_review_state",
       );
     }
-    if (!review || review.findings.length === 0) {
+    if (!review) {
+      throw new PolicyViolationError(
+        "Cannot remediate without a review artifact",
+        "remediate_requires_review",
+      );
+    }
+    if (review.overallVerdict !== "changes_requested") {
+      throw new PolicyViolationError(
+        `Cannot remediate when review verdict is "${review.overallVerdict}" (must be "changes_requested")`,
+        "remediate_requires_changes_requested_verdict",
+      );
+    }
+    if (review.findings.length === 0) {
       throw new PolicyViolationError(
         "Cannot remediate without review findings",
         "remediate_requires_findings",
@@ -66,6 +96,13 @@ export class PolicyEngine {
     review: Review | null,
     executionReport: ExecutionReport | null,
   ): void {
+    if (!run.prNumber) {
+      throw new PolicyViolationError(
+        "Cannot mark ready without an existing PR",
+        "ready_requires_pr",
+      );
+    }
+
     if (!executionReport) {
       throw new PolicyViolationError(
         "Cannot mark ready without execution report",
@@ -87,25 +124,25 @@ export class PolicyEngine {
 
     if (!review) {
       throw new PolicyViolationError(
-        "Cannot mark ready without review completion",
+        "Cannot mark ready without a review (review stage must have run)",
         "ready_requires_review",
+      );
+    }
+
+    if (review.overallVerdict !== "approved") {
+      throw new PolicyViolationError(
+        `Cannot mark ready when latest review verdict is "${review.overallVerdict}" (must be "approved")`,
+        "ready_requires_approved_verdict",
       );
     }
 
     const unresolvedBlockers = review.findings.filter(
       (f) => f.severity === "blocker",
     );
-    if (unresolvedBlockers.length > 0 && review.overallVerdict === "changes_requested") {
+    if (unresolvedBlockers.length > 0) {
       throw new PolicyViolationError(
         `Cannot mark ready with ${unresolvedBlockers.length} unresolved blocker findings`,
         "ready_requires_blockers_resolved",
-      );
-    }
-
-    if (!run.prNumber) {
-      throw new PolicyViolationError(
-        "Cannot mark ready without an existing PR",
-        "ready_requires_pr",
       );
     }
   }

@@ -45,7 +45,7 @@ export class ExecutorAgent {
 
     await this.artifactRepo.create({
       runId,
-      type: "RawTranscript",
+      type: "ExecutorTranscript",
       version: 2,
       payloadJson: {},
       rawText: output.raw,

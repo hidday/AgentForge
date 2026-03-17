@@ -106,7 +106,7 @@ const MOCK_EXECUTOR_OUTPUT = wrap({
   },
 });
 
-const MOCK_REVIEWER_OUTPUT = wrap({
+const MOCK_REVIEWER_CHANGES_REQUESTED_OUTPUT = wrap({
   success: true,
   stage: "reviewer",
   payload: {
@@ -145,6 +145,29 @@ const MOCK_REVIEWER_OUTPUT = wrap({
       },
     ],
     overallVerdict: "changes_requested",
+  },
+});
+
+const MOCK_REVIEWER_APPROVED_OUTPUT = wrap({
+  success: true,
+  stage: "reviewer",
+  payload: {
+    reviewId: "rev-002",
+    summary:
+      "All previous review findings have been addressed. The null body check is in place, product tests cover edge cases. Implementation looks good.",
+    findings: [
+      {
+        id: "f4",
+        severity: "nit",
+        type: "style",
+        file: "src/schemas/userSchemas.ts",
+        lineHint: 8,
+        title: "Consider extracting shared email schema",
+        details:
+          "Minor style suggestion carried forward — not blocking.",
+      },
+    ],
+    overallVerdict: "approved",
   },
 });
 
@@ -189,21 +212,31 @@ const MOCK_REMEDIATION_OUTPUT = wrap({
 export function createMockProcessHandler(): (
   options: ProcessSpawnOptions,
 ) => Promise<ProcessResult> {
-  return async (options: ProcessSpawnOptions): Promise<ProcessResult> => {
-    const commandStr = `${options.command} ${options.args.join(" ")}`;
+  const callCounts = new Map<string, number>();
 
+  return async (options: ProcessSpawnOptions): Promise<ProcessResult> => {
     let stdout: string;
-    if (commandStr.includes("claude") || options.command.endsWith("claude")) {
-      const prompt = options.args.join(" ").toLowerCase();
-      if (prompt.includes("planner") || prompt.includes("plan")) {
+
+    const isCodex = options.command.endsWith("codex") || options.command === "codex";
+    const isClaude = options.command.endsWith("claude") || options.command === "claude";
+
+    if (isClaude) {
+      const stdinContent = (options.stdinData ?? "").toLowerCase();
+      if (stdinContent.includes("planner") || stdinContent.includes("plan")) {
         stdout = MOCK_PLANNER_OUTPUT;
-      } else if (prompt.includes("remediat")) {
+      } else if (stdinContent.includes("remediat")) {
         stdout = MOCK_REMEDIATION_OUTPUT;
       } else {
         stdout = MOCK_EXECUTOR_OUTPUT;
       }
-    } else if (commandStr.includes("codex") || options.command.endsWith("codex")) {
-      stdout = MOCK_REVIEWER_OUTPUT;
+    } else if (isCodex) {
+      const codexCalls = (callCounts.get("codex") ?? 0) + 1;
+      callCounts.set("codex", codexCalls);
+
+      // First codex call returns changes_requested, subsequent calls return approved
+      stdout = codexCalls <= 1
+        ? MOCK_REVIEWER_CHANGES_REQUESTED_OUTPUT
+        : MOCK_REVIEWER_APPROVED_OUTPUT;
     } else {
       stdout = wrap({ success: false, stage: "planner", payload: {} });
     }

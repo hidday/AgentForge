@@ -30,4 +30,5 @@ export interface ProcessSpawnOptions {
   cwd: string;
   env?: Record<string, string>;
   timeoutMs: number;
+  stdinData?: string;
 }

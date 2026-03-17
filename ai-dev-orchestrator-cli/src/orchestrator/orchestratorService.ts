@@ -93,27 +93,30 @@ export class OrchestratorService {
         await this.startRun(issueId);
         break;
       case "approve-plan": {
-        const run = await this.runRepo.findByIssueId(issueId);
-        if (run) await this.approvePlan(run.id);
+        const run = await this.runRepo.findActiveByIssueId(issueId);
+        if (run) {
+          await this.approvePlan(run.id);
+          await this.runExecution(run.id);
+        }
         break;
       }
       case "reject-plan": {
-        const run = await this.runRepo.findByIssueId(issueId);
+        const run = await this.runRepo.findActiveByIssueId(issueId);
         if (run) await this.rejectPlan(run.id);
         break;
       }
       case "re-review": {
-        const run = await this.runRepo.findByIssueId(issueId);
+        const run = await this.runRepo.findActiveByIssueId(issueId);
         if (run) await this.runReview(run.id);
         break;
       }
       case "pause-ai": {
-        const run = await this.runRepo.findByIssueId(issueId);
+        const run = await this.runRepo.findActiveByIssueId(issueId);
         if (run) await this.transitionAndRecord(run, RunEvent.BLOCKED, "user-command");
         break;
       }
       case "resume-ai": {
-        const run = await this.runRepo.findByIssueId(issueId);
+        const run = await this.runRepo.findActiveByIssueId(issueId);
         if (run) await this.transitionAndRecord(run, RunEvent.RESET_TO_TODO, "user-command");
         break;
       }
@@ -127,16 +130,22 @@ export class OrchestratorService {
     const timer = startTimer();
     this.logger.info({ issueId }, "Starting new run");
 
+    const activeRun = await this.runRepo.findActiveByIssueId(issueId);
+    if (activeRun) {
+      this.logger.info(
+        { issueId, existingRunId: activeRun.id, state: activeRun.state },
+        "Active run already exists for this issue, returning existing run",
+      );
+      return activeRun;
+    }
+
     const issue = await this.linearClient.getIssue(issueId);
 
-    let run = await this.runRepo.findByIssueId(issueId);
-    if (!run) {
-      run = await this.runRepo.create({
-        linearIssueId: issueId,
-        repo: "acme/backend-api",
-        workingDirectory: env.DEFAULT_REPO_PATH,
-      });
-    }
+    let run = await this.runRepo.create({
+      linearIssueId: issueId,
+      repo: "acme/backend-api",
+      workingDirectory: env.DEFAULT_REPO_PATH,
+    });
 
     this.policy.assertCanPlan(run);
 
@@ -146,7 +155,7 @@ export class OrchestratorService {
 
     await this.linearClient.postComment(
       issueId,
-      `🤖 AI planning started for "${issue.title}". Will produce a plan for approval.`,
+      `AI planning started for "${issue.title}". Will produce a plan for approval.`,
     );
 
     const plan = await this.plannerAgent.run(bundle, run.id);
@@ -169,23 +178,44 @@ export class OrchestratorService {
   }
 
   async approvePlan(runId: string): Promise<Run> {
-    const timer = startTimer();
     let run = await this.requireRun(runId);
 
+    const planArtifact = await this.artifactRepo.findLatestByType(runId, "Plan");
+    if (!planArtifact) {
+      throw new Error(`No plan artifact found for run ${runId}`);
+    }
+    const plan = planArtifact.payloadJson as Plan;
+
+    run = await this.runRepo.update(runId, {
+      approvedPlanVersion: plan.planVersion,
+    });
+
     run = await this.transitionAndRecord(run, RunEvent.PLAN_APPROVED, "human");
+
+    await this.linearClient.postComment(
+      run.linearIssueId,
+      `Plan v${plan.planVersion} approved. Starting implementation...`,
+    );
+
+    this.logger.info(
+      { runId, approvedPlanVersion: plan.planVersion, state: run.state },
+      "Plan approved",
+    );
+
+    return run;
+  }
+
+  async runExecution(runId: string): Promise<Run> {
+    const timer = startTimer();
+    let run = await this.requireRun(runId);
 
     const planArtifact = await this.artifactRepo.findLatestByType(runId, "Plan");
     const plan = planArtifact?.payloadJson as Plan;
 
-    const issue = await this.linearClient.getIssue(run.linearIssueId);
-    const bundle = this.buildTaskBundle(issue, run);
-
     this.policy.assertCanExecute(run, plan);
 
-    await this.linearClient.postComment(
-      run.linearIssueId,
-      "✅ Plan approved. Starting implementation...",
-    );
+    const issue = await this.linearClient.getIssue(run.linearIssueId);
+    const bundle = this.buildTaskBundle(issue, run);
 
     await this.eventRepo.create({
       runId,
@@ -224,14 +254,10 @@ export class OrchestratorService {
 
     await this.linearClient.postComment(
       run.linearIssueId,
-      "❌ Plan rejected. Replanning...",
+      "Plan rejected. Replanning...",
     );
 
     return run;
-  }
-
-  async runExecution(runId: string): Promise<Run> {
-    return this.approvePlan(runId);
   }
 
   async runReview(runId: string): Promise<Run> {
@@ -259,12 +285,8 @@ export class OrchestratorService {
 
     run = await this.runRepo.update(runId, { reviewerRuntime: "codex" });
 
-    const hasMaterialFindings = review.findings.some(
-      (f) => f.severity === "blocker" || f.severity === "important",
-    );
-
-    if (hasMaterialFindings) {
-      run = await this.transitionAndRecord(run, RunEvent.REVIEW_FINDINGS_EXIST, "reviewer-agent");
+    if (review.overallVerdict === "changes_requested") {
+      run = await this.transitionAndRecord(run, RunEvent.REVIEW_CHANGES_REQUESTED, "reviewer-agent");
 
       await this.linearClient.postComment(
         run.linearIssueId,
@@ -272,20 +294,20 @@ export class OrchestratorService {
       );
 
       this.logger.info(
-        { runId, state: run.state, durationMs: timer.elapsed() },
-        "Review found material issues, starting remediation",
+        { runId, state: run.state, verdict: review.overallVerdict, durationMs: timer.elapsed() },
+        "Review requested changes, starting remediation",
       );
 
       run = await this.runRemediation(runId);
     } else {
-      run = await this.transitionAndRecord(run, RunEvent.REVIEW_COMPLETED, "reviewer-agent");
-
-      await this.markReady(runId);
+      run = await this.transitionAndRecord(run, RunEvent.REVIEW_APPROVED, "reviewer-agent");
 
       this.logger.info(
-        { runId, state: run.state, durationMs: timer.elapsed() },
-        "Review passed, ready for human review",
+        { runId, state: run.state, verdict: review.overallVerdict, durationMs: timer.elapsed() },
+        "Review approved, marking ready for human review",
       );
+
+      await this.markReady(runId);
     }
 
     return run;
@@ -321,18 +343,10 @@ export class OrchestratorService {
 
     this.logger.info(
       { runId, state: run.state, durationMs: timer.elapsed() },
-      "Remediation complete, re-reviewing",
+      "Remediation complete, triggering fresh review cycle",
     );
 
-    // After remediation, we re-enter review.
-    // For mock mode the second review will pass since the mock always returns the same output.
-    // In real mode the re-review would evaluate the updated code.
-    // To avoid infinite loops in mock mode, we directly transition to ReadyForHumanReview.
-    if (env.AGENT_RUNTIME_MODE === "mock") {
-      run = await this.transitionAndRecord(run, RunEvent.REVIEW_COMPLETED, "reviewer-agent");
-      await this.markReady(runId);
-    }
-
+    run = await this.runReview(runId);
     return run;
   }
 
@@ -352,7 +366,7 @@ export class OrchestratorService {
       await this.githubClient.commentOnPR(
         run.repo,
         run.prNumber,
-        "🟢 All AI checks passed. Ready for human review.",
+        "All AI checks passed. Ready for human review.",
       );
     }
 
@@ -360,7 +374,7 @@ export class OrchestratorService {
     await this.linearClient.addLabel(run.linearIssueId, "ready-for-human-review");
     await this.linearClient.postComment(
       run.linearIssueId,
-      "✅ AI workflow complete. Issue marked as **Ready for Human Review**.",
+      "AI workflow complete. Issue marked as **Ready for Human Review**.",
     );
 
     this.logger.info({ runId, state: run.state }, "Run marked as ready for human review");
@@ -443,7 +457,7 @@ export class OrchestratorService {
     const questions = plan.openQuestions.length > 0
       ? "\n\n**Open Questions:**\n" +
         plan.openQuestions
-          .map((q) => `- ${q.question}${q.requiredForExecution ? " ⚠️ *blocks execution*" : ""}`)
+          .map((q) => `- ${q.question}${q.requiredForExecution ? " *blocks execution*" : ""}`)
           .join("\n")
       : "";
     const risks = plan.risks.length > 0
@@ -451,7 +465,7 @@ export class OrchestratorService {
       : "";
 
     return [
-      `## 📋 AI Plan (v${plan.planVersion}) — Confidence: ${(plan.confidence * 100).toFixed(0)}%`,
+      `## AI Plan (v${plan.planVersion}) — Confidence: ${(plan.confidence * 100).toFixed(0)}%`,
       "",
       plan.summary,
       "",
@@ -474,7 +488,7 @@ export class OrchestratorService {
       .join("\n");
 
     return [
-      `## 🔍 AI Review — ${review.overallVerdict === "approved" ? "Approved ✅" : "Changes Requested ⚠️"}`,
+      `## AI Review — ${review.overallVerdict === "approved" ? "Approved" : "Changes Requested"}`,
       "",
       review.summary,
       "",
@@ -494,7 +508,7 @@ export class OrchestratorService {
       .join("\n");
 
     return [
-      "## 🔧 Remediation Summary",
+      "## Remediation Summary",
       "",
       items,
     ].join("\n");

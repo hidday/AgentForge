@@ -50,7 +50,7 @@ export class RemediationAgent {
 
     await this.artifactRepo.create({
       runId,
-      type: "RawTranscript",
+      type: "RemediationTranscript",
       version: 4,
       payloadJson: {},
       rawText: output.raw,

@@ -3,6 +3,8 @@ import type { RunState as PrismaRunState } from "@prisma/client";
 import { RunState } from "../domain/runState.js";
 import type { Run } from "../domain/types.js";
 
+const TERMINAL_STATES: RunState[] = [RunState.Done];
+
 function toDomain(row: {
   id: string;
   linearIssueId: string;
@@ -11,6 +13,7 @@ function toDomain(row: {
   prNumber: number | null;
   state: PrismaRunState;
   planVersion: number;
+  approvedPlanVersion: number | null;
   plannerRuntime: string | null;
   executorRuntime: string | null;
   reviewerRuntime: string | null;
@@ -58,6 +61,17 @@ export class RunRepository {
     return row ? toDomain(row) : null;
   }
 
+  async findActiveByIssueId(linearIssueId: string): Promise<Run | null> {
+    const row = await this.prisma.aiRun.findFirst({
+      where: {
+        linearIssueId,
+        state: { notIn: TERMINAL_STATES as PrismaRunState[] },
+      },
+      orderBy: { createdAt: "desc" },
+    });
+    return row ? toDomain(row) : null;
+  }
+
   async updateState(id: string, state: RunState): Promise<Run> {
     const row = await this.prisma.aiRun.update({
       where: { id },
@@ -74,6 +88,7 @@ export class RunRepository {
         | "branchName"
         | "prNumber"
         | "planVersion"
+        | "approvedPlanVersion"
         | "plannerRuntime"
         | "executorRuntime"
         | "reviewerRuntime"

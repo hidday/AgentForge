@@ -25,7 +25,10 @@ enum ArtifactType {
   ExecutionReport
   Review
   Remediation
-  RawTranscript
+  PlannerTranscript
+  ExecutorTranscript
+  ReviewerTranscript
+  RemediationTranscript
 }
 
 model AiRun {
@@ -36,6 +39,7 @@ model AiRun {
   prNumber               Int?
   state                  RunState     @default(Todo)
   planVersion            Int          @default(0)
+  approvedPlanVersion    Int?
   plannerRuntime         String?
   executorRuntime        String?
   reviewerRuntime        String?
@@ -78,4 +82,14 @@ model AiEvent {
 
   @@index([runId])
   @@map("ai_events")
+}
+
+model ProcessedEvent {
+  id              String   @id @default(uuid())
+  source          String
+  externalEventId String
+  createdAt       DateTime @default(now())
+
+  @@unique([source, externalEventId])
+  @@map("processed_events")
 }

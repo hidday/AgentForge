@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import type { OrchestratorService } from "../orchestrator/orchestratorService.js";
+import type { IdempotencyRepository } from "../orchestrator/idempotencyRepository.js";
 import { parseLinearCommand } from "./linearCommandParser.js";
 
 const LinearWebhookPayloadSchema = z.object({
@@ -18,6 +19,7 @@ const LinearWebhookPayloadSchema = z.object({
 export function registerLinearWebhook(
   app: FastifyInstance,
   orchestrator: OrchestratorService,
+  idempotencyRepo: IdempotencyRepository,
 ): void {
   app.post("/webhooks/linear", async (request, reply) => {
     const parsed = LinearWebhookPayloadSchema.safeParse(request.body);
@@ -26,6 +28,13 @@ export function registerLinearWebhook(
     }
 
     const { action, type, data } = parsed.data;
+
+    const dedupeKey = `${type}:${action}:${data.id}`;
+    const isNew = await idempotencyRepo.tryMarkProcessed("linear", dedupeKey);
+    if (!isNew) {
+      app.log.info({ dedupeKey }, "Duplicate webhook ignored");
+      return reply.code(200).send({ ok: true, duplicate: true });
+    }
 
     if (type === "Issue" && action === "create") {
       await orchestrator.handleLinearWebhook({

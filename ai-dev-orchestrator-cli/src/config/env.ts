@@ -8,7 +8,9 @@ const EnvSchema = z.object({
   DATABASE_URL: z.string().url(),
   AGENT_RUNTIME_MODE: z.enum(["mock", "real"]).default("mock"),
   CLAUDE_CODE_COMMAND: z.string().default("claude"),
+  CLAUDE_CODE_ARGS_BASE: z.string().default("--print --output-format json"),
   CODEX_COMMAND: z.string().default("codex"),
+  CODEX_ARGS_BASE: z.string().default("--approval-mode full-auto -q"),
   AGENT_TIMEOUT_MS: z.coerce.number().int().positive().default(120_000),
   DEFAULT_REPO_PATH: z.string().default("./workspace"),
   LOG_LEVEL: z
@@ -17,6 +19,10 @@ const EnvSchema = z.object({
 });
 
 export type Env = z.infer<typeof EnvSchema>;
+
+export function parseBaseArgs(argsString: string): string[] {
+  return argsString.split(/\s+/).filter(Boolean);
+}
 
 function loadEnv(): Env {
   const result = EnvSchema.safeParse(process.env);

@@ -46,7 +46,7 @@ export class ReviewerAgent {
 
     await this.artifactRepo.create({
       runId,
-      type: "RawTranscript",
+      type: "ReviewerTranscript",
       version: 3,
       payloadJson: {},
       rawText: output.raw,

@@ -1,10 +1,11 @@
 import Fastify from "fastify";
-import { env } from "./config/env.js";
+import { env, parseBaseArgs } from "./config/env.js";
 import { logger } from "./utils/logger.js";
 import { getPrismaClient, disconnectPrisma } from "./db/prisma.js";
 import { RunRepository } from "./orchestrator/runRepository.js";
 import { ArtifactRepository } from "./orchestrator/artifactRepository.js";
 import { EventRepository } from "./orchestrator/eventRepository.js";
+import { IdempotencyRepository } from "./orchestrator/idempotencyRepository.js";
 import { OrchestratorService } from "./orchestrator/orchestratorService.js";
 import { ProcessRunner } from "./runtime/processRunner.js";
 import { ClaudeCodeRunner } from "./runtime/claudeCodeRunner.js";
@@ -22,12 +23,13 @@ import { createMockProcessHandler } from "./mocks/mockCliOutputs.js";
 import { MOCK_ISSUE } from "./mocks/mockLinearData.js";
 import { parseLinearCommand } from "./linear/linearCommandParser.js";
 
-function buildOrchestrator(): OrchestratorService {
+function buildServices() {
   const prisma = getPrismaClient();
 
   const runRepo = new RunRepository(prisma);
   const artifactRepo = new ArtifactRepository(prisma);
   const eventRepo = new EventRepository(prisma);
+  const idempotencyRepo = new IdempotencyRepository(prisma);
 
   const processRunner = new ProcessRunner(env.AGENT_RUNTIME_MODE, logger);
   if (env.AGENT_RUNTIME_MODE === "mock") {
@@ -37,31 +39,27 @@ function buildOrchestrator(): OrchestratorService {
   const claudeCodeRunner = new ClaudeCodeRunner(
     processRunner,
     env.CLAUDE_CODE_COMMAND,
+    parseBaseArgs(env.CLAUDE_CODE_ARGS_BASE),
     logger,
   );
   const codexRunner = new CodexRunner(
     processRunner,
     env.CODEX_COMMAND,
+    parseBaseArgs(env.CODEX_ARGS_BASE),
     logger,
   );
   const agentRunner = new AgentRunner(claudeCodeRunner, codexRunner, logger);
 
+  const githubClient = new MockGitHubClient();
   const plannerAgent = new PlannerAgent(agentRunner, artifactRepo, logger);
-  const executorAgent = new ExecutorAgent(
-    agentRunner,
-    artifactRepo,
-    new MockGitHubClient(),
-    logger,
-  );
+  const executorAgent = new ExecutorAgent(agentRunner, artifactRepo, githubClient, logger);
   const reviewerAgent = new ReviewerAgent(agentRunner, artifactRepo, logger);
   const remediationAgent = new RemediationAgent(agentRunner, artifactRepo, logger);
 
   const linearClient = new MockLinearClient();
   linearClient.seedIssue(MOCK_ISSUE);
 
-  const githubClient = new MockGitHubClient();
-
-  return new OrchestratorService({
+  const orchestrator = new OrchestratorService({
     runRepo,
     artifactRepo,
     eventRepo,
@@ -73,6 +71,8 @@ function buildOrchestrator(): OrchestratorService {
     remediationAgent,
     logger,
   });
+
+  return { orchestrator, idempotencyRepo };
 }
 
 async function main(): Promise<void> {
@@ -86,7 +86,7 @@ async function main(): Promise<void> {
     },
   });
 
-  const orchestrator = buildOrchestrator();
+  const { orchestrator, idempotencyRepo } = buildServices();
 
   app.get("/health", async () => ({
     status: "ok",
@@ -94,7 +94,7 @@ async function main(): Promise<void> {
     timestamp: new Date().toISOString(),
   }));
 
-  registerLinearWebhook(app, orchestrator);
+  registerLinearWebhook(app, orchestrator, idempotencyRepo);
   registerGitHubWebhook(app, orchestrator);
 
   app.post<{ Params: { issueId: string } }>(
