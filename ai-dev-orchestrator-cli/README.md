@@ -198,7 +198,7 @@ Node.js 20+, TypeScript (strict), Fastify 5, PostgreSQL + Prisma, Zod, pino, pnp
 - **Agents are runtimes, not API calls** -- all AI interaction via CLI subprocess
 - **Explicit state machine** -- every transition in a static lookup table
 - **Two-tier review** -- plan review (before approval) + code review (after implementation)
-- **Boss planner pattern** -- plan reviser selectively incorporates feedback, not a subordinate
+- **Lead engineer pattern** -- both the plan reviser and the remediation agent act as the authority on their work; reviewer feedback is a valued second opinion, not mandatory instructions; every finding gets an explicit disposition (accept/dismiss/partial) with rationale, but none are blindly followed
 - **Policy engine** -- stage gates enforce approval, version matching, and check status
 - **Dependency injection** -- all services accept deps via constructor
 - **Artifact-first** -- every agent output stored as a versioned, typed artifact

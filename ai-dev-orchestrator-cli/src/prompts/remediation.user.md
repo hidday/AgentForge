@@ -1,6 +1,6 @@
-## Remediation Task
+## Code Review Feedback
 
-Address the following review findings.
+A code reviewer provided feedback on your implementation. Evaluate each finding using your engineering judgment.
 
 ### Review ({{review.reviewId}})
 
@@ -11,7 +11,7 @@ Address the following review findings.
 
 {{review.findings}}
 
-### Current Execution Context
+### Your Implementation Context
 
 **Files Changed**: {{executionReport.filesChanged}}
 **Current Check Status**:
@@ -21,9 +21,13 @@ Address the following review findings.
 
 ## Instructions
 
-1. Address each finding explicitly
-2. For each finding, classify your response as: accepted, rejected, or partially_addressed
-3. Implement fixes for accepted findings
-4. Provide clear rationale for rejected findings
-5. Rerun all checks
-6. Indicate whether code is now ready for human review
+1. Read every finding carefully
+2. For each finding, decide independently: accept, reject, or partially address
+3. You MUST respond to every single finding -- no skipping, no omissions
+4. Accept findings that identify real bugs or gaps you missed
+5. Dismiss findings that are stylistic, out of scope, or misaligned with requirements
+6. Partially incorporate findings where the concern is valid but the fix should be different
+7. Provide a clear rationale for every decision
+8. Implement fixes for accepted findings
+9. Rerun all checks
+10. Indicate whether code is now ready for human review
