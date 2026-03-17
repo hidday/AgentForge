@@ -29,7 +29,12 @@ export class PlanReviserAgent {
     runId: string,
   ): Promise<PlanRevisionResult> {
     this.logger.info(
-      { runId, planVersion: plan.planVersion, reviewId: planReview.reviewId, findings: planReview.findings.length },
+      {
+        runId,
+        planVersion: plan.planVersion,
+        reviewId: planReview.reviewId,
+        findings: planReview.findings.length,
+      },
       "Starting plan reviser agent (Claude CLI, boss mode)",
     );
 
@@ -79,7 +84,9 @@ export class PlanReviserAgent {
 
     const accepted = revision.dispositions.filter((d) => d.status === "accepted").length;
     const dismissed = revision.dispositions.filter((d) => d.status === "dismissed").length;
-    const partial = revision.dispositions.filter((d) => d.status === "partially_incorporated").length;
+    const partial = revision.dispositions.filter(
+      (d) => d.status === "partially_incorporated",
+    ).length;
 
     this.logger.info(
       {

@@ -54,7 +54,12 @@ export class PlannerAgent {
     });
 
     this.logger.info(
-      { runId, planVersion: plan.planVersion, confidence: plan.confidence, steps: plan.steps.length },
+      {
+        runId,
+        planVersion: plan.planVersion,
+        confidence: plan.confidence,
+        steps: plan.steps.length,
+      },
       "Plan created",
     );
 

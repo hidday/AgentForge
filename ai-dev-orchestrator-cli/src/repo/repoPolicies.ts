@@ -8,9 +8,7 @@ export function validateFilePaths(
   const violations: string[] = [];
 
   for (const file of filesChanged) {
-    const isAllowed =
-      allowedPaths.length === 0 ||
-      allowedPaths.some((p) => file.startsWith(p));
+    const isAllowed = allowedPaths.length === 0 || allowedPaths.some((p) => file.startsWith(p));
     if (!isAllowed) {
       violations.push(`File "${file}" is not in any allowed path`);
     }
@@ -31,9 +29,7 @@ export function validateDiffSize(
   const violations: string[] = [];
 
   if (filesChanged.length > constraints.maxFilesChanged) {
-    violations.push(
-      `Changed ${filesChanged.length} files (max: ${constraints.maxFilesChanged})`,
-    );
+    violations.push(`Changed ${filesChanged.length} files (max: ${constraints.maxFilesChanged})`);
   }
 
   return { valid: violations.length === 0, violations };

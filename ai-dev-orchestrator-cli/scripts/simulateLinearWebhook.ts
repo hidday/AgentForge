@@ -1,7 +1,7 @@
 import dotenv from "dotenv";
 dotenv.config();
 
-const PORT = process.env["PORT"] ?? "3100";
+const PORT = process.env.PORT ?? "3100";
 const BASE_URL = `http://localhost:${PORT}`;
 
 async function simulateWebhook(): Promise<void> {
@@ -62,7 +62,7 @@ async function simulateWebhook(): Promise<void> {
   console.log("=== Webhook simulation complete ===");
 }
 
-simulateWebhook().catch((err) => {
+simulateWebhook().catch((err: unknown) => {
   console.error("Simulation failed:", err);
   process.exit(1);
 });

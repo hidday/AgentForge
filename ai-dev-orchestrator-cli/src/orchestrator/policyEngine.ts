@@ -51,10 +51,7 @@ export class PolicyEngine {
       );
     }
     if (!run.prNumber) {
-      throw new PolicyViolationError(
-        "Cannot review without an existing PR",
-        "review_requires_pr",
-      );
+      throw new PolicyViolationError("Cannot review without an existing PR", "review_requires_pr");
     }
     if (!executionReport) {
       throw new PolicyViolationError(
@@ -136,9 +133,7 @@ export class PolicyEngine {
       );
     }
 
-    const unresolvedBlockers = review.findings.filter(
-      (f) => f.severity === "blocker",
-    );
+    const unresolvedBlockers = review.findings.filter((f) => f.severity === "blocker");
     if (unresolvedBlockers.length > 0) {
       throw new PolicyViolationError(
         `Cannot mark ready with ${unresolvedBlockers.length} unresolved blocker findings`,
@@ -147,14 +142,9 @@ export class PolicyEngine {
     }
   }
 
-  assertExecutorPaths(
-    filesChanged: string[],
-    bundle: TaskBundle,
-  ): void {
+  assertExecutorPaths(filesChanged: string[], bundle: TaskBundle): void {
     for (const file of filesChanged) {
-      const isProtected = bundle.repo.protectedPaths.some((p) =>
-        file.startsWith(p),
-      );
+      const isProtected = bundle.repo.protectedPaths.some((p) => file.startsWith(p));
       if (isProtected) {
         throw new PolicyViolationError(
           `Executor modified protected path: ${file}`,

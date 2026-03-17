@@ -1,8 +1,5 @@
 import type { ZodType } from "zod";
-import {
-  STRUCTURED_OUTPUT_BEGIN,
-  STRUCTURED_OUTPUT_END,
-} from "../schemas/cliProtocol.js";
+import { STRUCTURED_OUTPUT_BEGIN, STRUCTURED_OUTPUT_END } from "../schemas/cliProtocol.js";
 import { OutputParseError } from "../utils/errors.js";
 
 export class OutputParser {

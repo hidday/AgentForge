@@ -13,9 +13,7 @@ const EnvSchema = z.object({
   CODEX_ARGS_BASE: z.string().default("--approval-mode full-auto -q"),
   AGENT_TIMEOUT_MS: z.coerce.number().int().positive().default(120_000),
   DEFAULT_REPO_PATH: z.string().default("./workspace"),
-  LOG_LEVEL: z
-    .enum(["trace", "debug", "info", "warn", "error", "fatal"])
-    .default("info"),
+  LOG_LEVEL: z.enum(["trace", "debug", "info", "warn", "error", "fatal"]).default("info"),
 });
 
 export type Env = z.infer<typeof EnvSchema>;

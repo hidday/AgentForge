@@ -19,46 +19,50 @@ export interface LinearClient {
 
 export class MockLinearClient implements LinearClient {
   private issues = new Map<string, LinearIssue>();
-  private comments: Array<{ issueId: string; body: string }> = [];
+  private comments: { issueId: string; body: string }[] = [];
 
   seedIssue(issue: LinearIssue): void {
     this.issues.set(issue.id, { ...issue });
   }
 
-  getPostedComments(): Array<{ issueId: string; body: string }> {
+  getPostedComments(): { issueId: string; body: string }[] {
     return [...this.comments];
   }
 
-  async getIssue(issueId: string): Promise<LinearIssue> {
+  getIssue(issueId: string): Promise<LinearIssue> {
     const issue = this.issues.get(issueId);
     if (!issue) {
       throw new Error(`Mock: Issue ${issueId} not found`);
     }
-    return { ...issue };
+    return Promise.resolve({ ...issue });
   }
 
-  async postComment(issueId: string, body: string): Promise<void> {
+  postComment(issueId: string, body: string): Promise<void> {
     this.comments.push({ issueId, body });
+    return Promise.resolve();
   }
 
-  async updateIssueState(issueId: string, state: string): Promise<void> {
+  updateIssueState(issueId: string, state: string): Promise<void> {
     const issue = this.issues.get(issueId);
     if (issue) {
       issue.state = state;
     }
+    return Promise.resolve();
   }
 
-  async addLabel(issueId: string, label: string): Promise<void> {
+  addLabel(issueId: string, label: string): Promise<void> {
     const issue = this.issues.get(issueId);
     if (issue && !issue.labels.includes(label)) {
       issue.labels.push(label);
     }
+    return Promise.resolve();
   }
 
-  async removeLabel(issueId: string, label: string): Promise<void> {
+  removeLabel(issueId: string, label: string): Promise<void> {
     const issue = this.issues.get(issueId);
     if (issue) {
       issue.labels = issue.labels.filter((l) => l !== label);
     }
+    return Promise.resolve();
   }
 }

@@ -86,7 +86,7 @@ async function main(): Promise<void> {
     logger: {
       level: env.LOG_LEVEL,
       transport:
-        process.env["NODE_ENV"] !== "production"
+        process.env.NODE_ENV !== "production"
           ? { target: "pino-pretty", options: { colorize: true } }
           : undefined,
     },
@@ -94,7 +94,7 @@ async function main(): Promise<void> {
 
   const { orchestrator, idempotencyRepo } = buildServices();
 
-  app.get("/health", async () => ({
+  app.get("/health", () => ({
     status: "ok",
     mode: env.AGENT_RUNTIME_MODE,
     timestamp: new Date().toISOString(),
@@ -103,19 +103,16 @@ async function main(): Promise<void> {
   registerLinearWebhook(app, orchestrator, idempotencyRepo);
   registerGitHubWebhook(app, orchestrator);
 
-  app.post<{ Params: { issueId: string } }>(
-    "/simulate/run/:issueId",
-    async (request, reply) => {
-      const { issueId } = request.params;
-      try {
-        const run = await orchestrator.startRun(issueId);
-        return reply.send({ ok: true, runId: run.id, state: run.state });
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        return reply.code(500).send({ ok: false, error: message });
-      }
-    },
-  );
+  app.post<{ Params: { issueId: string } }>("/simulate/run/:issueId", async (request, reply) => {
+    const { issueId } = request.params;
+    try {
+      const run = await orchestrator.startRun(issueId);
+      return await reply.send({ ok: true, runId: run.id, state: run.state });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return await reply.code(500).send({ ok: false, error: message });
+    }
+  });
 
   app.post("/simulate/comment-command", async (request, reply) => {
     const body = request.body as { issueId?: string; command?: string } | undefined;
@@ -130,10 +127,10 @@ async function main(): Promise<void> {
 
     try {
       await orchestrator.handleCommand(body.issueId, command);
-      return reply.send({ ok: true, command: command.type });
+      return await reply.send({ ok: true, command: command.type });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      return reply.code(500).send({ ok: false, error: message });
+      return await reply.code(500).send({ ok: false, error: message });
     }
   });
 
@@ -150,14 +147,18 @@ async function main(): Promise<void> {
     process.exit(0);
   };
 
-  process.on("SIGINT", shutdown);
-  process.on("SIGTERM", shutdown);
+  process.on("SIGINT", () => {
+    void shutdown();
+  });
+  process.on("SIGTERM", () => {
+    void shutdown();
+  });
 
   await app.listen({ port: env.PORT, host: "0.0.0.0" });
   app.log.info(`Server running on port ${env.PORT} in ${env.AGENT_RUNTIME_MODE} mode`);
 }
 
-main().catch((err) => {
+main().catch((err: unknown) => {
   logger.fatal(err, "Failed to start server");
   process.exit(1);
 });

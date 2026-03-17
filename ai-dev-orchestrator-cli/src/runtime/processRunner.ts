@@ -4,9 +4,7 @@ import { AgentTimeoutError } from "../utils/errors.js";
 import { startTimer } from "../utils/time.js";
 import type { ProcessResult, ProcessSpawnOptions } from "./runnerTypes.js";
 
-export interface MockProcessHandler {
-  (options: ProcessSpawnOptions): Promise<ProcessResult>;
-}
+export type MockProcessHandler = (options: ProcessSpawnOptions) => Promise<ProcessResult>;
 
 export class ProcessRunner {
   private mockHandler: MockProcessHandler | null = null;
@@ -27,9 +25,7 @@ export class ProcessRunner {
     return this.executeReal(options);
   }
 
-  private async executeMock(
-    options: ProcessSpawnOptions,
-  ): Promise<ProcessResult> {
+  private async executeMock(options: ProcessSpawnOptions): Promise<ProcessResult> {
     if (!this.mockHandler) {
       throw new Error("Mock mode enabled but no mock handler configured");
     }
@@ -94,20 +90,12 @@ export class ProcessRunner {
         const durationMs = timer.elapsed();
 
         if (timedOut) {
-          this.logger.warn(
-            { command, durationMs, timeoutMs },
-            "Process timed out",
-          );
-          reject(
-            new AgentTimeoutError(`${command} ${args.join(" ")}`, timeoutMs),
-          );
+          this.logger.warn({ command, durationMs, timeoutMs }, "Process timed out");
+          reject(new AgentTimeoutError(`${command} ${args.join(" ")}`, timeoutMs));
           return;
         }
 
-        this.logger.info(
-          { command, exitCode: code ?? 1, durationMs },
-          "Process completed",
-        );
+        this.logger.info({ command, exitCode: code ?? 1, durationMs }, "Process completed");
 
         resolve({
           stdout,

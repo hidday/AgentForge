@@ -9,10 +9,14 @@ export function loadPromptTemplate(filename: string): string {
   return readFileSync(resolve(PROMPTS_DIR, filename), "utf-8");
 }
 
-export function renderTemplate(
-  template: string,
-  vars: Record<string, unknown>,
-): string {
+function toDisplayString(value: unknown): string {
+  if (value == null) return "";
+  if (typeof value === "string") return value;
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  return JSON.stringify(value);
+}
+
+export function renderTemplate(template: string, vars: Record<string, unknown>): string {
   return template.replace(/\{\{([^}]+)\}\}/g, (_match, path: string) => {
     const keys = path.trim().split(".");
     let value: unknown = vars;
@@ -24,16 +28,16 @@ export function renderTemplate(
     }
     if (Array.isArray(value)) {
       return value
-        .map((item, i) => {
+        .map((item: unknown, i) => {
           if (typeof item === "object" && item !== null) {
-            return Object.entries(item)
-              .map(([k, v]) => `  - ${k}: ${v}`)
+            return Object.entries(item as Record<string, unknown>)
+              .map(([k, v]) => `  - ${k}: ${toDisplayString(v)}`)
               .join("\n");
           }
-          return `${i + 1}. ${String(item)}`;
+          return `${String(i + 1)}. ${toDisplayString(item)}`;
         })
         .join("\n");
     }
-    return String(value ?? "");
+    return toDisplayString(value);
   });
 }

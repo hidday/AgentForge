@@ -52,10 +52,16 @@ async function simulate(): Promise<void> {
     processRunner.setMockHandler(createMockProcessHandler());
 
     const claudeCodeRunner = new ClaudeCodeRunner(
-      processRunner, "claude", parseBaseArgs("--print --output-format json"), logger,
+      processRunner,
+      "claude",
+      parseBaseArgs("--print --output-format json"),
+      logger,
     );
     const codexRunner = new CodexRunner(
-      processRunner, "codex", parseBaseArgs("--approval-mode full-auto -q"), logger,
+      processRunner,
+      "codex",
+      parseBaseArgs("--approval-mode full-auto -q"),
+      logger,
     );
     const agentRunner = new AgentRunner(claudeCodeRunner, codexRunner, logger);
 
@@ -121,9 +127,9 @@ async function simulate(): Promise<void> {
     const events = await eventRepo.findByRunId(run.id);
     for (const e of events) {
       const payload = e.payloadJson as Record<string, unknown> | undefined;
-      const from = payload?.["from"] ?? "-";
-      const to = payload?.["to"] ?? "-";
-      console.log(`  ${e.eventType.padEnd(34)} ${String(from).padEnd(22)} -> ${to}  (${e.source})`);
+      const from = typeof payload?.from === "string" ? payload.from : "-";
+      const to = typeof payload?.to === "string" ? payload.to : "-";
+      console.log(`  ${e.eventType.padEnd(34)} ${from.padEnd(22)} -> ${to}  (${e.source})`);
     }
 
     // Show Linear comments
@@ -144,7 +150,7 @@ async function simulate(): Promise<void> {
   }
 }
 
-simulate().catch((err) => {
+simulate().catch((err: unknown) => {
   console.error("Simulation failed:", err);
   process.exit(1);
 });

@@ -3,10 +3,7 @@ import type { AgentRunner } from "../runtime/agentRunner.js";
 import type { ArtifactRepository } from "../orchestrator/artifactRepository.js";
 import type { Review } from "../schemas/review.js";
 import type { ExecutionReport } from "../schemas/executionReport.js";
-import {
-  RemediationOutputSchema,
-  type RemediationOutput,
-} from "../schemas/cliProtocol.js";
+import { RemediationOutputSchema, type RemediationOutput } from "../schemas/cliProtocol.js";
 import type { Remediation } from "../schemas/remediation.js";
 import { AGENT_STAGES } from "../domain/types.js";
 import { loadPromptTemplate, renderTemplate } from "./promptRenderer.js";

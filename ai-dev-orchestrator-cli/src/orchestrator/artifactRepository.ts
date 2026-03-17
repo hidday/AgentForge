@@ -48,10 +48,7 @@ export class ArtifactRepository {
     return rows.map(toDomain);
   }
 
-  async findLatestByType(
-    runId: string,
-    type: ArtifactType,
-  ): Promise<Artifact | null> {
+  async findLatestByType(runId: string, type: ArtifactType): Promise<Artifact | null> {
     const row = await this.prisma.aiArtifact.findFirst({
       where: { runId, type: type as PrismaArtifactType },
       orderBy: { version: "desc" },

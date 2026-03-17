@@ -1,8 +1,5 @@
 import type { ProcessResult, ProcessSpawnOptions } from "../runtime/runnerTypes.js";
-import {
-  STRUCTURED_OUTPUT_BEGIN,
-  STRUCTURED_OUTPUT_END,
-} from "../schemas/cliProtocol.js";
+import { STRUCTURED_OUTPUT_BEGIN, STRUCTURED_OUTPUT_END } from "../schemas/cliProtocol.js";
 
 function wrap(json: object): string {
   return [
@@ -49,7 +46,8 @@ const MOCK_PLANNER_OUTPUT = wrap({
       {
         id: "s1",
         title: "Create validation middleware",
-        description: "Create src/middleware/validation.ts with validateBody and validateQuery helpers",
+        description:
+          "Create src/middleware/validation.ts with validateBody and validateQuery helpers",
       },
       {
         id: "s2",
@@ -162,7 +160,8 @@ const MOCK_PLAN_REVISER_OUTPUT = wrap({
         {
           id: "s2",
           title: "Create validation middleware",
-          description: "Create src/middleware/validation.ts with validateBody and validateQuery helpers",
+          description:
+            "Create src/middleware/validation.ts with validateBody and validateQuery helpers",
         },
         {
           id: "s3",
@@ -172,7 +171,8 @@ const MOCK_PLAN_REVISER_OUTPUT = wrap({
         {
           id: "s4",
           title: "Apply middleware to routes",
-          description: "Add body-parser error handler and validation middleware to all POST/PUT route handlers",
+          description:
+            "Add body-parser error handler and validation middleware to all POST/PUT route handlers",
         },
         {
           id: "s5",
@@ -182,7 +182,8 @@ const MOCK_PLAN_REVISER_OUTPUT = wrap({
         {
           id: "s6",
           title: "Write tests",
-          description: "Add tests for validation success, field-level errors, malformed JSON handling, and edge cases",
+          description:
+            "Add tests for validation success, field-level errors, malformed JSON handling, and edge cases",
         },
       ],
       testPlan:
@@ -244,8 +245,7 @@ const MOCK_REVIEWER_CHANGES_REQUESTED_OUTPUT = wrap({
         type: "test-coverage",
         file: "tests/routes/products.test.ts",
         title: "Insufficient test coverage for product validation",
-        details:
-          "Add tests for invalid price, missing required fields, and boundary values.",
+        details: "Add tests for invalid price, missing required fields, and boundary values.",
       },
       {
         id: "f3",
@@ -266,8 +266,7 @@ const MOCK_REVIEWER_APPROVED_OUTPUT = wrap({
   stage: "reviewer",
   payload: {
     reviewId: "rev-002",
-    summary:
-      "All previous review findings have been addressed. Implementation looks good.",
+    summary: "All previous review findings have been addressed. Implementation looks good.",
     findings: [
       {
         id: "f4",
@@ -292,20 +291,24 @@ const MOCK_REMEDIATION_OUTPUT = wrap({
       {
         findingId: "f1",
         status: "accepted",
-        action: "Added an explicit check for undefined/null req.body before calling safeParse. Returns 400 with a clear error when body is missing or unparseable.",
-        rationale: "Genuine bug. Express with broken JSON or missing content-type header produces undefined body, which would bypass validation silently. Good catch.",
+        action:
+          "Added an explicit check for undefined/null req.body before calling safeParse. Returns 400 with a clear error when body is missing or unparseable.",
+        rationale:
+          "Genuine bug. Express with broken JSON or missing content-type header produces undefined body, which would bypass validation silently. Good catch.",
       },
       {
         findingId: "f2",
         status: "rejected",
         action: "No changes made.",
-        rationale: "The existing tests cover the validation contract for the products endpoint (valid input, missing fields, type errors). Adding negative price tests and string length boundary tests is out of scope for this PR -- the issue is about adding validation middleware, not exhaustive domain-level testing. The current coverage is sufficient for the stated requirements.",
+        rationale:
+          "The existing tests cover the validation contract for the products endpoint (valid input, missing fields, type errors). Adding negative price tests and string length boundary tests is out of scope for this PR -- the issue is about adding validation middleware, not exhaustive domain-level testing. The current coverage is sufficient for the stated requirements.",
       },
       {
         findingId: "f3",
         status: "rejected",
         action: "No changes made.",
-        rationale: "Email validation appears in exactly one schema. Extracting a shared helper for a single use site adds indirection without benefit. If email validation is needed in additional schemas later, this refactor can be done then.",
+        rationale:
+          "Email validation appears in exactly one schema. Extracting a shared helper for a single use site adds indirection without benefit. If email validation is needed in additional schemas later, this refactor can be done then.",
       },
     ],
     rerunChecks: {
@@ -322,7 +325,7 @@ export function createMockProcessHandler(): (
 ) => Promise<ProcessResult> {
   const callCounts = new Map<string, number>();
 
-  return async (options: ProcessSpawnOptions): Promise<ProcessResult> => {
+  return (options: ProcessSpawnOptions): Promise<ProcessResult> => {
     let stdout: string;
 
     const isCodex = options.command.endsWith("codex") || options.command === "codex";
@@ -330,7 +333,11 @@ export function createMockProcessHandler(): (
     const stdinContent = (options.stdinData ?? "").toLowerCase();
 
     if (isClaude) {
-      if (stdinContent.includes("plan revision") || stdinContent.includes("plan-reviser") || stdinContent.includes("lead engineer")) {
+      if (
+        stdinContent.includes("plan revision") ||
+        stdinContent.includes("plan-reviser") ||
+        stdinContent.includes("lead engineer")
+      ) {
         stdout = MOCK_PLAN_REVISER_OUTPUT;
       } else if (stdinContent.includes("planner") || stdinContent.includes("implementation plan")) {
         stdout = MOCK_PLANNER_OUTPUT;
@@ -343,26 +350,31 @@ export function createMockProcessHandler(): (
       const codexCalls = (callCounts.get("codex") ?? 0) + 1;
       callCounts.set("codex", codexCalls);
 
-      if (stdinContent.includes("plan review") || stdinContent.includes("plan-reviewer") || stdinContent.includes("plan under review")) {
+      if (
+        stdinContent.includes("plan review") ||
+        stdinContent.includes("plan-reviewer") ||
+        stdinContent.includes("plan under review")
+      ) {
         stdout = MOCK_PLAN_REVIEWER_OUTPUT;
       } else {
         // Code review: first call returns changes_requested, second returns approved
         const codeReviewCalls = (callCounts.get("code-review") ?? 0) + 1;
         callCounts.set("code-review", codeReviewCalls);
-        stdout = codeReviewCalls <= 1
-          ? MOCK_REVIEWER_CHANGES_REQUESTED_OUTPUT
-          : MOCK_REVIEWER_APPROVED_OUTPUT;
+        stdout =
+          codeReviewCalls <= 1
+            ? MOCK_REVIEWER_CHANGES_REQUESTED_OUTPUT
+            : MOCK_REVIEWER_APPROVED_OUTPUT;
       }
     } else {
       stdout = wrap({ success: false, stage: "planner", payload: {} });
     }
 
-    return {
+    return Promise.resolve({
       stdout,
       stderr: "",
       exitCode: 0,
       durationMs: 1500 + Math.floor(Math.random() * 500),
       timedOut: false,
-    };
+    });
   };
 }

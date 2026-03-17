@@ -4,15 +4,13 @@ import { env } from "../config/env.js";
 let prisma: PrismaClient | undefined;
 
 export function getPrismaClient(): PrismaClient {
-  if (!prisma) {
-    prisma = new PrismaClient({
-      datasourceUrl: env.DATABASE_URL,
-      log:
-        env.LOG_LEVEL === "debug" || env.LOG_LEVEL === "trace"
-          ? ["query", "info", "warn", "error"]
-          : ["warn", "error"],
-    });
-  }
+  prisma ??= new PrismaClient({
+    datasourceUrl: env.DATABASE_URL,
+    log:
+      env.LOG_LEVEL === "debug" || env.LOG_LEVEL === "trace"
+        ? ["query", "info", "warn", "error"]
+        : ["warn", "error"],
+  });
   return prisma;
 }
 

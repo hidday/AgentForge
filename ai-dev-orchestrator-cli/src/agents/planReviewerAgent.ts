@@ -16,12 +16,11 @@ export class PlanReviewerAgent {
     private readonly logger: Logger,
   ) {}
 
-  async run(
-    plan: Plan,
-    taskBundle: TaskBundle,
-    runId: string,
-  ): Promise<PlanReview> {
-    this.logger.info({ runId, planVersion: plan.planVersion }, "Starting plan reviewer agent (Codex CLI)");
+  async run(plan: Plan, taskBundle: TaskBundle, runId: string): Promise<PlanReview> {
+    this.logger.info(
+      { runId, planVersion: plan.planVersion },
+      "Starting plan reviewer agent (Codex CLI)",
+    );
 
     const systemTemplate = loadPromptTemplate("plan-reviewer.system.md");
     const userTemplate = loadPromptTemplate("plan-reviewer.user.md");

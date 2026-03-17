@@ -28,7 +28,7 @@ export class AgentRunner {
         return this.codexRunner.run(input, stage, schema);
       default: {
         const _exhaustive: never = runtime;
-        throw new Error(`Unknown runtime: ${_exhaustive}`);
+        throw new Error(`Unknown runtime: ${String(_exhaustive)}`);
       }
     }
   }

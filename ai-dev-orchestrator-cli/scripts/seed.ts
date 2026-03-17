@@ -40,7 +40,7 @@ async function seed(): Promise<void> {
 }
 
 seed()
-  .catch((err) => {
+  .catch((err: unknown) => {
     console.error("Seed failed:", err);
     process.exit(1);
   })
