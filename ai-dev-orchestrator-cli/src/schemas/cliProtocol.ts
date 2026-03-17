@@ -1,10 +1,19 @@
 import { z } from "zod";
 import { PlanSchema } from "./plan.js";
+import { PlanReviewSchema } from "./planReview.js";
+import { PlanRevisionSchema } from "./planRevision.js";
 import { ExecutionReportSchema } from "./executionReport.js";
 import { ReviewSchema } from "./review.js";
 import { RemediationSchema } from "./remediation.js";
 
-export const Stage = z.enum(["planner", "executor", "reviewer", "remediation"]);
+export const Stage = z.enum([
+  "planner",
+  "plan-reviewer",
+  "plan-reviser",
+  "executor",
+  "reviewer",
+  "remediation",
+]);
 export type Stage = z.infer<typeof Stage>;
 
 export const CliOutputBaseSchema = z.object({
@@ -17,6 +26,19 @@ export const CliOutputBaseSchema = z.object({
 export const PlannerOutputSchema = CliOutputBaseSchema.extend({
   stage: z.literal("planner"),
   payload: PlanSchema,
+});
+
+export const PlanReviewerOutputSchema = CliOutputBaseSchema.extend({
+  stage: z.literal("plan-reviewer"),
+  payload: PlanReviewSchema,
+});
+
+export const PlanReviserOutputSchema = CliOutputBaseSchema.extend({
+  stage: z.literal("plan-reviser"),
+  payload: z.object({
+    revision: PlanRevisionSchema,
+    revisedPlan: PlanSchema,
+  }),
 });
 
 export const ExecutorOutputSchema = CliOutputBaseSchema.extend({
@@ -36,6 +58,8 @@ export const RemediationOutputSchema = CliOutputBaseSchema.extend({
 
 export const CliOutputSchema = z.discriminatedUnion("stage", [
   PlannerOutputSchema,
+  PlanReviewerOutputSchema,
+  PlanReviserOutputSchema,
   ExecutorOutputSchema,
   ReviewerOutputSchema,
   RemediationOutputSchema,
@@ -43,6 +67,8 @@ export const CliOutputSchema = z.discriminatedUnion("stage", [
 
 export type CliOutput = z.infer<typeof CliOutputSchema>;
 export type PlannerOutput = z.infer<typeof PlannerOutputSchema>;
+export type PlanReviewerOutput = z.infer<typeof PlanReviewerOutputSchema>;
+export type PlanReviserOutput = z.infer<typeof PlanReviserOutputSchema>;
 export type ExecutorOutput = z.infer<typeof ExecutorOutputSchema>;
 export type ReviewerOutput = z.infer<typeof ReviewerOutputSchema>;
 export type RemediationOutput = z.infer<typeof RemediationOutputSchema>;

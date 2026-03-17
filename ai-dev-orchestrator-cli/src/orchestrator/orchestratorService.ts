@@ -4,6 +4,7 @@ import { RunEvent } from "../domain/runEvent.js";
 import type { Run } from "../domain/types.js";
 import type { TaskBundle } from "../schemas/taskBundle.js";
 import type { Plan } from "../schemas/plan.js";
+import type { PlanReview } from "../schemas/planReview.js";
 import type { ExecutionReport } from "../schemas/executionReport.js";
 import type { Review } from "../schemas/review.js";
 import type { LinearCommand } from "../linear/linearCommandParser.js";
@@ -15,6 +16,8 @@ import type { EventRepository } from "./eventRepository.js";
 import { PolicyEngine } from "./policyEngine.js";
 import { transition } from "./stateMachine.js";
 import type { PlannerAgent } from "../agents/plannerAgent.js";
+import type { PlanReviewerAgent } from "../agents/planReviewerAgent.js";
+import type { PlanReviserAgent } from "../agents/planReviserAgent.js";
 import type { ExecutorAgent } from "../agents/executorAgent.js";
 import type { ReviewerAgent } from "../agents/reviewerAgent.js";
 import type { RemediationAgent } from "../agents/remediationAgent.js";
@@ -34,6 +37,8 @@ interface OrchestratorDeps {
   linearClient: LinearClient;
   githubClient: GitHubClient;
   plannerAgent: PlannerAgent;
+  planReviewerAgent: PlanReviewerAgent;
+  planReviserAgent: PlanReviserAgent;
   executorAgent: ExecutorAgent;
   reviewerAgent: ReviewerAgent;
   remediationAgent: RemediationAgent;
@@ -47,6 +52,8 @@ export class OrchestratorService {
   private readonly linearClient: LinearClient;
   private readonly githubClient: GitHubClient;
   private readonly plannerAgent: PlannerAgent;
+  private readonly planReviewerAgent: PlanReviewerAgent;
+  private readonly planReviserAgent: PlanReviserAgent;
   private readonly executorAgent: ExecutorAgent;
   private readonly reviewerAgent: ReviewerAgent;
   private readonly remediationAgent: RemediationAgent;
@@ -60,6 +67,8 @@ export class OrchestratorService {
     this.linearClient = deps.linearClient;
     this.githubClient = deps.githubClient;
     this.plannerAgent = deps.plannerAgent;
+    this.planReviewerAgent = deps.planReviewerAgent;
+    this.planReviserAgent = deps.planReviserAgent;
     this.executorAgent = deps.executorAgent;
     this.reviewerAgent = deps.reviewerAgent;
     this.remediationAgent = deps.remediationAgent;
@@ -72,13 +81,11 @@ export class OrchestratorService {
     switch (payload.action) {
       case "issue.created":
         break;
-
       case "comment.command":
         if (payload.command) {
           await this.handleCommand(payload.issueId, payload.command);
         }
         break;
-
       case "issue.updated":
         break;
     }
@@ -155,7 +162,7 @@ export class OrchestratorService {
 
     await this.linearClient.postComment(
       issueId,
-      `AI planning started for "${issue.title}". Will produce a plan for approval.`,
+      `AI planning started for "${issue.title}". Will produce a plan, have it AI-reviewed, then present for approval.`,
     );
 
     const plan = await this.plannerAgent.run(bundle, run.id);
@@ -166,12 +173,87 @@ export class OrchestratorService {
     });
     run = await this.transitionAndRecord(run, RunEvent.PLAN_CREATED, "planner-agent");
 
-    const planSummary = this.formatPlanComment(plan);
-    await this.linearClient.postComment(issueId, planSummary);
-
     this.logger.info(
       { runId: run.id, state: run.state, durationMs: timer.elapsed() },
-      "Planning complete, awaiting approval",
+      "Plan created, starting AI plan review",
+    );
+
+    run = await this.runPlanReview(run.id);
+    return run;
+  }
+
+  async runPlanReview(runId: string): Promise<Run> {
+    const timer = startTimer();
+    let run = await this.requireRun(runId);
+
+    const planArtifact = await this.artifactRepo.findLatestByType(runId, "Plan");
+    if (!planArtifact) {
+      throw new Error(`No plan artifact found for run ${runId}`);
+    }
+    const plan = planArtifact.payloadJson as Plan;
+
+    const issue = await this.linearClient.getIssue(run.linearIssueId);
+    const bundle = this.buildTaskBundle(issue, run);
+
+    const planReview = await this.planReviewerAgent.run(plan, bundle, runId);
+
+    if (planReview.overallVerdict === "approved") {
+      run = await this.transitionAndRecord(run, RunEvent.PLAN_REVIEW_APPROVED, "plan-reviewer-agent");
+
+      const planSummary = this.formatPlanComment(plan, "AI plan review: approved");
+      await this.linearClient.postComment(run.linearIssueId, planSummary);
+
+      this.logger.info(
+        { runId, state: run.state, verdict: "approved", durationMs: timer.elapsed() },
+        "Plan review approved, awaiting human approval",
+      );
+    } else {
+      run = await this.transitionAndRecord(run, RunEvent.PLAN_REVIEW_CHANGES_REQUESTED, "plan-reviewer-agent");
+
+      await this.linearClient.postComment(
+        run.linearIssueId,
+        this.formatPlanReviewComment(planReview),
+      );
+
+      this.logger.info(
+        { runId, state: run.state, verdict: "changes_requested", findings: planReview.findings.length, durationMs: timer.elapsed() },
+        "Plan review requested changes, starting plan revision",
+      );
+
+      run = await this.runPlanRevision(runId);
+    }
+
+    return run;
+  }
+
+  async runPlanRevision(runId: string): Promise<Run> {
+    const timer = startTimer();
+    let run = await this.requireRun(runId);
+
+    const planArtifact = await this.artifactRepo.findLatestByType(runId, "Plan");
+    const plan = planArtifact?.payloadJson as Plan;
+
+    const planReviewArtifact = await this.artifactRepo.findLatestByType(runId, "PlanReview");
+    const planReview = planReviewArtifact?.payloadJson as PlanReview;
+
+    const issue = await this.linearClient.getIssue(run.linearIssueId);
+    const bundle = this.buildTaskBundle(issue, run);
+
+    const { revision, revisedPlan } = await this.planReviserAgent.run(plan, planReview, bundle, runId);
+
+    run = await this.runRepo.update(runId, {
+      planVersion: revisedPlan.planVersion,
+    });
+
+    run = await this.transitionAndRecord(run, RunEvent.PLAN_REVISED, "plan-reviser-agent");
+
+    const planSummary = this.formatPlanComment(revisedPlan, "Revised after AI review");
+    const dispositionSummary = this.formatPlanRevisionComment(revision.dispositions);
+    await this.linearClient.postComment(run.linearIssueId, planSummary + "\n\n" + dispositionSummary);
+
+    this.logger.info(
+      { runId, state: run.state, revisedVersion: revisedPlan.planVersion, durationMs: timer.elapsed() },
+      "Plan revised, awaiting human approval",
     );
 
     return run;
@@ -223,11 +305,7 @@ export class OrchestratorService {
       source: "orchestrator",
     });
 
-    const { report, branchName, prNumber } = await this.executorAgent.run(
-      plan,
-      bundle,
-      runId,
-    );
+    const { report, branchName, prNumber } = await this.executorAgent.run(plan, bundle, runId);
 
     run = await this.runRepo.update(runId, {
       branchName,
@@ -241,7 +319,7 @@ export class OrchestratorService {
 
     this.logger.info(
       { runId, state: run.state, prNumber, durationMs: timer.elapsed() },
-      "Execution complete, starting review",
+      "Execution complete, starting code review",
     );
 
     run = await this.runReview(runId);
@@ -252,10 +330,7 @@ export class OrchestratorService {
     let run = await this.requireRun(runId);
     run = await this.transitionAndRecord(run, RunEvent.PLAN_REJECTED, "human");
 
-    await this.linearClient.postComment(
-      run.linearIssueId,
-      "Plan rejected. Replanning...",
-    );
+    await this.linearClient.postComment(run.linearIssueId, "Plan rejected. Replanning...");
 
     return run;
   }
@@ -288,14 +363,11 @@ export class OrchestratorService {
     if (review.overallVerdict === "changes_requested") {
       run = await this.transitionAndRecord(run, RunEvent.REVIEW_CHANGES_REQUESTED, "reviewer-agent");
 
-      await this.linearClient.postComment(
-        run.linearIssueId,
-        this.formatReviewComment(review),
-      );
+      await this.linearClient.postComment(run.linearIssueId, this.formatCodeReviewComment(review));
 
       this.logger.info(
         { runId, state: run.state, verdict: review.overallVerdict, durationMs: timer.elapsed() },
-        "Review requested changes, starting remediation",
+        "Code review requested changes, starting remediation",
       );
 
       run = await this.runRemediation(runId);
@@ -304,7 +376,7 @@ export class OrchestratorService {
 
       this.logger.info(
         { runId, state: run.state, verdict: review.overallVerdict, durationMs: timer.elapsed() },
-        "Review approved, marking ready for human review",
+        "Code review approved, marking ready for human review",
       );
 
       await this.markReady(runId);
@@ -325,15 +397,9 @@ export class OrchestratorService {
     const execArtifact = await this.artifactRepo.findLatestByType(runId, "ExecutionReport");
     const executionReport = execArtifact?.payloadJson as ExecutionReport;
 
-    const remediation = await this.remediationAgent.run(
-      review,
-      executionReport,
-      run.workingDirectory,
-      runId,
-    );
+    const remediation = await this.remediationAgent.run(review, executionReport, run.workingDirectory, runId);
 
     run = await this.runRepo.update(runId, { remediationRuntime: "claude-code" });
-
     run = await this.transitionAndRecord(run, RunEvent.REMEDIATION_FINISHED, "remediation-agent");
 
     await this.linearClient.postComment(
@@ -363,35 +429,20 @@ export class OrchestratorService {
 
     if (run.prNumber) {
       await this.githubClient.markPRReady(run.repo, run.prNumber);
-      await this.githubClient.commentOnPR(
-        run.repo,
-        run.prNumber,
-        "All AI checks passed. Ready for human review.",
-      );
+      await this.githubClient.commentOnPR(run.repo, run.prNumber, "All AI checks passed. Ready for human review.");
     }
 
     await this.linearClient.updateIssueState(run.linearIssueId, "In Review");
     await this.linearClient.addLabel(run.linearIssueId, "ready-for-human-review");
-    await this.linearClient.postComment(
-      run.linearIssueId,
-      "AI workflow complete. Issue marked as **Ready for Human Review**.",
-    );
+    await this.linearClient.postComment(run.linearIssueId, "AI workflow complete. Issue marked as **Ready for Human Review**.");
 
     this.logger.info({ runId, state: run.state }, "Run marked as ready for human review");
-
     return run;
   }
 
-  private async transitionAndRecord(
-    run: Run,
-    event: RunEvent,
-    source: string,
-  ): Promise<Run> {
+  private async transitionAndRecord(run: Run, event: RunEvent, source: string): Promise<Run> {
     const newState = transition(run.state, event);
-    this.logger.info(
-      { runId: run.id, from: run.state, event, to: newState, source },
-      "State transition",
-    );
+    this.logger.info({ runId: run.id, from: run.state, event, to: newState, source }, "State transition");
 
     await this.eventRepo.create({
       runId: run.id,
@@ -405,9 +456,7 @@ export class OrchestratorService {
 
   private async requireRun(runId: string): Promise<Run> {
     const run = await this.runRepo.findById(runId);
-    if (!run) {
-      throw new Error(`Run not found: ${runId}`);
-    }
+    if (!run) throw new Error(`Run not found: ${runId}`);
     return run;
   }
 
@@ -450,23 +499,19 @@ export class OrchestratorService {
     };
   }
 
-  private formatPlanComment(plan: Plan): string {
-    const steps = plan.steps
-      .map((s, i) => `${i + 1}. **${s.title}**: ${s.description}`)
-      .join("\n");
+  private formatPlanComment(plan: Plan, statusNote?: string): string {
+    const steps = plan.steps.map((s, i) => `${i + 1}. **${s.title}**: ${s.description}`).join("\n");
     const questions = plan.openQuestions.length > 0
-      ? "\n\n**Open Questions:**\n" +
-        plan.openQuestions
-          .map((q) => `- ${q.question}${q.requiredForExecution ? " *blocks execution*" : ""}`)
-          .join("\n")
+      ? "\n\n**Open Questions:**\n" + plan.openQuestions.map((q) => `- ${q.question}${q.requiredForExecution ? " *blocks execution*" : ""}`).join("\n")
       : "";
     const risks = plan.risks.length > 0
       ? "\n\n**Risks:**\n" + plan.risks.map((r) => `- ${r}`).join("\n")
       : "";
+    const status = statusNote ? `\n\n*${statusNote}*\n` : "";
 
     return [
-      `## AI Plan (v${plan.planVersion}) — Confidence: ${(plan.confidence * 100).toFixed(0)}%`,
-      "",
+      `## AI Plan (v${plan.planVersion}) -- Confidence: ${(plan.confidence * 100).toFixed(0)}%`,
+      status,
       plan.summary,
       "",
       "### Steps",
@@ -479,16 +524,44 @@ export class OrchestratorService {
     ].join("\n");
   }
 
-  private formatReviewComment(review: Review): string {
-    const findings = review.findings
-      .map(
-        (f) =>
-          `- **[${f.severity.toUpperCase()}]** ${f.title} (${f.file}${f.lineHint ? `:${f.lineHint}` : ""})\n  ${f.details}`,
-      )
+  private formatPlanReviewComment(planReview: PlanReview): string {
+    const findings = planReview.findings
+      .map((f) => `- **[${f.severity.toUpperCase()}]** ${f.title}${f.affectedStepId ? ` (step ${f.affectedStepId})` : ""}\n  ${f.details}`)
       .join("\n");
 
     return [
-      `## AI Review — ${review.overallVerdict === "approved" ? "Approved" : "Changes Requested"}`,
+      `## AI Plan Review -- ${planReview.overallVerdict === "approved" ? "Approved" : "Changes Requested"}`,
+      "",
+      planReview.summary,
+      "",
+      "### Findings",
+      findings,
+    ].join("\n");
+  }
+
+  private formatPlanRevisionComment(
+    dispositions: Array<{ findingId: string; status: string; rationale: string }>,
+  ): string {
+    const items = dispositions
+      .map((d) => `- **${d.findingId}** [${d.status}]: ${d.rationale}`)
+      .join("\n");
+
+    return [
+      "### Plan Revision Dispositions",
+      "",
+      "The lead planner reviewed each finding and decided:",
+      "",
+      items,
+    ].join("\n");
+  }
+
+  private formatCodeReviewComment(review: Review): string {
+    const findings = review.findings
+      .map((f) => `- **[${f.severity.toUpperCase()}]** ${f.title} (${f.file}${f.lineHint ? `:${f.lineHint}` : ""})\n  ${f.details}`)
+      .join("\n");
+
+    return [
+      `## AI Code Review -- ${review.overallVerdict === "approved" ? "Approved" : "Changes Requested"}`,
       "",
       review.summary,
       "",
@@ -501,16 +574,9 @@ export class OrchestratorService {
     resolution: Array<{ findingId: string; status: string; action: string; rationale: string }>,
   ): string {
     const items = resolution
-      .map(
-        (r) =>
-          `- **${r.findingId}** [${r.status}]: ${r.action}\n  *Rationale*: ${r.rationale}`,
-      )
+      .map((r) => `- **${r.findingId}** [${r.status}]: ${r.action}\n  *Rationale*: ${r.rationale}`)
       .join("\n");
 
-    return [
-      "## Remediation Summary",
-      "",
-      items,
-    ].join("\n");
+    return ["## Remediation Summary", "", items].join("\n");
   }
 }

@@ -12,6 +12,8 @@ import { ClaudeCodeRunner } from "./runtime/claudeCodeRunner.js";
 import { CodexRunner } from "./runtime/codexRunner.js";
 import { AgentRunner } from "./runtime/agentRunner.js";
 import { PlannerAgent } from "./agents/plannerAgent.js";
+import { PlanReviewerAgent } from "./agents/planReviewerAgent.js";
+import { PlanReviserAgent } from "./agents/planReviserAgent.js";
 import { ExecutorAgent } from "./agents/executorAgent.js";
 import { ReviewerAgent } from "./agents/reviewerAgent.js";
 import { RemediationAgent } from "./agents/remediationAgent.js";
@@ -52,6 +54,8 @@ function buildServices() {
 
   const githubClient = new MockGitHubClient();
   const plannerAgent = new PlannerAgent(agentRunner, artifactRepo, logger);
+  const planReviewerAgent = new PlanReviewerAgent(agentRunner, artifactRepo, logger);
+  const planReviserAgent = new PlanReviserAgent(agentRunner, artifactRepo, logger);
   const executorAgent = new ExecutorAgent(agentRunner, artifactRepo, githubClient, logger);
   const reviewerAgent = new ReviewerAgent(agentRunner, artifactRepo, logger);
   const remediationAgent = new RemediationAgent(agentRunner, artifactRepo, logger);
@@ -66,6 +70,8 @@ function buildServices() {
     linearClient,
     githubClient,
     plannerAgent,
+    planReviewerAgent,
+    planReviserAgent,
     executorAgent,
     reviewerAgent,
     remediationAgent,
@@ -114,9 +120,7 @@ async function main(): Promise<void> {
   app.post("/simulate/comment-command", async (request, reply) => {
     const body = request.body as { issueId?: string; command?: string } | undefined;
     if (!body?.issueId || !body?.command) {
-      return reply
-        .code(400)
-        .send({ error: "Required: { issueId, command }" });
+      return reply.code(400).send({ error: "Required: { issueId, command }" });
     }
 
     const command = parseLinearCommand(body.command);
@@ -136,10 +140,7 @@ async function main(): Promise<void> {
   app.setErrorHandler((error: { statusCode?: number; message: string }, _request, reply) => {
     app.log.error(error);
     const statusCode = error.statusCode ?? 500;
-    reply.code(statusCode).send({
-      error: error.message,
-      statusCode,
-    });
+    reply.code(statusCode).send({ error: error.message, statusCode });
   });
 
   const shutdown = async (): Promise<void> => {
@@ -153,9 +154,7 @@ async function main(): Promise<void> {
   process.on("SIGTERM", shutdown);
 
   await app.listen({ port: env.PORT, host: "0.0.0.0" });
-  app.log.info(
-    `Server running on port ${env.PORT} in ${env.AGENT_RUNTIME_MODE} mode`,
-  );
+  app.log.info(`Server running on port ${env.PORT} in ${env.AGENT_RUNTIME_MODE} mode`);
 }
 
 main().catch((err) => {

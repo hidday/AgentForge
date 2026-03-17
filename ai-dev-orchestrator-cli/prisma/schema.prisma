@@ -10,6 +10,8 @@ datasource db {
 enum RunState {
   Todo
   Planning
+  PlanReview
+  PlanRevision
   AwaitingPlanApproval
   Implementing
   AIReview
@@ -22,10 +24,14 @@ enum RunState {
 
 enum ArtifactType {
   Plan
+  PlanReview
+  PlanRevision
   ExecutionReport
   Review
   Remediation
   PlannerTranscript
+  PlanReviewerTranscript
+  PlanReviserTranscript
   ExecutorTranscript
   ReviewerTranscript
   RemediationTranscript

@@ -22,10 +22,14 @@ export interface Run {
 
 export type ArtifactType =
   | "Plan"
+  | "PlanReview"
+  | "PlanRevision"
   | "ExecutionReport"
   | "Review"
   | "Remediation"
   | "PlannerTranscript"
+  | "PlanReviewerTranscript"
+  | "PlanReviserTranscript"
   | "ExecutorTranscript"
   | "ReviewerTranscript"
   | "RemediationTranscript";
@@ -58,6 +62,8 @@ export interface AgentStage {
 
 export const AGENT_STAGES = {
   planner: { runtime: "claude-code" as const, name: "planner" },
+  planReviewer: { runtime: "codex" as const, name: "plan-reviewer" },
+  planReviser: { runtime: "claude-code" as const, name: "plan-reviser" },
   executor: { runtime: "claude-code" as const, name: "executor" },
   reviewer: { runtime: "codex" as const, name: "reviewer" },
   remediation: { runtime: "claude-code" as const, name: "remediation" },

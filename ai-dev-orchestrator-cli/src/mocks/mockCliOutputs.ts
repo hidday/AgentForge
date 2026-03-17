@@ -78,6 +78,120 @@ const MOCK_PLANNER_OUTPUT = wrap({
   },
 });
 
+const MOCK_PLAN_REVIEWER_OUTPUT = wrap({
+  success: true,
+  stage: "plan-reviewer",
+  payload: {
+    reviewId: "plan-rev-001",
+    summary:
+      "The plan covers the core requirements well. However, it lacks an explicit step for handling error responses when the request body parser itself fails (malformed JSON). The test plan should also include integration-level tests.",
+    findings: [
+      {
+        id: "pf1",
+        severity: "important",
+        type: "missing_requirement",
+        affectedStepId: "s1",
+        title: "No error handling for malformed JSON bodies",
+        details:
+          "The validation middleware step assumes req.body is always a parsed object. When Express receives malformed JSON, req.body may be undefined. The plan should include a step to handle body-parser failures explicitly, returning a clear 400 error before Zod validation runs.",
+      },
+      {
+        id: "pf2",
+        severity: "suggestion",
+        type: "scope",
+        title: "Consider adding OpenAPI schema generation",
+        details:
+          "Since Zod schemas are being created for all endpoints, it would be relatively low effort to also generate OpenAPI documentation from them. This is outside the stated requirements but could add significant value.",
+      },
+    ],
+    overallVerdict: "changes_requested",
+  },
+});
+
+const MOCK_PLAN_REVISER_OUTPUT = wrap({
+  success: true,
+  stage: "plan-reviser",
+  payload: {
+    revision: {
+      originalPlanVersion: 1,
+      revisedPlanVersion: 2,
+      reviewId: "plan-rev-001",
+      dispositions: [
+        {
+          findingId: "pf1",
+          status: "accepted",
+          rationale:
+            "Valid point. Express body-parser failures are a real edge case that the original plan missed. Adding a dedicated step for malformed body handling before Zod validation.",
+        },
+        {
+          findingId: "pf2",
+          status: "dismissed",
+          rationale:
+            "OpenAPI generation is out of scope for this issue. The requirements are specifically about request validation and error responses, not documentation. Adding this would expand scope beyond what was requested.",
+        },
+      ],
+    },
+    revisedPlan: {
+      planVersion: 2,
+      summary:
+        "Add Zod-based request validation middleware to all API endpoints, returning structured 400 errors on invalid input. Includes explicit handling for malformed JSON bodies.",
+      assumptions: [
+        "The project uses Express with TypeScript",
+        "Zod is already a project dependency or can be added",
+        "Existing tests use Jest or Vitest",
+        "No existing validation middleware is in place",
+      ],
+      openQuestions: [
+        {
+          id: "q1",
+          question: "Should validation strip unknown fields or reject them?",
+          requiredForExecution: false,
+        },
+      ],
+      risks: [
+        "Existing client code may send extra fields that would be rejected by strict validation",
+        "Schema changes to request bodies could break integration tests",
+      ],
+      steps: [
+        {
+          id: "s1",
+          title: "Create body-parser error handler",
+          description:
+            "Create middleware that catches body-parser failures (malformed JSON) and returns a 400 with a structured error before Zod validation runs",
+        },
+        {
+          id: "s2",
+          title: "Create validation middleware",
+          description: "Create src/middleware/validation.ts with validateBody and validateQuery helpers",
+        },
+        {
+          id: "s3",
+          title: "Define request schemas",
+          description: "Create Zod schemas for each POST/PUT endpoint's request body",
+        },
+        {
+          id: "s4",
+          title: "Apply middleware to routes",
+          description: "Add body-parser error handler and validation middleware to all POST/PUT route handlers",
+        },
+        {
+          id: "s5",
+          title: "Add query parameter validation",
+          description: "Create and apply Zod schemas for list endpoint query parameters",
+        },
+        {
+          id: "s6",
+          title: "Write tests",
+          description: "Add tests for validation success, field-level errors, malformed JSON handling, and edge cases",
+        },
+      ],
+      testPlan:
+        "Test each endpoint with valid input, missing required fields, invalid types, boundary values, extra fields, and malformed JSON bodies. Verify error response format matches { errors: [{ field, message }] }. Include integration tests.",
+      confidence: 0.92,
+    },
+  },
+});
+
 const MOCK_EXECUTOR_OUTPUT = wrap({
   success: true,
   stage: "executor",
@@ -112,7 +226,7 @@ const MOCK_REVIEWER_CHANGES_REQUESTED_OUTPUT = wrap({
   payload: {
     reviewId: "rev-001",
     summary:
-      "The implementation is solid overall. Validation middleware is well-structured and applied consistently. Found two issues: a missing null check on nested object validation and insufficient test coverage for the products endpoint.",
+      "The implementation is solid overall. Found one important issue with missing null body handling and a test coverage suggestion.",
     findings: [
       {
         id: "f1",
@@ -122,7 +236,7 @@ const MOCK_REVIEWER_CHANGES_REQUESTED_OUTPUT = wrap({
         lineHint: 15,
         title: "Missing error handler for non-JSON request bodies",
         details:
-          "If the request body is not valid JSON, schema.safeParse will receive undefined instead of throwing a parse error. The middleware should handle the case where req.body is undefined and return a clear error.",
+          "If the request body is not valid JSON, schema.safeParse will receive undefined. The middleware should handle the case where req.body is undefined.",
       },
       {
         id: "f2",
@@ -131,7 +245,7 @@ const MOCK_REVIEWER_CHANGES_REQUESTED_OUTPUT = wrap({
         file: "tests/routes/products.test.ts",
         title: "Insufficient test coverage for product validation",
         details:
-          "The product endpoint tests only cover the happy path. Add tests for invalid price (negative numbers, non-numeric), missing required fields, and boundary values for string lengths.",
+          "Add tests for invalid price, missing required fields, and boundary values.",
       },
       {
         id: "f3",
@@ -140,8 +254,7 @@ const MOCK_REVIEWER_CHANGES_REQUESTED_OUTPUT = wrap({
         file: "src/schemas/userSchemas.ts",
         lineHint: 8,
         title: "Consider extracting shared email schema",
-        details:
-          "The email validation pattern is repeated. Consider creating a shared emailSchema that can be reused across user and other schemas.",
+        details: "The email validation pattern is repeated across schemas.",
       },
     ],
     overallVerdict: "changes_requested",
@@ -154,7 +267,7 @@ const MOCK_REVIEWER_APPROVED_OUTPUT = wrap({
   payload: {
     reviewId: "rev-002",
     summary:
-      "All previous review findings have been addressed. The null body check is in place, product tests cover edge cases. Implementation looks good.",
+      "All previous review findings have been addressed. Implementation looks good.",
     findings: [
       {
         id: "f4",
@@ -163,8 +276,7 @@ const MOCK_REVIEWER_APPROVED_OUTPUT = wrap({
         file: "src/schemas/userSchemas.ts",
         lineHint: 8,
         title: "Consider extracting shared email schema",
-        details:
-          "Minor style suggestion carried forward — not blocking.",
+        details: "Minor style suggestion carried forward -- not blocking.",
       },
     ],
     overallVerdict: "approved",
@@ -180,24 +292,20 @@ const MOCK_REMEDIATION_OUTPUT = wrap({
       {
         findingId: "f1",
         status: "accepted",
-        action:
-          "Added an explicit check for undefined/null req.body before calling safeParse. Returns 400 with a clear error message when body is missing or unparseable.",
-        rationale:
-          "The reviewer correctly identified a gap. Express with broken JSON or missing content-type header can produce undefined body.",
+        action: "Added an explicit check for undefined/null req.body before calling safeParse.",
+        rationale: "The reviewer correctly identified a gap with malformed JSON bodies.",
       },
       {
         findingId: "f2",
         status: "accepted",
-        action:
-          "Added 8 new test cases for products endpoint covering negative prices, non-numeric values, missing required fields, and string length boundaries.",
-        rationale: "Test coverage was genuinely insufficient for the products endpoint.",
+        action: "Added 8 new test cases for products endpoint.",
+        rationale: "Test coverage was genuinely insufficient.",
       },
       {
         findingId: "f3",
         status: "rejected",
         action: "No changes made.",
-        rationale:
-          "While extracting a shared email schema is a good idea in general, in this codebase the email field only appears in the user schema. Will revisit if email validation is needed elsewhere.",
+        rationale: "Email field only appears in user schema. Will revisit if needed elsewhere.",
       },
     ],
     rerunChecks: {
@@ -219,10 +327,12 @@ export function createMockProcessHandler(): (
 
     const isCodex = options.command.endsWith("codex") || options.command === "codex";
     const isClaude = options.command.endsWith("claude") || options.command === "claude";
+    const stdinContent = (options.stdinData ?? "").toLowerCase();
 
     if (isClaude) {
-      const stdinContent = (options.stdinData ?? "").toLowerCase();
-      if (stdinContent.includes("planner") || stdinContent.includes("plan")) {
+      if (stdinContent.includes("plan revision") || stdinContent.includes("plan-reviser") || stdinContent.includes("lead engineer")) {
+        stdout = MOCK_PLAN_REVISER_OUTPUT;
+      } else if (stdinContent.includes("planner") || stdinContent.includes("implementation plan")) {
         stdout = MOCK_PLANNER_OUTPUT;
       } else if (stdinContent.includes("remediat")) {
         stdout = MOCK_REMEDIATION_OUTPUT;
@@ -233,10 +343,16 @@ export function createMockProcessHandler(): (
       const codexCalls = (callCounts.get("codex") ?? 0) + 1;
       callCounts.set("codex", codexCalls);
 
-      // First codex call returns changes_requested, subsequent calls return approved
-      stdout = codexCalls <= 1
-        ? MOCK_REVIEWER_CHANGES_REQUESTED_OUTPUT
-        : MOCK_REVIEWER_APPROVED_OUTPUT;
+      if (stdinContent.includes("plan review") || stdinContent.includes("plan-reviewer") || stdinContent.includes("plan under review")) {
+        stdout = MOCK_PLAN_REVIEWER_OUTPUT;
+      } else {
+        // Code review: first call returns changes_requested, second returns approved
+        const codeReviewCalls = (callCounts.get("code-review") ?? 0) + 1;
+        callCounts.set("code-review", codeReviewCalls);
+        stdout = codeReviewCalls <= 1
+          ? MOCK_REVIEWER_CHANGES_REQUESTED_OUTPUT
+          : MOCK_REVIEWER_APPROVED_OUTPUT;
+      }
     } else {
       stdout = wrap({ success: false, stage: "planner", payload: {} });
     }
