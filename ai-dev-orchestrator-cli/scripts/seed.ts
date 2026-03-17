@@ -1,9 +1,12 @@
-import { PrismaClient } from "@prisma/client";
 import dotenv from "dotenv";
-
 dotenv.config();
 
-const prisma = new PrismaClient();
+import { PrismaClient } from "../src/generated/prisma/client.js";
+import { PrismaPg } from "@prisma/adapter-pg";
+
+// eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL! });
+const prisma = new PrismaClient({ adapter });
 
 async function seed(): Promise<void> {
   console.log("Seeding database...");

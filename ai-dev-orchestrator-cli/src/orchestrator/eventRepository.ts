@@ -1,4 +1,4 @@
-import type { PrismaClient } from "@prisma/client";
+import type { PrismaClient } from "../generated/prisma/client.js";
 import type { RunEventRecord } from "../domain/types.js";
 
 function toDomain(row: {

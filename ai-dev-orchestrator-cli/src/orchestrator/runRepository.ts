@@ -1,5 +1,5 @@
-import type { PrismaClient } from "@prisma/client";
-import type { RunState as PrismaRunState } from "@prisma/client";
+import type { PrismaClient } from "../generated/prisma/client.js";
+import type { RunState as PrismaRunState } from "../generated/prisma/enums.js";
 import { RunState } from "../domain/runState.js";
 import type { Run } from "../domain/types.js";
 

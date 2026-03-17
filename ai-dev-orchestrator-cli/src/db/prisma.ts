@@ -1,11 +1,12 @@
-import { PrismaClient } from "@prisma/client";
+import { PrismaClient } from "../generated/prisma/client.js";
+import { PrismaPg } from "@prisma/adapter-pg";
 import { env } from "../config/env.js";
 
 let prisma: PrismaClient | undefined;
 
 export function getPrismaClient(): PrismaClient {
   prisma ??= new PrismaClient({
-    datasourceUrl: env.DATABASE_URL,
+    adapter: new PrismaPg({ connectionString: env.DATABASE_URL }),
     log:
       env.LOG_LEVEL === "debug" || env.LOG_LEVEL === "trace"
         ? ["query", "info", "warn", "error"]

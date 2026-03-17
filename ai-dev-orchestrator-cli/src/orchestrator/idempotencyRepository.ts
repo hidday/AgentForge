@@ -1,4 +1,4 @@
-import type { PrismaClient } from "@prisma/client";
+import type { PrismaClient } from "../generated/prisma/client.js";
 
 export class IdempotencyRepository {
   constructor(private readonly prisma: PrismaClient) {}

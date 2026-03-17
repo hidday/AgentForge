@@ -1,7 +1,8 @@
 import dotenv from "dotenv";
 dotenv.config();
 
-import { PrismaClient } from "@prisma/client";
+import { PrismaClient } from "../src/generated/prisma/client.js";
+import { PrismaPg } from "@prisma/adapter-pg";
 import { logger } from "../src/utils/logger.js";
 import { parseBaseArgs } from "../src/config/env.js";
 import { RunRepository } from "../src/orchestrator/runRepository.js";
@@ -41,7 +42,9 @@ function section(title: string): void {
 async function simulate(): Promise<void> {
   header("AI Dev Orchestrator -- Full Workflow Simulation (Mock Mode)");
 
-  const prisma = new PrismaClient();
+  // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+  const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL! });
+  const prisma = new PrismaClient({ adapter });
 
   try {
     const runRepo = new RunRepository(prisma);

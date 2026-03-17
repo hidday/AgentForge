@@ -1,5 +1,5 @@
-import type { PrismaClient } from "@prisma/client";
-import type { ArtifactType as PrismaArtifactType } from "@prisma/client";
+import type { PrismaClient } from "../generated/prisma/client.js";
+import type { ArtifactType as PrismaArtifactType } from "../generated/prisma/enums.js";
 import type { Artifact, ArtifactType } from "../domain/types.js";
 
 function toDomain(row: {
