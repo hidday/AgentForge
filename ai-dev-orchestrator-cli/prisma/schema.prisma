@@ -1,0 +1,81 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum RunState {
+  Todo
+  Planning
+  AwaitingPlanApproval
+  Implementing
+  AIReview
+  AddressingReview
+  ReadyForHumanReview
+  Done
+  AIBlocked
+  HumanClarificationNeeded
+}
+
+enum ArtifactType {
+  Plan
+  ExecutionReport
+  Review
+  Remediation
+  RawTranscript
+}
+
+model AiRun {
+  id                     String       @id @default(uuid())
+  linearIssueId          String
+  repo                   String
+  branchName             String?
+  prNumber               Int?
+  state                  RunState     @default(Todo)
+  planVersion            Int          @default(0)
+  plannerRuntime         String?
+  executorRuntime        String?
+  reviewerRuntime        String?
+  remediationRuntime     String?
+  workingDirectory       String
+  latestArtifactVersion  Int          @default(0)
+  createdAt              DateTime     @default(now())
+  updatedAt              DateTime     @updatedAt
+
+  artifacts AiArtifact[]
+  events    AiEvent[]
+
+  @@map("ai_runs")
+}
+
+model AiArtifact {
+  id          String       @id @default(uuid())
+  runId       String
+  type        ArtifactType
+  version     Int
+  payloadJson Json
+  rawText     String
+  createdAt   DateTime     @default(now())
+
+  run AiRun @relation(fields: [runId], references: [id])
+
+  @@index([runId, type])
+  @@map("ai_artifacts")
+}
+
+model AiEvent {
+  id          String   @id @default(uuid())
+  runId       String
+  eventType   String
+  source      String
+  payloadJson Json
+  createdAt   DateTime @default(now())
+
+  run AiRun @relation(fields: [runId], references: [id])
+
+  @@index([runId])
+  @@map("ai_events")
+}
