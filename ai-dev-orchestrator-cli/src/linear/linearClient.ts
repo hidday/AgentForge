@@ -15,6 +15,7 @@ export interface LinearClient {
   updateIssueState(issueId: string, state: string): Promise<void>;
   addLabel(issueId: string, label: string): Promise<void>;
   removeLabel(issueId: string, label: string): Promise<void>;
+  listLabels(issueId: string): Promise<string[]>;
 }
 
 export class MockLinearClient implements LinearClient {
@@ -64,5 +65,10 @@ export class MockLinearClient implements LinearClient {
       issue.labels = issue.labels.filter((l) => l !== label);
     }
     return Promise.resolve();
+  }
+
+  listLabels(issueId: string): Promise<string[]> {
+    const issue = this.issues.get(issueId);
+    return Promise.resolve(issue ? [...issue.labels] : []);
   }
 }

@@ -21,6 +21,8 @@ import type { ExecutorAgent } from "../agents/executorAgent.js";
 import type { ReviewerAgent } from "../agents/reviewerAgent.js";
 import type { RemediationAgent } from "../agents/remediationAgent.js";
 import type { RepoRegistry } from "../config/repoRegistry.js";
+import type { LinearSyncService } from "../sync/linearSync.js";
+import type { GitHubSyncService } from "../sync/githubSync.js";
 import { startTimer } from "../utils/time.js";
 
 export interface WebhookPayload {
@@ -36,6 +38,8 @@ interface OrchestratorDeps {
   linearClient: LinearClient;
   githubClient: GitHubClient;
   repoRegistry: RepoRegistry;
+  linearSync: LinearSyncService;
+  githubSync: GitHubSyncService;
   plannerAgent: PlannerAgent;
   planReviewerAgent: PlanReviewerAgent;
   planReviserAgent: PlanReviserAgent;
@@ -52,6 +56,8 @@ export class OrchestratorService {
   private readonly linearClient: LinearClient;
   private readonly githubClient: GitHubClient;
   private readonly repoRegistry: RepoRegistry;
+  private readonly linearSync: LinearSyncService;
+  private readonly githubSync: GitHubSyncService;
   private readonly plannerAgent: PlannerAgent;
   private readonly planReviewerAgent: PlanReviewerAgent;
   private readonly planReviserAgent: PlanReviserAgent;
@@ -68,6 +74,8 @@ export class OrchestratorService {
     this.linearClient = deps.linearClient;
     this.githubClient = deps.githubClient;
     this.repoRegistry = deps.repoRegistry;
+    this.linearSync = deps.linearSync;
+    this.githubSync = deps.githubSync;
     this.plannerAgent = deps.plannerAgent;
     this.planReviewerAgent = deps.planReviewerAgent;
     this.planReviserAgent = deps.planReviserAgent;
@@ -397,6 +405,15 @@ export class OrchestratorService {
 
     run = await this.runRepo.update(runId, { reviewerRuntime: "codex" });
 
+    if (run.prNumber && review.findings.length > 0) {
+      await this.githubSync.postReviewFindings(
+        run.repo,
+        run.prNumber,
+        review.findings,
+        review.overallVerdict,
+      );
+    }
+
     if (review.overallVerdict === "changes_requested") {
       run = await this.transitionAndRecord(
         run,
@@ -473,17 +490,8 @@ export class OrchestratorService {
 
     this.policy.assertCanMarkReady(run, review, executionReport);
 
-    if (run.prNumber) {
-      await this.githubClient.markPRReady(run.repo, run.prNumber);
-      await this.githubClient.commentOnPR(
-        run.repo,
-        run.prNumber,
-        "All AI checks passed. Ready for human review.",
-      );
-    }
-
-    await this.linearClient.updateIssueState(run.linearIssueId, "In Review");
-    await this.linearClient.addLabel(run.linearIssueId, "ready-for-human-review");
+    // Label sync and GitHub PR-ready are handled by the sync services
+    // via transitionAndRecord(). Post the final comment only.
     await this.linearClient.postComment(
       run.linearIssueId,
       "AI workflow complete. Issue marked as **Ready for Human Review**.",
@@ -507,7 +515,12 @@ export class OrchestratorService {
       payloadJson: { from: run.state, to: newState },
     });
 
-    return this.runRepo.updateState(run.id, newState);
+    const updatedRun = await this.runRepo.updateState(run.id, newState);
+
+    await this.linearSync.syncState(updatedRun);
+    await this.githubSync.syncState(updatedRun);
+
+    return updatedRun;
   }
 
   private async requireRun(runId: string): Promise<Run> {

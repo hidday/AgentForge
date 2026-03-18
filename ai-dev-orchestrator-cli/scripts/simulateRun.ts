@@ -22,6 +22,8 @@ import { RemediationAgent } from "../src/agents/remediationAgent.js";
 import { MockLinearClient } from "../src/linear/linearClient.js";
 import { MockGitHubClient } from "../src/github/githubClient.js";
 import { loadRepoRegistry } from "../src/config/repoRegistry.js";
+import { LinearSyncService } from "../src/sync/linearSync.js";
+import { GitHubSyncService } from "../src/sync/githubSync.js";
 import { env } from "../src/config/env.js";
 import { createMockProcessHandler } from "../src/mocks/mockCliOutputs.js";
 import { MOCK_ISSUE } from "../src/mocks/mockLinearData.js";
@@ -82,6 +84,8 @@ async function simulate(): Promise<void> {
     linearClient.seedIssue(MOCK_ISSUE);
 
     const repoRegistry = loadRepoRegistry(env.REPOS_CONFIG_PATH, env.REPOS_ROOT_PATH, logger);
+    const linearSync = new LinearSyncService(linearClient, logger);
+    const githubSync = new GitHubSyncService(githubClient, logger);
 
     const orchestrator = new OrchestratorService({
       runRepo,
@@ -90,6 +94,8 @@ async function simulate(): Promise<void> {
       linearClient,
       githubClient,
       repoRegistry,
+      linearSync,
+      githubSync,
       plannerAgent,
       planReviewerAgent,
       planReviserAgent,

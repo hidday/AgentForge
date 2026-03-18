@@ -18,6 +18,19 @@ export interface GitHubClient {
   getPRDiff(repo: string, prNumber: number): Promise<string>;
   markPRReady(repo: string, prNumber: number): Promise<void>;
   listPRComments(repo: string, prNumber: number): Promise<PRComment[]>;
+  createPRReviewComment(
+    repo: string,
+    prNumber: number,
+    body: string,
+    path: string,
+    line?: number,
+  ): Promise<void>;
+  submitPRReview(
+    repo: string,
+    prNumber: number,
+    body: string,
+    event: "APPROVE" | "REQUEST_CHANGES" | "COMMENT",
+  ): Promise<void>;
 }
 
 export class MockGitHubClient implements GitHubClient {
@@ -97,5 +110,29 @@ export class MockGitHubClient implements GitHubClient {
 
   listPRComments(_repo: string, _prNumber: number): Promise<PRComment[]> {
     return Promise.resolve([]);
+  }
+
+  createPRReviewComment(
+    _repo: string,
+    prNumber: number,
+    body: string,
+    path: string,
+    line?: number,
+  ): Promise<void> {
+    this.prComments.push({
+      prNumber,
+      body: `[${path}${line ? `:${String(line)}` : ""}] ${body}`,
+    });
+    return Promise.resolve();
+  }
+
+  submitPRReview(
+    _repo: string,
+    prNumber: number,
+    body: string,
+    _event: "APPROVE" | "REQUEST_CHANGES" | "COMMENT",
+  ): Promise<void> {
+    this.prComments.push({ prNumber, body });
+    return Promise.resolve();
   }
 }

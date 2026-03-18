@@ -22,6 +22,8 @@ import { MockGitHubClient } from "./github/githubClient.js";
 import { registerLinearWebhook } from "./linear/linearWebhook.js";
 import { registerGitHubWebhook } from "./github/githubWebhook.js";
 import { loadRepoRegistry } from "./config/repoRegistry.js";
+import { LinearSyncService } from "./sync/linearSync.js";
+import { GitHubSyncService } from "./sync/githubSync.js";
 import { createMockProcessHandler } from "./mocks/mockCliOutputs.js";
 import { MOCK_ISSUE } from "./mocks/mockLinearData.js";
 import { parseLinearCommand } from "./linear/linearCommandParser.js";
@@ -65,6 +67,9 @@ function buildServices() {
   const linearClient = new MockLinearClient();
   linearClient.seedIssue(MOCK_ISSUE);
 
+  const linearSync = new LinearSyncService(linearClient, logger);
+  const githubSync = new GitHubSyncService(githubClient, logger);
+
   const orchestrator = new OrchestratorService({
     runRepo,
     artifactRepo,
@@ -72,6 +77,8 @@ function buildServices() {
     linearClient,
     githubClient,
     repoRegistry,
+    linearSync,
+    githubSync,
     plannerAgent,
     planReviewerAgent,
     planReviserAgent,

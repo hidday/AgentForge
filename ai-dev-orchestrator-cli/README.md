@@ -129,6 +129,32 @@ Only one active (non-terminal) run per Linear issue. Duplicate `startRun()` call
 
 CLI commands and base arguments are configurable via `CLAUDE_CODE_ARGS_BASE` / `CODEX_ARGS_BASE`. Prompts are passed via stdin.
 
+### Linear/GitHub Sync
+
+Every state transition automatically syncs to Linear and GitHub via dedicated sync services:
+
+**Linear labels** -- Each run state maps to an `ai:` prefixed label. The sync layer removes the previous label and sets the new one after every transition:
+
+| RunState | Label |
+|---|---|
+| Planning | `ai:planning` |
+| PlanReview | `ai:plan-review` |
+| PlanRevision | `ai:plan-revision` |
+| AwaitingPlanApproval | `ai:awaiting-approval` |
+| Implementing | `ai:implementing` |
+| AIReview | `ai:code-review` |
+| AddressingReview | `ai:remediation` |
+| ReadyForHumanReview | `ai:ready-for-review` |
+| Done | `ai:done` |
+| AIBlocked | `ai:blocked` |
+| HumanClarificationNeeded | `ai:needs-clarification` |
+
+**Linear issue state** -- Updated automatically (Todo / In Progress / In Review / Done).
+
+**GitHub PR** -- Code review findings are posted as individual PR review comments with file/line references. PR is marked ready when the run reaches ReadyForHumanReview.
+
+The DB remains the source of truth. Linear and GitHub are kept in sync as a read-through layer for team visibility.
+
 ### Multi-Repo Support
 
 The orchestrator supports multiple repositories via `repos.config.json`. Each repo entry defines its name, local directory, default branch, allowed/protected paths, and constraints. The `REPOS_ROOT_PATH` env var points to the parent directory containing all managed repos.
