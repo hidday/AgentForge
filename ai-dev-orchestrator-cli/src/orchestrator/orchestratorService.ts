@@ -23,6 +23,7 @@ import type { RemediationAgent } from "../agents/remediationAgent.js";
 import type { RepoRegistry } from "../config/repoRegistry.js";
 import type { LinearSyncService } from "../sync/linearSync.js";
 import type { GitHubSyncService } from "../sync/githubSync.js";
+import type { RunEventEmitter } from "../api/runEventEmitter.js";
 import { startTimer } from "../utils/time.js";
 
 export interface WebhookPayload {
@@ -47,6 +48,7 @@ interface OrchestratorDeps {
   reviewerAgent: ReviewerAgent;
   remediationAgent: RemediationAgent;
   logger: Logger;
+  dashboardEmitter?: RunEventEmitter;
 }
 
 export class OrchestratorService {
@@ -66,6 +68,7 @@ export class OrchestratorService {
   private readonly remediationAgent: RemediationAgent;
   private readonly policy = new PolicyEngine();
   private readonly logger: Logger;
+  private readonly dashboardEmitter?: RunEventEmitter;
 
   constructor(deps: OrchestratorDeps) {
     this.runRepo = deps.runRepo;
@@ -83,6 +86,19 @@ export class OrchestratorService {
     this.reviewerAgent = deps.reviewerAgent;
     this.remediationAgent = deps.remediationAgent;
     this.logger = deps.logger;
+    this.dashboardEmitter = deps.dashboardEmitter;
+  }
+
+  getRunRepo(): RunRepository {
+    return this.runRepo;
+  }
+
+  getArtifactRepo(): ArtifactRepository {
+    return this.artifactRepo;
+  }
+
+  getEventRepo(): EventRepository {
+    return this.eventRepo;
   }
 
   async handleLinearWebhook(payload: WebhookPayload): Promise<void> {
@@ -169,6 +185,8 @@ export class OrchestratorService {
       repo: repoEntry.name,
       workingDirectory,
     });
+
+    this.dashboardEmitter?.emitRunCreated(run.id, issueId, run.repo);
 
     this.policy.assertCanPlan(run);
 
@@ -501,6 +519,19 @@ export class OrchestratorService {
     return run;
   }
 
+  async approveHumanReview(runId: string): Promise<Run> {
+    let run = await this.requireRun(runId);
+    run = await this.transitionAndRecord(run, RunEvent.HUMAN_APPROVED, "human");
+
+    await this.linearClient.postComment(
+      run.linearIssueId,
+      "Human review approved. Run is **Done**.",
+    );
+
+    this.logger.info({ runId, state: run.state }, "Human review approved, run complete");
+    return run;
+  }
+
   private async transitionAndRecord(run: Run, event: RunEvent, source: string): Promise<Run> {
     const newState = transition(run.state, event);
     this.logger.info(
@@ -519,6 +550,8 @@ export class OrchestratorService {
 
     await this.linearSync.syncState(updatedRun);
     await this.githubSync.syncState(updatedRun);
+
+    this.dashboardEmitter?.emitStateChanged(run.id, run.state, newState);
 
     return updatedRun;
   }

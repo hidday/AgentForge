@@ -1,0 +1,110 @@
+import { useState } from "react";
+import { useRuns } from "@/hooks/useRuns.ts";
+import { RunsTable } from "@/components/RunsTable.tsx";
+import { cn } from "@/lib/utils.ts";
+import type { StateCategory } from "@/lib/stateColors.ts";
+
+const FILTERS: { label: string; value: StateCategory | "all" }[] = [
+  { label: "All", value: "all" },
+  { label: "Active", value: "active" },
+  { label: "Awaiting Human", value: "waiting" },
+  { label: "Blocked", value: "blocked" },
+  { label: "Done", value: "done" },
+];
+
+const STATE_CATEGORY_MAP: Record<string, StateCategory> = {
+  Todo: "idle",
+  Planning: "active",
+  PlanReview: "active",
+  PlanRevision: "active",
+  AwaitingPlanApproval: "waiting",
+  Implementing: "active",
+  AIReview: "active",
+  AddressingReview: "active",
+  ReadyForHumanReview: "waiting",
+  Done: "done",
+  AIBlocked: "blocked",
+  HumanClarificationNeeded: "waiting",
+};
+
+export function DashboardPage() {
+  const [filter, setFilter] = useState<StateCategory | "all">("all");
+  const { runs, loading, error, refetch } = useRuns();
+
+  const filteredRuns =
+    filter === "all"
+      ? runs
+      : runs.filter((r) => STATE_CATEGORY_MAP[r.state] === filter);
+
+  const counts = runs.reduce(
+    (acc, r) => {
+      const cat = STATE_CATEGORY_MAP[r.state] ?? "idle";
+      acc[cat] = (acc[cat] ?? 0) + 1;
+      return acc;
+    },
+    {} as Record<string, number>,
+  );
+
+  return (
+    <div className="min-h-screen px-6 py-8 max-w-7xl mx-auto">
+      <header className="mb-8">
+        <h1 className="text-2xl font-semibold tracking-tight">Agent Runs</h1>
+        <p className="text-text-secondary text-sm mt-1">
+          Monitor and manage AI development agent runs
+        </p>
+      </header>
+
+      {/* Stats bar */}
+      <div className="grid grid-cols-5 gap-3 mb-6">
+        {[
+          { label: "Total", value: runs.length, color: "text-text-primary" },
+          { label: "Active", value: counts["active"] ?? 0, color: "text-state-active" },
+          { label: "Awaiting", value: counts["waiting"] ?? 0, color: "text-state-waiting" },
+          { label: "Blocked", value: counts["blocked"] ?? 0, color: "text-state-blocked" },
+          { label: "Done", value: counts["done"] ?? 0, color: "text-state-done" },
+        ].map((stat) => (
+          <div
+            key={stat.label}
+            className="rounded-lg border border-border bg-surface px-4 py-3"
+          >
+            <div className={cn("text-2xl font-semibold tabular-nums", stat.color)}>
+              {stat.value}
+            </div>
+            <div className="text-xs text-text-muted mt-0.5">{stat.label}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Filter bar */}
+      <div className="flex gap-1 mb-4 p-1 bg-surface rounded-lg border border-border w-fit">
+        {FILTERS.map((f) => (
+          <button
+            key={f.value}
+            onClick={() => setFilter(f.value)}
+            className={cn(
+              "px-3 py-1.5 text-xs font-medium rounded-md transition-colors",
+              filter === f.value
+                ? "bg-accent text-white"
+                : "text-text-secondary hover:text-text-primary hover:bg-surface-hover",
+            )}
+          >
+            {f.label}
+          </button>
+        ))}
+      </div>
+
+      {loading ? (
+        <div className="flex items-center justify-center py-20 text-text-muted">
+          <div className="h-5 w-5 animate-spin rounded-full border-2 border-accent border-t-transparent mr-3" />
+          Loading runs...
+        </div>
+      ) : error ? (
+        <div className="rounded-lg border border-state-blocked/30 bg-state-blocked-bg p-4 text-state-blocked text-sm">
+          {error}
+        </div>
+      ) : (
+        <RunsTable runs={filteredRuns} onAction={refetch} />
+      )}
+    </div>
+  );
+}

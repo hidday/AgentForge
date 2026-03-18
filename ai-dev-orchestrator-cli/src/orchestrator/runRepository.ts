@@ -48,6 +48,14 @@ export class RunRepository {
     return toDomain(row);
   }
 
+  async findAll(stateFilter?: string): Promise<Run[]> {
+    const rows = await this.prisma.aiRun.findMany({
+      where: stateFilter ? { state: stateFilter as PrismaRunState } : undefined,
+      orderBy: { createdAt: "desc" },
+    });
+    return rows.map(toDomain);
+  }
+
   async findById(id: string): Promise<Run | null> {
     const row = await this.prisma.aiRun.findUnique({ where: { id } });
     return row ? toDomain(row) : null;

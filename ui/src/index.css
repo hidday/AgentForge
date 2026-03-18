@@ -1,0 +1,58 @@
+@import "tailwindcss";
+
+@theme {
+  --color-background: #0a0a0f;
+  --color-surface: #13131a;
+  --color-surface-hover: #1a1a24;
+  --color-border: #2a2a3a;
+  --color-border-subtle: #1e1e2e;
+  --color-text-primary: #e4e4ef;
+  --color-text-secondary: #8b8ba3;
+  --color-text-muted: #5e5e76;
+
+  --color-accent: #6366f1;
+  --color-accent-hover: #818cf8;
+
+  --color-state-active: #3b82f6;
+  --color-state-active-bg: #3b82f620;
+  --color-state-waiting: #f59e0b;
+  --color-state-waiting-bg: #f59e0b20;
+  --color-state-blocked: #ef4444;
+  --color-state-blocked-bg: #ef444420;
+  --color-state-done: #22c55e;
+  --color-state-done-bg: #22c55e20;
+  --color-state-idle: #6b7280;
+  --color-state-idle-bg: #6b728020;
+
+  --color-severity-blocker: #ef4444;
+  --color-severity-important: #f59e0b;
+  --color-severity-suggestion: #3b82f6;
+  --color-severity-nit: #6b7280;
+
+  --font-mono: "JetBrains Mono", "Fira Code", ui-monospace, monospace;
+}
+
+body {
+  background-color: var(--color-background);
+  color: var(--color-text-primary);
+  font-family:
+    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+.animate-pulse-dot {
+  animation: pulse-dot 2s ease-in-out infinite;
+}
+
+@keyframes flash-highlight {
+  0% { background-color: var(--color-accent); opacity: 0.15; }
+  100% { background-color: transparent; opacity: 0; }
+}
+
+.animate-flash {
+  animation: flash-highlight 1.5s ease-out;
+}

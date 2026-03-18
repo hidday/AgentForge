@@ -27,6 +27,8 @@ import { GitHubSyncService } from "./sync/githubSync.js";
 import { createMockProcessHandler } from "./mocks/mockCliOutputs.js";
 import { MOCK_ISSUE } from "./mocks/mockLinearData.js";
 import { parseLinearCommand } from "./linear/linearCommandParser.js";
+import { RunEventEmitter } from "./api/runEventEmitter.js";
+import { registerApiRoutes } from "./api/routes.js";
 
 function buildServices() {
   const prisma = getPrismaClient();
@@ -70,6 +72,8 @@ function buildServices() {
   const linearSync = new LinearSyncService(linearClient, logger);
   const githubSync = new GitHubSyncService(githubClient, logger);
 
+  const dashboardEmitter = new RunEventEmitter();
+
   const orchestrator = new OrchestratorService({
     runRepo,
     artifactRepo,
@@ -86,9 +90,10 @@ function buildServices() {
     reviewerAgent,
     remediationAgent,
     logger,
+    dashboardEmitter,
   });
 
-  return { orchestrator, idempotencyRepo };
+  return { orchestrator, idempotencyRepo, dashboardEmitter };
 }
 
 async function main(): Promise<void> {
@@ -102,7 +107,7 @@ async function main(): Promise<void> {
     },
   });
 
-  const { orchestrator, idempotencyRepo } = buildServices();
+  const { orchestrator, idempotencyRepo, dashboardEmitter } = buildServices();
 
   app.get("/health", () => ({
     status: "ok",
@@ -110,8 +115,21 @@ async function main(): Promise<void> {
     timestamp: new Date().toISOString(),
   }));
 
+  app.addHook("onRequest", async (request, reply) => {
+    const origin = request.headers.origin;
+    if (origin) {
+      reply.header("Access-Control-Allow-Origin", origin);
+      reply.header("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+      reply.header("Access-Control-Allow-Headers", "Content-Type");
+    }
+    if (request.method === "OPTIONS") {
+      return reply.code(204).send();
+    }
+  });
+
   registerLinearWebhook(app, orchestrator, idempotencyRepo);
   registerGitHubWebhook(app, orchestrator);
+  registerApiRoutes(app, orchestrator, dashboardEmitter);
 
   app.post<{ Params: { issueId: string } }>("/simulate/run/:issueId", async (request, reply) => {
     const { issueId } = request.params;
