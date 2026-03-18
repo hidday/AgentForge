@@ -22,6 +22,8 @@
     "format:check": "prettier --check \"src/**/*.ts\" \"scripts/**/*.ts\""
   },
   "dependencies": {
+    "@linear/sdk": "^78.0.0",
+    "@octokit/rest": "^22.0.1",
     "@prisma/adapter-pg": "^7.5.0",
     "@prisma/client": "^7.5.0",
     "dotenv": "^16.4.7",

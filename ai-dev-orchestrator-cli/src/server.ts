@@ -18,7 +18,11 @@ import { ExecutorAgent } from "./agents/executorAgent.js";
 import { ReviewerAgent } from "./agents/reviewerAgent.js";
 import { RemediationAgent } from "./agents/remediationAgent.js";
 import { MockLinearClient } from "./linear/linearClient.js";
+import type { LinearClient } from "./linear/linearClient.js";
+import { RealLinearClient } from "./linear/realLinearClient.js";
 import { MockGitHubClient } from "./github/githubClient.js";
+import type { GitHubClient } from "./github/githubClient.js";
+import { RealGitHubClient } from "./github/realGitHubClient.js";
 import { registerLinearWebhook } from "./linear/linearWebhook.js";
 import { registerGitHubWebhook } from "./github/githubWebhook.js";
 import { loadRepoRegistry } from "./config/repoRegistry.js";
@@ -58,16 +62,29 @@ function buildServices() {
   );
   const agentRunner = new AgentRunner(claudeCodeRunner, codexRunner, logger);
 
-  const githubClient = new MockGitHubClient();
+  const githubClient: GitHubClient = env.GITHUB_TOKEN
+    ? new RealGitHubClient(env.GITHUB_TOKEN, logger)
+    : new MockGitHubClient();
+
+  const linearClient: LinearClient = env.LINEAR_API_KEY
+    ? new RealLinearClient(env.LINEAR_API_KEY, logger)
+    : (() => {
+        const mock = new MockLinearClient();
+        mock.seedIssue(MOCK_ISSUE);
+        return mock;
+      })();
+
+  logger.info({
+    linearMode: env.LINEAR_API_KEY ? "real" : "mock",
+    githubMode: env.GITHUB_TOKEN ? "real" : "mock",
+  }, "Initialized external clients");
+
   const plannerAgent = new PlannerAgent(agentRunner, artifactRepo, logger);
   const planReviewerAgent = new PlanReviewerAgent(agentRunner, artifactRepo, logger);
   const planReviserAgent = new PlanReviserAgent(agentRunner, artifactRepo, logger);
   const executorAgent = new ExecutorAgent(agentRunner, artifactRepo, githubClient, logger);
   const reviewerAgent = new ReviewerAgent(agentRunner, artifactRepo, logger);
   const remediationAgent = new RemediationAgent(agentRunner, artifactRepo, logger);
-
-  const linearClient = new MockLinearClient();
-  linearClient.seedIssue(MOCK_ISSUE);
 
   const linearSync = new LinearSyncService(linearClient, logger);
   const githubSync = new GitHubSyncService(githubClient, logger);

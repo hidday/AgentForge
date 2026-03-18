@@ -15,6 +15,8 @@ const EnvSchema = z.object({
   REPOS_ROOT_PATH: z.string().default("./workspace"),
   REPOS_CONFIG_PATH: z.string().default("./repos.config.json"),
   LOG_LEVEL: z.enum(["trace", "debug", "info", "warn", "error", "fatal"]).default("info"),
+  LINEAR_API_KEY: z.string().optional(),
+  GITHUB_TOKEN: z.string().optional(),
 });
 
 export type Env = z.infer<typeof EnvSchema>;
