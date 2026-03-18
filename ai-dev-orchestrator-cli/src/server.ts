@@ -21,6 +21,7 @@ import { MockLinearClient } from "./linear/linearClient.js";
 import { MockGitHubClient } from "./github/githubClient.js";
 import { registerLinearWebhook } from "./linear/linearWebhook.js";
 import { registerGitHubWebhook } from "./github/githubWebhook.js";
+import { loadRepoRegistry } from "./config/repoRegistry.js";
 import { createMockProcessHandler } from "./mocks/mockCliOutputs.js";
 import { MOCK_ISSUE } from "./mocks/mockLinearData.js";
 import { parseLinearCommand } from "./linear/linearCommandParser.js";
@@ -32,6 +33,7 @@ function buildServices() {
   const artifactRepo = new ArtifactRepository(prisma);
   const eventRepo = new EventRepository(prisma);
   const idempotencyRepo = new IdempotencyRepository(prisma);
+  const repoRegistry = loadRepoRegistry(env.REPOS_CONFIG_PATH, env.REPOS_ROOT_PATH, logger);
 
   const processRunner = new ProcessRunner(env.AGENT_RUNTIME_MODE, logger);
   if (env.AGENT_RUNTIME_MODE === "mock") {
@@ -69,6 +71,7 @@ function buildServices() {
     eventRepo,
     linearClient,
     githubClient,
+    repoRegistry,
     plannerAgent,
     planReviewerAgent,
     planReviserAgent,

@@ -12,7 +12,8 @@ const EnvSchema = z.object({
   CODEX_COMMAND: z.string().default("codex"),
   CODEX_ARGS_BASE: z.string().default("--approval-mode full-auto -q"),
   AGENT_TIMEOUT_MS: z.coerce.number().int().positive().default(120_000),
-  DEFAULT_REPO_PATH: z.string().default("./workspace"),
+  REPOS_ROOT_PATH: z.string().default("./workspace"),
+  REPOS_CONFIG_PATH: z.string().default("./repos.config.json"),
   LOG_LEVEL: z.enum(["trace", "debug", "info", "warn", "error", "fatal"]).default("info"),
 });
 

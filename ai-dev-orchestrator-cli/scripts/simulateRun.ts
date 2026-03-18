@@ -21,6 +21,8 @@ import { ReviewerAgent } from "../src/agents/reviewerAgent.js";
 import { RemediationAgent } from "../src/agents/remediationAgent.js";
 import { MockLinearClient } from "../src/linear/linearClient.js";
 import { MockGitHubClient } from "../src/github/githubClient.js";
+import { loadRepoRegistry } from "../src/config/repoRegistry.js";
+import { env } from "../src/config/env.js";
 import { createMockProcessHandler } from "../src/mocks/mockCliOutputs.js";
 import { MOCK_ISSUE } from "../src/mocks/mockLinearData.js";
 
@@ -79,12 +81,15 @@ async function simulate(): Promise<void> {
     const linearClient = new MockLinearClient();
     linearClient.seedIssue(MOCK_ISSUE);
 
+    const repoRegistry = loadRepoRegistry(env.REPOS_CONFIG_PATH, env.REPOS_ROOT_PATH, logger);
+
     const orchestrator = new OrchestratorService({
       runRepo,
       artifactRepo,
       eventRepo,
       linearClient,
       githubClient,
+      repoRegistry,
       plannerAgent,
       planReviewerAgent,
       planReviserAgent,

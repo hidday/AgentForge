@@ -129,6 +129,17 @@ Only one active (non-terminal) run per Linear issue. Duplicate `startRun()` call
 
 CLI commands and base arguments are configurable via `CLAUDE_CODE_ARGS_BASE` / `CODEX_ARGS_BASE`. Prompts are passed via stdin.
 
+### Multi-Repo Support
+
+The orchestrator supports multiple repositories via `repos.config.json`. Each repo entry defines its name, local directory, default branch, allowed/protected paths, and constraints. The `REPOS_ROOT_PATH` env var points to the parent directory containing all managed repos.
+
+When a run is started, the orchestrator resolves the target repo from the Linear issue's project name (mapped via `linearProject` in the config). If no match is found, the `defaultRepo` is used.
+
+To add a repo:
+1. Clone it under `REPOS_ROOT_PATH` (e.g. `/Users/me/Code/my-repo`)
+2. Add an entry to `repos.config.json` with `directory`, `linearProject`, paths, and constraints
+3. Issues from the mapped Linear project will automatically target that repo
+
 ### RESET_TO_TODO Limitation
 
 `RESET_TO_TODO` always returns to Todo. Prior state is not preserved (v1 limitation).

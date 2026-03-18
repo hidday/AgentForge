@@ -20,8 +20,8 @@ import type { PlanReviserAgent } from "../agents/planReviserAgent.js";
 import type { ExecutorAgent } from "../agents/executorAgent.js";
 import type { ReviewerAgent } from "../agents/reviewerAgent.js";
 import type { RemediationAgent } from "../agents/remediationAgent.js";
+import type { RepoRegistry } from "../config/repoRegistry.js";
 import { startTimer } from "../utils/time.js";
-import { env } from "../config/env.js";
 
 export interface WebhookPayload {
   action: string;
@@ -35,6 +35,7 @@ interface OrchestratorDeps {
   eventRepo: EventRepository;
   linearClient: LinearClient;
   githubClient: GitHubClient;
+  repoRegistry: RepoRegistry;
   plannerAgent: PlannerAgent;
   planReviewerAgent: PlanReviewerAgent;
   planReviserAgent: PlanReviserAgent;
@@ -50,6 +51,7 @@ export class OrchestratorService {
   private readonly eventRepo: EventRepository;
   private readonly linearClient: LinearClient;
   private readonly githubClient: GitHubClient;
+  private readonly repoRegistry: RepoRegistry;
   private readonly plannerAgent: PlannerAgent;
   private readonly planReviewerAgent: PlanReviewerAgent;
   private readonly planReviserAgent: PlanReviserAgent;
@@ -65,6 +67,7 @@ export class OrchestratorService {
     this.eventRepo = deps.eventRepo;
     this.linearClient = deps.linearClient;
     this.githubClient = deps.githubClient;
+    this.repoRegistry = deps.repoRegistry;
     this.plannerAgent = deps.plannerAgent;
     this.planReviewerAgent = deps.planReviewerAgent;
     this.planReviserAgent = deps.planReviserAgent;
@@ -150,10 +153,13 @@ export class OrchestratorService {
 
     const issue = await this.linearClient.getIssue(issueId);
 
+    const repoEntry = this.repoRegistry.resolveForIssue(issue.project);
+    const workingDirectory = this.repoRegistry.resolveWorkingDirectory(repoEntry);
+
     let run = await this.runRepo.create({
       linearIssueId: issueId,
-      repo: "acme/backend-api",
-      workingDirectory: env.DEFAULT_REPO_PATH,
+      repo: repoEntry.name,
+      workingDirectory,
     });
 
     this.policy.assertCanPlan(run);
@@ -522,6 +528,9 @@ export class OrchestratorService {
     },
     run: Run,
   ): TaskBundle {
+    const repoEntry =
+      this.repoRegistry.getRepoByName(run.repo) ?? this.repoRegistry.getDefaultRepo();
+
     return {
       issue: {
         id: issue.id,
@@ -533,20 +542,14 @@ export class OrchestratorService {
         cycle: issue.cycle,
       },
       repo: {
-        name: run.repo,
-        defaultBranch: "main",
+        name: repoEntry.name,
+        defaultBranch: repoEntry.defaultBranch,
         workingBranch: `ai/${issue.id.toLowerCase().replace(/[^a-z0-9]/g, "-")}`,
         repoPath: run.workingDirectory,
-        allowedPaths: ["src/", "tests/", "package.json"],
-        protectedPaths: [".github/", "infrastructure/", "prisma/migrations/"],
+        allowedPaths: repoEntry.allowedPaths,
+        protectedPaths: repoEntry.protectedPaths,
       },
-      constraints: {
-        requiredChecks: ["lint", "typecheck", "tests"],
-        maxFilesChanged: 30,
-        maxDiffLines: 2000,
-        forbiddenPatterns: ["console\\.log", "TODO.*HACK"],
-        mustNotTouch: [".github/workflows/", "prisma/migrations/"],
-      },
+      constraints: repoEntry.constraints,
       definitionOfDone: [
         "All required checks pass",
         "PR created with descriptive title and body",
