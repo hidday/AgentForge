@@ -1,8 +1,10 @@
 import { useState } from "react";
 import { useRuns } from "@/hooks/useRuns.ts";
 import { RunsTable } from "@/components/RunsTable.tsx";
+import { LinearSyncDialog } from "@/components/LinearSyncDialog.tsx";
 import { cn } from "@/lib/utils.ts";
 import type { StateCategory } from "@/lib/stateColors.ts";
+import { RefreshCw } from "lucide-react";
 
 const FILTERS: { label: string; value: StateCategory | "all" }[] = [
   { label: "All", value: "all" },
@@ -29,6 +31,7 @@ const STATE_CATEGORY_MAP: Record<string, StateCategory> = {
 
 export function DashboardPage() {
   const [filter, setFilter] = useState<StateCategory | "all">("all");
+  const [syncOpen, setSyncOpen] = useState(false);
   const { runs, loading, error, refetch } = useRuns();
 
   const filteredRuns =
@@ -47,11 +50,20 @@ export function DashboardPage() {
 
   return (
     <div className="min-h-screen px-6 py-8 max-w-7xl mx-auto">
-      <header className="mb-8">
-        <h1 className="text-2xl font-semibold tracking-tight">Agent Runs</h1>
-        <p className="text-text-secondary text-sm mt-1">
-          Monitor and manage AI development agent runs
-        </p>
+      <header className="mb-8 flex items-start justify-between">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight">Agent Runs</h1>
+          <p className="text-text-secondary text-sm mt-1">
+            Monitor and manage AI development agent runs
+          </p>
+        </div>
+        <button
+          onClick={() => setSyncOpen(true)}
+          className="flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium border border-border text-text-secondary hover:text-text-primary hover:bg-surface-hover transition-colors"
+        >
+          <RefreshCw size={14} />
+          Sync from Linear
+        </button>
       </header>
 
       {/* Stats bar */}
@@ -105,6 +117,12 @@ export function DashboardPage() {
       ) : (
         <RunsTable runs={filteredRuns} onAction={refetch} />
       )}
+
+      <LinearSyncDialog
+        open={syncOpen}
+        onClose={() => setSyncOpen(false)}
+        onIngested={refetch}
+      />
     </div>
   );
 }

@@ -17,6 +17,10 @@ const EnvSchema = z.object({
   LOG_LEVEL: z.enum(["trace", "debug", "info", "warn", "error", "fatal"]).default("info"),
   LINEAR_API_KEY: z.string().optional(),
   GITHUB_TOKEN: z.string().optional(),
+  SYNC_ON_STARTUP: z
+    .enum(["true", "false", "1", "0"])
+    .default("false")
+    .transform((v) => v === "true" || v === "1"),
 });
 
 export type Env = z.infer<typeof EnvSchema>;

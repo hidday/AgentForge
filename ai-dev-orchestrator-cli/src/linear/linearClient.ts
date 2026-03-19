@@ -11,6 +11,7 @@ export interface LinearIssue {
 
 export interface LinearClient {
   getIssue(issueId: string): Promise<LinearIssue>;
+  searchIssues(project: string, state: string): Promise<LinearIssue[]>;
   postComment(issueId: string, body: string): Promise<void>;
   updateIssueState(issueId: string, state: string): Promise<void>;
   addLabel(issueId: string, label: string): Promise<void>;
@@ -36,6 +37,11 @@ export class MockLinearClient implements LinearClient {
       throw new Error(`Mock: Issue ${issueId} not found`);
     }
     return Promise.resolve({ ...issue });
+  }
+
+  searchIssues(_project: string, state: string): Promise<LinearIssue[]> {
+    const matches = [...this.issues.values()].filter((i) => i.state === state);
+    return Promise.resolve(matches.map((i) => ({ ...i })));
   }
 
   postComment(issueId: string, body: string): Promise<void> {

@@ -35,6 +35,40 @@ export class RealLinearClient implements LinearClient {
     };
   }
 
+  async searchIssues(projectName: string, stateName: string): Promise<LinearIssue[]> {
+    const issuesConn = await this.sdk.issues({
+      filter: {
+        project: { name: { eq: projectName } },
+        state: { name: { eq: stateName } },
+      },
+    });
+
+    const results: LinearIssue[] = [];
+    for (const issue of issuesConn?.nodes ?? []) {
+      const labelsConn = await issue.labels();
+      const labels = labelsConn?.nodes?.map((l) => l.name) ?? [];
+      const project = await issue.project;
+      const cycle = await issue.cycle;
+
+      results.push({
+        id: issue.id,
+        title: issue.title,
+        description: issue.description ?? "",
+        state: stateName,
+        labels,
+        priority: issue.priority,
+        project: project?.name ?? undefined,
+        cycle: cycle?.name ?? undefined,
+      });
+    }
+
+    this.logger.info(
+      { projectName, stateName, count: results.length },
+      "Searched Linear issues",
+    );
+    return results;
+  }
+
   async postComment(issueId: string, body: string): Promise<void> {
     await this.sdk.createComment({ issueId, body });
     this.logger.debug({ issueId }, "Posted comment to Linear issue");

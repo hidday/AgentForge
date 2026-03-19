@@ -50,6 +50,17 @@ export interface RunEventRecord {
   createdAt: string;
 }
 
+export interface LinearIssue {
+  id: string;
+  title: string;
+  description: string;
+  state: string;
+  labels: string[];
+  priority: number;
+  project?: string;
+  cycle?: string;
+}
+
 export const api = {
   getRuns: (state?: string) =>
     request<{ runs: Run[] }>(`/runs${state ? `?state=${state}` : ""}`),
@@ -83,4 +94,13 @@ export const api = {
 
   resumeRun: (runId: string) =>
     request<{ ok: boolean }>(`/runs/${runId}/actions/resume`, { method: "POST" }),
+
+  fetchPendingIssues: () =>
+    request<{ issues: LinearIssue[] }>("/linear/pending"),
+
+  ingestIssues: (issueIds: string[]) =>
+    request<{ ok: boolean; started: string[]; skipped: string[] }>("/linear/ingest", {
+      method: "POST",
+      body: JSON.stringify({ issueIds }),
+    }),
 };

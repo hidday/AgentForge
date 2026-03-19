@@ -1,12 +1,14 @@
 import type { FastifyInstance } from "fastify";
 import type { OrchestratorService } from "../orchestrator/orchestratorService.js";
 import type { RunEventEmitter, DashboardEvent } from "./runEventEmitter.js";
+import type { LinearPollService } from "../sync/linearPoll.js";
 import { RunEvent } from "../domain/runEvent.js";
 
 export function registerApiRoutes(
   app: FastifyInstance,
   orchestrator: OrchestratorService,
   emitter: RunEventEmitter,
+  linearPollService?: LinearPollService,
 ): void {
   const runRepo = orchestrator.getRunRepo();
   const artifactRepo = orchestrator.getArtifactRepo();
@@ -126,6 +128,42 @@ export function registerApiRoutes(
       }
     },
   );
+
+  // ── Linear polling ──────────────────────────────────────────────────────
+
+  app.get("/api/linear/pending", async (_request, reply) => {
+    if (!linearPollService) {
+      return reply.code(501).send({
+        error: "Linear polling not available (no LINEAR_API_KEY configured)",
+      });
+    }
+    try {
+      const issues = await linearPollService.discoverPendingIssues();
+      return { issues };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return reply.code(500).send({ error: message });
+    }
+  });
+
+  app.post("/api/linear/ingest", async (request, reply) => {
+    if (!linearPollService) {
+      return reply.code(501).send({
+        error: "Linear polling not available (no LINEAR_API_KEY configured)",
+      });
+    }
+    const body = request.body as { issueIds?: string[] } | undefined;
+    if (!body?.issueIds || !Array.isArray(body.issueIds) || body.issueIds.length === 0) {
+      return reply.code(400).send({ error: "Required: { issueIds: string[] }" });
+    }
+    try {
+      const result = await linearPollService.startRunsForIssues(body.issueIds);
+      return { ok: true, ...result };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return reply.code(500).send({ error: message });
+    }
+  });
 
   // ── SSE stream ─────────────────────────────────────────────────────────
 

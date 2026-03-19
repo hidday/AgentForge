@@ -33,6 +33,7 @@ import { MOCK_ISSUE } from "./mocks/mockLinearData.js";
 import { parseLinearCommand } from "./linear/linearCommandParser.js";
 import { RunEventEmitter } from "./api/runEventEmitter.js";
 import { registerApiRoutes } from "./api/routes.js";
+import { LinearPollService } from "./sync/linearPoll.js";
 
 function buildServices() {
   const prisma = getPrismaClient();
@@ -110,7 +111,11 @@ function buildServices() {
     dashboardEmitter,
   });
 
-  return { orchestrator, idempotencyRepo, dashboardEmitter };
+  const linearPollService = env.LINEAR_API_KEY
+    ? new LinearPollService(linearClient, runRepo, orchestrator, repoRegistry, logger)
+    : undefined;
+
+  return { orchestrator, idempotencyRepo, dashboardEmitter, linearPollService };
 }
 
 async function main(): Promise<void> {
@@ -124,7 +129,7 @@ async function main(): Promise<void> {
     },
   });
 
-  const { orchestrator, idempotencyRepo, dashboardEmitter } = buildServices();
+  const { orchestrator, idempotencyRepo, dashboardEmitter, linearPollService } = buildServices();
 
   app.get("/health", () => ({
     status: "ok",
@@ -146,7 +151,7 @@ async function main(): Promise<void> {
 
   registerLinearWebhook(app, orchestrator, idempotencyRepo);
   registerGitHubWebhook(app, orchestrator);
-  registerApiRoutes(app, orchestrator, dashboardEmitter);
+  registerApiRoutes(app, orchestrator, dashboardEmitter, linearPollService);
 
   app.post<{ Params: { issueId: string } }>("/simulate/run/:issueId", async (request, reply) => {
     const { issueId } = request.params;
@@ -201,6 +206,18 @@ async function main(): Promise<void> {
 
   await app.listen({ port: env.PORT, host: "0.0.0.0" });
   app.log.info(`Server running on port ${env.PORT} in ${env.AGENT_RUNTIME_MODE} mode`);
+
+  if (linearPollService && env.SYNC_ON_STARTUP) {
+    try {
+      const pending = await linearPollService.discoverPendingIssues();
+      app.log.info(
+        { count: pending.length, issues: pending.map((i) => ({ id: i.id, title: i.title })) },
+        "Startup sync: discovered pending Linear issues (use dashboard to start runs)",
+      );
+    } catch (err) {
+      app.log.warn({ error: err instanceof Error ? err.message : String(err) }, "Startup sync failed");
+    }
+  }
 }
 
 main().catch((err: unknown) => {
