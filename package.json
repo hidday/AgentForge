@@ -1,0 +1,14 @@
+{
+  "name": "agent-forge",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "node scripts/dev.mjs",
+    "setup": "cd ai-dev-orchestrator-cli && pnpm install && cd ../ui && npm install",
+    "db:push": "cd ai-dev-orchestrator-cli && npx prisma db push",
+    "build": "cd ai-dev-orchestrator-cli && pnpm run build && cd ../ui && npm run build"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}
