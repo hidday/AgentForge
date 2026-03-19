@@ -1,4 +1,4 @@
-# ai-dev-orchestrator-cli
+# foundry
 
 A production-style sample repository demonstrating how to orchestrate AI development workflows using **Claude Code CLI** and **Codex CLI** as subprocess-based agent runtimes.
 
@@ -195,7 +195,7 @@ AGENT_RUNTIME_MODE=real
 ## Quick Start
 
 ```bash
-cd ai-dev-orchestrator-cli
+cd foundry
 pnpm install
 
 # Set up PostgreSQL

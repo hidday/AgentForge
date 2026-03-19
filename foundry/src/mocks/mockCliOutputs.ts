@@ -21,7 +21,7 @@ const MOCK_PLANNER_OUTPUT = wrap({
     summary:
       "Add Zod-based request validation middleware to all API endpoints, returning structured 400 errors on invalid input.",
     assumptions: [
-      "The project uses Express with TypeScript",
+      "The project uses Fastify with TypeScript",
       "Zod is already a project dependency or can be added",
       "Existing tests use Jest or Vitest",
       "No existing validation middleware is in place",
@@ -91,7 +91,7 @@ const MOCK_PLAN_REVIEWER_OUTPUT = wrap({
         affectedStepId: "s1",
         title: "No error handling for malformed JSON bodies",
         details:
-          "The validation middleware step assumes req.body is always a parsed object. When Express receives malformed JSON, req.body may be undefined. The plan should include a step to handle body-parser failures explicitly, returning a clear 400 error before Zod validation runs.",
+          "The validation hook step assumes request.body is always a parsed object. When Fastify receives malformed JSON, body parsing fails before the route handler. The plan should include a step to configure Fastify's built-in error handler for content-type and JSON parse failures, returning a clear 400 error.",
       },
       {
         id: "pf2",
@@ -119,7 +119,7 @@ const MOCK_PLAN_REVISER_OUTPUT = wrap({
           findingId: "pf1",
           status: "accepted",
           rationale:
-            "Valid point. Express body-parser failures are a real edge case that the original plan missed. Adding a dedicated step for malformed body handling before Zod validation.",
+            "Valid point. Fastify body parsing failures are a real edge case that the original plan missed. Adding a dedicated step for malformed body handling via Fastify's error handler before Zod validation.",
         },
         {
           findingId: "pf2",
@@ -134,7 +134,7 @@ const MOCK_PLAN_REVISER_OUTPUT = wrap({
       summary:
         "Add Zod-based request validation middleware to all API endpoints, returning structured 400 errors on invalid input. Includes explicit handling for malformed JSON bodies.",
       assumptions: [
-        "The project uses Express with TypeScript",
+        "The project uses Fastify with TypeScript",
         "Zod is already a project dependency or can be added",
         "Existing tests use Jest or Vitest",
         "No existing validation middleware is in place",
@@ -294,7 +294,7 @@ const MOCK_REMEDIATION_OUTPUT = wrap({
         action:
           "Added an explicit check for undefined/null req.body before calling safeParse. Returns 400 with a clear error when body is missing or unparseable.",
         rationale:
-          "Genuine bug. Express with broken JSON or missing content-type header produces undefined body, which would bypass validation silently. Good catch.",
+          "Genuine bug. Fastify with a missing or wrong content-type header can skip body parsing, producing an empty body that would bypass validation silently. Good catch.",
       },
       {
         findingId: "f2",

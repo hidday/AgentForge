@@ -1,5 +1,5 @@
 {
-  "name": "ai-dev-orchestrator-cli",
+  "name": "foundry",
   "version": "0.1.0",
   "description": "AI development orchestrator using Claude Code CLI and Codex CLI as subprocess-based agent runtimes",
   "type": "module",

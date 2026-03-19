@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { existsSync } from "node:fs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const BACKEND_DIR = resolve(ROOT, "ai-dev-orchestrator-cli");
+const BACKEND_DIR = resolve(ROOT, "foundry");
 const UI_DIR = resolve(ROOT, "ui");
 
 const colors = {
