@@ -8,6 +8,6 @@ description: >-
 
 # Create Structured Linear Issue
 
-Read and follow the canonical specification at [.agents/create-linear-issue.md](../../../.agents/create-linear-issue.md).
+Read and follow the canonical specification at [.agents/skills/create-linear-issue.md](../../../.agents/skills/create-linear-issue.md).
 
-Examples are at [.agents/create-linear-issue-examples.md](../../../.agents/create-linear-issue-examples.md).
+Examples are at [.agents/skills/create-linear-issue-examples.md](../../../.agents/skills/create-linear-issue-examples.md).

@@ -198,4 +198,4 @@ review.
 - **Out of scope**: Redis-backed distributed rate limiting, WebSocket rate limiting
 ```
 
-For more examples (bug fix, refactor, chore), see [create-linear-issue-examples.md](.agents/create-linear-issue-examples.md).
+For more examples (bug fix, refactor, chore), see [create-linear-issue-examples.md](.agents/skills/create-linear-issue-examples.md).
