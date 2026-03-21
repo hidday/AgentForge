@@ -58,6 +58,12 @@ export class CodexRunner {
   }
 
   private buildStdinPayload(input: AgentInput): string {
+    // Codex has no --system-prompt flag (unlike Claude). Prepend the system
+    // prompt to the stdin payload so the model receives role instructions and
+    // the structured-output format spec before the user task.
+    if (input.systemPrompt) {
+      return `${input.systemPrompt}\n\n---\n\n${input.prompt}`;
+    }
     return input.prompt;
   }
 }

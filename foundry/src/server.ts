@@ -164,6 +164,17 @@ async function main(): Promise<void> {
     }
   });
 
+  app.post<{ Params: { runId: string } }>("/simulate/plan-review/:runId", async (request, reply) => {
+    const { runId } = request.params;
+    // Fire-and-forget: respond immediately so tsx hot-reloads don't kill the
+    // in-flight long-running agent call (plan review can take 60-120 s).
+    reply.send({ ok: true, runId, status: "started" });
+    orchestrator.runPlanReview(runId).catch((err) => {
+      const message = err instanceof Error ? err.message : String(err);
+      app.log.error({ runId, error: message }, "Plan review failed");
+    });
+  });
+
   app.post("/simulate/comment-command", async (request, reply) => {
     const body = request.body as { issueId?: string; command?: string } | undefined;
     if (!body?.issueId || !body?.command) {

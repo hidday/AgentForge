@@ -31,7 +31,7 @@ function startProcess(tag, color, cmd, args, cwd) {
   const proc = spawn(cmd, args, {
     cwd,
     stdio: ["ignore", "pipe", "pipe"],
-    env: { ...process.env },
+    env: buildEnv(),
   });
 
   proc.stdout.on("data", (data) => {
@@ -51,6 +51,24 @@ function startProcess(tag, color, cmd, args, cwd) {
   });
 
   return proc;
+}
+
+/**
+ * Build an env block for child processes.
+ *
+ * Problem: `npm exec` / `npx` prepend the nvm Node bin dir to PATH when they
+ * launch sub-processes. That dir contains an *npm-installed* `claude` CLI
+ * (older, incompatible version) which then shadows the native `~/.local/bin/claude`.
+ *
+ * Fix: inject ~/.local/bin at the very front of PATH so the native binary always
+ * wins regardless of what npm / npx prepend later.
+ */
+function buildEnv() {
+  const localBin = resolve(process.env.HOME ?? "/", ".local", "bin");
+  const existing = process.env.PATH ?? "";
+  // Only prepend if not already the first entry (idempotent on re-runs)
+  const PATH = existing.startsWith(localBin) ? existing : `${localBin}:${existing}`;
+  return { ...process.env, PATH };
 }
 
 // ── Main ────────────────────────────────────────────────────────────────
