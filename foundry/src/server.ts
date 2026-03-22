@@ -175,6 +175,15 @@ async function main(): Promise<void> {
     });
   });
 
+  app.post<{ Params: { runId: string } }>("/simulate/plan-revision/:runId", async (request, reply) => {
+    const { runId } = request.params;
+    reply.send({ ok: true, runId, status: "started" });
+    orchestrator.runPlanRevision(runId).catch((err) => {
+      const message = err instanceof Error ? err.message : String(err);
+      app.log.error({ runId, error: message }, "Plan revision failed");
+    });
+  });
+
   app.post("/simulate/comment-command", async (request, reply) => {
     const body = request.body as { issueId?: string; command?: string } | undefined;
     if (!body?.issueId || !body?.command) {
