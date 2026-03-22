@@ -37,3 +37,27 @@ export class StateTransitionError extends Error {
     this.name = "StateTransitionError";
   }
 }
+
+export interface PreflightSummary {
+  ok: boolean;
+  requiredRuntimes: string[];
+  results: {
+    runtime: string;
+    command: string;
+    binaryCheck: { ok: boolean; version?: string; error?: string; durationMs: number };
+    authCheck: { ok: boolean; durationMs: number; error?: string };
+  }[];
+}
+
+export class PreflightError extends Error {
+  public readonly result: PreflightSummary;
+
+  constructor(result: PreflightSummary) {
+    const failures = result.results
+      .filter((r) => !r.binaryCheck.ok || !r.authCheck.ok)
+      .map((r) => r.runtime);
+    super(`Preflight failed for runtimes: ${failures.join(", ")}`);
+    this.name = "PreflightError";
+    this.result = result;
+  }
+}

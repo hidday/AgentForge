@@ -34,6 +34,7 @@ import { parseLinearCommand } from "./linear/linearCommandParser.js";
 import { RunEventEmitter } from "./api/runEventEmitter.js";
 import { registerApiRoutes } from "./api/routes.js";
 import { LinearPollService } from "./sync/linearPoll.js";
+import { RuntimeHealthCheck } from "./runtime/runtimeHealthCheck.js";
 
 function buildServices() {
   const prisma = getPrismaClient();
@@ -115,7 +116,14 @@ function buildServices() {
     ? new LinearPollService(linearClient, runRepo, orchestrator, repoRegistry, logger)
     : undefined;
 
-  return { orchestrator, idempotencyRepo, dashboardEmitter, linearPollService };
+  const preflightProcessRunner = new ProcessRunner("real", logger);
+  const runtimeConfigs = RuntimeHealthCheck.buildRuntimeConfigs(
+    env.CLAUDE_CODE_COMMAND,
+    env.CODEX_COMMAND,
+  );
+  const runtimeHealthCheck = new RuntimeHealthCheck(preflightProcessRunner, runtimeConfigs, logger);
+
+  return { orchestrator, idempotencyRepo, dashboardEmitter, linearPollService, runtimeHealthCheck };
 }
 
 async function main(): Promise<void> {
@@ -129,13 +137,41 @@ async function main(): Promise<void> {
     },
   });
 
-  const { orchestrator, idempotencyRepo, dashboardEmitter, linearPollService } = buildServices();
+  const { orchestrator, idempotencyRepo, dashboardEmitter, linearPollService, runtimeHealthCheck } =
+    buildServices();
 
-  app.get("/health", () => ({
-    status: "ok",
-    mode: env.AGENT_RUNTIME_MODE,
-    timestamp: new Date().toISOString(),
-  }));
+  if (env.AGENT_RUNTIME_MODE === "real") {
+    try {
+      await runtimeHealthCheck.runPreflight();
+    } catch {
+      logger.fatal(
+        "Agent preflight failed -- refusing to start. Fix the CLI authentication and retry.",
+      );
+      process.exit(1);
+    }
+  }
+
+  app.get("/health", () => {
+    const preflight = runtimeHealthCheck.getLastResult();
+    return {
+      status: "ok",
+      mode: env.AGENT_RUNTIME_MODE,
+      timestamp: new Date().toISOString(),
+      runtimes: preflight
+        ? {
+            ok: preflight.ok,
+            required: preflight.requiredRuntimes,
+            skipped: preflight.skippedRuntimes,
+            results: preflight.results.map((r) => ({
+              runtime: r.runtime,
+              command: r.command,
+              binary: r.binaryCheck.ok ? (r.binaryCheck.version ?? "ok") : r.binaryCheck.error,
+              auth: r.authCheck.ok ? "ok" : r.authCheck.error,
+            })),
+          }
+        : undefined,
+    };
+  });
 
   app.addHook("onRequest", async (request, reply) => {
     const origin = request.headers.origin;
