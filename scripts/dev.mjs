@@ -1,3 +1,43 @@
+// ── Runtime requirements ─────────────────────────────────────────────────────
+//
+// This dev script requires:
+//   • Node.js >=22.12.0  — Vite requires Node 20.19+/22.12+ (see Vite 6 release notes)
+//   • arm64 on macOS     — esbuild ships a darwin-arm64 native binary; running
+//                          under Rosetta (x64) causes platform-mismatch errors.
+//
+// Both checks run before any imports or child-process spawns so the error is
+// immediate and actionable.
+
+(function checkNodeVersion() {
+  const [major, minor, patch] = process.versions.node.split(".").map(Number);
+  const required = [22, 12, 0];
+  const current = [major, minor, patch];
+  let tooOld = false;
+  for (let i = 0; i < 3; i++) {
+    if (current[i] < required[i]) { tooOld = true; break; }
+    if (current[i] > required[i]) break;
+  }
+  if (tooOld) {
+    console.error(
+      `Error: Node.js >=22.12.0 is required (current: ${process.versions.node}).\n` +
+      `Run: nvm install 22 && nvm use`
+    );
+    process.exit(1);
+  }
+})();
+
+(function checkArchitecture() {
+  if (process.platform === "darwin" && process.arch !== "arm64") {
+    console.error(
+      `Error: On Apple Silicon, Node.js must be the native arm64 build ` +
+      `(current arch: ${process.arch}).\n` +
+      `You may be running under Rosetta. Fix: open a native arm64 terminal ` +
+      `and run nvm install 22 && nvm use`
+    );
+    process.exit(1);
+  }
+})();
+
 import { spawn, execSync } from "node:child_process";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
