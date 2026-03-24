@@ -13,6 +13,7 @@ import {
 const RETRY_LABELS: Record<string, string> = {
   PlanRevision: "Retry Plan Revision",
   PlanReview: "Retry Plan Review",
+  Implementing: "Retry Execution",
   AIReview: "Retry Code Review",
   AddressingReview: "Retry Remediation",
 };

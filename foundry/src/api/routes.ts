@@ -153,6 +153,9 @@ export function registerApiRoutes(
         [RunState.PlanReview]: () => {
           orchestrator.runPlanReview(run.id).catch(logError);
         },
+        [RunState.Implementing]: () => {
+          orchestrator.runExecution(run.id).catch(logError);
+        },
         [RunState.AIReview]: () => {
           orchestrator.runReview(run.id).catch(logError);
         },
