@@ -1,10 +1,21 @@
 import { z } from "zod";
 
-export const OpenQuestionSchema = z.object({
-  id: z.string(),
-  question: z.string(),
-  requiredForExecution: z.boolean().catch(false),
-});
+// The model sometimes outputs openQuestions as plain strings instead of
+// objects. Normalize both forms to the expected shape.
+export const OpenQuestionSchema = z
+  .union([
+    z.object({
+      id: z.string(),
+      question: z.string(),
+      requiredForExecution: z.boolean().catch(false),
+    }),
+    z.string().transform((s, ctx) => ({
+      id: `q${ctx.path.join("-") || "1"}`,
+      question: s,
+      requiredForExecution: false as boolean,
+    })),
+  ])
+  .transform((v) => v as { id: string; question: string; requiredForExecution: boolean });
 
 export const PlanStepSchema = z.object({
   id: z.string(),
