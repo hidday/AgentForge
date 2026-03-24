@@ -7,7 +7,15 @@ import {
   XCircle,
   Pause,
   Play,
+  RotateCcw,
 } from "lucide-react";
+
+const RETRY_LABELS: Record<string, string> = {
+  PlanRevision: "Retry Plan Revision",
+  PlanReview: "Retry Plan Review",
+  AIReview: "Retry Code Review",
+  AddressingReview: "Retry Remediation",
+};
 
 interface ActionBarProps {
   runId: string;
@@ -119,6 +127,20 @@ export function ActionBar({ runId, state, onAction }: ActionBarProps) {
         confirmLabel: "Resume",
         variant: "default",
         action: () => api.resumeRun(runId),
+      },
+    },
+    {
+      show: state in RETRY_LABELS,
+      icon: RotateCcw,
+      label: RETRY_LABELS[state] ?? "Retry",
+      style: "bg-accent text-white hover:bg-accent-hover",
+      dialog: {
+        title: RETRY_LABELS[state] ?? "Retry Stage",
+        description:
+          `Re-run the current stage (${state}). The agent will pick up from where it left off using existing artifacts.`,
+        confirmLabel: "Retry",
+        variant: "default",
+        action: () => api.retryStage(runId),
       },
     },
   ];

@@ -95,6 +95,11 @@ export const api = {
   resumeRun: (runId: string) =>
     request<{ ok: boolean }>(`/runs/${runId}/actions/resume`, { method: "POST" }),
 
+  retryStage: (runId: string) =>
+    request<{ ok: boolean; state: string; retrying: boolean }>(`/runs/${runId}/actions/retry`, {
+      method: "POST",
+    }),
+
   fetchPendingIssues: () =>
     request<{ issues: LinearIssue[] }>("/linear/pending"),
 

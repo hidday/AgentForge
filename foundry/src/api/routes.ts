@@ -3,6 +3,7 @@ import type { OrchestratorService } from "../orchestrator/orchestratorService.js
 import type { RunEventEmitter, DashboardEvent } from "./runEventEmitter.js";
 import type { LinearPollService } from "../sync/linearPoll.js";
 import { RunEvent } from "../domain/runEvent.js";
+import { RunState } from "../domain/runState.js";
 
 export function registerApiRoutes(
   app: FastifyInstance,
@@ -126,6 +127,41 @@ export function registerApiRoutes(
         const message = err instanceof Error ? err.message : String(err);
         return reply.code(400).send({ error: message });
       }
+    },
+  );
+
+  app.post<{ Params: { id: string } }>(
+    "/api/runs/:id/actions/retry",
+    async (request, reply) => {
+      const run = await runRepo.findById(request.params.id);
+      if (!run) return reply.code(404).send({ error: "Run not found" });
+
+      const retryableStates: Record<string, () => void> = {
+        [RunState.PlanRevision]: () => {
+          void orchestrator.runPlanRevision(run.id);
+        },
+        [RunState.PlanReview]: () => {
+          void orchestrator.runPlanReview(run.id);
+        },
+        [RunState.AIReview]: () => {
+          void orchestrator.runReview(run.id);
+        },
+        [RunState.AddressingReview]: () => {
+          void orchestrator.runRemediation(run.id);
+        },
+      };
+
+      const trigger = retryableStates[run.state];
+      if (!trigger) {
+        return reply.code(400).send({
+          error: `Retry is not supported for state "${run.state}". Retryable states: ${Object.keys(retryableStates).join(", ")}`,
+        });
+      }
+
+      // Fire-and-forget so the HTTP response returns immediately while the
+      // (potentially long-running) agent work happens in the background.
+      trigger();
+      return { ok: true, runId: run.id, state: run.state, retrying: true };
     },
   );
 
