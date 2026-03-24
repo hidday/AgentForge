@@ -30,6 +30,7 @@ export class PlannerAgent {
         systemPrompt,
         workingDirectory: taskBundle.repo.repoPath,
         timeoutMs: env.AGENT_TIMEOUT_MS,
+        runId,
       },
       "planner",
       PlannerOutputSchema,

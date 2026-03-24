@@ -31,6 +31,7 @@ export class ClaudeCodeRunner {
       env: input.env,
       timeoutMs: input.timeoutMs,
       stdinData,
+      context: input.runId ? { runId: input.runId, stage, runtime: "claude-code" } : undefined,
     });
 
     // When running with --output-format json, Claude wraps the response in a

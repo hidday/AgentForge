@@ -35,6 +35,7 @@ export class PlanReviewerAgent {
         systemPrompt,
         workingDirectory: taskBundle.repo.repoPath,
         timeoutMs: env.AGENT_TIMEOUT_MS,
+        runId,
       },
       "plan-reviewer",
       PlanReviewerOutputSchema,

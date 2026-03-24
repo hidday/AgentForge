@@ -31,6 +31,7 @@ export class CodexRunner {
       env: input.env,
       timeoutMs: input.timeoutMs,
       stdinData,
+      context: input.runId ? { runId: input.runId, stage, runtime: "codex" } : undefined,
     });
 
     if (result.exitCode !== 0 && !result.stdout.includes("BEGIN_STRUCTURED_OUTPUT")) {

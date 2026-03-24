@@ -21,6 +21,32 @@ export type DashboardEvent =
       issueId: string;
       repo: string;
       timestamp: string;
+    }
+  | {
+      type: "process:started";
+      runId: string;
+      processId: string;
+      stage: string;
+      runtime: string;
+      command: string;
+      timestamp: string;
+    }
+  | {
+      type: "process:output";
+      runId: string;
+      processId: string;
+      chunk: string;
+      timestamp: string;
+    }
+  | {
+      type: "process:completed";
+      runId: string;
+      processId: string;
+      stage: string;
+      runtime: string;
+      exitCode: number;
+      durationMs: number;
+      timestamp: string;
     };
 
 export class RunEventEmitter extends EventEmitter {
@@ -52,6 +78,57 @@ export class RunEventEmitter extends EventEmitter {
       runId,
       issueId,
       repo,
+      timestamp: new Date().toISOString(),
+    };
+    this.emit("dashboard", event);
+  }
+
+  emitProcessStarted(
+    runId: string,
+    processId: string,
+    stage: string,
+    runtime: string,
+    command: string,
+  ): void {
+    const event: DashboardEvent = {
+      type: "process:started",
+      runId,
+      processId,
+      stage,
+      runtime,
+      command,
+      timestamp: new Date().toISOString(),
+    };
+    this.emit("dashboard", event);
+  }
+
+  emitProcessOutput(runId: string, processId: string, chunk: string): void {
+    const event: DashboardEvent = {
+      type: "process:output",
+      runId,
+      processId,
+      chunk,
+      timestamp: new Date().toISOString(),
+    };
+    this.emit("dashboard", event);
+  }
+
+  emitProcessCompleted(
+    runId: string,
+    processId: string,
+    stage: string,
+    runtime: string,
+    exitCode: number,
+    durationMs: number,
+  ): void {
+    const event: DashboardEvent = {
+      type: "process:completed",
+      runId,
+      processId,
+      stage,
+      runtime,
+      exitCode,
+      durationMs,
       timestamp: new Date().toISOString(),
     };
     this.emit("dashboard", event);

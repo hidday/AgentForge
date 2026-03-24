@@ -1,8 +1,10 @@
 import { useParams, Link } from "react-router-dom";
 import { useRun } from "@/hooks/useRun.ts";
+import { useActiveProcesses } from "@/hooks/useActiveProcesses.ts";
 import { StateBadge } from "@/components/StateBadge.tsx";
 import { WorkflowStepper } from "@/components/WorkflowStepper.tsx";
 import { ArtifactTabs } from "@/components/ArtifactTabs.tsx";
+import { AgentOutputPanel } from "@/components/AgentOutputPanel.tsx";
 import { EventTimeline } from "@/components/EventTimeline.tsx";
 import { ActionBar } from "@/components/ActionBar.tsx";
 import { formatTimestamp } from "@/lib/utils.ts";
@@ -32,6 +34,7 @@ export function RunDetailPage() {
   }
 
   const { run, artifacts, events } = data;
+  const { processes, output } = useActiveProcesses(run.id);
 
   return (
     <div className="min-h-screen flex flex-col">
@@ -104,8 +107,9 @@ export function RunDetailPage() {
           <WorkflowStepper currentState={run.state} events={events} />
         </aside>
 
-        {/* Center: Artifacts */}
-        <main className="min-w-0">
+        {/* Center: Artifacts + Agent Output */}
+        <main className="min-w-0 space-y-4">
+          <AgentOutputPanel processes={processes} output={output} />
           <ArtifactTabs artifacts={artifacts} />
         </main>
 

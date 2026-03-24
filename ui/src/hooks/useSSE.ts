@@ -1,8 +1,16 @@
 import { useEffect, useRef } from "react";
 
 export interface DashboardEvent {
-  type: "run:state-changed" | "run:artifact-created" | "run:created";
+  type:
+    | "run:state-changed"
+    | "run:artifact-created"
+    | "run:created"
+    | "process:started"
+    | "process:output"
+    | "process:completed";
   runId: string;
+  processId?: string;
+  chunk?: string;
   [key: string]: unknown;
 }
 

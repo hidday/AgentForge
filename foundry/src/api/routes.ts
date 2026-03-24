@@ -2,6 +2,7 @@ import type { FastifyInstance } from "fastify";
 import type { OrchestratorService } from "../orchestrator/orchestratorService.js";
 import type { RunEventEmitter, DashboardEvent } from "./runEventEmitter.js";
 import type { LinearPollService } from "../sync/linearPoll.js";
+import type { ProcessRunner } from "../runtime/processRunner.js";
 import { RunEvent } from "../domain/runEvent.js";
 import { RunState } from "../domain/runState.js";
 
@@ -9,6 +10,7 @@ export function registerApiRoutes(
   app: FastifyInstance,
   orchestrator: OrchestratorService,
   emitter: RunEventEmitter,
+  processRunner: ProcessRunner,
   linearPollService?: LinearPollService,
 ): void {
   const runRepo = orchestrator.getRunRepo();
@@ -164,6 +166,22 @@ export function registerApiRoutes(
       return { ok: true, runId: run.id, state: run.state, retrying: true };
     },
   );
+
+  // ── Active processes ────────────────────────────────────────────────────
+
+  app.get<{ Querystring: { runId?: string } }>("/api/processes", async (request) => {
+    const all = processRunner.getActiveProcesses();
+    const { runId } = request.query;
+    return { processes: runId ? all.filter((p) => p.runId === runId) : all };
+  });
+
+  app.get<{ Params: { id: string } }>("/api/processes/:id/output", async (request, reply) => {
+    const output = processRunner.getProcessOutput(request.params.id);
+    if (output === null) {
+      return reply.code(404).send({ error: "Process not found or no output available" });
+    }
+    return { processId: request.params.id, output };
+  });
 
   // ── Linear polling ──────────────────────────────────────────────────────
 

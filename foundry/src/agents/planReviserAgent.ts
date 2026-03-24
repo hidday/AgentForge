@@ -51,6 +51,7 @@ export class PlanReviserAgent {
         systemPrompt,
         workingDirectory: taskBundle.repo.repoPath,
         timeoutMs: env.AGENT_TIMEOUT_MS,
+        runId,
       },
       "plan-reviser",
       PlanReviserOutputSchema,

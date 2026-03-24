@@ -40,6 +40,7 @@ export class RemediationAgent {
         systemPrompt,
         workingDirectory,
         timeoutMs: env.AGENT_TIMEOUT_MS,
+        runId,
       },
       "remediation",
       RemediationOutputSchema,

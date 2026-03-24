@@ -50,6 +50,17 @@ export interface RunEventRecord {
   createdAt: string;
 }
 
+export interface ActiveProcess {
+  id: string;
+  pid: number;
+  command: string;
+  runId: string;
+  stage: string;
+  runtime: string;
+  startedAt: string;
+  elapsedMs: number;
+}
+
 export interface LinearIssue {
   id: string;
   title: string;
@@ -99,6 +110,14 @@ export const api = {
     request<{ ok: boolean; state: string; retrying: boolean }>(`/runs/${runId}/actions/retry`, {
       method: "POST",
     }),
+
+  getActiveProcesses: (runId?: string) =>
+    request<{ processes: ActiveProcess[] }>(
+      `/processes${runId ? `?runId=${runId}` : ""}`,
+    ),
+
+  getProcessOutput: (processId: string) =>
+    request<{ processId: string; output: string }>(`/processes/${processId}/output`),
 
   fetchPendingIssues: () =>
     request<{ issues: LinearIssue[] }>("/linear/pending"),

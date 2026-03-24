@@ -46,7 +46,9 @@ function buildServices() {
   const idempotencyRepo = new IdempotencyRepository(prisma);
   const repoRegistry = loadRepoRegistry(env.REPOS_CONFIG_PATH, env.REPOS_ROOT_PATH, logger);
 
-  const processRunner = new ProcessRunner(env.AGENT_RUNTIME_MODE, logger);
+  const dashboardEmitter = new RunEventEmitter();
+
+  const processRunner = new ProcessRunner(env.AGENT_RUNTIME_MODE, logger, dashboardEmitter);
   if (env.AGENT_RUNTIME_MODE === "mock") {
     processRunner.setMockHandler(createMockProcessHandler());
   }
@@ -99,8 +101,6 @@ function buildServices() {
   const linearSync = new LinearSyncService(linearClient, logger);
   const githubSync = new GitHubSyncService(githubClient, logger);
 
-  const dashboardEmitter = new RunEventEmitter();
-
   const orchestrator = new OrchestratorService({
     runRepo,
     artifactRepo,
@@ -134,7 +134,7 @@ function buildServices() {
   );
   const runtimeHealthCheck = new RuntimeHealthCheck(preflightProcessRunner, runtimeConfigs, logger);
 
-  return { orchestrator, idempotencyRepo, dashboardEmitter, linearPollService, runtimeHealthCheck };
+  return { orchestrator, idempotencyRepo, dashboardEmitter, processRunner, linearPollService, runtimeHealthCheck };
 }
 
 async function main(): Promise<void> {
@@ -148,7 +148,7 @@ async function main(): Promise<void> {
     },
   });
 
-  const { orchestrator, idempotencyRepo, dashboardEmitter, linearPollService, runtimeHealthCheck } =
+  const { orchestrator, idempotencyRepo, dashboardEmitter, processRunner, linearPollService, runtimeHealthCheck } =
     buildServices();
 
   if (env.AGENT_RUNTIME_MODE === "real") {
@@ -196,9 +196,13 @@ async function main(): Promise<void> {
     }
   });
 
+  if (env.AGENT_RUNTIME_MODE === "real") {
+    processRunner.rehydrateOrphans();
+  }
+
   registerLinearWebhook(app, orchestrator, idempotencyRepo);
   registerGitHubWebhook(app, orchestrator);
-  registerApiRoutes(app, orchestrator, dashboardEmitter, linearPollService);
+  registerApiRoutes(app, orchestrator, dashboardEmitter, processRunner, linearPollService);
 
   app.post<{ Params: { issueId: string } }>("/simulate/run/:issueId", async (request, reply) => {
     const { issueId } = request.params;

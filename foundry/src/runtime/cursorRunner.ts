@@ -32,6 +32,7 @@ export class CursorRunner {
       env: input.env,
       timeoutMs: input.timeoutMs,
       stdinData,
+      context: input.runId ? { runId: input.runId, stage, runtime: "cursor" } : undefined,
     });
 
     const outputText = this.unwrapJsonEnvelope(result.stdout);

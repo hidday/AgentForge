@@ -14,6 +14,7 @@ export interface AgentInput {
   workingDirectory: string;
   env?: Record<string, string>;
   timeoutMs: number;
+  runId?: string;
 }
 
 export interface AgentOutput<T = unknown> {
@@ -24,6 +25,12 @@ export interface AgentOutput<T = unknown> {
   durationMs: number;
 }
 
+export interface ProcessContext {
+  runId: string;
+  stage: string;
+  runtime: string;
+}
+
 export interface ProcessSpawnOptions {
   command: string;
   args: string[];
@@ -31,4 +38,5 @@ export interface ProcessSpawnOptions {
   env?: Record<string, string>;
   timeoutMs: number;
   stdinData?: string;
+  context?: ProcessContext;
 }
