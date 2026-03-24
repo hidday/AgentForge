@@ -13,6 +13,7 @@ import { ArrowLeft, GitBranch, ExternalLink } from "lucide-react";
 export function RunDetailPage() {
   const { id } = useParams<{ id: string }>();
   const { data, loading, error, refetch } = useRun(id!);
+  const { processes, output } = useActiveProcesses(id!);
 
   if (loading) {
     return (
@@ -34,7 +35,6 @@ export function RunDetailPage() {
   }
 
   const { run, artifacts, events } = data;
-  const { processes, output } = useActiveProcesses(run.id);
 
   return (
     <div className="min-h-screen flex flex-col">
