@@ -3,7 +3,7 @@ import { z } from "zod";
 export const OpenQuestionSchema = z.object({
   id: z.string(),
   question: z.string(),
-  requiredForExecution: z.boolean(),
+  requiredForExecution: z.boolean().catch(false),
 });
 
 export const PlanStepSchema = z.object({

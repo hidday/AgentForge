@@ -15,7 +15,7 @@ export class ClaudeCodeRunner {
     private readonly logger: Logger,
   ) {}
 
-  async run<T>(input: AgentInput, stage: Stage, schema: ZodType<T>): Promise<AgentOutput<T>> {
+  async run<T>(input: AgentInput, stage: Stage, schema: ZodType<T, any, any>): Promise<AgentOutput<T>> {
     const args = this.buildArgs(input);
     const stdinData = this.buildStdinPayload(input);
 

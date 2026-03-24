@@ -19,7 +19,8 @@ export class AgentRunner {
     runtime: AgentRuntime,
     input: AgentInput,
     stage: Stage,
-    schema: ZodType<T>,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    schema: ZodType<T, any, any>,
   ): Promise<AgentOutput<T>> {
     this.logger.info({ runtime, stage }, "Routing agent execution");
 
