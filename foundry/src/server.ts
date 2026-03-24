@@ -127,7 +127,9 @@ function buildServices() {
   const preflightProcessRunner = new ProcessRunner("real", logger);
   const runtimeConfigs = RuntimeHealthCheck.buildRuntimeConfigs(
     env.CLAUDE_CODE_COMMAND,
+    parseBaseArgs(env.CLAUDE_CODE_ARGS_BASE),
     env.CODEX_COMMAND,
+    parseBaseArgs(env.CODEX_ARGS_BASE),
     env.CURSOR_COMMAND,
   );
   const runtimeHealthCheck = new RuntimeHealthCheck(preflightProcessRunner, runtimeConfigs, logger);

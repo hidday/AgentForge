@@ -4,7 +4,7 @@ import { AGENT_STAGES, type AgentRuntime } from "../domain/types.js";
 import { startTimer } from "../utils/time.js";
 import { PreflightError } from "../utils/errors.js";
 
-const PROBE_TIMEOUT_MS = 15_000;
+const PROBE_TIMEOUT_MS = 30_000;
 const VERSION_TIMEOUT_MS = 5_000;
 
 export interface RuntimeProbeResult {
@@ -25,9 +25,16 @@ export interface PreflightResult {
 interface RuntimeConfig {
   command: string;
   versionArgs: string[];
+  /** Args passed to the CLI for the auth probe subprocess. */
   probeArgs: string[];
   probeStdin?: string;
-  /** When true, auth check passes on exit code 0 alone (no PONG required). */
+  /**
+   * When set, auth passes if this regex matches stdout (or stderr).
+   * Useful for commands like `claude auth status` that output structured text
+   * rather than a PONG echo. Takes precedence over exitCodeOnly.
+   */
+  successPattern?: string;
+  /** When true, auth check passes on exit code 0 alone (no pattern match required). */
   exitCodeOnly?: boolean;
 }
 
@@ -44,20 +51,24 @@ export class RuntimeHealthCheck {
 
   static buildRuntimeConfigs(
     claudeCommand: string,
+    _claudeBaseArgs: string[],
     codexCommand: string,
+    codexBaseArgs: string[],
     cursorCommand: string,
   ): Record<AgentRuntime, RuntimeConfig> {
     return {
       "claude-code": {
         command: claudeCommand,
         versionArgs: ["--version"],
-        probeArgs: ["--print"],
-        probeStdin: "Respond with exactly: PONG",
+        // `claude auth status` reads the local session cache — instant, no API call.
+        // Returns JSON; we check that "loggedIn" is true.
+        probeArgs: ["auth", "status"],
+        successPattern: '"loggedIn":\\s*true',
       },
       codex: {
         command: codexCommand,
         versionArgs: ["--version"],
-        probeArgs: ["--quiet", "--full-auto"],
+        probeArgs: codexBaseArgs,
         probeStdin: "Respond with exactly: PONG",
       },
       cursor: {
@@ -119,7 +130,6 @@ export class RuntimeHealthCheck {
           binaryError: r.binaryCheck.ok ? undefined : r.binaryCheck.error,
           authError: r.authCheck.ok ? undefined : r.authCheck.error,
         }));
-
       this.logger.error({ failures, totalDurationMs }, "Preflight FAILED: one or more agent runtimes are not ready");
       throw new PreflightError(this.lastResult);
     }
@@ -203,6 +213,20 @@ export class RuntimeHealthCheck {
         return { ok: false, durationMs, error: `Auth probe timed out after ${PROBE_TIMEOUT_MS}ms` };
       }
 
+      const output = result.stdout + result.stderr;
+
+      if (config.successPattern) {
+        const matched = new RegExp(config.successPattern).test(output);
+        if (!matched) {
+          return {
+            ok: false,
+            durationMs,
+            error: `Auth check failed: expected pattern not found in output (got: ${result.stdout.slice(0, 200)})`,
+          };
+        }
+        return { ok: true, durationMs };
+      }
+
       if (config.exitCodeOnly) {
         if (result.exitCode !== 0) {
           return {
@@ -214,7 +238,6 @@ export class RuntimeHealthCheck {
         return { ok: true, durationMs };
       }
 
-      const output = result.stdout + result.stderr;
       const hasPong = /pong/i.test(output);
 
       if (result.exitCode !== 0 && !hasPong) {
