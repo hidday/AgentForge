@@ -23,12 +23,23 @@ export const PlanStepSchema = z.object({
   description: z.string(),
 });
 
+// A flexible string field: coerce objects to their string representation,
+// fall back to an empty string if nothing useful can be extracted.
+const FlexString = z.union([
+  z.string(),
+  z.object({ description: z.string() }).transform((v) => v.description),
+  z.object({ text: z.string() }).transform((v) => v.text),
+  z.object({ risk: z.string() }).transform((v) => v.risk),
+  z.object({ assumption: z.string() }).transform((v) => v.assumption),
+  z.unknown().transform((v) => (typeof v === "string" ? v : String(v ?? ""))),
+]);
+
 export const PlanSchema = z.object({
   planVersion: z.number().int().positive(),
   summary: z.string(),
-  assumptions: z.array(z.string()),
+  assumptions: z.array(FlexString),
   openQuestions: z.array(OpenQuestionSchema),
-  risks: z.array(z.string()),
+  risks: z.array(FlexString),
   steps: z.array(PlanStepSchema),
   testPlan: z.string(),
   confidence: z.number().min(0).max(1),
