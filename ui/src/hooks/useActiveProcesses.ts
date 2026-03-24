@@ -14,42 +14,56 @@ export function useActiveProcesses(runId: string): UseActiveProcessesResult {
   const [output, setOutput] = useState("");
   const outputRef = useRef("");
 
-  const fetchProcesses = useCallback(async () => {
-    try {
-      const result = await api.getActiveProcesses(runId);
-      setProcesses(result.processes);
-
-      if (result.processes.length > 0) {
-        const proc = result.processes[0]!;
-        try {
-          const outputResult = await api.getProcessOutput(proc.id);
-          outputRef.current = outputResult.output;
-          setOutput(outputResult.output);
-        } catch {
-          // process may have just ended
+  useEffect(() => {
+    let cancelled = false;
+    async function init() {
+      try {
+        const result = await api.getActiveProcesses(runId);
+        if (cancelled) return;
+        setProcesses(result.processes);
+        if (result.processes.length > 0) {
+          const proc = result.processes[0]!;
+          try {
+            const outputResult = await api.getProcessOutput(proc.id);
+            if (cancelled) return;
+            outputRef.current = outputResult.output;
+            setOutput(outputResult.output);
+          } catch {
+            // process may have just ended
+          }
         }
+      } catch {
+        // server may be restarting
       }
-    } catch {
-      // server may be restarting
     }
+    void init();
+    return () => { cancelled = true; };
   }, [runId]);
-
-  useEffect(() => {
-    void fetchProcesses();
-  }, [fetchProcesses]);
-
-  useEffect(() => {
-    if (processes.length === 0) return;
-    const interval = setInterval(() => void fetchProcesses(), 2_000);
-    return () => clearInterval(interval);
-  }, [processes.length, fetchProcesses]);
 
   const handleSSE = useCallback(
     (event: DashboardEvent) => {
       if (event.runId !== runId) return;
 
-      if (event.type === "process:started" || event.type === "process:completed") {
-        void fetchProcesses();
+      if (event.type === "process:started") {
+        setProcesses((prev) => {
+          const entry: ActiveProcess = {
+            id: (event.processId as string) ?? "",
+            pid: 0,
+            command: (event.command as string) ?? "",
+            runId: event.runId,
+            stage: (event.stage as string) ?? "",
+            runtime: (event.runtime as string) ?? "",
+            startedAt: (event.timestamp as string) ?? new Date().toISOString(),
+            elapsedMs: 0,
+          };
+          return [...prev, entry];
+        });
+        outputRef.current = "";
+        setOutput("");
+      }
+
+      if (event.type === "process:completed") {
+        setProcesses((prev) => prev.filter((p) => p.id !== event.processId));
       }
 
       if (event.type === "process:output" && event.chunk) {
@@ -60,7 +74,7 @@ export function useActiveProcesses(runId: string): UseActiveProcessesResult {
         setOutput(outputRef.current);
       }
     },
-    [runId, fetchProcesses],
+    [runId],
   );
 
   useSSE(handleSSE);
