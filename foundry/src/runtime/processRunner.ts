@@ -380,7 +380,8 @@ export class ProcessRunner {
 
         if (timedOut) {
           this.logger.warn({ command, durationMs, timeoutMs }, "Process timed out");
-          reject(new AgentTimeoutError(`${command} ${args.join(" ")}`, timeoutMs));
+          const label = context ? `${context.runtime}/${context.stage}` : command;
+          reject(new AgentTimeoutError(label, timeoutMs));
           return;
         }
 

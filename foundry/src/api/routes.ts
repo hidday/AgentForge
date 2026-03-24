@@ -65,7 +65,10 @@ export function registerApiRoutes(
     async (request, reply) => {
       try {
         const run = await orchestrator.approvePlan(request.params.id);
-        void orchestrator.runExecution(run.id);
+        orchestrator.runExecution(run.id).catch((err: unknown) => {
+          const msg = err instanceof Error ? err.message.slice(0, 200) : String(err);
+          app.log.error({ runId: run.id, error: msg }, "Execution failed");
+        });
         return { ok: true, state: run.state };
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
@@ -138,18 +141,23 @@ export function registerApiRoutes(
       const run = await runRepo.findById(request.params.id);
       if (!run) return reply.code(404).send({ error: "Run not found" });
 
+      const logError = (err: unknown) => {
+        const message = err instanceof Error ? err.message.slice(0, 200) : String(err);
+        app.log.error({ runId: run.id, error: message }, "Retry stage failed");
+      };
+
       const retryableStates: Record<string, () => void> = {
         [RunState.PlanRevision]: () => {
-          void orchestrator.runPlanRevision(run.id);
+          orchestrator.runPlanRevision(run.id).catch(logError);
         },
         [RunState.PlanReview]: () => {
-          void orchestrator.runPlanReview(run.id);
+          orchestrator.runPlanReview(run.id).catch(logError);
         },
         [RunState.AIReview]: () => {
-          void orchestrator.runReview(run.id);
+          orchestrator.runReview(run.id).catch(logError);
         },
         [RunState.AddressingReview]: () => {
-          void orchestrator.runRemediation(run.id);
+          orchestrator.runRemediation(run.id).catch(logError);
         },
       };
 
