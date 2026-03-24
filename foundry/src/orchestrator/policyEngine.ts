@@ -161,12 +161,4 @@ export class PolicyEngine {
     }
   }
 
-  assertReviewerRuntime(runtime: string): void {
-    if (runtime !== "codex") {
-      throw new PolicyViolationError(
-        `Reviewer must use codex runtime, got "${runtime}"`,
-        "reviewer_must_use_codex",
-      );
-    }
-  }
 }

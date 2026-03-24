@@ -27,9 +27,11 @@ interface RuntimeConfig {
   versionArgs: string[];
   probeArgs: string[];
   probeStdin?: string;
+  /** When true, auth check passes on exit code 0 alone (no PONG required). */
+  exitCodeOnly?: boolean;
 }
 
-const ALL_RUNTIMES: AgentRuntime[] = ["claude-code", "codex"];
+const ALL_RUNTIMES: AgentRuntime[] = ["claude-code", "codex", "cursor"];
 
 export class RuntimeHealthCheck {
   private lastResult: PreflightResult | undefined;
@@ -43,6 +45,7 @@ export class RuntimeHealthCheck {
   static buildRuntimeConfigs(
     claudeCommand: string,
     codexCommand: string,
+    cursorCommand: string,
   ): Record<AgentRuntime, RuntimeConfig> {
     return {
       "claude-code": {
@@ -56,6 +59,12 @@ export class RuntimeHealthCheck {
         versionArgs: ["--version"],
         probeArgs: ["--quiet", "--full-auto"],
         probeStdin: "Respond with exactly: PONG",
+      },
+      cursor: {
+        command: cursorCommand,
+        versionArgs: ["--version"],
+        probeArgs: ["status"],
+        exitCodeOnly: true,
       },
     };
   }
@@ -192,6 +201,17 @@ export class RuntimeHealthCheck {
 
       if (result.timedOut) {
         return { ok: false, durationMs, error: `Auth probe timed out after ${PROBE_TIMEOUT_MS}ms` };
+      }
+
+      if (config.exitCodeOnly) {
+        if (result.exitCode !== 0) {
+          return {
+            ok: false,
+            durationMs,
+            error: `Exit code ${result.exitCode}: ${(result.stderr || result.stdout).slice(0, 200)}`,
+          };
+        }
+        return { ok: true, durationMs };
       }
 
       const output = result.stdout + result.stderr;

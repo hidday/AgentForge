@@ -404,8 +404,6 @@ export class OrchestratorService {
     const timer = startTimer();
     let run = await this.requireRun(runId);
 
-    this.policy.assertReviewerRuntime("codex");
-
     const execArtifact = await this.artifactRepo.findLatestByType(runId, "ExecutionReport");
     const executionReport = execArtifact?.payloadJson as ExecutionReport;
 

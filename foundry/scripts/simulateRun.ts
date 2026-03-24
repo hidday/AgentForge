@@ -12,6 +12,7 @@ import { OrchestratorService } from "../src/orchestrator/orchestratorService.js"
 import { ProcessRunner } from "../src/runtime/processRunner.js";
 import { ClaudeCodeRunner } from "../src/runtime/claudeCodeRunner.js";
 import { CodexRunner } from "../src/runtime/codexRunner.js";
+import { CursorRunner } from "../src/runtime/cursorRunner.js";
 import { AgentRunner } from "../src/runtime/agentRunner.js";
 import { PlannerAgent } from "../src/agents/plannerAgent.js";
 import { PlanReviewerAgent } from "../src/agents/planReviewerAgent.js";
@@ -70,7 +71,14 @@ async function simulate(): Promise<void> {
       parseBaseArgs("--approval-mode full-auto -q"),
       logger,
     );
-    const agentRunner = new AgentRunner(claudeCodeRunner, codexRunner, logger);
+    const cursorRunner = new CursorRunner(
+      processRunner,
+      "agent",
+      parseBaseArgs("--print --output-format json --force --trust"),
+      "claude-4.6-opus",
+      logger,
+    );
+    const agentRunner = new AgentRunner(claudeCodeRunner, codexRunner, cursorRunner, logger);
 
     const githubClient = new MockGitHubClient();
     const plannerAgent = new PlannerAgent(agentRunner, artifactRepo, logger);

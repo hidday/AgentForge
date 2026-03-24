@@ -53,7 +53,7 @@ export interface RunEventRecord {
   createdAt: Date;
 }
 
-export type AgentRuntime = "claude-code" | "codex";
+export type AgentRuntime = "claude-code" | "codex" | "cursor";
 
 export interface AgentStage {
   runtime: AgentRuntime;

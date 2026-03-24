@@ -10,6 +10,7 @@ import { OrchestratorService } from "./orchestrator/orchestratorService.js";
 import { ProcessRunner } from "./runtime/processRunner.js";
 import { ClaudeCodeRunner } from "./runtime/claudeCodeRunner.js";
 import { CodexRunner } from "./runtime/codexRunner.js";
+import { CursorRunner } from "./runtime/cursorRunner.js";
 import { AgentRunner } from "./runtime/agentRunner.js";
 import { PlannerAgent } from "./agents/plannerAgent.js";
 import { PlanReviewerAgent } from "./agents/planReviewerAgent.js";
@@ -62,7 +63,14 @@ function buildServices() {
     parseBaseArgs(env.CODEX_ARGS_BASE),
     logger,
   );
-  const agentRunner = new AgentRunner(claudeCodeRunner, codexRunner, logger);
+  const cursorRunner = new CursorRunner(
+    processRunner,
+    env.CURSOR_COMMAND,
+    parseBaseArgs(env.CURSOR_ARGS_BASE),
+    env.CURSOR_MODEL,
+    logger,
+  );
+  const agentRunner = new AgentRunner(claudeCodeRunner, codexRunner, cursorRunner, logger);
 
   const githubClient: GitHubClient = env.GITHUB_TOKEN
     ? new RealGitHubClient(env.GITHUB_TOKEN, logger)
@@ -120,6 +128,7 @@ function buildServices() {
   const runtimeConfigs = RuntimeHealthCheck.buildRuntimeConfigs(
     env.CLAUDE_CODE_COMMAND,
     env.CODEX_COMMAND,
+    env.CURSOR_COMMAND,
   );
   const runtimeHealthCheck = new RuntimeHealthCheck(preflightProcessRunner, runtimeConfigs, logger);
 
