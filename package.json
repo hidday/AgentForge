@@ -9,6 +9,6 @@
     "build": "cd foundry && pnpm run build && cd ../ui && npm run build"
   },
   "engines": {
-    "node": ">=20.0.0"
+    "node": ">=22.12.0"
   }
 }
