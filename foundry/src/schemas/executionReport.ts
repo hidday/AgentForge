@@ -1,7 +1,12 @@
 import { z } from "zod";
 
+const KNOWN_STATUSES = ["pass", "fail", "skip"] as const;
+type CheckStatus = (typeof KNOWN_STATUSES)[number];
+
 export const CheckResultSchema = z.object({
-  status: z.enum(["pass", "fail", "skip"]),
+  status: z
+    .string()
+    .transform((v): CheckStatus => (KNOWN_STATUSES.includes(v as CheckStatus) ? (v as CheckStatus) : "skip")),
   details: z.string(),
 });
 

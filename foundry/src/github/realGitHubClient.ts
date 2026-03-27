@@ -263,6 +263,21 @@ export class RealGitHubClient implements GitHubClient {
 
       this.logger.debug({ repo, prNumber, event }, "Submitted PR review");
     } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (event !== "COMMENT" && /cannot.*request changes.*own/i.test(msg)) {
+        this.logger.info(
+          { repo, prNumber, originalEvent: event },
+          "Cannot request changes on own PR, falling back to COMMENT",
+        );
+        await this.octokit.pulls.createReview({
+          owner,
+          repo: repoName,
+          pull_number: prNumber,
+          body,
+          event: "COMMENT",
+        });
+        return;
+      }
       throw this.wrapError("submitPRReview", repo, err, { prNumber, event });
     }
   }
