@@ -56,18 +56,24 @@ function startProcess(tag, color, cmd, args, cwd) {
 /**
  * Build an env block for child processes.
  *
- * Problem: `npm exec` / `npx` prepend the nvm Node bin dir to PATH when they
- * launch sub-processes. That dir contains an *npm-installed* `claude` CLI
- * (older, incompatible version) which then shadows the native `~/.local/bin/claude`.
- *
- * Fix: inject ~/.local/bin at the very front of PATH so the native binary always
- * wins regardless of what npm / npx prepend later.
+ * Two goals:
+ *  1. Derive the Node bin directory from process.execPath so child processes
+ *     (npx tsx, npx vite) resolve the exact same Node binary that already passed
+ *     the >=22.12.0 / arm64 checks above — not whatever `node` happens to appear
+ *     first on the ambient PATH.
+ *  2. Inject ~/.local/bin ahead of any npm-prepended paths so the native
+ *     `~/.local/bin/claude` CLI always wins over any npm-installed claude shim
+ *     that `npx` might shadow it with.
  */
 function buildEnv() {
+  // Derive the Node bin directory from the currently-running executable so child
+  // processes inherit the validated Node binary (>=22.12.0, arm64 on macOS).
+  const nodeBin = dirname(process.execPath);
   const localBin = resolve(process.env.HOME ?? "/", ".local", "bin");
   const existing = process.env.PATH ?? "";
-  // Only prepend if not already the first entry (idempotent on re-runs)
-  const PATH = existing.startsWith(localBin) ? existing : `${localBin}:${existing}`;
+  // Order: nodeBin first (correct node binary), then localBin (native claude CLI),
+  // then the existing PATH.  Duplicate entries in PATH are harmless.
+  const PATH = [nodeBin, localBin, existing].join(":");
   return { ...process.env, PATH };
 }
 
