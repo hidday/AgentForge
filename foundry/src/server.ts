@@ -134,16 +134,7 @@ function buildServices() {
   );
   const runtimeHealthCheck = new RuntimeHealthCheck(preflightProcessRunner, runtimeConfigs, logger);
 
-  return {
-    orchestrator,
-    idempotencyRepo,
-    dashboardEmitter,
-    processRunner,
-    linearPollService,
-    runtimeHealthCheck,
-    githubClient,
-    repoRegistry,
-  };
+  return { orchestrator, idempotencyRepo, dashboardEmitter, processRunner, linearPollService, runtimeHealthCheck };
 }
 
 async function main(): Promise<void> {
@@ -157,16 +148,8 @@ async function main(): Promise<void> {
     },
   });
 
-  const {
-    orchestrator,
-    idempotencyRepo,
-    dashboardEmitter,
-    processRunner,
-    linearPollService,
-    runtimeHealthCheck,
-    githubClient,
-    repoRegistry,
-  } = buildServices();
+  const { orchestrator, idempotencyRepo, dashboardEmitter, processRunner, linearPollService, runtimeHealthCheck } =
+    buildServices();
 
   if (env.AGENT_RUNTIME_MODE === "real") {
     try {
@@ -176,21 +159,6 @@ async function main(): Promise<void> {
         "Agent preflight failed -- refusing to start. Fix the CLI authentication and retry.",
       );
       process.exit(1);
-    }
-
-    if (env.GITHUB_TOKEN) {
-      try {
-        for (const repo of repoRegistry.listRepos()) {
-          await githubClient.verifyRepoAccess(repo.name);
-        }
-        logger.info("GitHub preflight passed: all configured repos are accessible");
-      } catch (err) {
-        logger.fatal(
-          { error: err instanceof Error ? err.message : String(err) },
-          "GitHub preflight failed -- refusing to start. Check GITHUB_TOKEN permissions.",
-        );
-        process.exit(1);
-      }
     }
   }
 
