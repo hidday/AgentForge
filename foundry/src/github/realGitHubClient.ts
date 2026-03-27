@@ -63,6 +63,11 @@ export class RealGitHubClient implements GitHubClient {
 
       this.logger.debug({ repo, branchName }, "Created branch on GitHub");
     } catch (err) {
+      const status = (err as { status?: number }).status;
+      if (status === 422) {
+        this.logger.info({ repo, branchName }, "Branch already exists on GitHub, continuing");
+        return;
+      }
       throw this.wrapError("createBranch", repo, err, { branchName });
     }
   }
@@ -90,6 +95,22 @@ export class RealGitHubClient implements GitHubClient {
       this.logger.debug({ repo, prNumber: data.number }, "Created draft PR on GitHub");
       return data.number;
     } catch (err) {
+      const status = (err as { status?: number }).status;
+      if (status === 422) {
+        this.logger.info({ repo, head, base }, "PR already exists for this head branch, looking up existing PR");
+        const { data: pulls } = await this.octokit.pulls.list({
+          owner,
+          repo: repoName,
+          head: `${owner}:${head}`,
+          base,
+          state: "open",
+        });
+        if (pulls.length > 0) {
+          const prNumber = pulls[0]!.number;
+          this.logger.info({ repo, prNumber }, "Found existing open PR");
+          return prNumber;
+        }
+      }
       throw this.wrapError("createDraftPR", repo, err, { head, base });
     }
   }
