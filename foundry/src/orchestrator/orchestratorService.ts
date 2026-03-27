@@ -424,13 +424,15 @@ export class OrchestratorService {
 
     run = await this.runRepo.update(runId, { reviewerRuntime: "codex" });
 
+    let commentMap: Record<string, number> = {};
     if (run.prNumber && review.findings.length > 0) {
-      await this.githubSync.postReviewFindings(
+      const map = await this.githubSync.postReviewFindings(
         run.repo,
         run.prNumber,
         review.findings,
         review.overallVerdict,
       );
+      commentMap = Object.fromEntries(map);
     }
 
     if (review.overallVerdict === "changes_requested") {
@@ -447,7 +449,7 @@ export class OrchestratorService {
         "Code review requested changes, starting remediation",
       );
 
-      run = await this.runRemediation(runId);
+      run = await this.runRemediation(runId, commentMap);
     } else {
       run = await this.transitionAndRecord(run, RunEvent.REVIEW_APPROVED, "reviewer-agent");
 
@@ -462,7 +464,7 @@ export class OrchestratorService {
     return run;
   }
 
-  async runRemediation(runId: string): Promise<Run> {
+  async runRemediation(runId: string, commentMap: Record<string, number> = {}): Promise<Run> {
     const timer = startTimer();
     let run = await this.requireRun(runId);
 
@@ -488,6 +490,15 @@ export class OrchestratorService {
       run.linearIssueId,
       this.formatRemediationComment(remediation.resolution),
     );
+
+    if (run.prNumber) {
+      await this.githubSync.postRemediationResolutions(
+        run.repo,
+        run.prNumber,
+        remediation.resolution,
+        commentMap,
+      );
+    }
 
     this.logger.info(
       { runId, state: run.state, durationMs: timer.elapsed() },
