@@ -86,10 +86,13 @@ function buildServices() {
         return mock;
       })();
 
-  logger.info({
-    linearMode: env.LINEAR_API_KEY ? "real" : "mock",
-    githubMode: env.GITHUB_TOKEN ? "real" : "mock",
-  }, "Initialized external clients");
+  logger.info(
+    {
+      linearMode: env.LINEAR_API_KEY ? "real" : "mock",
+      githubMode: env.GITHUB_TOKEN ? "real" : "mock",
+    },
+    "Initialized external clients",
+  );
 
   const plannerAgent = new PlannerAgent(agentRunner, artifactRepo, logger);
   const planReviewerAgent = new PlanReviewerAgent(agentRunner, artifactRepo, logger);
@@ -134,7 +137,16 @@ function buildServices() {
   );
   const runtimeHealthCheck = new RuntimeHealthCheck(preflightProcessRunner, runtimeConfigs, logger);
 
-  return { orchestrator, idempotencyRepo, dashboardEmitter, processRunner, linearPollService, runtimeHealthCheck, githubClient, repoRegistry };
+  return {
+    orchestrator,
+    idempotencyRepo,
+    dashboardEmitter,
+    processRunner,
+    linearPollService,
+    runtimeHealthCheck,
+    githubClient,
+    repoRegistry,
+  };
 }
 
 async function main(): Promise<void> {
@@ -238,25 +250,31 @@ async function main(): Promise<void> {
     }
   });
 
-  app.post<{ Params: { runId: string } }>("/simulate/plan-review/:runId", async (request, reply) => {
-    const { runId } = request.params;
-    // Fire-and-forget: respond immediately so tsx hot-reloads don't kill the
-    // in-flight long-running agent call (plan review can take 60-120 s).
-    reply.send({ ok: true, runId, status: "started" });
-    orchestrator.runPlanReview(runId).catch((err) => {
-      const message = err instanceof Error ? err.message : String(err);
-      app.log.error({ runId, error: message }, "Plan review failed");
-    });
-  });
+  app.post<{ Params: { runId: string } }>(
+    "/simulate/plan-review/:runId",
+    async (request, reply) => {
+      const { runId } = request.params;
+      // Fire-and-forget: respond immediately so tsx hot-reloads don't kill the
+      // in-flight long-running agent call (plan review can take 60-120 s).
+      reply.send({ ok: true, runId, status: "started" });
+      orchestrator.runPlanReview(runId).catch((err: unknown) => {
+        const message = err instanceof Error ? err.message : String(err);
+        app.log.error({ runId, error: message }, "Plan review failed");
+      });
+    },
+  );
 
-  app.post<{ Params: { runId: string } }>("/simulate/plan-revision/:runId", async (request, reply) => {
-    const { runId } = request.params;
-    reply.send({ ok: true, runId, status: "started" });
-    orchestrator.runPlanRevision(runId).catch((err) => {
-      const message = err instanceof Error ? err.message : String(err);
-      app.log.error({ runId, error: message }, "Plan revision failed");
-    });
-  });
+  app.post<{ Params: { runId: string } }>(
+    "/simulate/plan-revision/:runId",
+    async (request, reply) => {
+      const { runId } = request.params;
+      reply.send({ ok: true, runId, status: "started" });
+      orchestrator.runPlanRevision(runId).catch((err: unknown) => {
+        const message = err instanceof Error ? err.message : String(err);
+        app.log.error({ runId, error: message }, "Plan revision failed");
+      });
+    },
+  );
 
   app.post("/simulate/comment-command", async (request, reply) => {
     const body = request.body as { issueId?: string; command?: string } | undefined;
@@ -309,7 +327,10 @@ async function main(): Promise<void> {
         "Startup sync: discovered pending Linear issues (use dashboard to start runs)",
       );
     } catch (err) {
-      app.log.warn({ error: err instanceof Error ? err.message : String(err) }, "Startup sync failed");
+      app.log.warn(
+        { error: err instanceof Error ? err.message : String(err) },
+        "Startup sync failed",
+      );
     }
   }
 }

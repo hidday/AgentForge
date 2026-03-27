@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useMemo } from "react";
+import { useEffect, useRef, useState, useMemo, startTransition } from "react";
 import { Terminal, ChevronDown, ChevronUp, Wrench, AlertTriangle, MessageSquare, ChevronRight } from "lucide-react";
 import type { ActiveProcess } from "@/api/client.ts";
 import { parseClaudeOutput, type ParsedBlock } from "@/lib/parseClaudeOutput.ts";
@@ -118,7 +118,9 @@ export function AgentOutputPanel({ processes, output }: AgentOutputPanelProps) {
 
   useEffect(() => {
     if (isActive && !isActiveRef.current) {
-      setCollapsed(false);
+      startTransition(() => {
+        setCollapsed(false);
+      });
     }
     isActiveRef.current = isActive;
   }, [isActive]);

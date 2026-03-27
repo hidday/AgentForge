@@ -15,7 +15,11 @@ export class CodexRunner {
     private readonly logger: Logger,
   ) {}
 
-  async run<T>(input: AgentInput, stage: Stage, schema: ZodType<T, any, any>): Promise<AgentOutput<T>> {
+  async run<T>(
+    input: AgentInput,
+    stage: Stage,
+    schema: ZodType<T, any, any>,
+  ): Promise<AgentOutput<T>> {
     const args = this.buildArgs();
     const stdinData = this.buildStdinPayload(input);
 

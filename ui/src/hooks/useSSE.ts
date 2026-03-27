@@ -16,7 +16,9 @@ export interface DashboardEvent {
 
 export function useSSE(onEvent: (event: DashboardEvent) => void): void {
   const callbackRef = useRef(onEvent);
-  callbackRef.current = onEvent;
+  useEffect(() => {
+    callbackRef.current = onEvent;
+  });
 
   useEffect(() => {
     const source = new EventSource("/api/events/stream");

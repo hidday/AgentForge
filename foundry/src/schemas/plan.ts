@@ -31,7 +31,7 @@ const FlexString = z.union([
   z.object({ text: z.string() }).transform((v) => v.text),
   z.object({ risk: z.string() }).transform((v) => v.risk),
   z.object({ assumption: z.string() }).transform((v) => v.assumption),
-  z.unknown().transform((v) => (typeof v === "string" ? v : String(v ?? ""))),
+  z.unknown().transform((v) => (typeof v === "string" ? v : "")),
 ]);
 
 export const PlanSchema = z.object({

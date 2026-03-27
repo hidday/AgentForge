@@ -6,7 +6,9 @@ type CheckStatus = (typeof KNOWN_STATUSES)[number];
 export const CheckResultSchema = z.object({
   status: z
     .string()
-    .transform((v): CheckStatus => (KNOWN_STATUSES.includes(v as CheckStatus) ? (v as CheckStatus) : "skip")),
+    .transform(
+      (v): CheckStatus => (KNOWN_STATUSES.includes(v as CheckStatus) ? (v as CheckStatus) : "skip"),
+    ),
   details: z.string(),
 });
 

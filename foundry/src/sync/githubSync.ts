@@ -106,7 +106,12 @@ export class GitHubSyncService {
     await this.githubClient.commentOnPR(repo, prNumber, summaryBody);
 
     this.logger.info(
-      { repo, prNumber, resolutionCount: resolutions.length, repliedTo: Object.keys(commentMap).length },
+      {
+        repo,
+        prNumber,
+        resolutionCount: resolutions.length,
+        repliedTo: Object.keys(commentMap).length,
+      },
       "Posted remediation resolutions to PR",
     );
   }

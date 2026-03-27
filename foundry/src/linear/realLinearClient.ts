@@ -62,10 +62,7 @@ export class RealLinearClient implements LinearClient {
       });
     }
 
-    this.logger.info(
-      { projectName, stateName, count: results.length },
-      "Searched Linear issues",
-    );
+    this.logger.info({ projectName, stateName, count: results.length }, "Searched Linear issues");
     return results;
   }
 
@@ -141,10 +138,7 @@ export class RealLinearClient implements LinearClient {
     return names;
   }
 
-  private async resolveStateId(
-    teamId: string,
-    stateName: string,
-  ): Promise<string | undefined> {
+  private async resolveStateId(teamId: string, stateName: string): Promise<string | undefined> {
     let stateMap = this.stateCache.get(teamId);
     if (!stateMap) {
       stateMap = new Map();
@@ -158,10 +152,7 @@ export class RealLinearClient implements LinearClient {
     return stateMap.get(stateName);
   }
 
-  private async resolveOrCreateLabel(
-    labelName: string,
-    teamId?: string,
-  ): Promise<string> {
+  private async resolveOrCreateLabel(labelName: string, teamId?: string): Promise<string> {
     const cached = this.labelCache.get(labelName);
     if (cached) return cached;
 

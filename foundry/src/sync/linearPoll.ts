@@ -17,9 +17,7 @@ export class LinearPollService {
 
   async discoverPendingIssues(): Promise<LinearIssue[]> {
     const repos = this.repoRegistry.listRepos();
-    const projects = repos
-      .map((r) => r.linearProject)
-      .filter((p): p is string => p != null);
+    const projects = repos.map((r) => r.linearProject).filter((p): p is string => p != null);
 
     if (projects.length === 0) {
       this.logger.warn("No Linear projects configured in repo registry");
@@ -47,9 +45,7 @@ export class LinearPollService {
     return allCandidates;
   }
 
-  async startRunsForIssues(
-    issueIds: string[],
-  ): Promise<{ started: string[]; skipped: string[] }> {
+  async startRunsForIssues(issueIds: string[]): Promise<{ started: string[]; skipped: string[] }> {
     const started: string[] = [];
     const skipped: string[] = [];
 

@@ -30,7 +30,11 @@ export class ExecutorAgent {
     retry?: ExecutorRetryContext,
   ): Promise<{ report: ExecutionReport; branchName: string; prNumber: number }> {
     this.logger.info(
-      { runId, planVersion: plan.planVersion, isRetry: !!(retry?.existingBranch || retry?.existingPR) },
+      {
+        runId,
+        planVersion: plan.planVersion,
+        isRetry: retry?.existingBranch != null || retry?.existingPR != null,
+      },
       "Starting executor agent",
     );
 
@@ -65,16 +69,25 @@ export class ExecutorAgent {
 
     const branchName = retry?.existingBranch ?? taskBundle.repo.workingBranch;
     if (!retry?.existingBranch) {
-      this.logger.info({ runId, branchName, repo: taskBundle.repo.name }, "Creating branch on GitHub");
+      this.logger.info(
+        { runId, branchName, repo: taskBundle.repo.name },
+        "Creating branch on GitHub",
+      );
       await this.githubClient.createBranch(taskBundle.repo.name, branchName);
     } else {
-      this.logger.info({ runId, branchName }, "Skipping branch creation (already exists from previous attempt)");
+      this.logger.info(
+        { runId, branchName },
+        "Skipping branch creation (already exists from previous attempt)",
+      );
     }
 
     let prNumber: number;
     if (retry?.existingPR) {
       prNumber = retry.existingPR;
-      this.logger.info({ runId, prNumber }, "Skipping PR creation (already exists from previous attempt)");
+      this.logger.info(
+        { runId, prNumber },
+        "Skipping PR creation (already exists from previous attempt)",
+      );
     } else {
       prNumber = await this.githubClient.createDraftPR(
         taskBundle.repo.name,

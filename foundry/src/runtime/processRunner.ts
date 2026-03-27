@@ -1,5 +1,13 @@
 import { spawn } from "node:child_process";
-import { createWriteStream, mkdirSync, readFileSync, readdirSync, writeFileSync, existsSync, type WriteStream } from "node:fs";
+import {
+  createWriteStream,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  writeFileSync,
+  existsSync,
+  type WriteStream,
+} from "node:fs";
 import { join, resolve } from "node:path";
 import { watch } from "node:fs";
 import type { Logger } from "../utils/logger.js";
@@ -179,7 +187,10 @@ export class ProcessRunner {
           writeFileSync(join(this.spoolDir, file), JSON.stringify(manifest, null, 2));
         }
       } catch (err) {
-        this.logger.warn({ file, error: err instanceof Error ? err.message : String(err) }, "Failed to process manifest");
+        this.logger.warn(
+          { file, error: err instanceof Error ? err.message : String(err) },
+          "Failed to process manifest",
+        );
       }
     }
   }
@@ -312,10 +323,7 @@ export class ProcessRunner {
           startedAt: entry.startedAt.toISOString(),
           logFile: logPath,
         };
-        writeFileSync(
-          join(this.spoolDir, `${processId}.json`),
-          JSON.stringify(manifest, null, 2),
-        );
+        writeFileSync(join(this.spoolDir, `${processId}.json`), JSON.stringify(manifest, null, 2));
 
         this.emitter?.emitProcessStarted(
           context.runId,
@@ -419,7 +427,14 @@ export class ProcessRunner {
     if (!entry) return;
 
     this.logger.info(
-      { processId, exitCode, durationMs, runId: entry.context.runId, stage: entry.context.stage, runtime: entry.context.runtime },
+      {
+        processId,
+        exitCode,
+        durationMs,
+        runId: entry.context.runId,
+        stage: entry.context.stage,
+        runtime: entry.context.runtime,
+      },
       "Agent process completed",
     );
 

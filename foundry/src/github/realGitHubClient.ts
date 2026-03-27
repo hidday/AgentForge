@@ -28,11 +28,17 @@ export class RealGitHubClient implements GitHubClient {
       const detail = err instanceof Error ? err.message : String(err);
       throw new Error(
         `GitHub: cannot access repo "${repo}". Check that GITHUB_TOKEN has repository access permissions. Original: ${detail}`,
+        { cause: err },
       );
     }
   }
 
-  private wrapError(operation: string, repo: string, err: unknown, extra?: Record<string, unknown>): Error {
+  private wrapError(
+    operation: string,
+    repo: string,
+    err: unknown,
+    extra?: Record<string, unknown>,
+  ): Error {
     const detail = err instanceof Error ? err.message : String(err);
     const context = extra ? ` ${JSON.stringify(extra)}` : "";
     return new Error(`GitHub ${operation} failed for "${repo}"${context}: ${detail}`);
@@ -97,7 +103,10 @@ export class RealGitHubClient implements GitHubClient {
     } catch (err) {
       const status = (err as { status?: number }).status;
       if (status === 422) {
-        this.logger.info({ repo, head, base }, "PR already exists for this head branch, looking up existing PR");
+        this.logger.info(
+          { repo, head, base },
+          "PR already exists for this head branch, looking up existing PR",
+        );
         const { data: pulls } = await this.octokit.pulls.list({
           owner,
           repo: repoName,

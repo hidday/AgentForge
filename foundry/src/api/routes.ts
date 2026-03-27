@@ -3,7 +3,6 @@ import type { OrchestratorService } from "../orchestrator/orchestratorService.js
 import type { RunEventEmitter, DashboardEvent } from "./runEventEmitter.js";
 import type { LinearPollService } from "../sync/linearPoll.js";
 import type { ProcessRunner } from "../runtime/processRunner.js";
-import { RunEvent } from "../domain/runEvent.js";
 import { RunState } from "../domain/runState.js";
 
 export function registerApiRoutes(
@@ -103,84 +102,75 @@ export function registerApiRoutes(
     },
   );
 
-  app.post<{ Params: { id: string } }>(
-    "/api/runs/:id/actions/pause",
-    async (request, reply) => {
-      try {
-        const run = await runRepo.findById(request.params.id);
-        if (!run) return reply.code(404).send({ error: "Run not found" });
-
-        await orchestrator.handleCommand(run.linearIssueId, { type: "pause-ai" });
-        return { ok: true };
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        return reply.code(400).send({ error: message });
-      }
-    },
-  );
-
-  app.post<{ Params: { id: string } }>(
-    "/api/runs/:id/actions/resume",
-    async (request, reply) => {
-      try {
-        const run = await runRepo.findById(request.params.id);
-        if (!run) return reply.code(404).send({ error: "Run not found" });
-
-        await orchestrator.handleCommand(run.linearIssueId, { type: "resume-ai" });
-        return { ok: true };
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        return reply.code(400).send({ error: message });
-      }
-    },
-  );
-
-  app.post<{ Params: { id: string } }>(
-    "/api/runs/:id/actions/retry",
-    async (request, reply) => {
+  app.post<{ Params: { id: string } }>("/api/runs/:id/actions/pause", async (request, reply) => {
+    try {
       const run = await runRepo.findById(request.params.id);
-      if (!run) return reply.code(404).send({ error: "Run not found" });
+      if (!run) return await reply.code(404).send({ error: "Run not found" });
 
-      const logError = (err: unknown) => {
-        const message = err instanceof Error ? err.message.slice(0, 200) : String(err);
-        app.log.error({ runId: run.id, error: message }, "Retry stage failed");
-      };
+      await orchestrator.handleCommand(run.linearIssueId, { type: "pause-ai" });
+      return { ok: true };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return reply.code(400).send({ error: message });
+    }
+  });
 
-      const retryableStates: Record<string, () => void> = {
-        [RunState.PlanRevision]: () => {
-          orchestrator.runPlanRevision(run.id).catch(logError);
-        },
-        [RunState.PlanReview]: () => {
-          orchestrator.runPlanReview(run.id).catch(logError);
-        },
-        [RunState.Implementing]: () => {
-          orchestrator.runExecution(run.id).catch(logError);
-        },
-        [RunState.AIReview]: () => {
-          orchestrator.runReview(run.id).catch(logError);
-        },
-        [RunState.AddressingReview]: () => {
-          orchestrator.runRemediation(run.id).catch(logError);
-        },
-      };
+  app.post<{ Params: { id: string } }>("/api/runs/:id/actions/resume", async (request, reply) => {
+    try {
+      const run = await runRepo.findById(request.params.id);
+      if (!run) return await reply.code(404).send({ error: "Run not found" });
 
-      const trigger = retryableStates[run.state];
-      if (!trigger) {
-        return reply.code(400).send({
-          error: `Retry is not supported for state "${run.state}". Retryable states: ${Object.keys(retryableStates).join(", ")}`,
-        });
-      }
+      await orchestrator.handleCommand(run.linearIssueId, { type: "resume-ai" });
+      return { ok: true };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return reply.code(400).send({ error: message });
+    }
+  });
 
-      // Fire-and-forget so the HTTP response returns immediately while the
-      // (potentially long-running) agent work happens in the background.
-      trigger();
-      return { ok: true, runId: run.id, state: run.state, retrying: true };
-    },
-  );
+  app.post<{ Params: { id: string } }>("/api/runs/:id/actions/retry", async (request, reply) => {
+    const run = await runRepo.findById(request.params.id);
+    if (!run) return reply.code(404).send({ error: "Run not found" });
+
+    const logError = (err: unknown) => {
+      const message = err instanceof Error ? err.message.slice(0, 200) : String(err);
+      app.log.error({ runId: run.id, error: message }, "Retry stage failed");
+    };
+
+    const retryableStates: Record<string, () => void> = {
+      [RunState.PlanRevision]: () => {
+        orchestrator.runPlanRevision(run.id).catch(logError);
+      },
+      [RunState.PlanReview]: () => {
+        orchestrator.runPlanReview(run.id).catch(logError);
+      },
+      [RunState.Implementing]: () => {
+        orchestrator.runExecution(run.id).catch(logError);
+      },
+      [RunState.AIReview]: () => {
+        orchestrator.runReview(run.id).catch(logError);
+      },
+      [RunState.AddressingReview]: () => {
+        orchestrator.runRemediation(run.id).catch(logError);
+      },
+    };
+
+    const trigger = retryableStates[run.state];
+    if (!trigger) {
+      return reply.code(400).send({
+        error: `Retry is not supported for state "${run.state}". Retryable states: ${Object.keys(retryableStates).join(", ")}`,
+      });
+    }
+
+    // Fire-and-forget so the HTTP response returns immediately while the
+    // (potentially long-running) agent work happens in the background.
+    trigger();
+    return { ok: true, runId: run.id, state: run.state, retrying: true };
+  });
 
   // ── Active processes ────────────────────────────────────────────────────
 
-  app.get<{ Querystring: { runId?: string } }>("/api/processes", async (request) => {
+  app.get<{ Querystring: { runId?: string } }>("/api/processes", (request) => {
     const all = processRunner.getActiveProcesses();
     const { runId } = request.query;
     return { processes: runId ? all.filter((p) => p.runId === runId) : all };

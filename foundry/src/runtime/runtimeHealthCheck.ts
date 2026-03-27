@@ -130,7 +130,10 @@ export class RuntimeHealthCheck {
           binaryError: r.binaryCheck.ok ? undefined : r.binaryCheck.error,
           authError: r.authCheck.ok ? undefined : r.authCheck.error,
         }));
-      this.logger.error({ failures, totalDurationMs }, "Preflight FAILED: one or more agent runtimes are not ready");
+      this.logger.error(
+        { failures, totalDurationMs },
+        "Preflight FAILED: one or more agent runtimes are not ready",
+      );
       throw new PreflightError(this.lastResult);
     }
 
@@ -157,9 +160,7 @@ export class RuntimeHealthCheck {
     return { runtime, command: config.command, binaryCheck, authCheck };
   }
 
-  private async checkBinary(
-    config: RuntimeConfig,
-  ): Promise<RuntimeProbeResult["binaryCheck"]> {
+  private async checkBinary(config: RuntimeConfig): Promise<RuntimeProbeResult["binaryCheck"]> {
     const timer = startTimer();
     try {
       const result = await this.processRunner.execute({
@@ -194,9 +195,7 @@ export class RuntimeHealthCheck {
     }
   }
 
-  private async checkAuth(
-    config: RuntimeConfig,
-  ): Promise<RuntimeProbeResult["authCheck"]> {
+  private async checkAuth(config: RuntimeConfig): Promise<RuntimeProbeResult["authCheck"]> {
     const timer = startTimer();
     try {
       const result = await this.processRunner.execute({
