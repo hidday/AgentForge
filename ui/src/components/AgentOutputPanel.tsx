@@ -168,7 +168,7 @@ export function AgentOutputPanel({ processes, output }: AgentOutputPanelProps) {
 
           {showRaw ? (
             <pre
-              ref={scrollRef as React.RefObject<HTMLPreElement>}
+              ref={scrollRef as unknown as React.RefObject<HTMLPreElement>}
               className="text-[#c8c8d0] text-[11px] leading-[1.6] font-mono p-3 overflow-auto max-h-[320px] min-h-[80px] whitespace-pre-wrap break-words"
             >
               {output || "Waiting for output..."}
