@@ -491,10 +491,11 @@ export class OrchestratorService {
 
     this.logger.info(
       { runId, state: run.state, durationMs: timer.elapsed() },
-      "Remediation complete, triggering fresh review cycle",
+      "Remediation complete, marking ready for human review",
     );
 
-    run = await this.runReview(runId);
+    run = await this.transitionAndRecord(run, RunEvent.REVIEW_APPROVED, "remediation-agent");
+    await this.markReady(runId);
     return run;
   }
 
