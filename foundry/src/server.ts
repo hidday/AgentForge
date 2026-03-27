@@ -134,16 +134,7 @@ function buildServices() {
   );
   const runtimeHealthCheck = new RuntimeHealthCheck(preflightProcessRunner, runtimeConfigs, logger);
 
-  return {
-    orchestrator,
-    idempotencyRepo,
-    dashboardEmitter,
-    processRunner,
-    linearPollService,
-    runtimeHealthCheck,
-    githubClient,
-    repoRegistry,
-  };
+  return { orchestrator, idempotencyRepo, dashboardEmitter, processRunner, linearPollService, runtimeHealthCheck, githubClient, repoRegistry };
 }
 
 async function main(): Promise<void> {

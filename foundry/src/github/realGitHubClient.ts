@@ -203,7 +203,7 @@ export class RealGitHubClient implements GitHubClient {
     body: string,
     path: string,
     line?: number,
-  ): Promise<void> {
+  ): Promise<number> {
     const { owner, repo: repoName } = splitRepo(repo);
 
     try {
@@ -214,20 +214,44 @@ export class RealGitHubClient implements GitHubClient {
       });
 
       const commitId = pr.head.sha;
+      let commentId: number;
 
       if (line != null) {
-        await this.octokit.pulls.createReviewComment({
-          owner,
-          repo: repoName,
-          pull_number: prNumber,
-          body,
-          path,
-          line,
-          side: "RIGHT",
-          commit_id: commitId,
-        });
+        try {
+          const { data } = await this.octokit.pulls.createReviewComment({
+            owner,
+            repo: repoName,
+            pull_number: prNumber,
+            body,
+            path,
+            line,
+            side: "RIGHT",
+            commit_id: commitId,
+          });
+          commentId = data.id;
+        } catch (lineErr) {
+          const status = (lineErr as { status?: number }).status;
+          if (status === 422) {
+            this.logger.warn(
+              { repo, prNumber, path, line },
+              "Line not in PR diff, falling back to file-level comment",
+            );
+            const { data } = await this.octokit.pulls.createReviewComment({
+              owner,
+              repo: repoName,
+              pull_number: prNumber,
+              body: `*(line ${String(line)})* ${body}`,
+              path,
+              subject_type: "file",
+              commit_id: commitId,
+            });
+            commentId = data.id;
+          } else {
+            throw lineErr;
+          }
+        }
       } else {
-        await this.octokit.pulls.createReviewComment({
+        const { data } = await this.octokit.pulls.createReviewComment({
           owner,
           repo: repoName,
           pull_number: prNumber,
@@ -236,11 +260,47 @@ export class RealGitHubClient implements GitHubClient {
           subject_type: "file",
           commit_id: commitId,
         });
+        commentId = data.id;
       }
 
-      this.logger.debug({ repo, prNumber, path, line }, "Created PR review comment");
+      this.logger.debug({ repo, prNumber, path, line, commentId }, "Created PR review comment");
+      return commentId;
     } catch (err) {
+      const status = (err as { status?: number }).status;
+      if (status === 422) {
+        this.logger.warn(
+          { repo, prNumber, path, line },
+          "Could not post PR review comment (file may not be in diff), skipping",
+        );
+        return 0;
+      }
       throw this.wrapError("createPRReviewComment", repo, err, { prNumber, path, line });
+    }
+  }
+
+  async replyToReviewComment(
+    repo: string,
+    prNumber: number,
+    commentId: number,
+    body: string,
+  ): Promise<void> {
+    const { owner, repo: repoName } = splitRepo(repo);
+
+    try {
+      await this.octokit.pulls.createReplyForReviewComment({
+        owner,
+        repo: repoName,
+        pull_number: prNumber,
+        comment_id: commentId,
+        body,
+      });
+
+      this.logger.debug({ repo, prNumber, commentId }, "Replied to PR review comment");
+    } catch (err) {
+      this.logger.warn(
+        { repo, prNumber, commentId, error: err instanceof Error ? err.message : String(err) },
+        "Failed to reply to PR review comment, skipping",
+      );
     }
   }
 

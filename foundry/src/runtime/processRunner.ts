@@ -404,12 +404,6 @@ export class ProcessRunner {
       entry.rollingBuffer = entry.rollingBuffer.slice(-ROLLING_BUFFER_MAX);
     }
 
-    const truncated = text.length > 1000 ? text.slice(-1000) : text;
-    this.logger.debug(
-      { processId: entry.id, runId: entry.context.runId, stage: entry.context.stage, chunkLength: text.length },
-      truncated,
-    );
-
     if (!this.emitter) return;
 
     const now = Date.now();

@@ -25,6 +25,12 @@ export interface GitHubClient {
     body: string,
     path: string,
     line?: number,
+  ): Promise<number>;
+  replyToReviewComment(
+    repo: string,
+    prNumber: number,
+    commentId: number,
+    body: string,
   ): Promise<void>;
   submitPRReview(
     repo: string,
@@ -117,17 +123,30 @@ export class MockGitHubClient implements GitHubClient {
     return Promise.resolve([]);
   }
 
+  private nextCommentId = 1000;
+
   createPRReviewComment(
     _repo: string,
     prNumber: number,
     body: string,
     path: string,
     line?: number,
-  ): Promise<void> {
+  ): Promise<number> {
+    const commentId = this.nextCommentId++;
     this.prComments.push({
       prNumber,
       body: `[${path}${line ? `:${String(line)}` : ""}] ${body}`,
     });
+    return Promise.resolve(commentId);
+  }
+
+  replyToReviewComment(
+    _repo: string,
+    _prNumber: number,
+    _commentId: number,
+    body: string,
+  ): Promise<void> {
+    this.prComments.push({ prNumber: _prNumber, body });
     return Promise.resolve();
   }
 

@@ -1,3 +1,34 @@
+// ── Runtime requirements ─────────────────────────────────────────────────────
+// • Node.js >=22.12.0 is required: Vite requires Node 20.19+ or 22.12+, and
+//   the backend uses esbuild compiled for the native platform (darwin-arm64 on
+//   Apple Silicon Macs).  Running an older Node or an x64/Rosetta Node on
+//   Apple Silicon will produce platform-mismatch errors from esbuild.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const _nodeVer = process.versions.node.split(".").map(Number);
+const [_nodeMajor, _nodeMinor, _nodePatch] = _nodeVer;
+const _meetsVersion =
+  _nodeMajor > 22 ||
+  (_nodeMajor === 22 && _nodeMinor > 12) ||
+  (_nodeMajor === 22 && _nodeMinor === 12 && _nodePatch >= 0);
+
+if (!_meetsVersion) {
+  console.error(
+    `Error: Node.js >=22.12.0 is required (current: ${process.versions.node}).\n` +
+    `Run: nvm install 22 && nvm use`
+  );
+  process.exit(1);
+}
+
+if (process.platform === "darwin" && process.arch !== "arm64") {
+  console.error(
+    `Error: On Apple Silicon, Node.js must be the native arm64 build (current arch: ${process.arch}).\n` +
+    `You may be running under Rosetta.\n` +
+    `Fix: open a native arm64 terminal and run nvm install 22 && nvm use`
+  );
+  process.exit(1);
+}
+
 import { spawn, execSync } from "node:child_process";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
