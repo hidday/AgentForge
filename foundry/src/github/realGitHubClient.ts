@@ -264,7 +264,7 @@ export class RealGitHubClient implements GitHubClient {
       this.logger.debug({ repo, prNumber, event }, "Submitted PR review");
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      if (event !== "COMMENT" && /cannot.*request changes.*own/i.test(msg)) {
+      if (event !== "COMMENT" && /can\s*not.*request changes.*own/i.test(msg)) {
         this.logger.info(
           { repo, prNumber, originalEvent: event },
           "Cannot request changes on own PR, falling back to COMMENT",
