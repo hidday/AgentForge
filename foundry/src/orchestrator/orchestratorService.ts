@@ -370,7 +370,10 @@ export class OrchestratorService {
       source: "orchestrator",
     });
 
-    const { report, branchName, prNumber } = await this.executorAgent.run(plan, bundle, runId);
+    const { report, branchName, prNumber } = await this.executorAgent.run(plan, bundle, runId, {
+      existingBranch: run.branchName,
+      existingPR: run.prNumber,
+    });
 
     run = await this.runRepo.update(runId, {
       branchName,

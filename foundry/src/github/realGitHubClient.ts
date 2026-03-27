@@ -19,29 +19,52 @@ export class RealGitHubClient implements GitHubClient {
     this.logger = logger;
   }
 
+  async verifyRepoAccess(repo: string): Promise<void> {
+    const { owner, repo: repoName } = splitRepo(repo);
+    try {
+      await this.octokit.repos.get({ owner, repo: repoName });
+      this.logger.debug({ repo }, "Verified GitHub repo access");
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : String(err);
+      throw new Error(
+        `GitHub: cannot access repo "${repo}". Check that GITHUB_TOKEN has repository access permissions. Original: ${detail}`,
+      );
+    }
+  }
+
+  private wrapError(operation: string, repo: string, err: unknown, extra?: Record<string, unknown>): Error {
+    const detail = err instanceof Error ? err.message : String(err);
+    const context = extra ? ` ${JSON.stringify(extra)}` : "";
+    return new Error(`GitHub ${operation} failed for "${repo}"${context}: ${detail}`);
+  }
+
   async createBranch(repo: string, branchName: string): Promise<void> {
     const { owner, repo: repoName } = splitRepo(repo);
 
-    const { data: repoData } = await this.octokit.repos.get({
-      owner,
-      repo: repoName,
-    });
-    const defaultBranch = repoData.default_branch;
+    try {
+      const { data: repoData } = await this.octokit.repos.get({
+        owner,
+        repo: repoName,
+      });
+      const defaultBranch = repoData.default_branch;
 
-    const { data: refData } = await this.octokit.git.getRef({
-      owner,
-      repo: repoName,
-      ref: `heads/${defaultBranch}`,
-    });
+      const { data: refData } = await this.octokit.git.getRef({
+        owner,
+        repo: repoName,
+        ref: `heads/${defaultBranch}`,
+      });
 
-    await this.octokit.git.createRef({
-      owner,
-      repo: repoName,
-      ref: `refs/heads/${branchName}`,
-      sha: refData.object.sha,
-    });
+      await this.octokit.git.createRef({
+        owner,
+        repo: repoName,
+        ref: `refs/heads/${branchName}`,
+        sha: refData.object.sha,
+      });
 
-    this.logger.debug({ repo, branchName }, "Created branch on GitHub");
+      this.logger.debug({ repo, branchName }, "Created branch on GitHub");
+    } catch (err) {
+      throw this.wrapError("createBranch", repo, err, { branchName });
+    }
   }
 
   async createDraftPR(
@@ -53,84 +76,104 @@ export class RealGitHubClient implements GitHubClient {
   ): Promise<number> {
     const { owner, repo: repoName } = splitRepo(repo);
 
-    const { data } = await this.octokit.pulls.create({
-      owner,
-      repo: repoName,
-      head,
-      base,
-      title,
-      body,
-      draft: true,
-    });
+    try {
+      const { data } = await this.octokit.pulls.create({
+        owner,
+        repo: repoName,
+        head,
+        base,
+        title,
+        body,
+        draft: true,
+      });
 
-    this.logger.debug({ repo, prNumber: data.number }, "Created draft PR on GitHub");
-    return data.number;
+      this.logger.debug({ repo, prNumber: data.number }, "Created draft PR on GitHub");
+      return data.number;
+    } catch (err) {
+      throw this.wrapError("createDraftPR", repo, err, { head, base });
+    }
   }
 
   async commentOnPR(repo: string, prNumber: number, body: string): Promise<void> {
     const { owner, repo: repoName } = splitRepo(repo);
 
-    await this.octokit.issues.createComment({
-      owner,
-      repo: repoName,
-      issue_number: prNumber,
-      body,
-    });
+    try {
+      await this.octokit.issues.createComment({
+        owner,
+        repo: repoName,
+        issue_number: prNumber,
+        body,
+      });
 
-    this.logger.debug({ repo, prNumber }, "Commented on PR");
+      this.logger.debug({ repo, prNumber }, "Commented on PR");
+    } catch (err) {
+      throw this.wrapError("commentOnPR", repo, err, { prNumber });
+    }
   }
 
   async getPRDiff(repo: string, prNumber: number): Promise<string> {
     const { owner, repo: repoName } = splitRepo(repo);
 
-    const { data } = await this.octokit.pulls.get({
-      owner,
-      repo: repoName,
-      pull_number: prNumber,
-      mediaType: { format: "diff" },
-    });
+    try {
+      const { data } = await this.octokit.pulls.get({
+        owner,
+        repo: repoName,
+        pull_number: prNumber,
+        mediaType: { format: "diff" },
+      });
 
-    return data as unknown as string;
+      return data as unknown as string;
+    } catch (err) {
+      throw this.wrapError("getPRDiff", repo, err, { prNumber });
+    }
   }
 
   async markPRReady(repo: string, prNumber: number): Promise<void> {
     const { owner, repo: repoName } = splitRepo(repo);
 
-    const { data: pr } = await this.octokit.pulls.get({
-      owner,
-      repo: repoName,
-      pull_number: prNumber,
-    });
+    try {
+      const { data: pr } = await this.octokit.pulls.get({
+        owner,
+        repo: repoName,
+        pull_number: prNumber,
+      });
 
-    if (!pr.draft) return;
+      if (!pr.draft) return;
 
-    await this.octokit.graphql(
-      `mutation($prId: ID!) {
-        markPullRequestReadyForReview(input: { pullRequestId: $prId }) {
-          pullRequest { id }
-        }
-      }`,
-      { prId: pr.node_id },
-    );
+      await this.octokit.graphql(
+        `mutation($prId: ID!) {
+          markPullRequestReadyForReview(input: { pullRequestId: $prId }) {
+            pullRequest { id }
+          }
+        }`,
+        { prId: pr.node_id },
+      );
 
-    this.logger.debug({ repo, prNumber }, "Marked PR as ready for review");
+      this.logger.debug({ repo, prNumber }, "Marked PR as ready for review");
+    } catch (err) {
+      throw this.wrapError("markPRReady", repo, err, { prNumber });
+    }
   }
 
   async listPRComments(repo: string, prNumber: number): Promise<PRComment[]> {
     const { owner, repo: repoName } = splitRepo(repo);
 
-    const { data } = await this.octokit.issues.listComments({
-      owner,
-      repo: repoName,
-      issue_number: prNumber,
-    });
+    try {
+      const { data } = await this.octokit.issues.listComments({
+        owner,
+        repo: repoName,
+        issue_number: prNumber,
+      });
 
-    return data.map((c) => ({
-      id: String(c.id),
-      author: c.user?.login ?? "unknown",
-      body: c.body ?? "",
-      createdAt: c.created_at,
-    }));
+      return data.map((c) => ({
+        id: String(c.id),
+        author: c.user?.login ?? "unknown",
+        body: c.body ?? "",
+        createdAt: c.created_at,
+      }));
+    } catch (err) {
+      throw this.wrapError("listPRComments", repo, err, { prNumber });
+    }
   }
 
   async createPRReviewComment(
@@ -142,38 +185,42 @@ export class RealGitHubClient implements GitHubClient {
   ): Promise<void> {
     const { owner, repo: repoName } = splitRepo(repo);
 
-    const { data: pr } = await this.octokit.pulls.get({
-      owner,
-      repo: repoName,
-      pull_number: prNumber,
-    });
-
-    const commitId = pr.head.sha;
-
-    if (line != null) {
-      await this.octokit.pulls.createReviewComment({
+    try {
+      const { data: pr } = await this.octokit.pulls.get({
         owner,
         repo: repoName,
         pull_number: prNumber,
-        body,
-        path,
-        line,
-        side: "RIGHT",
-        commit_id: commitId,
       });
-    } else {
-      await this.octokit.pulls.createReviewComment({
-        owner,
-        repo: repoName,
-        pull_number: prNumber,
-        body,
-        path,
-        subject_type: "file",
-        commit_id: commitId,
-      });
+
+      const commitId = pr.head.sha;
+
+      if (line != null) {
+        await this.octokit.pulls.createReviewComment({
+          owner,
+          repo: repoName,
+          pull_number: prNumber,
+          body,
+          path,
+          line,
+          side: "RIGHT",
+          commit_id: commitId,
+        });
+      } else {
+        await this.octokit.pulls.createReviewComment({
+          owner,
+          repo: repoName,
+          pull_number: prNumber,
+          body,
+          path,
+          subject_type: "file",
+          commit_id: commitId,
+        });
+      }
+
+      this.logger.debug({ repo, prNumber, path, line }, "Created PR review comment");
+    } catch (err) {
+      throw this.wrapError("createPRReviewComment", repo, err, { prNumber, path, line });
     }
-
-    this.logger.debug({ repo, prNumber, path, line }, "Created PR review comment");
   }
 
   async submitPRReview(
@@ -184,14 +231,18 @@ export class RealGitHubClient implements GitHubClient {
   ): Promise<void> {
     const { owner, repo: repoName } = splitRepo(repo);
 
-    await this.octokit.pulls.createReview({
-      owner,
-      repo: repoName,
-      pull_number: prNumber,
-      body,
-      event,
-    });
+    try {
+      await this.octokit.pulls.createReview({
+        owner,
+        repo: repoName,
+        pull_number: prNumber,
+        body,
+        event,
+      });
 
-    this.logger.debug({ repo, prNumber, event }, "Submitted PR review");
+      this.logger.debug({ repo, prNumber, event }, "Submitted PR review");
+    } catch (err) {
+      throw this.wrapError("submitPRReview", repo, err, { prNumber, event });
+    }
   }
 }

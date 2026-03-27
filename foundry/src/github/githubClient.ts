@@ -6,6 +6,7 @@ export interface PRComment {
 }
 
 export interface GitHubClient {
+  verifyRepoAccess(repo: string): Promise<void>;
   createBranch(repo: string, branchName: string): Promise<void>;
   createDraftPR(
     repo: string,
@@ -53,6 +54,10 @@ export class MockGitHubClient implements GitHubClient {
         { repo: pr.repo, head: pr.head, title: pr.title, draft: pr.draft },
       ]),
     );
+  }
+
+  verifyRepoAccess(_repo: string): Promise<void> {
+    return Promise.resolve();
   }
 
   createBranch(_repo: string, branchName: string): Promise<void> {
