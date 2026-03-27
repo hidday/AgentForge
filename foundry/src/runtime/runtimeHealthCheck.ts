@@ -108,13 +108,14 @@ export class RuntimeHealthCheck {
     const ok = results.every((r) => r.binaryCheck.ok && r.authCheck.ok);
     const totalDurationMs = timer.elapsed();
 
-    this.lastResult = {
+    const preflightResult: PreflightResult = {
       ok,
       requiredRuntimes: [...required],
       skippedRuntimes: skipped,
       results,
       totalDurationMs,
     };
+    this.lastResult = preflightResult;
 
     if (ok) {
       this.logger.info(
@@ -134,10 +135,10 @@ export class RuntimeHealthCheck {
         { failures, totalDurationMs },
         "Preflight FAILED: one or more agent runtimes are not ready",
       );
-      throw new PreflightError(this.lastResult);
+      throw new PreflightError(preflightResult);
     }
 
-    return this.lastResult;
+    return preflightResult;
   }
 
   private async probeRuntime(runtime: AgentRuntime): Promise<RuntimeProbeResult> {
