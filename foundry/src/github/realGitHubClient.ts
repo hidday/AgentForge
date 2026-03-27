@@ -216,16 +216,37 @@ export class RealGitHubClient implements GitHubClient {
       const commitId = pr.head.sha;
 
       if (line != null) {
-        await this.octokit.pulls.createReviewComment({
-          owner,
-          repo: repoName,
-          pull_number: prNumber,
-          body,
-          path,
-          line,
-          side: "RIGHT",
-          commit_id: commitId,
-        });
+        try {
+          await this.octokit.pulls.createReviewComment({
+            owner,
+            repo: repoName,
+            pull_number: prNumber,
+            body,
+            path,
+            line,
+            side: "RIGHT",
+            commit_id: commitId,
+          });
+        } catch (lineErr) {
+          const status = (lineErr as { status?: number }).status;
+          if (status === 422) {
+            this.logger.warn(
+              { repo, prNumber, path, line },
+              "Line not in PR diff, falling back to file-level comment",
+            );
+            await this.octokit.pulls.createReviewComment({
+              owner,
+              repo: repoName,
+              pull_number: prNumber,
+              body: `*(line ${String(line)})* ${body}`,
+              path,
+              subject_type: "file",
+              commit_id: commitId,
+            });
+          } else {
+            throw lineErr;
+          }
+        }
       } else {
         await this.octokit.pulls.createReviewComment({
           owner,
@@ -240,6 +261,14 @@ export class RealGitHubClient implements GitHubClient {
 
       this.logger.debug({ repo, prNumber, path, line }, "Created PR review comment");
     } catch (err) {
+      const status = (err as { status?: number }).status;
+      if (status === 422) {
+        this.logger.warn(
+          { repo, prNumber, path, line },
+          "Could not post PR review comment (file may not be in diff), skipping",
+        );
+        return;
+      }
       throw this.wrapError("createPRReviewComment", repo, err, { prNumber, path, line });
     }
   }
