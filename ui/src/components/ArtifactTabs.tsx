@@ -5,7 +5,7 @@ import { PlanView } from "./PlanView.tsx";
 import { ReviewView } from "./ReviewView.tsx";
 import { ExecutionReportView } from "./ExecutionReportView.tsx";
 
-type TabId = "plan" | "planReview" | "execution" | "review" | "remediation";
+type TabId = "plan" | "planReview" | "execution" | "review" | "remediation" | "rejectionFeedback";
 
 interface TabDef {
   id: TabId;
@@ -19,6 +19,7 @@ const TABS: TabDef[] = [
   { id: "execution", label: "Execution", artifactType: "ExecutionReport" },
   { id: "review", label: "Code Review", artifactType: "Review" },
   { id: "remediation", label: "Remediation", artifactType: "Remediation" },
+  { id: "rejectionFeedback", label: "Rejection Feedback", artifactType: "RejectionContext" },
 ];
 
 interface ArtifactTabsProps {
@@ -42,9 +43,16 @@ export function ArtifactTabs({ artifacts }: ArtifactTabsProps) {
     );
   }
 
-  const activeArtifact = artifacts.find(
-    (a) => a.type === TABS.find((t) => t.id === activeTab)?.artifactType,
-  );
+  const activeTabDef = TABS.find((t) => t.id === activeTab);
+  // For rejectionFeedback, collect all matching artifacts (possibly multiple rejections)
+  const activeArtifacts =
+    activeTab === "rejectionFeedback"
+      ? artifacts.filter((a) => a.type === "RejectionContext")
+      : [];
+  const activeArtifact =
+    activeTab !== "rejectionFeedback"
+      ? artifacts.find((a) => a.type === activeTabDef?.artifactType)
+      : undefined;
 
   return (
     <div>
@@ -66,7 +74,15 @@ export function ArtifactTabs({ artifacts }: ArtifactTabsProps) {
       </div>
 
       <div className="rounded-lg border border-border bg-surface p-4">
-        {activeArtifact ? (
+        {activeTab === "rejectionFeedback" ? (
+          activeArtifacts.length > 0 ? (
+            <RejectionFeedbackView artifacts={activeArtifacts} />
+          ) : (
+            <div className="text-center py-8 text-text-muted text-sm">
+              No rejection feedback recorded
+            </div>
+          )
+        ) : activeArtifact ? (
           <ArtifactContent artifact={activeArtifact} tabId={activeTab} />
         ) : (
           <div className="text-center py-8 text-text-muted text-sm">
@@ -97,6 +113,9 @@ function ArtifactContent({
       return <ExecutionReportView report={payload} />;
     case "remediation":
       return <RemediationView remediation={payload} />;
+    case "rejectionFeedback":
+      // Handled separately via RejectionFeedbackView — should not reach here
+      return null;
     default:
       return (
         <pre className="text-xs font-mono text-text-secondary overflow-auto">
@@ -104,6 +123,38 @@ function ArtifactContent({
         </pre>
       );
   }
+}
+
+interface RejectionContextArtifactPayload {
+  planVersion: number;
+  feedback: string;
+  source: "api" | "linear";
+}
+
+function RejectionFeedbackView({ artifacts }: { artifacts: Artifact[] }) {
+  // Sort descending by version so latest rejection appears first
+  const sorted = [...artifacts].sort((a, b) => b.version - a.version);
+
+  return (
+    <div className="space-y-3">
+      {sorted.map((artifact) => {
+        const payload = artifact.payloadJson as RejectionContextArtifactPayload;
+        return (
+          <div key={artifact.id} className="rounded border border-border-subtle p-3">
+            <div className="flex items-center gap-2 mb-2">
+              <span className="text-xs font-medium text-text-primary">
+                Plan V{payload.planVersion} Rejection
+              </span>
+              <span className="text-[10px] px-1.5 py-0.5 rounded-full font-medium bg-state-blocked-bg text-state-blocked">
+                {payload.source}
+              </span>
+            </div>
+            <p className="text-sm text-text-secondary whitespace-pre-wrap">{payload.feedback}</p>
+          </div>
+        );
+      })}
+    </div>
+  );
 }
 
 function RemediationView({

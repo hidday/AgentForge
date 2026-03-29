@@ -94,9 +94,12 @@ export const api = {
       method: "POST",
     }),
 
-  rejectPlan: (runId: string) =>
+  rejectPlan: (runId: string, context?: string) =>
     request<{ ok: boolean; state: string }>(`/runs/${runId}/actions/reject-plan`, {
       method: "POST",
+      ...(context && context.trim().length > 0
+        ? { body: JSON.stringify({ context }) }
+        : {}),
     }),
 
   approveReview: (runId: string) =>

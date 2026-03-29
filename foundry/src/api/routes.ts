@@ -80,8 +80,25 @@ export function registerApiRoutes(
   app.post<{ Params: { id: string } }>(
     "/api/runs/:id/actions/reject-plan",
     async (request, reply) => {
+      const body = request.body as { context?: unknown } | undefined;
+
+      // Validate context if provided
+      if (body !== undefined && body !== null && "context" in (body as object)) {
+        if (
+          typeof (body as { context?: unknown }).context !== "string" &&
+          (body as { context?: unknown }).context !== undefined
+        ) {
+          return reply.code(400).send({ error: "context must be a string if provided" });
+        }
+      }
+
+      const context =
+        typeof (body as { context?: unknown } | undefined)?.context === "string"
+          ? (body as { context: string }).context || undefined
+          : undefined;
+
       try {
-        const run = await orchestrator.rejectPlan(request.params.id);
+        const run = await orchestrator.rejectPlan(request.params.id, context, "api");
         return { ok: true, state: run.state };
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);

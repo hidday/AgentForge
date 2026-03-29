@@ -1,7 +1,7 @@
 export type LinearCommand =
   | { type: "ai-plan" }
   | { type: "approve-plan" }
-  | { type: "reject-plan" }
+  | { type: "reject-plan"; body?: string }
   | { type: "run-ai" }
   | { type: "re-review" }
   | { type: "pause-ai" }
@@ -24,6 +24,11 @@ export function parseLinearCommand(text: string): LinearCommand | null {
 
   for (const [prefix, type] of Object.entries(COMMAND_MAP)) {
     if (firstLine === prefix || firstLine.startsWith(`${prefix} `)) {
+      // For reject-plan, capture the remainder of the first line as body
+      if (type === "reject-plan") {
+        const remainder = firstLine.slice(prefix.length).trim();
+        return { type: "reject-plan", body: remainder.length > 0 ? remainder : undefined };
+      }
       return { type } as LinearCommand;
     }
   }

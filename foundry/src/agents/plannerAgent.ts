@@ -12,6 +12,7 @@ import { env } from "../config/env.js";
 export interface PlannerRunOptions {
   humanAnswers?: HumanAnswer[];
   planVersionOverride?: number;
+  humanFeedback?: { planVersion: number; feedback: string };
 }
 
 export class PlannerAgent {
@@ -37,9 +38,21 @@ export class PlannerAgent {
       humanAnswersSection = `## Human Answers to Open Questions\n${answerLines}`;
     }
 
+    // Build the humanFeedbackSection template variable
+    let humanFeedbackSection = "";
+    if (options?.humanFeedback) {
+      const { planVersion, feedback } = options.humanFeedback;
+      humanFeedbackSection =
+        `## Human Feedback on Previous Plan\n` +
+        `**Rejected Plan Version:** V${planVersion}\n\n` +
+        `${feedback}\n\n` +
+        `Address this feedback directly in the new plan while preserving the valid parts of the previous approach.`;
+    }
+
     const userPrompt = renderTemplate(userTemplate, {
       ...taskBundle,
       humanAnswersSection,
+      humanFeedbackSection,
     } as Record<string, unknown>);
 
     const output = await this.agentRunner.run<PlannerOutput>(

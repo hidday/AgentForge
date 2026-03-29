@@ -68,6 +68,7 @@ export function EventTimeline({ events }: EventTimelineProps) {
           const payload = event.payloadJson as {
             from?: string;
             to?: string;
+            feedback?: string;
           } | null;
 
           return (
@@ -101,6 +102,11 @@ export function EventTimeline({ events }: EventTimelineProps) {
                       <ArrowRight size={8} />
                       <span className="font-mono">{payload.to}</span>
                     </div>
+                  )}
+                  {event.eventType === "PLAN_REJECTED" && payload?.feedback && (
+                    <p className="mt-1 pl-2 text-[10px] text-text-secondary border-l border-border-subtle italic">
+                      {payload.feedback}
+                    </p>
                   )}
                   <div className="flex items-center gap-2 mt-1">
                     <div className="flex items-center gap-1 text-[10px] text-text-muted">
