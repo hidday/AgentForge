@@ -4,6 +4,7 @@ import type { RunEventEmitter, DashboardEvent } from "./runEventEmitter.js";
 import type { LinearPollService } from "../sync/linearPoll.js";
 import type { ProcessRunner } from "../runtime/processRunner.js";
 import { RunState } from "../domain/runState.js";
+import { PolicyError, ValidationError } from "../utils/errors.js";
 
 export function registerApiRoutes(
   app: FastifyInstance,
@@ -127,6 +128,48 @@ export function registerApiRoutes(
       return reply.code(400).send({ error: message });
     }
   });
+
+  app.post<{ Params: { id: string } }>(
+    "/api/runs/:id/actions/answer-questions",
+    async (request, reply) => {
+      const body = request.body as { answers?: unknown } | undefined;
+
+      // Schema validation
+      if (!body?.answers || !Array.isArray(body.answers) || body.answers.length === 0) {
+        return reply.code(400).send({ error: "Required: { answers: Array<{ questionId: string; answer: string }> } (non-empty)" });
+      }
+
+      for (const item of body.answers as unknown[]) {
+        if (
+          typeof item !== "object" ||
+          item === null ||
+          typeof (item as Record<string, unknown>).questionId !== "string" ||
+          !(item as Record<string, unknown>).questionId ||
+          typeof (item as Record<string, unknown>).answer !== "string"
+        ) {
+          return reply.code(400).send({
+            error: "Each answer must have a non-empty questionId (string) and an answer (string)",
+          });
+        }
+      }
+
+      const answers = body.answers as Array<{ questionId: string; answer: string }>;
+
+      try {
+        const run = await orchestrator.answerQuestions(request.params.id, answers);
+        return { ok: true, run };
+      } catch (err) {
+        if (err instanceof PolicyError) {
+          return reply.code(409).send({ error: err.message });
+        }
+        if (err instanceof ValidationError) {
+          return reply.code(400).send({ error: err.message });
+        }
+        const message = err instanceof Error ? err.message : String(err);
+        return reply.code(400).send({ error: message });
+      }
+    },
+  );
 
   app.post<{ Params: { id: string } }>("/api/runs/:id/actions/retry", async (request, reply) => {
     const run = await runRepo.findById(request.params.id);

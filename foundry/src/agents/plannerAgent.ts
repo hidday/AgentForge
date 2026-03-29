@@ -5,8 +5,14 @@ import type { TaskBundle } from "../schemas/taskBundle.js";
 import { PlannerOutputSchema, type PlannerOutput } from "../schemas/cliProtocol.js";
 import type { Plan } from "../schemas/plan.js";
 import { AGENT_STAGES } from "../domain/types.js";
+import type { HumanAnswer } from "../domain/types.js";
 import { loadPromptTemplate, renderTemplate } from "./promptRenderer.js";
 import { env } from "../config/env.js";
+
+export interface PlannerRunOptions {
+  humanAnswers?: HumanAnswer[];
+  planVersionOverride?: number;
+}
 
 export class PlannerAgent {
   constructor(
@@ -15,13 +21,26 @@ export class PlannerAgent {
     private readonly logger: Logger,
   ) {}
 
-  async run(taskBundle: TaskBundle, runId: string): Promise<Plan> {
+  async run(taskBundle: TaskBundle, runId: string, options?: PlannerRunOptions): Promise<Plan> {
     this.logger.info({ runId, issueId: taskBundle.issue.id }, "Starting planner agent");
 
     const systemTemplate = loadPromptTemplate("planner.system.md");
     const userTemplate = loadPromptTemplate("planner.user.md");
     const systemPrompt = renderTemplate(systemTemplate, taskBundle);
-    const userPrompt = renderTemplate(userTemplate, taskBundle);
+
+    // Build the humanAnswersSection template variable
+    let humanAnswersSection = "";
+    if (options?.humanAnswers && options.humanAnswers.length > 0) {
+      const answerLines = options.humanAnswers
+        .map((a) => `**[${a.questionId}]**: ${a.answer}`)
+        .join("\n");
+      humanAnswersSection = `## Human Answers to Open Questions\n${answerLines}`;
+    }
+
+    const userPrompt = renderTemplate(userTemplate, {
+      ...taskBundle,
+      humanAnswersSection,
+    } as Record<string, unknown>);
 
     const output = await this.agentRunner.run<PlannerOutput>(
       AGENT_STAGES.planner.runtime,
@@ -46,24 +65,30 @@ export class PlannerAgent {
 
     const plan = output.parsed.payload;
 
+    // Apply planVersionOverride if provided to prevent version collisions
+    const effectivePlan =
+      options?.planVersionOverride !== undefined
+        ? { ...plan, planVersion: options.planVersionOverride }
+        : plan;
+
     await this.artifactRepo.create({
       runId,
       type: "Plan",
-      version: plan.planVersion,
-      payloadJson: plan as unknown as object,
-      rawText: JSON.stringify(plan, null, 2),
+      version: effectivePlan.planVersion,
+      payloadJson: effectivePlan as unknown as object,
+      rawText: JSON.stringify(effectivePlan, null, 2),
     });
 
     this.logger.info(
       {
         runId,
-        planVersion: plan.planVersion,
-        confidence: plan.confidence,
-        steps: plan.steps.length,
+        planVersion: effectivePlan.planVersion,
+        confidence: effectivePlan.confidence,
+        steps: effectivePlan.steps.length,
       },
       "Plan created",
     );
 
-    return plan;
+    return effectivePlan;
   }
 }

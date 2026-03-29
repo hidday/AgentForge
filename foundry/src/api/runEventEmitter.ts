@@ -47,6 +47,12 @@ export type DashboardEvent =
       exitCode: number;
       durationMs: number;
       timestamp: string;
+    }
+  | {
+      type: "run:questions-answered";
+      runId: string;
+      questionCount: number;
+      timestamp: string;
     };
 
 export class RunEventEmitter extends EventEmitter {
@@ -129,6 +135,16 @@ export class RunEventEmitter extends EventEmitter {
       runtime,
       exitCode,
       durationMs,
+      timestamp: new Date().toISOString(),
+    };
+    this.emit("dashboard", event);
+  }
+
+  emitQuestionsAnswered(runId: string, questionCount: number): void {
+    const event: DashboardEvent = {
+      type: "run:questions-answered",
+      runId,
+      questionCount,
       timestamp: new Date().toISOString(),
     };
     this.emit("dashboard", event);

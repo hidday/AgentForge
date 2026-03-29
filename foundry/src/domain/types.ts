@@ -32,7 +32,19 @@ export type ArtifactType =
   | "PlanReviserTranscript"
   | "ExecutorTranscript"
   | "ReviewerTranscript"
-  | "RemediationTranscript";
+  | "RemediationTranscript"
+  | "HumanAnswers"
+  | "TaskBundle";
+
+export interface HumanAnswer {
+  questionId: string;
+  answer: string;
+}
+
+export interface HumanAnswersPayload {
+  answers: HumanAnswer[];
+  submittedAt: string;
+}
 
 export interface Artifact {
   id: string;
