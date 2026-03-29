@@ -41,3 +41,5 @@ Create an implementation plan for the following issue.
 7. Provide a confidence score
 
 Do NOT write any code. Produce only a plan.
+
+{{humanAnswersSection}}

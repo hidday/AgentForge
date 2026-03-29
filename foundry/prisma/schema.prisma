@@ -20,6 +20,7 @@ enum RunState {
   Done
   AIBlocked
   HumanClarificationNeeded
+  Failed
 }
 
 enum ArtifactType {
@@ -35,6 +36,8 @@ enum ArtifactType {
   ExecutorTranscript
   ReviewerTranscript
   RemediationTranscript
+  HumanAnswers
+  TaskBundle
 }
 
 model AiRun {

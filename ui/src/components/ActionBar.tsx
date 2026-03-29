@@ -8,6 +8,7 @@ import {
   Pause,
   Play,
   RotateCcw,
+  MessageSquare,
 } from "lucide-react";
 
 const RETRY_LABELS: Record<string, string> = {
@@ -22,6 +23,8 @@ interface ActionBarProps {
   runId: string;
   state: string;
   onAction: () => void;
+  onScrollToQuestions?: () => void;
+  hasOptionalQuestions?: boolean;
 }
 
 type DialogConfig = {
@@ -32,7 +35,13 @@ type DialogConfig = {
   action: () => Promise<unknown>;
 } | null;
 
-export function ActionBar({ runId, state, onAction }: ActionBarProps) {
+export function ActionBar({
+  runId,
+  state,
+  onAction,
+  onScrollToQuestions,
+  hasOptionalQuestions = false,
+}: ActionBarProps) {
   const [dialog, setDialog] = useState<DialogConfig>(null);
   const [loading, setLoading] = useState(false);
 
@@ -148,12 +157,40 @@ export function ActionBar({ runId, state, onAction }: ActionBarProps) {
 
   const visibleActions = actions.filter((a) => a.show);
 
-  if (visibleActions.length === 0) return null;
+  // Direct-action buttons (no confirmation dialog)
+  const showAnswerQuestionsBtn = state === "HumanClarificationNeeded";
+  const showAnswerOptionalBtn = state === "AwaitingPlanApproval" && hasOptionalQuestions;
+
+  if (visibleActions.length === 0 && !showAnswerQuestionsBtn && !showAnswerOptionalBtn) {
+    return null;
+  }
 
   return (
     <>
       <div className="sticky bottom-0 z-10 border-t border-border bg-surface/80 backdrop-blur-sm px-6 py-3">
         <div className="flex items-center justify-end gap-2">
+          {showAnswerQuestionsBtn && (
+            <button
+              key="answer-questions"
+              onClick={onScrollToQuestions}
+              className="flex items-center gap-1.5 rounded-md bg-accent px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-accent-hover"
+            >
+              <MessageSquare size={14} />
+              Answer Questions
+            </button>
+          )}
+
+          {showAnswerOptionalBtn && (
+            <button
+              key="answer-optional-questions"
+              onClick={onScrollToQuestions}
+              className="flex items-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-sm font-medium text-text-secondary transition-colors hover:bg-surface-hover"
+            >
+              <MessageSquare size={14} />
+              Answer Optional Questions
+            </button>
+          )}
+
           {visibleActions.map((action) => {
             const Icon = action.icon;
             return (

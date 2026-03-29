@@ -1,5 +1,5 @@
-import { readFileSync } from "node:fs";
-import { resolve, join } from "node:path";
+import { readFileSync, existsSync, statSync } from "node:fs";
+import { resolve, join, isAbsolute } from "node:path";
 import { z } from "zod";
 import type { Logger } from "../utils/logger.js";
 
@@ -75,16 +75,50 @@ export class RepoRegistry {
         this.logger.debug({ project, repo: entry.name }, "Resolved repo from Linear project");
         return entry;
       }
-      this.logger.warn(
-        { project, fallback: this.defaultEntry.name },
-        "No repo mapped to Linear project, using default",
+      const configured = [...this.projectMap.keys()];
+      throw new Error(
+        `No repo mapped to Linear project "${project}". ` +
+          `Configured projects: [${configured.join(", ")}]. ` +
+          `Add a matching "linearProject" entry in repos.config.json.`,
       );
     }
+
+    this.logger.debug(
+      { fallback: this.defaultEntry.name },
+      "Issue has no Linear project, using default repo",
+    );
     return this.defaultEntry;
   }
 
   resolveWorkingDirectory(entry: RepoEntry): string {
+    if (isAbsolute(entry.directory)) {
+      return resolve(entry.directory);
+    }
     return resolve(join(this.reposRootPath, entry.directory));
+  }
+
+  validateWorkingDirectory(workingDirectory: string): void {
+    if (!existsSync(workingDirectory)) {
+      throw new Error(
+        `Working directory does not exist: ${workingDirectory}. ` +
+          `Ensure the repository is cloned at this path, or update repos.config.json and REPOS_ROOT_PATH.`,
+      );
+    }
+
+    const gitDir = join(workingDirectory, ".git");
+    if (!existsSync(gitDir)) {
+      throw new Error(
+        `Working directory is not a git repository: ${workingDirectory}. ` +
+          `Expected a .git directory at ${gitDir}.`,
+      );
+    }
+
+    const stat = statSync(workingDirectory);
+    if (!stat.isDirectory()) {
+      throw new Error(
+        `Working directory path is not a directory: ${workingDirectory}.`,
+      );
+    }
   }
 
   listRepos(): RepoEntry[] {

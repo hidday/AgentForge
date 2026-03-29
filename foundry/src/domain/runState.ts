@@ -11,4 +11,5 @@ export enum RunState {
   Done = "Done",
   AIBlocked = "AIBlocked",
   HumanClarificationNeeded = "HumanClarificationNeeded",
+  Failed = "Failed",
 }

@@ -8,6 +8,24 @@ export class PolicyViolationError extends Error {
   }
 }
 
+export class PolicyError extends Error {
+  public readonly statusCode = 409;
+
+  constructor(message: string) {
+    super(message);
+    this.name = "PolicyError";
+  }
+}
+
+export class ValidationError extends Error {
+  public readonly statusCode = 400;
+
+  constructor(message: string) {
+    super(message);
+    this.name = "ValidationError";
+  }
+}
+
 export class AgentTimeoutError extends Error {
   constructor(
     public readonly agent: string,

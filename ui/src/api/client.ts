@@ -131,4 +131,10 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ issueIds }),
     }),
+
+  answerQuestions: (runId: string, answers: Array<{ questionId: string; answer: string }>) =>
+    request<{ ok: boolean; run: Run }>(`/runs/${runId}/actions/answer-questions`, {
+      method: "POST",
+      body: JSON.stringify({ answers }),
+    }),
 };

@@ -14,6 +14,21 @@
         "forbiddenPatterns": [],
         "mustNotTouch": []
       }
+    },
+    {
+      "name": "hidday/feed-pilot",
+      "directory": "feed-pilot",
+      "linearProject": "feed-pilot",
+      "defaultBranch": "main",
+      "allowedPaths": ["src/", "tests/", "scripts/"],
+      "protectedPaths": [".github/", "prisma/migrations/"],
+      "constraints": {
+        "requiredChecks": ["lint", "typecheck", "tests"],
+        "maxFilesChanged": 30,
+        "maxDiffLines": 2000,
+        "forbiddenPatterns": [],
+        "mustNotTouch": []
+      }
     }
   ],
   "defaultRepo": "hidday/AgentForge"

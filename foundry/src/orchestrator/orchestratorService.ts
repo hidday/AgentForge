@@ -1,6 +1,7 @@
 import type { Logger } from "../utils/logger.js";
 import { RunEvent } from "../domain/runEvent.js";
-import type { Run } from "../domain/types.js";
+import { RunState } from "../domain/runState.js";
+import type { Run, HumanAnswer } from "../domain/types.js";
 import type { TaskBundle } from "../schemas/taskBundle.js";
 import type { Plan } from "../schemas/plan.js";
 import type { PlanReview } from "../schemas/planReview.js";
@@ -25,6 +26,9 @@ import type { LinearSyncService } from "../sync/linearSync.js";
 import type { GitHubSyncService } from "../sync/githubSync.js";
 import type { RunEventEmitter } from "../api/runEventEmitter.js";
 import { startTimer } from "../utils/time.js";
+import { PolicyError, ValidationError } from "../utils/errors.js";
+
+const MAX_CLARIFICATION_ITERATIONS = 3;
 
 export interface WebhookPayload {
   action: string;
@@ -179,6 +183,7 @@ export class OrchestratorService {
 
     const repoEntry = this.repoRegistry.resolveForIssue(issue.project);
     const workingDirectory = this.repoRegistry.resolveWorkingDirectory(repoEntry);
+    this.repoRegistry.validateWorkingDirectory(workingDirectory);
 
     let run = await this.runRepo.create({
       linearIssueId: issueId,
@@ -205,6 +210,45 @@ export class OrchestratorService {
       planVersion: plan.planVersion,
       plannerRuntime: "claude-code",
     });
+
+    // Check for blocking open questions before proceeding to plan review
+    const blockingQuestions = plan.openQuestions.filter((q) => q.requiredForExecution);
+    if (blockingQuestions.length > 0) {
+      // Persist the task bundle as an immutable artifact for later re-use
+      await this.artifactRepo.create({
+        runId: run.id,
+        type: "TaskBundle",
+        version: 1,
+        payloadJson: bundle as unknown as object,
+        rawText: JSON.stringify(bundle, null, 2),
+      });
+
+      run = await this.transitionAndRecord(run, RunEvent.PLAN_CREATED, "planner-agent");
+      run = await this.transitionAndRecord(
+        run,
+        RunEvent.NEEDS_HUMAN_CLARIFICATION,
+        "planner-agent",
+        {
+          blockingQuestions: blockingQuestions.map((q) => ({
+            id: q.id,
+            question: q.question,
+          })),
+        },
+      );
+
+      this.logger.info(
+        {
+          runId: run.id,
+          state: run.state,
+          blockingCount: blockingQuestions.length,
+          durationMs: timer.elapsed(),
+        },
+        "Plan has blocking questions, pausing for human clarification",
+      );
+
+      return run;
+    }
+
     run = await this.transitionAndRecord(run, RunEvent.PLAN_CREATED, "planner-agent");
 
     this.logger.info(
@@ -532,6 +576,135 @@ export class OrchestratorService {
     return run;
   }
 
+  async answerQuestions(runId: string, answers: HumanAnswer[]): Promise<Run> {
+    let run = await this.requireRun(runId);
+
+    // Assert valid state
+    if (
+      run.state !== RunState.HumanClarificationNeeded &&
+      run.state !== RunState.AwaitingPlanApproval
+    ) {
+      throw new PolicyError(
+        `answerQuestions requires state HumanClarificationNeeded or AwaitingPlanApproval, got: ${run.state}`,
+      );
+    }
+
+    // Validate that all submitted questionIds belong to the latest plan
+    const planArtifact = await this.artifactRepo.findLatestByType(runId, "Plan");
+    if (!planArtifact) {
+      throw new Error(`No plan artifact found for run ${runId}`);
+    }
+    const plan = planArtifact.payloadJson as Plan;
+    const validQuestionIds = new Set(plan.openQuestions.map((q) => q.id));
+    for (const answer of answers) {
+      if (!validQuestionIds.has(answer.questionId)) {
+        throw new ValidationError(
+          `Unrecognised questionId: "${answer.questionId}". Valid IDs: ${[...validQuestionIds].join(", ")}`,
+        );
+      }
+    }
+
+    // Persist the HumanAnswers artifact
+    const humanAnswersPayload = {
+      answers,
+      submittedAt: new Date().toISOString(),
+    };
+    await this.artifactRepo.create({
+      runId,
+      type: "HumanAnswers",
+      version: 1,
+      payloadJson: humanAnswersPayload,
+      rawText: JSON.stringify(humanAnswersPayload, null, 2),
+    });
+
+    // Emit the questions-answered event
+    this.dashboardEmitter?.emitQuestionsAnswered(runId, answers.length);
+
+    // AwaitingPlanApproval: record answers only, no re-planning
+    if (run.state === RunState.AwaitingPlanApproval) {
+      this.logger.info(
+        { runId, answerCount: answers.length },
+        "Answers recorded for AwaitingPlanApproval run (no re-planning)",
+      );
+      return run;
+    }
+
+    // HumanClarificationNeeded: validate required questions are answered, then re-plan
+    const requiredQuestions = plan.openQuestions.filter((q) => q.requiredForExecution);
+    const answeredIds = new Set(answers.map((a) => a.questionId));
+    const missingRequired = requiredQuestions.filter((q) => !answeredIds.has(q.id));
+    if (missingRequired.length > 0) {
+      throw new ValidationError(
+        `Missing answers for required questions: ${missingRequired.map((q) => q.id).join(", ")}`,
+      );
+    }
+
+    // Transition to Planning via CLARIFICATION_PROVIDED
+    run = await this.transitionAndRecord(run, RunEvent.CLARIFICATION_PROVIDED, "human");
+
+    // Load the original TaskBundle artifact (do NOT re-fetch from Linear)
+    const taskBundleArtifact = await this.artifactRepo.findLatestByType(runId, "TaskBundle");
+    if (!taskBundleArtifact) {
+      throw new Error(`No TaskBundle artifact found for run ${runId}`);
+    }
+    const taskBundle = taskBundleArtifact.payloadJson as TaskBundle;
+
+    // Compute next plan version based on the current planVersion tracked on the run.
+    // latestArtifactVersion is never updated after artifact writes, so it cannot be
+    // relied upon here; planVersion is updated on every plan creation/revision.
+    const nextPlanVersion = run.planVersion + 1;
+
+    // Re-run the planner with human answers injected
+    const newPlan = await this.plannerAgent.run(taskBundle, runId, {
+      humanAnswers: answers,
+      planVersionOverride: nextPlanVersion,
+    });
+
+    run = await this.runRepo.update(runId, {
+      planVersion: newPlan.planVersion,
+    });
+
+    // Record PLAN_CREATED to satisfy the Planning → PlanReview state machine
+    run = await this.transitionAndRecord(run, RunEvent.PLAN_CREATED, "planner-agent");
+
+    // Check if new plan still has blocking questions
+    const newBlockingQuestions = newPlan.openQuestions.filter((q) => q.requiredForExecution);
+    if (newBlockingQuestions.length === 0) {
+      // No blockers — proceed to plan review
+      run = await this.runPlanReview(runId);
+      return run;
+    }
+
+    // Still has blockers — check iteration count
+    const events = await this.eventRepo.findByRunId(runId);
+    const clarificationCount = events.filter(
+      (e) => e.eventType === (RunEvent.NEEDS_HUMAN_CLARIFICATION as string),
+    ).length;
+
+    if (clarificationCount >= MAX_CLARIFICATION_ITERATIONS) {
+      // Max iterations reached — fail the run
+      run = await this.transitionAndRecord(run, RunEvent.CLARIFICATION_EXHAUSTED, "orchestrator", {
+        reason: "Max clarification iterations reached with unresolved blocking questions",
+      });
+      this.logger.warn(
+        { runId, clarificationCount, maxIterations: MAX_CLARIFICATION_ITERATIONS },
+        "Clarification exhausted — run failed",
+      );
+      return run;
+    }
+
+    // Transition back to HumanClarificationNeeded with updated blocking questions
+    run = await this.transitionAndRecord(run, RunEvent.NEEDS_HUMAN_CLARIFICATION, "planner-agent", {
+      blockingQuestions: newBlockingQuestions.map((q) => ({
+        id: q.id,
+        question: q.question,
+      })),
+      iteration: clarificationCount + 1,
+    });
+
+    return run;
+  }
+
   async approveHumanReview(runId: string): Promise<Run> {
     let run = await this.requireRun(runId);
     run = await this.transitionAndRecord(run, RunEvent.HUMAN_APPROVED, "human");
@@ -545,7 +718,12 @@ export class OrchestratorService {
     return run;
   }
 
-  private async transitionAndRecord(run: Run, event: RunEvent, source: string): Promise<Run> {
+  private async transitionAndRecord(
+    run: Run,
+    event: RunEvent,
+    source: string,
+    extraPayload?: Record<string, unknown>,
+  ): Promise<Run> {
     const newState = transition(run.state, event);
     this.logger.info(
       { runId: run.id, from: run.state, event, to: newState, source },
@@ -556,7 +734,7 @@ export class OrchestratorService {
       runId: run.id,
       eventType: event,
       source,
-      payloadJson: { from: run.state, to: newState },
+      payloadJson: { from: run.state, to: newState, ...extraPayload },
     });
 
     const updatedRun = await this.runRepo.updateState(run.id, newState);
