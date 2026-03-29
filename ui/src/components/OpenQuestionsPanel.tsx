@@ -65,7 +65,10 @@ export function OpenQuestionsPanel({
         {questions.map((q) => (
           <div key={q.id} className="space-y-1.5">
             <div className="flex items-start gap-2">
-              <span className="text-sm text-text-secondary flex-1">{q.question}</span>
+              <div className="flex-1 space-y-0.5">
+                <span className="block text-xs font-mono text-text-muted">{q.id}</span>
+                <span className="text-sm text-text-secondary">{q.question}</span>
+              </div>
               <span
                 className={`shrink-0 rounded px-1.5 py-0.5 text-xs font-medium ${
                   q.requiredForExecution

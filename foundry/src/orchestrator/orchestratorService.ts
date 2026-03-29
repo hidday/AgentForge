@@ -649,8 +649,10 @@ export class OrchestratorService {
     }
     const taskBundle = taskBundleArtifact.payloadJson as TaskBundle;
 
-    // Compute next plan version
-    const nextPlanVersion = run.latestArtifactVersion + 1;
+    // Compute next plan version based on the current planVersion tracked on the run.
+    // latestArtifactVersion is never updated after artifact writes, so it cannot be
+    // relied upon here; planVersion is updated on every plan creation/revision.
+    const nextPlanVersion = run.planVersion + 1;
 
     // Re-run the planner with human answers injected
     const newPlan = await this.plannerAgent.run(taskBundle, runId, {

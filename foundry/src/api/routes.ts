@@ -147,10 +147,12 @@ export function registerApiRoutes(
           item === null ||
           typeof (item as Record<string, unknown>).questionId !== "string" ||
           !(item as Record<string, unknown>).questionId ||
-          typeof (item as Record<string, unknown>).answer !== "string"
+          typeof (item as Record<string, unknown>).answer !== "string" ||
+          !(item as Record<string, unknown>).answer
         ) {
           return reply.code(400).send({
-            error: "Each answer must have a non-empty questionId (string) and an answer (string)",
+            error:
+              "Each answer must have a non-empty questionId (string) and a non-empty answer (string)",
           });
         }
       }
