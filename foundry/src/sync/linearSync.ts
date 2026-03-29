@@ -21,6 +21,7 @@ const STATE_LABEL_MAP: Record<RunState, { label: string; issueState: string }> =
     label: "ai:needs-clarification",
     issueState: "In Progress",
   },
+  [RunState.Failed]: { label: "ai:failed", issueState: "Cancelled" },
 };
 
 export function getLabelForState(state: RunState): { label: string; issueState: string } {

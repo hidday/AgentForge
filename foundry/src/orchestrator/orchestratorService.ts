@@ -676,17 +676,14 @@ export class OrchestratorService {
     // Still has blockers — check iteration count
     const events = await this.eventRepo.findByRunId(runId);
     const clarificationCount = events.filter(
-      (e) => e.eventType === RunEvent.NEEDS_HUMAN_CLARIFICATION,
+      (e) => e.eventType === (RunEvent.NEEDS_HUMAN_CLARIFICATION as string),
     ).length;
 
     if (clarificationCount >= MAX_CLARIFICATION_ITERATIONS) {
       // Max iterations reached — fail the run
-      run = await this.transitionAndRecord(
-        run,
-        RunEvent.CLARIFICATION_EXHAUSTED,
-        "orchestrator",
-        { reason: "Max clarification iterations reached with unresolved blocking questions" },
-      );
+      run = await this.transitionAndRecord(run, RunEvent.CLARIFICATION_EXHAUSTED, "orchestrator", {
+        reason: "Max clarification iterations reached with unresolved blocking questions",
+      });
       this.logger.warn(
         { runId, clarificationCount, maxIterations: MAX_CLARIFICATION_ITERATIONS },
         "Clarification exhausted — run failed",
@@ -695,18 +692,13 @@ export class OrchestratorService {
     }
 
     // Transition back to HumanClarificationNeeded with updated blocking questions
-    run = await this.transitionAndRecord(
-      run,
-      RunEvent.NEEDS_HUMAN_CLARIFICATION,
-      "planner-agent",
-      {
-        blockingQuestions: newBlockingQuestions.map((q) => ({
-          id: q.id,
-          question: q.question,
-        })),
-        iteration: clarificationCount + 1,
-      },
-    );
+    run = await this.transitionAndRecord(run, RunEvent.NEEDS_HUMAN_CLARIFICATION, "planner-agent", {
+      blockingQuestions: newBlockingQuestions.map((q) => ({
+        id: q.id,
+        question: q.question,
+      })),
+      iteration: clarificationCount + 1,
+    });
 
     return run;
   }

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { OpenQuestionsPanel } from "./OpenQuestionsPanel.tsx";
 
@@ -12,7 +12,7 @@ vi.mock("@/api/client.ts", () => ({
 
 import { api } from "@/api/client.ts";
 
-const mockApi = api as { answerQuestions: ReturnType<typeof vi.fn> };
+const mockApi = api as unknown as { answerQuestions: ReturnType<typeof vi.fn> };
 
 const requiredQuestion = {
   id: "q1",

@@ -136,7 +136,9 @@ export function registerApiRoutes(
 
       // Schema validation
       if (!body?.answers || !Array.isArray(body.answers) || body.answers.length === 0) {
-        return reply.code(400).send({ error: "Required: { answers: Array<{ questionId: string; answer: string }> } (non-empty)" });
+        return reply.code(400).send({
+          error: "Required: { answers: Array<{ questionId: string; answer: string }> } (non-empty)",
+        });
       }
 
       for (const item of body.answers as unknown[]) {
@@ -153,7 +155,7 @@ export function registerApiRoutes(
         }
       }
 
-      const answers = body.answers as Array<{ questionId: string; answer: string }>;
+      const answers = body.answers as { questionId: string; answer: string }[];
 
       try {
         const run = await orchestrator.answerQuestions(request.params.id, answers);

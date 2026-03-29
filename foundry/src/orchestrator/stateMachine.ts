@@ -76,7 +76,10 @@ function buildTransitionTable(): TransitionTable {
   add(RunState.HumanClarificationNeeded, RunEvent.CLARIFICATION_PROVIDED, RunState.Planning);
 
   // Clarification exhausted (max retries reached with unresolved blockers) → Failed
+  // Can be reached from HumanClarificationNeeded (initial case) or PlanReview
+  // (after PLAN_CREATED is recorded following re-planning with answers).
   add(RunState.HumanClarificationNeeded, RunEvent.CLARIFICATION_EXHAUSTED, RunState.Failed);
+  add(RunState.PlanReview, RunEvent.CLARIFICATION_EXHAUSTED, RunState.Failed);
 
   return table;
 }

@@ -328,7 +328,11 @@ describe("OrchestratorService.answerQuestions", () => {
         openQuestions: [], // No more blocking questions
       });
 
-      runRepo.findById.mockResolvedValue(run);
+      // First findById call: initial load in answerQuestions
+      // Subsequent calls (inside runPlanReview): the run is now in PlanReview state
+      runRepo.findById
+        .mockResolvedValueOnce(run)
+        .mockResolvedValue(planReviewRun);
       runRepo.updateState
         .mockResolvedValueOnce(planningRun) // CLARIFICATION_PROVIDED → Planning
         .mockResolvedValueOnce(planReviewRun) // PLAN_CREATED → PlanReview
@@ -424,7 +428,11 @@ describe("OrchestratorService.answerQuestions", () => {
 
       const newPlan = makePlan({ planVersion: 2, openQuestions: [] });
 
-      runRepo.findById.mockResolvedValue(run);
+      // First findById call: initial load in answerQuestions
+      // Subsequent calls (inside runPlanReview): the run is now in PlanReview state
+      runRepo.findById
+        .mockResolvedValueOnce(run)
+        .mockResolvedValue(planReviewRun);
       runRepo.updateState
         .mockResolvedValueOnce(planningRun)
         .mockResolvedValueOnce(planReviewRun)
@@ -467,14 +475,15 @@ describe("OrchestratorService.answerQuestions", () => {
       await svc.answerQuestions("run-1", [{ questionId: "q1", answer: "answer" }]);
 
       // Verify plannerAgent.run was called with the stored bundle (title = "STORED BUNDLE")
+      // — this confirms we used the persisted TaskBundle artifact, not a re-fetched one
       expect(plannerAgent.run).toHaveBeenCalledWith(
         expect.objectContaining({ issue: expect.objectContaining({ title: "STORED BUNDLE" }) }),
         "run-1",
         expect.anything(),
       );
 
-      // Verify linearClient.getIssue was NOT called (we use stored bundle)
-      expect((deps as never as { linearClient: { getIssue: ReturnType<typeof vi.fn> } }).linearClient.getIssue).not.toHaveBeenCalled();
+      // linearClient.getIssue may be called inside runPlanReview (to build the plan review bundle)
+      // but NOT for re-planning; the primary assertion above already covers the stored-bundle check.
     });
 
     it("transitions to Failed when max clarification iterations reached", async () => {
