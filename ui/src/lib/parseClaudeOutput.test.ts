@@ -185,6 +185,161 @@ describe("parseClaudeOutput – tool_result extraction", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Metadata / noise filtering
+// ---------------------------------------------------------------------------
+describe("parseClaudeOutput – metadata event filtering", () => {
+  it("skips message_start events", () => {
+    const line = JSON.stringify({
+      type: "message_start",
+      message: { id: "msg_123", model: "claude-sonnet-4-20250514", usage: { input_tokens: 100 } },
+    });
+    expect(parseClaudeOutput(line)).toEqual([]);
+  });
+
+  it("skips message_delta events", () => {
+    const line = JSON.stringify({
+      type: "message_delta",
+      delta: { stop_reason: "end_turn" },
+      usage: { output_tokens: 50 },
+    });
+    expect(parseClaudeOutput(line)).toEqual([]);
+  });
+
+  it("skips message_stop events", () => {
+    const line = JSON.stringify({ type: "message_stop" });
+    expect(parseClaudeOutput(line)).toEqual([]);
+  });
+
+  it("skips ping events", () => {
+    const line = JSON.stringify({ type: "ping" });
+    expect(parseClaudeOutput(line)).toEqual([]);
+  });
+
+  it("skips content_block_stop events", () => {
+    const line = JSON.stringify({ type: "content_block_stop", index: 0 });
+    expect(parseClaudeOutput(line)).toEqual([]);
+  });
+
+  it("skips result events", () => {
+    const line = JSON.stringify({
+      type: "result",
+      result: "Some long agent output text...",
+      cost_usd: 0.01,
+      duration_ms: 5000,
+    });
+    expect(parseClaudeOutput(line)).toEqual([]);
+  });
+
+  it("skips Claude Code init/config objects", () => {
+    const line = JSON.stringify({
+      output_style: "default",
+      claude_code_version: "2.1.81",
+      agents: ["general-purpose", "Explore", "Plan"],
+      skills: ["update-config", "debug"],
+      uuid: "21383d10-c2c9-4326-8508-262e93e08f30",
+      fast_mode_state: "off",
+    });
+    expect(parseClaudeOutput(line)).toEqual([]);
+  });
+
+  it("skips objects with usage metadata but no content", () => {
+    const line = JSON.stringify({
+      usage: { input_tokens: 2, output_tokens: 8 },
+      stop_reason: null,
+      session_id: "abc",
+      uuid: "def",
+    });
+    expect(parseClaudeOutput(line)).toEqual([]);
+  });
+
+  it("skips Claude Code wrapper envelopes with session_id/uuid but no content", () => {
+    const line = JSON.stringify({
+      parent_tool_use_id: null,
+      session_id: "d19e3ded-9f7d-46a5-bd1c-54076a84746a",
+      uuid: "65be793d-b2cc-4793-b32f-ca946c80a4e3",
+      timestamp: "2026-03-29T13:02:31.411Z",
+    });
+    expect(parseClaudeOutput(line)).toEqual([]);
+  });
+
+  it("does NOT skip wrapper events that have a content array", () => {
+    const line = JSON.stringify({
+      content: [{ type: "text", text: "Hello from agent" }],
+      stop_reason: null,
+      usage: { input_tokens: 100 },
+      session_id: "abc",
+      uuid: "def",
+    });
+    const result = parseClaudeOutput(line);
+    expect(result).toEqual<ParsedBlock[]>([{ type: "text", content: "Hello from agent" }]);
+  });
+
+  it("does NOT skip wrapper events that have tool_use_result", () => {
+    const line = JSON.stringify({
+      tool_use_result: "file.txt",
+      session_id: "abc",
+      uuid: "def",
+    });
+    const result = parseClaudeOutput(line);
+    expect(result).toEqual<ParsedBlock[]>([
+      { type: "tool_result", content: "file.txt", isError: false },
+    ]);
+  });
+
+  it("does NOT skip wrapper events that have content_block", () => {
+    const line = JSON.stringify({
+      type: "content_block_start",
+      content_block: { type: "tool_use", name: "Bash", input: { command: "ls" } },
+      session_id: "abc",
+      uuid: "def",
+    });
+    const result = parseClaudeOutput(line);
+    expect(result).toEqual<ParsedBlock[]>([
+      { type: "tool_use", content: "ls", toolName: "Bash" },
+    ]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Partial-line noise filtering (SSE chunk boundaries)
+// ---------------------------------------------------------------------------
+describe("parseClaudeOutput – partial line noise filtering", () => {
+  it("filters partial JSON lines containing token metadata", () => {
+    const fragment =
+      'xgBagQ=="}],"stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":2,"cache_creation_input_tokens":6780,"output_tokens":8,"service_tier":"standard","inference_geo":"not_available"}}';
+    expect(parseClaudeOutput(fragment)).toEqual([]);
+  });
+
+  it("filters partial lines with output_style / claude_code_version", () => {
+    const fragment =
+      'mands":["update-config"],"apiKeySource":"none","claude_code_version":"2.1.81","output_style":"default"}';
+    expect(parseClaudeOutput(fragment)).toEqual([]);
+  });
+
+  it("filters partial lines with parent_tool_use_id + session_id", () => {
+    const fragment =
+      '","is_error":false}]},"parent_tool_use_id":"toolu_019aPpT5qgpzuEuRoHbbLrDY","session_id":"d19e3ded-9f7d-46a5-bd1c-54076a84746a","uuid":"abc"}';
+    expect(parseClaudeOutput(fragment)).toEqual([]);
+  });
+
+  it("filters partial lines with stop_reason:null + stop_sequence:null", () => {
+    const fragment =
+      'parser"},"caller":{"type":"direct"}}],"stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":2}}';
+    expect(parseClaudeOutput(fragment)).toEqual([]);
+  });
+
+  it("keeps genuine non-JSON raw lines", () => {
+    const result = parseClaudeOutput("Error: command not found");
+    expect(result).toEqual<ParsedBlock[]>([{ type: "raw", content: "Error: command not found" }]);
+  });
+
+  it("keeps plain text raw lines", () => {
+    const result = parseClaudeOutput("Processing files...");
+    expect(result).toEqual<ParsedBlock[]>([{ type: "raw", content: "Processing files..." }]);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Edge cases
 // ---------------------------------------------------------------------------
 describe("parseClaudeOutput – edge cases", () => {
@@ -216,5 +371,18 @@ describe("parseClaudeOutput – edge cases", () => {
   it("handles a JSON object with no recognised fields gracefully (produces no block)", () => {
     const line = JSON.stringify({ unknown_field: 42 });
     expect(parseClaudeOutput(line)).toEqual([]);
+  });
+
+  it("filters metadata from a mixed stream of content and noise", () => {
+    const raw = ndjoin(
+      JSON.stringify({ type: "message_start", message: { id: "msg_1", model: "claude-sonnet-4-20250514" } }),
+      JSON.stringify({ type: "content_block_delta", delta: { type: "text_delta", text: "Hello " } }),
+      JSON.stringify({ type: "content_block_delta", delta: { type: "text_delta", text: "world" } }),
+      JSON.stringify({ type: "content_block_stop", index: 0 }),
+      JSON.stringify({ type: "message_delta", delta: { stop_reason: "end_turn" }, usage: { output_tokens: 10 } }),
+      JSON.stringify({ type: "message_stop" }),
+    );
+    const result = parseClaudeOutput(raw);
+    expect(result).toEqual<ParsedBlock[]>([{ type: "text", content: "Hello world" }]);
   });
 });

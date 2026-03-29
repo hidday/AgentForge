@@ -5,9 +5,22 @@ export interface ParsedBlock {
   isError?: boolean;
 }
 
+const SKIP_EVENT_TYPES = new Set([
+  "message_start",
+  "message_delta",
+  "message_stop",
+  "ping",
+  "content_block_stop",
+  "result",
+]);
+
+const METADATA_NOISE_RE =
+  /"(?:input_tokens|output_tokens|service_tier|cache_creation_input_tokens|cache_read_input_tokens|inference_geo|context_management|ephemeral_\w+_input_tokens|output_style|claude_code_version|apiKeySource|fast_mode_state)"\s*:/;
+
 /**
  * Parses the raw NDJSON output from Claude Code CLI (--output-format stream-json --verbose)
  * and extracts only the human-relevant content: text, tool calls, tool results, and errors.
+ * Filters out API metadata (usage, tokens, service_tier, etc.) and Claude Code wrapper noise.
  */
 export function parseClaudeOutput(raw: string): ParsedBlock[] {
   if (!raw) return [];
@@ -21,12 +34,12 @@ export function parseClaudeOutput(raw: string): ParsedBlock[] {
 
     const parsed = tryParseJSON(trimmed);
     if (!parsed) {
-      blocks.push({ type: "raw", content: trimmed });
+      if (!isNoiseLine(trimmed)) {
+        blocks.push({ type: "raw", content: trimmed });
+      }
       continue;
     }
 
-    // Claude Code wraps events in objects with "content" arrays and metadata.
-    // We also see bare arrays for tool_result messages.
     if (Array.isArray(parsed)) {
       extractFromContentArray(parsed, blocks);
       continue;
@@ -34,6 +47,8 @@ export function parseClaudeOutput(raw: string): ParsedBlock[] {
 
     if (typeof parsed === "object" && parsed !== null) {
       const obj = parsed as Record<string, unknown>;
+
+      if (isSkippableEvent(obj)) continue;
 
       // Top-level tool_use_result field (Claude Code wrapper)
       if (obj.tool_use_result !== undefined) {
@@ -90,6 +105,55 @@ export function parseClaudeOutput(raw: string): ParsedBlock[] {
   }
 
   return mergeAdjacentText(blocks);
+}
+
+/**
+ * Returns true if a complete JSON object is a metadata/system event
+ * that carries no user-facing content.
+ */
+function isSkippableEvent(obj: Record<string, unknown>): boolean {
+  const eventType = typeof obj.type === "string" ? obj.type : "";
+  if (SKIP_EVENT_TYPES.has(eventType)) return true;
+
+  if (obj.output_style !== undefined || obj.claude_code_version !== undefined) return true;
+
+  const hasContentFields =
+    Array.isArray(obj.content) ||
+    obj.tool_use_result !== undefined ||
+    obj.content_block !== undefined ||
+    (eventType === "content_block_delta" && obj.delta !== undefined);
+
+  if (hasContentFields) return false;
+
+  if (obj.usage !== undefined) return true;
+  if (obj.session_id !== undefined && obj.uuid !== undefined) return true;
+
+  return false;
+}
+
+/**
+ * Returns true if a non-JSON line is a fragment of API metadata
+ * rather than meaningful agent output. These appear when SSE chunks
+ * split NDJSON lines at arbitrary byte boundaries.
+ */
+function isNoiseLine(line: string): boolean {
+  if (METADATA_NOISE_RE.test(line)) return true;
+
+  if (
+    /"parent_tool_use_id"\s*:/.test(line) &&
+    /"session_id"\s*:/.test(line)
+  ) {
+    return true;
+  }
+
+  if (
+    /"stop_reason"\s*:\s*null/.test(line) &&
+    /"stop_sequence"\s*:\s*null/.test(line)
+  ) {
+    return true;
+  }
+
+  return false;
 }
 
 function extractFromContentArray(arr: unknown[], blocks: ParsedBlock[]): void {
