@@ -34,7 +34,14 @@ export type ArtifactType =
   | "ReviewerTranscript"
   | "RemediationTranscript"
   | "HumanAnswers"
-  | "TaskBundle";
+  | "TaskBundle"
+  | "RejectionContext";
+
+export interface RejectionContextPayload {
+  planVersion: number;
+  feedback: string;
+  source: "api" | "linear";
+}
 
 export interface HumanAnswer {
   questionId: string;

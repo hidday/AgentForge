@@ -1,7 +1,7 @@
 import type { Logger } from "../utils/logger.js";
 import { RunEvent } from "../domain/runEvent.js";
 import { RunState } from "../domain/runState.js";
-import type { Run, HumanAnswer } from "../domain/types.js";
+import type { Run, HumanAnswer, RejectionContextPayload } from "../domain/types.js";
 import type { TaskBundle } from "../schemas/taskBundle.js";
 import type { Plan } from "../schemas/plan.js";
 import type { PlanReview } from "../schemas/planReview.js";
@@ -142,7 +142,7 @@ export class OrchestratorService {
       }
       case "reject-plan": {
         const run = await this.runRepo.findActiveByIssueId(issueId);
-        if (run) await this.rejectPlan(run.id);
+        if (run) await this.rejectPlan(run.id, command.body, "linear");
         break;
       }
       case "re-review": {
@@ -438,12 +438,109 @@ export class OrchestratorService {
     return run;
   }
 
-  async rejectPlan(runId: string): Promise<Run> {
+  async rejectPlan(
+    runId: string,
+    context?: string,
+    source: "api" | "linear" = "api",
+  ): Promise<Run> {
     let run = await this.requireRun(runId);
-    run = await this.transitionAndRecord(run, RunEvent.PLAN_REJECTED, "human");
+    run = await this.transitionAndRecord(run, RunEvent.PLAN_REJECTED, "human", {
+      ...(context ? { feedback: context } : {}),
+    });
 
-    await this.linearClient.postComment(run.linearIssueId, "Plan rejected. Replanning...");
+    // s5a: Persist RejectionContext artifact when feedback is provided
+    if (context && context.trim().length > 0) {
+      const rejectionPayload: RejectionContextPayload = {
+        planVersion: run.planVersion,
+        feedback: context,
+        source,
+      };
+      await this.artifactRepo.create({
+        runId: run.id,
+        type: "RejectionContext",
+        version: run.planVersion,
+        payloadJson: rejectionPayload as unknown as object,
+        rawText: JSON.stringify(rejectionPayload, null, 2),
+      });
+    }
 
+    // s5b: Post Linear comment with feedback if provided
+    const comment =
+      context && context.trim().length > 0
+        ? `Plan rejected with feedback: ${context}\nReplanning...`
+        : "Plan rejected. Replanning...";
+    await this.linearClient.postComment(run.linearIssueId, comment);
+
+    // s5c: Trigger replanning, injecting humanFeedback from RejectionContext artifact if present
+    const rejectionArtifact = await this.artifactRepo.findLatestByType(runId, "RejectionContext");
+    const rejectionContext = rejectionArtifact?.payloadJson as RejectionContextPayload | undefined;
+
+    const issue = await this.linearClient.getIssue(run.linearIssueId);
+    const bundle = this.buildTaskBundle(issue, run);
+
+    // Persist TaskBundle for re-use (mirrors the clarification flow)
+    const existingBundle = await this.artifactRepo.findLatestByType(runId, "TaskBundle");
+    if (!existingBundle) {
+      await this.artifactRepo.create({
+        runId: run.id,
+        type: "TaskBundle",
+        version: 1,
+        payloadJson: bundle as unknown as object,
+        rawText: JSON.stringify(bundle, null, 2),
+      });
+    }
+
+    const nextPlanVersion = run.planVersion + 1;
+
+    const newPlan = await this.plannerAgent.run(bundle, run.id, {
+      planVersionOverride: nextPlanVersion,
+      ...(rejectionContext
+        ? {
+            humanFeedback: {
+              planVersion: rejectionContext.planVersion,
+              feedback: rejectionContext.feedback,
+            },
+          }
+        : {}),
+    });
+
+    run = await this.runRepo.update(run.id, {
+      planVersion: newPlan.planVersion,
+      plannerRuntime: "claude-code",
+    });
+
+    // Check for blocking open questions before proceeding to plan review
+    const blockingQuestions = newPlan.openQuestions.filter((q) => q.requiredForExecution);
+    if (blockingQuestions.length > 0) {
+      run = await this.transitionAndRecord(run, RunEvent.PLAN_CREATED, "planner-agent");
+      run = await this.transitionAndRecord(
+        run,
+        RunEvent.NEEDS_HUMAN_CLARIFICATION,
+        "planner-agent",
+        {
+          blockingQuestions: blockingQuestions.map((q) => ({
+            id: q.id,
+            question: q.question,
+          })),
+        },
+      );
+
+      this.logger.info(
+        { runId: run.id, state: run.state, blockingCount: blockingQuestions.length },
+        "Re-plan after rejection has blocking questions, pausing for human clarification",
+      );
+
+      return run;
+    }
+
+    run = await this.transitionAndRecord(run, RunEvent.PLAN_CREATED, "planner-agent");
+
+    this.logger.info(
+      { runId: run.id, state: run.state },
+      "Plan rejected and re-planned, starting AI plan review",
+    );
+
+    run = await this.runPlanReview(run.id);
     return run;
   }
 
