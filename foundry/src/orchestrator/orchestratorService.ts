@@ -25,6 +25,7 @@ import type { RepoRegistry } from "../config/repoRegistry.js";
 import type { LinearSyncService } from "../sync/linearSync.js";
 import type { GitHubSyncService } from "../sync/githubSync.js";
 import type { RunEventEmitter } from "../api/runEventEmitter.js";
+import type { GitService } from "../git/gitService.js";
 import { startTimer } from "../utils/time.js";
 import { PolicyError, ValidationError } from "../utils/errors.js";
 
@@ -42,6 +43,7 @@ interface OrchestratorDeps {
   eventRepo: EventRepository;
   linearClient: LinearClient;
   githubClient: GitHubClient;
+  gitService: GitService;
   repoRegistry: RepoRegistry;
   linearSync: LinearSyncService;
   githubSync: GitHubSyncService;
@@ -61,6 +63,7 @@ export class OrchestratorService {
   private readonly eventRepo: EventRepository;
   private readonly linearClient: LinearClient;
   private readonly githubClient: GitHubClient;
+  private readonly gitService: GitService;
   private readonly repoRegistry: RepoRegistry;
   private readonly linearSync: LinearSyncService;
   private readonly githubSync: GitHubSyncService;
@@ -80,6 +83,7 @@ export class OrchestratorService {
     this.eventRepo = deps.eventRepo;
     this.linearClient = deps.linearClient;
     this.githubClient = deps.githubClient;
+    this.gitService = deps.gitService;
     this.repoRegistry = deps.repoRegistry;
     this.linearSync = deps.linearSync;
     this.githubSync = deps.githubSync;
@@ -189,6 +193,17 @@ export class OrchestratorService {
       linearIssueId: issueId,
       repo: repoEntry.name,
       workingDirectory,
+    });
+
+    const { worktreePath, branchName } = await this.gitService.setupRunWorktree(
+      workingDirectory,
+      run.id,
+      repoEntry.defaultBranch,
+    );
+
+    run = await this.runRepo.update(run.id, {
+      workingDirectory: worktreePath,
+      branchName,
     });
 
     this.dashboardEmitter?.emitRunCreated(run.id, issueId, run.repo);
@@ -405,6 +420,10 @@ export class OrchestratorService {
 
     this.policy.assertCanExecute(run, plan);
 
+    if (run.branchName) {
+      await this.gitService.assertBranch(run.workingDirectory, run.branchName);
+    }
+
     const issue = await this.linearClient.getIssue(run.linearIssueId);
     const bundle = this.buildTaskBundle(issue, run);
 
@@ -414,13 +433,20 @@ export class OrchestratorService {
       source: "orchestrator",
     });
 
-    const { report, branchName, prNumber } = await this.executorAgent.run(plan, bundle, runId, {
+    const { report, prNumber } = await this.executorAgent.run(plan, bundle, runId, {
       existingBranch: run.branchName,
       existingPR: run.prNumber,
     });
 
+    if (run.branchName) {
+      await this.gitService.commitAndPush(
+        run.workingDirectory,
+        run.branchName,
+        `[AI] Implement: ${bundle.issue.title}`,
+      );
+    }
+
     run = await this.runRepo.update(runId, {
-      branchName,
       prNumber,
       executorRuntime: "claude-code",
     });
@@ -614,6 +640,10 @@ export class OrchestratorService {
 
     this.policy.assertCanRemediate(run, review);
 
+    if (run.branchName) {
+      await this.gitService.assertBranch(run.workingDirectory, run.branchName);
+    }
+
     const execArtifact = await this.artifactRepo.findLatestByType(runId, "ExecutionReport");
     const executionReport = execArtifact?.payloadJson as ExecutionReport;
 
@@ -623,6 +653,14 @@ export class OrchestratorService {
       run.workingDirectory,
       runId,
     );
+
+    if (run.branchName) {
+      await this.gitService.commitAndPush(
+        run.workingDirectory,
+        run.branchName,
+        `[AI] Remediation: address review findings`,
+      );
+    }
 
     run = await this.runRepo.update(runId, { remediationRuntime: "claude-code" });
     run = await this.transitionAndRecord(run, RunEvent.REMEDIATION_FINISHED, "remediation-agent");
@@ -841,7 +879,23 @@ export class OrchestratorService {
 
     this.dashboardEmitter?.emitStateChanged(run.id, run.state, newState);
 
+    if (newState === RunState.Done || newState === RunState.Failed) {
+      await this.cleanupRunWorktree(updatedRun);
+    }
+
     return updatedRun;
+  }
+
+  private async cleanupRunWorktree(run: Run): Promise<void> {
+    const mainRepoPath = this.gitService.resolveMainRepoPath(run.workingDirectory);
+    if (mainRepoPath === run.workingDirectory) {
+      return;
+    }
+    this.logger.info(
+      { runId: run.id, worktreePath: run.workingDirectory, mainRepoPath },
+      "Cleaning up run worktree",
+    );
+    await this.gitService.removeWorktree(mainRepoPath, run.workingDirectory);
   }
 
   private async requireRun(runId: string): Promise<Run> {
@@ -878,7 +932,7 @@ export class OrchestratorService {
       repo: {
         name: repoEntry.name,
         defaultBranch: repoEntry.defaultBranch,
-        workingBranch: `ai/${issue.id.toLowerCase().replace(/[^a-z0-9]/g, "-")}`,
+        workingBranch: run.branchName ?? `ai/${issue.id.toLowerCase().replace(/[^a-z0-9]/g, "-")}`,
         repoPath: run.workingDirectory,
         allowedPaths: repoEntry.allowedPaths,
         protectedPaths: repoEntry.protectedPaths,

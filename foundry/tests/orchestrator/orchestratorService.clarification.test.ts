@@ -145,6 +145,14 @@ function buildDeps(overrides: Record<string, unknown> = {}) {
   const reviewerAgent = { run: vi.fn() };
   const remediationAgent = { run: vi.fn() };
 
+  const gitService = {
+    setupRunWorktree: vi.fn().mockResolvedValue({ worktreePath: "/tmp/worktree", branchName: "ai/run-test1234" }),
+    assertBranch: vi.fn().mockResolvedValue(undefined),
+    commitAndPush: vi.fn().mockResolvedValue(undefined),
+    removeWorktree: vi.fn().mockResolvedValue(undefined),
+    resolveMainRepoPath: vi.fn().mockReturnValue("/tmp"),
+  };
+
   const logger = {
     info: vi.fn(),
     warn: vi.fn(),
@@ -166,6 +174,7 @@ function buildDeps(overrides: Record<string, unknown> = {}) {
       eventRepo,
       linearClient,
       githubClient,
+      gitService,
       repoRegistry,
       linearSync,
       githubSync,
@@ -576,7 +585,11 @@ describe("OrchestratorService.answerQuestions", () => {
         .mockResolvedValueOnce(planningRun)      // PLAN_CREATED → PlanReview but intercepted
         .mockResolvedValueOnce(clarificationRun); // NEEDS_HUMAN_CLARIFICATION
 
-      runRepo.update.mockResolvedValue(planningRun);
+      // First update: setupRunWorktree stores worktreePath/branchName (still Todo)
+      // Second update: planVersion after planning
+      runRepo.update
+        .mockResolvedValueOnce({ ...todoRun, workingDirectory: "/tmp/worktree", branchName: "ai/run-test1234" })
+        .mockResolvedValue(planningRun);
       artifactRepo.create.mockResolvedValue({ id: "artifact-new" });
       plannerAgent.run.mockResolvedValue(planWithBlockers);
       eventRepo.findByRunId.mockResolvedValue([]);

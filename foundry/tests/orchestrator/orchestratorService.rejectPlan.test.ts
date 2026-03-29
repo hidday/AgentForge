@@ -192,6 +192,14 @@ function buildDeps(overrides: Record<string, unknown> = {}) {
   const reviewerAgent = { run: vi.fn() };
   const remediationAgent = { run: vi.fn() };
 
+  const gitService = {
+    setupRunWorktree: vi.fn().mockResolvedValue({ worktreePath: "/tmp/worktree", branchName: "ai/run-test1234" }),
+    assertBranch: vi.fn().mockResolvedValue(undefined),
+    commitAndPush: vi.fn().mockResolvedValue(undefined),
+    removeWorktree: vi.fn().mockResolvedValue(undefined),
+    resolveMainRepoPath: vi.fn().mockReturnValue("/tmp"),
+  };
+
   const logger = {
     info: vi.fn(),
     warn: vi.fn(),
@@ -213,6 +221,7 @@ function buildDeps(overrides: Record<string, unknown> = {}) {
       eventRepo,
       linearClient,
       githubClient,
+      gitService,
       repoRegistry,
       linearSync,
       githubSync,

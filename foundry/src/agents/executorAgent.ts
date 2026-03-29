@@ -28,7 +28,7 @@ export class ExecutorAgent {
     taskBundle: TaskBundle,
     runId: string,
     retry?: ExecutorRetryContext,
-  ): Promise<{ report: ExecutionReport; branchName: string; prNumber: number }> {
+  ): Promise<{ report: ExecutionReport; prNumber: number }> {
     this.logger.info(
       {
         runId,
@@ -66,20 +66,7 @@ export class ExecutorAgent {
     });
 
     const report = output.parsed.payload;
-
     const branchName = retry?.existingBranch ?? taskBundle.repo.workingBranch;
-    if (!retry?.existingBranch) {
-      this.logger.info(
-        { runId, branchName, repo: taskBundle.repo.name },
-        "Creating branch on GitHub",
-      );
-      await this.githubClient.createBranch(taskBundle.repo.name, branchName);
-    } else {
-      this.logger.info(
-        { runId, branchName },
-        "Skipping branch creation (already exists from previous attempt)",
-      );
-    }
 
     let prNumber: number;
     if (retry?.existingPR) {
@@ -119,6 +106,6 @@ export class ExecutorAgent {
       "Execution completed",
     );
 
-    return { report, branchName, prNumber };
+    return { report, prNumber };
   }
 }

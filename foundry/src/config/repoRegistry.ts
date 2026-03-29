@@ -109,7 +109,16 @@ export class RepoRegistry {
     if (!existsSync(gitDir)) {
       throw new Error(
         `Working directory is not a git repository: ${workingDirectory}. ` +
-          `Expected a .git directory at ${gitDir}.`,
+          `Expected a .git entry at ${gitDir}.`,
+      );
+    }
+
+    // .git can be a directory (normal clone) or a file (worktree)
+    const gitStat = statSync(gitDir);
+    if (!gitStat.isDirectory() && !gitStat.isFile()) {
+      throw new Error(
+        `Working directory has invalid .git entry: ${gitDir}. ` +
+          `Expected a directory (clone) or file (worktree).`,
       );
     }
 

@@ -101,6 +101,7 @@ export class RunRepository {
         | "executorRuntime"
         | "reviewerRuntime"
         | "remediationRuntime"
+        | "workingDirectory"
         | "latestArtifactVersion"
       >
     >,

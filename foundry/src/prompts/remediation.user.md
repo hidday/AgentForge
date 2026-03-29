@@ -19,6 +19,10 @@ A code reviewer provided feedback on your implementation. Evaluate each finding 
 - Typecheck: {{executionReport.checks.typecheck.status}}
 - Tests: {{executionReport.checks.tests.status}}
 
+## Git Context
+
+You are working in an **isolated Git worktree** on a dedicated branch. Do NOT switch branches, commit, or push. The orchestrator handles all Git operations.
+
 ## Instructions
 
 1. Read every finding carefully

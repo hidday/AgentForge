@@ -36,6 +36,7 @@ import { RunEventEmitter } from "./api/runEventEmitter.js";
 import { registerApiRoutes } from "./api/routes.js";
 import { LinearPollService } from "./sync/linearPoll.js";
 import { RuntimeHealthCheck } from "./runtime/runtimeHealthCheck.js";
+import { GitService } from "./git/gitService.js";
 
 function buildServices() {
   const prisma = getPrismaClient();
@@ -101,6 +102,7 @@ function buildServices() {
   const reviewerAgent = new ReviewerAgent(agentRunner, artifactRepo, logger);
   const remediationAgent = new RemediationAgent(agentRunner, artifactRepo, logger);
 
+  const gitService = new GitService(logger);
   const linearSync = new LinearSyncService(linearClient, logger);
   const githubSync = new GitHubSyncService(githubClient, logger);
 
@@ -110,6 +112,7 @@ function buildServices() {
     eventRepo,
     linearClient,
     githubClient,
+    gitService,
     repoRegistry,
     linearSync,
     githubSync,

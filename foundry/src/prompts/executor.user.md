@@ -31,5 +31,5 @@ Implement the following approved plan.
 2. Stay within allowed paths
 3. Run lint, typecheck, and test checks
 4. List all changed files
-5. Create a draft PR if all checks pass
+5. Do NOT commit, push, or create branches -- the orchestrator handles Git operations
 6. Produce the structured execution report
