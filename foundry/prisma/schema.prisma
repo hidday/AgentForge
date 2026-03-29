@@ -38,6 +38,7 @@ enum ArtifactType {
   RemediationTranscript
   HumanAnswers
   TaskBundle
+  RejectionContext
 }
 
 model AiRun {
