@@ -22,6 +22,7 @@ import { ReviewerAgent } from "../src/agents/reviewerAgent.js";
 import { RemediationAgent } from "../src/agents/remediationAgent.js";
 import { MockLinearClient } from "../src/linear/linearClient.js";
 import { MockGitHubClient } from "../src/github/githubClient.js";
+import { GitService } from "../src/git/gitService.js";
 import { loadRepoRegistry } from "../src/config/repoRegistry.js";
 import { LinearSyncService } from "../src/sync/linearSync.js";
 import { GitHubSyncService } from "../src/sync/githubSync.js";
@@ -94,6 +95,7 @@ async function simulate(): Promise<void> {
     const repoRegistry = loadRepoRegistry(env.REPOS_CONFIG_PATH, env.REPOS_ROOT_PATH, logger);
     const linearSync = new LinearSyncService(linearClient, logger);
     const githubSync = new GitHubSyncService(githubClient, logger);
+    const gitService = new GitService(logger);
 
     const orchestrator = new OrchestratorService({
       runRepo,
@@ -101,6 +103,7 @@ async function simulate(): Promise<void> {
       eventRepo,
       linearClient,
       githubClient,
+      gitService,
       repoRegistry,
       linearSync,
       githubSync,
