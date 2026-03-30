@@ -19,7 +19,7 @@
       "name": "hidday/feed-pilot",
       "directory": "feed-pilot",
       "linearProject": "feed-pilot",
-      "defaultBranch": "main",
+      "defaultBranch": "master",
       "allowedPaths": ["src/", "tests/", "scripts/"],
       "protectedPaths": [".github/", "prisma/migrations/"],
       "constraints": {
