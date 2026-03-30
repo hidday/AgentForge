@@ -44,6 +44,16 @@ export class RealGitHubClient implements GitHubClient {
     return new Error(`GitHub ${operation} failed for "${repo}"${context}: ${detail}`);
   }
 
+  async getDefaultBranch(repo: string): Promise<string> {
+    const { owner, repo: repoName } = splitRepo(repo);
+    try {
+      const { data } = await this.octokit.repos.get({ owner, repo: repoName });
+      return data.default_branch;
+    } catch (err) {
+      throw this.wrapError("getDefaultBranch", repo, err);
+    }
+  }
+
   async createBranch(repo: string, branchName: string): Promise<void> {
     const { owner, repo: repoName } = splitRepo(repo);
 
@@ -103,6 +113,18 @@ export class RealGitHubClient implements GitHubClient {
     } catch (err) {
       const status = (err as { status?: number }).status;
       if (status === 422) {
+        const message = err instanceof Error ? err.message : String(err);
+        const isFieldValidation =
+          message.includes('"code":"invalid"') || message.includes('"code":"missing_field"');
+
+        if (isFieldValidation) {
+          this.logger.error(
+            { repo, head, base, detail: message },
+            "PR creation failed: invalid field (base branch may not exist)",
+          );
+          throw this.wrapError("createDraftPR", repo, err, { head, base });
+        }
+
         this.logger.info(
           { repo, head, base },
           "PR already exists for this head branch, looking up existing PR",

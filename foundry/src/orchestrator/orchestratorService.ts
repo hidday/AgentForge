@@ -212,7 +212,7 @@ export class OrchestratorService {
 
     run = await this.transitionAndRecord(run, RunEvent.RUN_REQUESTED, "orchestrator");
 
-    const bundle = this.buildTaskBundle(issue, run);
+    const bundle = await this.buildTaskBundle(issue, run);
 
     await this.linearClient.postComment(
       issueId,
@@ -282,7 +282,7 @@ export class OrchestratorService {
     this.logger.info({ runId, state: run.state }, "Retrying planning stage");
 
     const issue = await this.linearClient.getIssue(run.linearIssueId);
-    const bundle = this.buildTaskBundle(issue, run);
+    const bundle = await this.buildTaskBundle(issue, run);
 
     const existingBundle = await this.artifactRepo.findLatestByType(runId, "TaskBundle");
     if (!existingBundle) {
@@ -376,7 +376,7 @@ export class OrchestratorService {
     run = await this.transitionAndRecord(run, RunEvent.RUN_REQUESTED, "orchestrator");
 
     const issue = await this.linearClient.getIssue(run.linearIssueId);
-    const bundle = this.buildTaskBundle(issue, run);
+    const bundle = await this.buildTaskBundle(issue, run);
 
     const plan = await this.plannerAgent.run(bundle, run.id);
 
@@ -437,7 +437,7 @@ export class OrchestratorService {
     const plan = planArtifact.payloadJson as Plan;
 
     const issue = await this.linearClient.getIssue(run.linearIssueId);
-    const bundle = this.buildTaskBundle(issue, run);
+    const bundle = await this.buildTaskBundle(issue, run);
 
     const planReview = await this.planReviewerAgent.run(plan, bundle, runId);
 
@@ -495,7 +495,7 @@ export class OrchestratorService {
     const planReview = planReviewArtifact?.payloadJson as PlanReview;
 
     const issue = await this.linearClient.getIssue(run.linearIssueId);
-    const bundle = this.buildTaskBundle(issue, run);
+    const bundle = await this.buildTaskBundle(issue, run);
 
     const { revision, revisedPlan } = await this.planReviserAgent.run(
       plan,
@@ -576,7 +576,7 @@ export class OrchestratorService {
     }
 
     const issue = await this.linearClient.getIssue(run.linearIssueId);
-    const bundle = this.buildTaskBundle(issue, run);
+    const bundle = await this.buildTaskBundle(issue, run);
 
     await this.eventRepo.create({
       runId,
@@ -653,7 +653,7 @@ export class OrchestratorService {
     const rejectionContext = rejectionArtifact?.payloadJson as RejectionContextPayload | undefined;
 
     const issue = await this.linearClient.getIssue(run.linearIssueId);
-    const bundle = this.buildTaskBundle(issue, run);
+    const bundle = await this.buildTaskBundle(issue, run);
 
     // Persist TaskBundle for re-use (mirrors the clarification flow)
     const existingBundle = await this.artifactRepo.findLatestByType(runId, "TaskBundle");
@@ -734,7 +734,7 @@ export class OrchestratorService {
     const plan = planArtifact?.payloadJson as Plan;
 
     const issue = await this.linearClient.getIssue(run.linearIssueId);
-    const bundle = this.buildTaskBundle(issue, run);
+    const bundle = await this.buildTaskBundle(issue, run);
 
     const diff = run.prNumber ? await this.githubClient.getPRDiff(run.repo, run.prNumber) : "";
 
@@ -1055,7 +1055,7 @@ export class OrchestratorService {
     return run;
   }
 
-  private buildTaskBundle(
+  private async buildTaskBundle(
     issue: {
       id: string;
       title: string;
@@ -1066,9 +1066,26 @@ export class OrchestratorService {
       cycle?: string;
     },
     run: Run,
-  ): TaskBundle {
+  ): Promise<TaskBundle> {
     const repoEntry =
       this.repoRegistry.getRepoByName(run.repo) ?? this.repoRegistry.getDefaultRepo();
+
+    let defaultBranch = repoEntry.defaultBranch;
+    try {
+      const remoteBranch = await this.githubClient.getDefaultBranch(repoEntry.name);
+      if (remoteBranch !== defaultBranch) {
+        this.logger.warn(
+          { repo: repoEntry.name, config: defaultBranch, remote: remoteBranch },
+          "Config defaultBranch differs from GitHub, using remote value",
+        );
+        defaultBranch = remoteBranch;
+      }
+    } catch (err) {
+      this.logger.warn(
+        { repo: repoEntry.name, error: err instanceof Error ? err.message : String(err) },
+        "Failed to resolve default branch from GitHub, falling back to config value",
+      );
+    }
 
     return {
       issue: {
@@ -1082,7 +1099,7 @@ export class OrchestratorService {
       },
       repo: {
         name: repoEntry.name,
-        defaultBranch: repoEntry.defaultBranch,
+        defaultBranch,
         workingBranch: run.branchName ?? `ai/${issue.id.toLowerCase().replace(/[^a-z0-9]/g, "-")}`,
         repoPath: run.workingDirectory,
         allowedPaths: repoEntry.allowedPaths,
