@@ -71,6 +71,7 @@ function buildTransitionTable(): TransitionTable {
   // after reset.
   add(RunState.AIBlocked, RunEvent.RESET_TO_TODO, RunState.Todo);
   add(RunState.HumanClarificationNeeded, RunEvent.RESET_TO_TODO, RunState.Todo);
+  add(RunState.Failed, RunEvent.RESET_TO_TODO, RunState.Todo);
 
   // Clarification flow: human answers provided → back to Planning for re-planning
   add(RunState.HumanClarificationNeeded, RunEvent.CLARIFICATION_PROVIDED, RunState.Planning);

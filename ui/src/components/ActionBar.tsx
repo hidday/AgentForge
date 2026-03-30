@@ -12,6 +12,8 @@ import {
 } from "lucide-react";
 
 const RETRY_LABELS: Record<string, string> = {
+  Todo: "Start Run",
+  Planning: "Retry Planning",
   PlanRevision: "Retry Plan Revision",
   PlanReview: "Retry Plan Review",
   Implementing: "Retry Execution",
@@ -141,7 +143,7 @@ export function ActionBar({
     },
     {
       show:
-        state === "AIBlocked" || state === "HumanClarificationNeeded",
+        state === "AIBlocked" || state === "HumanClarificationNeeded" || state === "Failed",
       icon: Play,
       label: "Resume",
       style: "bg-accent text-white hover:bg-accent-hover",

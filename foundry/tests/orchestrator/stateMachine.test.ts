@@ -30,12 +30,14 @@ describe("stateMachine - clarification transitions", () => {
     expect(validEvents).toContain(RunEvent.CLARIFICATION_EXHAUSTED);
   });
 
-  it("Failed is a terminal state (no outgoing transitions)", () => {
-    const validEvents = getValidEvents(RunState.Failed);
-    expect(validEvents).toHaveLength(0);
+  it("Failed allows RESET_TO_TODO to recover", () => {
+    const next = transition(RunState.Failed, RunEvent.RESET_TO_TODO);
+    expect(next).toBe(RunState.Todo);
   });
 
-  it("throws for invalid transitions from Failed", () => {
-    expect(() => transition(RunState.Failed, RunEvent.RESET_TO_TODO)).toThrow();
+  it("Failed has only RESET_TO_TODO as outgoing transition", () => {
+    const validEvents = getValidEvents(RunState.Failed);
+    expect(validEvents).toHaveLength(1);
+    expect(validEvents).toContain(RunEvent.RESET_TO_TODO);
   });
 });

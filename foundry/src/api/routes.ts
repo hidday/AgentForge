@@ -202,6 +202,12 @@ export function registerApiRoutes(
     };
 
     const retryableStates: Record<string, () => void> = {
+      [RunState.Todo]: () => {
+        orchestrator.retryRun(run.id).catch(logError);
+      },
+      [RunState.Planning]: () => {
+        orchestrator.runPlanning(run.id).catch(logError);
+      },
       [RunState.PlanRevision]: () => {
         orchestrator.runPlanRevision(run.id).catch(logError);
       },

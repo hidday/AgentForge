@@ -275,6 +275,157 @@ export class OrchestratorService {
     return run;
   }
 
+  async runPlanning(runId: string): Promise<Run> {
+    const timer = startTimer();
+    let run = await this.requireRun(runId);
+
+    this.logger.info({ runId, state: run.state }, "Retrying planning stage");
+
+    const issue = await this.linearClient.getIssue(run.linearIssueId);
+    const bundle = this.buildTaskBundle(issue, run);
+
+    const existingBundle = await this.artifactRepo.findLatestByType(runId, "TaskBundle");
+    if (!existingBundle) {
+      await this.artifactRepo.create({
+        runId: run.id,
+        type: "TaskBundle",
+        version: 1,
+        payloadJson: bundle as unknown as object,
+        rawText: JSON.stringify(bundle, null, 2),
+      });
+    }
+
+    const rejectionArtifact = await this.artifactRepo.findLatestByType(runId, "RejectionContext");
+    const rejectionContext = rejectionArtifact?.payloadJson as RejectionContextPayload | undefined;
+
+    const nextPlanVersion = run.planVersion + 1;
+
+    const plan = await this.plannerAgent.run(bundle, run.id, {
+      planVersionOverride: nextPlanVersion,
+      ...(rejectionContext
+        ? {
+            humanFeedback: {
+              planVersion: rejectionContext.planVersion,
+              feedback: rejectionContext.feedback,
+            },
+          }
+        : {}),
+    });
+
+    run = await this.runRepo.update(run.id, {
+      planVersion: plan.planVersion,
+      plannerRuntime: "claude-code",
+    });
+
+    const blockingQuestions = plan.openQuestions.filter((q) => q.requiredForExecution);
+    if (blockingQuestions.length > 0) {
+      run = await this.transitionAndRecord(run, RunEvent.PLAN_CREATED, "planner-agent");
+      run = await this.transitionAndRecord(
+        run,
+        RunEvent.NEEDS_HUMAN_CLARIFICATION,
+        "planner-agent",
+        {
+          blockingQuestions: blockingQuestions.map((q) => ({
+            id: q.id,
+            question: q.question,
+          })),
+        },
+      );
+
+      this.logger.info(
+        { runId: run.id, state: run.state, blockingCount: blockingQuestions.length, durationMs: timer.elapsed() },
+        "Re-plan has blocking questions, pausing for human clarification",
+      );
+      return run;
+    }
+
+    run = await this.transitionAndRecord(run, RunEvent.PLAN_CREATED, "planner-agent");
+
+    this.logger.info(
+      { runId: run.id, state: run.state, durationMs: timer.elapsed() },
+      "Planning retry complete, starting AI plan review",
+    );
+
+    run = await this.runPlanReview(run.id);
+    return run;
+  }
+
+  async retryRun(runId: string): Promise<Run> {
+    const timer = startTimer();
+    let run = await this.requireRun(runId);
+
+    this.logger.info({ runId, state: run.state }, "Retrying run from Todo");
+
+    if (!run.branchName) {
+      const repoEntry =
+        this.repoRegistry.getRepoByName(run.repo) ?? this.repoRegistry.getDefaultRepo();
+      const mainWorkingDir = this.gitService.resolveMainRepoPath(run.workingDirectory);
+
+      const { worktreePath, branchName } = await this.gitService.setupRunWorktree(
+        mainWorkingDir,
+        run.id,
+        repoEntry.defaultBranch,
+      );
+
+      run = await this.runRepo.update(run.id, {
+        workingDirectory: worktreePath,
+        branchName,
+      });
+    }
+
+    run = await this.transitionAndRecord(run, RunEvent.RUN_REQUESTED, "orchestrator");
+
+    const issue = await this.linearClient.getIssue(run.linearIssueId);
+    const bundle = this.buildTaskBundle(issue, run);
+
+    const plan = await this.plannerAgent.run(bundle, run.id);
+
+    run = await this.runRepo.update(run.id, {
+      planVersion: plan.planVersion,
+      plannerRuntime: "claude-code",
+    });
+
+    const blockingQuestions = plan.openQuestions.filter((q) => q.requiredForExecution);
+    if (blockingQuestions.length > 0) {
+      await this.artifactRepo.create({
+        runId: run.id,
+        type: "TaskBundle",
+        version: 1,
+        payloadJson: bundle as unknown as object,
+        rawText: JSON.stringify(bundle, null, 2),
+      });
+
+      run = await this.transitionAndRecord(run, RunEvent.PLAN_CREATED, "planner-agent");
+      run = await this.transitionAndRecord(
+        run,
+        RunEvent.NEEDS_HUMAN_CLARIFICATION,
+        "planner-agent",
+        {
+          blockingQuestions: blockingQuestions.map((q) => ({
+            id: q.id,
+            question: q.question,
+          })),
+        },
+      );
+
+      this.logger.info(
+        { runId: run.id, state: run.state, blockingCount: blockingQuestions.length, durationMs: timer.elapsed() },
+        "Plan has blocking questions, pausing for human clarification",
+      );
+      return run;
+    }
+
+    run = await this.transitionAndRecord(run, RunEvent.PLAN_CREATED, "planner-agent");
+
+    this.logger.info(
+      { runId: run.id, state: run.state, durationMs: timer.elapsed() },
+      "Run retry complete, starting AI plan review",
+    );
+
+    run = await this.runPlanReview(run.id);
+    return run;
+  }
+
   async runPlanReview(runId: string): Promise<Run> {
     const timer = startTimer();
     let run = await this.requireRun(runId);
