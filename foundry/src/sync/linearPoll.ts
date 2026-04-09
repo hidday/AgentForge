@@ -1,4 +1,4 @@
-import type { LinearClient, LinearIssue } from "../linear/linearClient.js";
+import type { LinearClient, LinearIssue, IssueSearchFilter } from "../linear/linearClient.js";
 import type { RunRepository } from "../orchestrator/runRepository.js";
 import type { OrchestratorService } from "../orchestrator/orchestratorService.js";
 import type { RepoRegistry } from "../config/repoRegistry.js";
@@ -17,19 +17,33 @@ export class LinearPollService {
 
   async discoverPendingIssues(): Promise<LinearIssue[]> {
     const repos = this.repoRegistry.listRepos();
-    const projects = repos.map((r) => r.linearProject).filter((p): p is string => p != null);
 
-    if (projects.length === 0) {
-      this.logger.warn("No Linear projects configured in repo registry");
+    // Build one search filter per repo entry. A repo is included if it has
+    // either a linearProject name or assigneeMe=true configured.
+    const filters: IssueSearchFilter[] = repos
+      .filter((r) => r.linearProject != null || r.assigneeMe === true)
+      .map((r) => ({
+        projectName: r.linearProject,
+        assigneeMe: r.assigneeMe,
+        team: r.linearTeam,
+        state: DEFAULT_POLL_STATE,
+      }));
+
+    if (filters.length === 0) {
+      this.logger.warn("No Linear projects or assigneeMe repos configured in repo registry");
       return [];
     }
 
+    const seenIds = new Set<string>();
     const allCandidates: LinearIssue[] = [];
 
-    for (const project of projects) {
-      const issues = await this.linearClient.searchIssues(project, DEFAULT_POLL_STATE);
+    for (const filter of filters) {
+      const issues = await this.linearClient.searchIssues(filter);
 
       for (const issue of issues) {
+        if (seenIds.has(issue.id)) continue;
+        seenIds.add(issue.id);
+
         const existingRun = await this.runRepo.findActiveByIssueId(issue.id);
         if (!existingRun) {
           allCandidates.push(issue);
@@ -38,7 +52,14 @@ export class LinearPollService {
     }
 
     this.logger.info(
-      { candidateCount: allCandidates.length, projects },
+      {
+        candidateCount: allCandidates.length,
+        filters: filters.map((f) => ({
+          project: f.projectName,
+          assigneeMe: f.assigneeMe,
+          team: f.team,
+        })),
+      },
       "Discovered pending Linear issues",
     );
 

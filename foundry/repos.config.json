@@ -33,7 +33,8 @@
     {
       "name": "prysmic-ai/prysmic",
       "directory": "/Users/hiddaysaban/Prysmic/prysmic",
-      "linearProject": "prysmic",
+      "linearTeam": "PRY",
+      "assigneeMe": true,
       "defaultBranch": "main",
       "allowedPaths": [
         "infra/",

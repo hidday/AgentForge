@@ -1,5 +1,5 @@
 import { LinearClient as LinearSdk } from "@linear/sdk";
-import type { LinearClient, LinearIssue } from "./linearClient.js";
+import type { LinearClient, LinearIssue, IssueSearchFilter } from "./linearClient.js";
 import type { Logger } from "../utils/logger.js";
 
 export class RealLinearClient implements LinearClient {
@@ -35,13 +35,27 @@ export class RealLinearClient implements LinearClient {
     };
   }
 
-  async searchIssues(projectName: string, stateName: string): Promise<LinearIssue[]> {
-    const issuesConn = await this.sdk.issues({
-      filter: {
-        project: { name: { eq: projectName } },
-        state: { name: { eq: stateName } },
-      },
-    });
+  async searchIssues(filter: IssueSearchFilter): Promise<LinearIssue[]> {
+    const { projectName, assigneeMe, team, state: stateName } = filter;
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const gqlFilter: Record<string, any> = {
+      state: { name: { eq: stateName } },
+    };
+
+    if (projectName) {
+      gqlFilter["project"] = { name: { eq: projectName } };
+    }
+
+    if (assigneeMe) {
+      gqlFilter["assignee"] = { isMe: { eq: true } };
+    }
+
+    if (team) {
+      gqlFilter["team"] = { or: [{ name: { eq: team } }, { key: { eq: team } }] };
+    }
+
+    const issuesConn = await this.sdk.issues({ filter: gqlFilter });
 
     const results: LinearIssue[] = [];
     for (const issue of issuesConn?.nodes ?? []) {
@@ -62,7 +76,10 @@ export class RealLinearClient implements LinearClient {
       });
     }
 
-    this.logger.info({ projectName, stateName, count: results.length }, "Searched Linear issues");
+    this.logger.info(
+      { projectName, assigneeMe, team, stateName, count: results.length },
+      "Searched Linear issues",
+    );
     return results;
   }
 

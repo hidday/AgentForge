@@ -15,6 +15,8 @@ const RepoEntrySchema = z.object({
   name: z.string(),
   directory: z.string(),
   linearProject: z.string().optional(),
+  linearTeam: z.string().optional(),
+  assigneeMe: z.boolean().optional(),
   defaultBranch: z.string().default("main"),
   allowedPaths: z.array(z.string()),
   protectedPaths: z.array(z.string()),

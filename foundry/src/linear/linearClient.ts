@@ -9,9 +9,20 @@ export interface LinearIssue {
   cycle?: string;
 }
 
+export interface IssueSearchFilter {
+  /** Match issues belonging to a specific Linear project name (exact match). */
+  projectName?: string;
+  /** When true, match only issues assigned to the authenticated user. */
+  assigneeMe?: boolean;
+  /** Scope search to a specific Linear team name or key (e.g. "PRY"). */
+  team?: string;
+  /** Workflow state name to filter by (e.g. "Todo"). */
+  state: string;
+}
+
 export interface LinearClient {
   getIssue(issueId: string): Promise<LinearIssue>;
-  searchIssues(project: string, state: string): Promise<LinearIssue[]>;
+  searchIssues(filter: IssueSearchFilter): Promise<LinearIssue[]>;
   postComment(issueId: string, body: string): Promise<void>;
   updateIssueState(issueId: string, state: string): Promise<void>;
   addLabel(issueId: string, label: string): Promise<void>;
@@ -39,8 +50,12 @@ export class MockLinearClient implements LinearClient {
     return Promise.resolve({ ...issue });
   }
 
-  searchIssues(_project: string, state: string): Promise<LinearIssue[]> {
-    const matches = [...this.issues.values()].filter((i) => i.state === state);
+  searchIssues(filter: IssueSearchFilter): Promise<LinearIssue[]> {
+    const matches = [...this.issues.values()].filter((i) => {
+      if (i.state !== filter.state) return false;
+      if (filter.projectName && i.project !== filter.projectName) return false;
+      return true;
+    });
     return Promise.resolve(matches.map((i) => ({ ...i })));
   }
 
