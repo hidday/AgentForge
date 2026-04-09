@@ -5,6 +5,7 @@ export interface LinearIssue {
   state: string;
   labels: string[];
   priority: number;
+  url?: string;
   project?: string;
   team?: string;
   cycle?: string;

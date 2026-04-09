@@ -8,6 +8,8 @@ const TERMINAL_STATES: RunState[] = [RunState.Done];
 function toDomain(row: {
   id: string;
   linearIssueId: string;
+  linearIssueTitle: string | null;
+  linearIssueUrl: string | null;
   repo: string;
   branchName: string | null;
   prNumber: number | null;
@@ -34,12 +36,16 @@ export class RunRepository {
 
   async create(params: {
     linearIssueId: string;
+    linearIssueTitle?: string;
+    linearIssueUrl?: string;
     repo: string;
     workingDirectory: string;
   }): Promise<Run> {
     const row = await this.prisma.aiRun.create({
       data: {
         linearIssueId: params.linearIssueId,
+        linearIssueTitle: params.linearIssueTitle ?? null,
+        linearIssueUrl: params.linearIssueUrl ?? null,
         repo: params.repo,
         workingDirectory: params.workingDirectory,
         state: "Todo",

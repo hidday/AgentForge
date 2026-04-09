@@ -191,6 +191,8 @@ export class OrchestratorService {
 
     let run = await this.runRepo.create({
       linearIssueId: issueId,
+      linearIssueTitle: issue.title,
+      linearIssueUrl: issue.url,
       repo: repoEntry.name,
       workingDirectory,
     });

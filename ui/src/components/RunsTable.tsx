@@ -80,9 +80,9 @@ export function RunsTable({ runs, onAction }: RunsTableProps) {
                 <td className="px-4 py-3">
                   <Link
                     to={`/runs/${run.id}`}
-                    className="font-mono text-xs text-accent hover:text-accent-hover transition-colors"
+                    className="text-xs text-accent hover:text-accent-hover transition-colors"
                   >
-                    {run.linearIssueId}
+                    {run.linearIssueTitle || run.linearIssueId.slice(0, 8)}
                   </Link>
                 </td>
                 <td className="px-4 py-3 text-text-secondary font-mono text-xs">

@@ -44,6 +44,8 @@ enum ArtifactType {
 model AiRun {
   id                     String       @id @default(uuid())
   linearIssueId          String
+  linearIssueTitle       String?
+  linearIssueUrl         String?
   repo                   String
   branchName             String?
   prNumber               Int?

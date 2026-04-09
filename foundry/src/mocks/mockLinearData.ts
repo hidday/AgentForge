@@ -24,6 +24,7 @@ export const MOCK_ISSUE: LinearIssue = {
   state: "Todo",
   labels: ["bug", "api", "validation"],
   priority: 2,
+  url: "https://linear.app/mock-team/issue/LIN-1042",
   project: "Backend Platform",
   cycle: "Sprint 23",
 };

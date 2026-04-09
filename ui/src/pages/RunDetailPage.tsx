@@ -77,9 +77,20 @@ export function RunDetailPage() {
 
             <div className="flex items-center gap-2">
               <span className="text-xs text-text-muted">Issue:</span>
-              <span className="font-mono text-xs text-accent">
-                {run.linearIssueId}
+              <span className="text-xs text-accent font-medium">
+                {run.linearIssueTitle || run.linearIssueId.slice(0, 8)}
               </span>
+              {run.linearIssueUrl && (
+                <a
+                  href={run.linearIssueUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs text-accent hover:text-accent-hover hover:bg-surface-hover transition-colors"
+                  title="View in Linear"
+                >
+                  <ExternalLink size={12} />
+                </a>
+              )}
             </div>
 
             <div className="flex items-center gap-2">
