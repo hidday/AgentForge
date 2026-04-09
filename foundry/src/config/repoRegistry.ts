@@ -35,6 +35,7 @@ export type ReposConfig = z.infer<typeof ReposConfigSchema>;
 export class RepoRegistry {
   private readonly entries: Map<string, RepoEntry>;
   private readonly projectMap: Map<string, RepoEntry>;
+  private readonly teamMap: Map<string, RepoEntry>;
   private readonly defaultEntry: RepoEntry;
 
   constructor(
@@ -47,6 +48,12 @@ export class RepoRegistry {
       config.repos
         .filter((r): r is RepoEntry & { linearProject: string } => r.linearProject != null)
         .map((r) => [r.linearProject, r]),
+    );
+    // Index repos that use assigneeMe by their linearTeam key for routing
+    this.teamMap = new Map(
+      config.repos
+        .filter((r): r is RepoEntry & { linearTeam: string } => r.linearTeam != null)
+        .map((r) => [r.linearTeam, r]),
     );
 
     const defaultEntry = this.entries.get(config.defaultRepo);
@@ -70,13 +77,27 @@ export class RepoRegistry {
     return this.defaultEntry;
   }
 
-  resolveForIssue(project?: string): RepoEntry {
+  resolveForIssue(project?: string, team?: string): RepoEntry {
+    // 1. Try exact project name match first
     if (project) {
       const entry = this.projectMap.get(project);
       if (entry) {
         this.logger.debug({ project, repo: entry.name }, "Resolved repo from Linear project");
         return entry;
       }
+    }
+
+    // 2. Try team-based routing (used by repos configured with assigneeMe + linearTeam)
+    if (team) {
+      const entry = this.teamMap.get(team);
+      if (entry) {
+        this.logger.debug({ team, repo: entry.name }, "Resolved repo from Linear team");
+        return entry;
+      }
+    }
+
+    // 3. If project was provided but unmatched and no team fallback, throw to surface misconfiguration
+    if (project && !team) {
       const configured = [...this.projectMap.keys()];
       throw new Error(
         `No repo mapped to Linear project "${project}". ` +
@@ -87,7 +108,7 @@ export class RepoRegistry {
 
     this.logger.debug(
       { fallback: this.defaultEntry.name },
-      "Issue has no Linear project, using default repo",
+      "Issue has no Linear project or team match, using default repo",
     );
     return this.defaultEntry;
   }

@@ -22,6 +22,7 @@ export class RealLinearClient implements LinearClient {
     const state = await issue.state;
     const project = await issue.project;
     const cycle = await issue.cycle;
+    const team = await issue.team;
 
     return {
       id: issue.id,
@@ -31,6 +32,7 @@ export class RealLinearClient implements LinearClient {
       labels,
       priority: issue.priority,
       project: project?.name ?? undefined,
+      team: team?.key ?? undefined,
       cycle: cycle?.name ?? undefined,
     };
   }
@@ -64,6 +66,8 @@ export class RealLinearClient implements LinearClient {
       const project = await issue.project;
       const cycle = await issue.cycle;
 
+      const team = await issue.team;
+
       results.push({
         id: issue.id,
         title: issue.title,
@@ -72,6 +76,7 @@ export class RealLinearClient implements LinearClient {
         labels,
         priority: issue.priority,
         project: project?.name ?? undefined,
+        team: team?.key ?? undefined,
         cycle: cycle?.name ?? undefined,
       });
     }

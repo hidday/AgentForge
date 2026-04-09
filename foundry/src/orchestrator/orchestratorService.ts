@@ -185,7 +185,7 @@ export class OrchestratorService {
 
     const issue = await this.linearClient.getIssue(issueId);
 
-    const repoEntry = this.repoRegistry.resolveForIssue(issue.project);
+    const repoEntry = this.repoRegistry.resolveForIssue(issue.project, issue.team);
     const workingDirectory = this.repoRegistry.resolveWorkingDirectory(repoEntry);
     this.repoRegistry.validateWorkingDirectory(workingDirectory);
 
