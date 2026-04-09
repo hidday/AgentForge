@@ -344,6 +344,23 @@ echo '<json line>' >> .prompts/research-log.jsonl
 
 Or write the full file if creating for the first time.
 
+### Committing the Log Back to the Repo
+
+**This step is mandatory.** After writing all entries, commit and push the updated log so the next scheduled run can read it:
+
+```bash
+git add .prompts/research-log.jsonl
+git commit -m "chore(research-log): update from scheduled run <today's date>"
+git push
+```
+
+If the push fails due to a conflict (another run pushed first), pull and rebase before pushing:
+```bash
+git pull --rebase && git push
+```
+
+**Without this step, the deduplication memory is lost and every run will re-review the same sources.**
+
 ---
 
 ## Phase 6: Output Summary
