@@ -201,17 +201,20 @@ For each selected enhancement, write a 2-3 paragraph rationale explaining:
 
 ### Pre-Requisites
 
-Before creating issues, you must discover the team and project IDs:
+Before creating issues, you must discover the team and project IDs using the correct MCP server:
 
-1. Call `list_teams` on the `plugin-linear-linear` MCP server to get available teams
-2. Call `list_projects` on the `plugin-linear-linear` MCP server to find the AgentForge project
+- **AgentForge / Hidday workspace** — use the `user-hidday-linear` MCP server (private workspace).
+- **Prysmic workspace** — use the `plugin-linear-linear` MCP server (OAuth-routed to Prysmic).
+
+1. Call `list_teams` on the appropriate MCP server to get available teams
+2. Call `list_projects` on the same server to find the target project
 3. Use these IDs when creating issues
 
-If the Linear MCP server requires authentication, call `mcp_auth` on `plugin-linear-linear` first.
+If the Linear MCP server requires authentication, call `mcp_auth` on that server first (e.g. `plugin-linear-linear` for Prysmic).
 
 ### Issue Format
 
-Each issue MUST follow the AgentForge structured issue format exactly. Use the `save_issue` tool on the `plugin-linear-linear` MCP server.
+Each issue MUST follow the AgentForge structured issue format exactly. Use the `save_issue` tool on the appropriate MCP server (`user-hidday-linear` for AgentForge/Hidday, `plugin-linear-linear` for Prysmic).
 
 #### Title Convention
 
@@ -276,7 +279,7 @@ Apply appropriate labels:
 
 ### Creating Each Issue
 
-For each of the 3 enhancements, call the `save_issue` tool on `plugin-linear-linear` with:
+For each of the 3 enhancements, call the `save_issue` tool on the appropriate MCP server (see Pre-Requisites) with:
 
 ```json
 {
@@ -289,7 +292,7 @@ For each of the 3 enhancements, call the `save_issue` tool on `plugin-linear-lin
 ```
 
 Important MCP notes:
-- The tool is `save_issue` on server `plugin-linear-linear`
+- The tool is `save_issue` on the correct Linear MCP server (`user-hidday-linear` for AgentForge/Hidday, `plugin-linear-linear` for Prysmic)
 - When passing the description, use real newlines in the markdown content, NOT escaped `\n` characters
 - The `team` parameter accepts team name, key, or UUID
 - The `project` parameter accepts project name, ID, or slug
