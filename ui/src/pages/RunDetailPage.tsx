@@ -85,10 +85,11 @@ export function RunDetailPage() {
                   href={run.linearIssueUrl}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs text-accent hover:text-accent-hover hover:bg-surface-hover transition-colors"
-                  title="View in Linear"
+                  className="inline-flex items-center gap-1 rounded border border-border px-2 py-0.5 text-xs text-accent hover:text-accent-hover hover:bg-surface-hover transition-colors"
+                  title="Open in Linear"
                 >
                   <ExternalLink size={12} />
+                  Linear
                 </a>
               )}
             </div>

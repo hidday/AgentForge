@@ -9,6 +9,7 @@ import {
   CheckCircle2,
   XCircle,
   ChevronRight,
+  ExternalLink,
 } from "lucide-react";
 import { api } from "@/api/client.ts";
 
@@ -78,12 +79,26 @@ export function RunsTable({ runs, onAction }: RunsTableProps) {
                   <StateBadge state={run.state} />
                 </td>
                 <td className="px-4 py-3">
-                  <Link
-                    to={`/runs/${run.id}`}
-                    className="text-xs text-accent hover:text-accent-hover transition-colors"
-                  >
-                    {run.linearIssueTitle || run.linearIssueId.slice(0, 8)}
-                  </Link>
+                  <div className="flex items-center gap-1.5">
+                    <Link
+                      to={`/runs/${run.id}`}
+                      className="text-xs text-accent hover:text-accent-hover transition-colors truncate max-w-[280px]"
+                    >
+                      {run.linearIssueTitle || run.linearIssueId.slice(0, 8)}
+                    </Link>
+                    {run.linearIssueUrl && (
+                      <a
+                        href={run.linearIssueUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        onClick={(e) => e.stopPropagation()}
+                        className="shrink-0 rounded p-0.5 text-text-muted hover:text-accent hover:bg-surface-hover transition-colors"
+                        title="Open in Linear"
+                      >
+                        <ExternalLink size={12} />
+                      </a>
+                    )}
+                  </div>
                 </td>
                 <td className="px-4 py-3 text-text-secondary font-mono text-xs">
                   {run.repo}
