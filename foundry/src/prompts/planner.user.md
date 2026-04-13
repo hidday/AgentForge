@@ -39,6 +39,7 @@ Create an implementation plan for the following issue.
 5. Break the implementation into clear steps
 6. Define a test plan
 7. Provide a confidence score
+8. Write a requirements traceability paragraph correlating the issue requirements with your plan steps
 
 Do NOT write any code. Produce only a plan.
 

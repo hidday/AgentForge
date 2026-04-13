@@ -1,5 +1,5 @@
 import { cn } from "@/lib/utils.ts";
-import { AlertTriangle, HelpCircle, ListChecks } from "lucide-react";
+import { AlertTriangle, HelpCircle, ListChecks, GitCompareArrows } from "lucide-react";
 
 interface PlanViewProps {
   plan: Record<string, unknown>;
@@ -20,6 +20,7 @@ export function PlanView({ plan }: PlanViewProps) {
   }>;
   const confidence = plan.confidence as number | undefined;
   const summary = plan.summary as string | undefined;
+  const requirementsTraceability = plan.requirementsTraceability as string | undefined;
   const version = plan.planVersion as number | undefined;
 
   return (
@@ -58,6 +59,19 @@ export function PlanView({ plan }: PlanViewProps) {
       {/* Summary */}
       {summary && (
         <p className="text-sm text-text-secondary leading-relaxed">{summary}</p>
+      )}
+
+      {/* Requirements Traceability */}
+      {requirementsTraceability && (
+        <div>
+          <div className="flex items-center gap-1.5 mb-1.5">
+            <GitCompareArrows size={14} className="text-accent" />
+            <h4 className="text-sm font-medium">Requirements Traceability</h4>
+          </div>
+          <p className="text-xs text-text-secondary leading-relaxed whitespace-pre-line">
+            {requirementsTraceability}
+          </p>
+        </div>
       )}
 
       {/* Steps */}

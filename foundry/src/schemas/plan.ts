@@ -37,6 +37,7 @@ const FlexString = z.union([
 export const PlanSchema = z.object({
   planVersion: z.number().int().positive(),
   summary: z.string(),
+  requirementsTraceability: z.string(),
   assumptions: z.array(FlexString),
   openQuestions: z.array(OpenQuestionSchema),
   risks: z.array(FlexString),
