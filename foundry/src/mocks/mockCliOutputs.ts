@@ -20,6 +20,8 @@ const MOCK_PLANNER_OUTPUT = wrap({
     planVersion: 1,
     summary:
       "Add Zod-based request validation middleware to all API endpoints, returning structured 400 errors on invalid input.",
+    requirementsTraceability:
+      "The issue requires Zod-based validation on all POST/PUT endpoints with structured 400 errors, plus query parameter validation on GET endpoints. Steps s1-s2 create the validation middleware and define the schemas. Step s3 wires validation into POST/PUT routes, and s4 extends it to GET query params. Step s5 covers test coverage, which is implied by the 'no existing tests break' acceptance criterion but expanded to include edge cases.",
     assumptions: [
       "The project uses Fastify with TypeScript",
       "Zod is already a project dependency or can be added",
@@ -133,6 +135,8 @@ const MOCK_PLAN_REVISER_OUTPUT = wrap({
       planVersion: 2,
       summary:
         "Add Zod-based request validation middleware to all API endpoints, returning structured 400 errors on invalid input. Includes explicit handling for malformed JSON bodies.",
+      requirementsTraceability:
+        "The issue requires Zod-based validation on all POST/PUT endpoints with structured 400 errors, plus query parameter validation on GET endpoints. Steps s1-s2 address malformed JSON handling and create the validation layer. Steps s3-s4 wire validation into routes for both body and query params. Step s5 extends query param validation to list endpoints. Step s6 covers comprehensive testing including malformed JSON edge cases, going beyond the original requirements to prevent regressions.",
       assumptions: [
         "The project uses Fastify with TypeScript",
         "Zod is already a project dependency or can be added",
