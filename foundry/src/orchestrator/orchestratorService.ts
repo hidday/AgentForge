@@ -109,6 +109,10 @@ export class OrchestratorService {
     return this.eventRepo;
   }
 
+  getLinearClient(): LinearClient {
+    return this.linearClient;
+  }
+
   async handleLinearWebhook(payload: WebhookPayload): Promise<void> {
     this.logger.info(
       { action: payload.action, issueId: payload.issueId },

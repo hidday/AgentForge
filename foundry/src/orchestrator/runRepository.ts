@@ -94,11 +94,20 @@ export class RunRepository {
     return toDomain(row);
   }
 
+  async findMissingTitles(): Promise<Run[]> {
+    const rows = await this.prisma.aiRun.findMany({
+      where: { linearIssueTitle: null },
+    });
+    return rows.map(toDomain);
+  }
+
   async update(
     id: string,
     data: Partial<
       Pick<
         Run,
+        | "linearIssueTitle"
+        | "linearIssueUrl"
         | "branchName"
         | "prNumber"
         | "planVersion"

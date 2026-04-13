@@ -322,6 +322,35 @@ async function main(): Promise<void> {
   await app.listen({ port: env.PORT, host: "0.0.0.0" });
   app.log.info(`Server running on port ${env.PORT} in ${env.AGENT_RUNTIME_MODE} mode`);
 
+  // Backfill runs that are missing Linear issue titles
+  {
+    const runRepo = orchestrator.getRunRepo();
+    const linearClient = orchestrator.getLinearClient();
+    const runsWithoutTitle = await runRepo.findMissingTitles();
+    if (runsWithoutTitle.length > 0) {
+      app.log.info({ count: runsWithoutTitle.length }, "Backfilling missing Linear issue titles");
+      for (const run of runsWithoutTitle) {
+        try {
+          const issue = await linearClient.getIssue(run.linearIssueId);
+          await runRepo.update(run.id, {
+            linearIssueTitle: issue.title,
+            linearIssueUrl: issue.url ?? null,
+          });
+          app.log.info({ runId: run.id, title: issue.title }, "Backfilled issue title");
+        } catch (err) {
+          app.log.warn(
+            {
+              runId: run.id,
+              linearIssueId: run.linearIssueId,
+              error: err instanceof Error ? err.message : String(err),
+            },
+            "Failed to backfill issue title (issue may have been deleted)",
+          );
+        }
+      }
+    }
+  }
+
   if (linearPollService && env.SYNC_ON_STARTUP) {
     try {
       const pending = await linearPollService.discoverPendingIssues();
