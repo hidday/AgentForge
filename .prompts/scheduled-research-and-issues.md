@@ -203,7 +203,7 @@ For each selected enhancement, write a 2-3 paragraph rationale explaining:
 
 Before creating issues, you must discover the team and project IDs using the correct MCP server:
 
-- **AgentForge / Hidday workspace** — use the `user-hidday-linear` MCP server (private workspace).
+- **AgentForge / Hidday workspace** — use the `hidday-linear` MCP server (private workspace).
 - **Prysmic workspace** — use the `plugin-linear-linear` MCP server (OAuth-routed to Prysmic).
 
 1. Call `list_teams` on the appropriate MCP server to get available teams
