@@ -599,7 +599,11 @@ export class OrchestratorService {
 
     if (run.branchName) {
       await this.gitService.assertBranch(run.workingDirectory, run.branchName);
-      await this.gitService.push(run.workingDirectory, run.branchName);
+      await this.gitService.commitAndPush(
+        run.workingDirectory,
+        run.branchName,
+        `[AI] WIP: checkpoint before executor run`,
+      );
     }
 
     const issue = await this.linearClient.getIssue(run.linearIssueId);
