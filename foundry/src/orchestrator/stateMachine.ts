@@ -30,6 +30,7 @@ function buildTransitionTable(): TransitionTable {
   // Human approval
   add(RunState.AwaitingPlanApproval, RunEvent.PLAN_APPROVED, RunState.Implementing);
   add(RunState.AwaitingPlanApproval, RunEvent.PLAN_REJECTED, RunState.Planning);
+  add(RunState.AwaitingPlanApproval, RunEvent.RE_REVIEW_REQUESTED, RunState.PlanReview);
 
   // Execution
   add(RunState.Implementing, RunEvent.EXECUTION_STARTED, RunState.Implementing);

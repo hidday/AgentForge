@@ -304,10 +304,24 @@ export class OrchestratorService {
     const rejectionArtifact = await this.artifactRepo.findLatestByType(runId, "RejectionContext");
     const rejectionContext = rejectionArtifact?.payloadJson as RejectionContextPayload | undefined;
 
+    const previousPlanArtifact = await this.artifactRepo.findLatestByType(runId, "Plan");
+    const previousPlan = previousPlanArtifact?.payloadJson as Plan | undefined;
+
+    const humanAnswersArtifact = await this.artifactRepo.findLatestByType(runId, "HumanAnswers");
+    const humanAnswersPayload = humanAnswersArtifact?.payloadJson as
+      | { answers: HumanAnswer[] }
+      | undefined;
+
+    const planReviewArtifact = await this.artifactRepo.findLatestByType(runId, "PlanReview");
+    const planReview = planReviewArtifact?.payloadJson as
+      | { summary: string; findings: { id: string; severity: string; title: string; details: string }[] }
+      | undefined;
+
     const nextPlanVersion = run.planVersion + 1;
 
     const plan = await this.plannerAgent.run(bundle, run.id, {
       planVersionOverride: nextPlanVersion,
+      ...(previousPlan ? { previousPlan } : {}),
       ...(rejectionContext
         ? {
             humanFeedback: {
@@ -315,6 +329,12 @@ export class OrchestratorService {
               feedback: rejectionContext.feedback,
             },
           }
+        : {}),
+      ...(humanAnswersPayload?.answers?.length
+        ? { humanAnswers: humanAnswersPayload.answers }
+        : {}),
+      ...(planReview
+        ? { planReviewFindings: { summary: planReview.summary, findings: planReview.findings } }
         : {}),
     });
 
@@ -579,6 +599,7 @@ export class OrchestratorService {
 
     if (run.branchName) {
       await this.gitService.assertBranch(run.workingDirectory, run.branchName);
+      await this.gitService.push(run.workingDirectory, run.branchName);
     }
 
     const issue = await this.linearClient.getIssue(run.linearIssueId);
@@ -625,18 +646,20 @@ export class OrchestratorService {
     runId: string,
     context?: string,
     source: "api" | "linear" = "api",
+    mode: "iterate" | "fresh" = "iterate",
   ): Promise<Run> {
     let run = await this.requireRun(runId);
     run = await this.transitionAndRecord(run, RunEvent.PLAN_REJECTED, "human", {
       ...(context ? { feedback: context } : {}),
+      mode,
     });
 
-    // s5a: Persist RejectionContext artifact when feedback is provided
     if (context && context.trim().length > 0) {
       const rejectionPayload: RejectionContextPayload = {
         planVersion: run.planVersion,
         feedback: context,
         source,
+        mode,
       };
       await this.artifactRepo.create({
         runId: run.id,
@@ -647,21 +670,15 @@ export class OrchestratorService {
       });
     }
 
-    // s5b: Post Linear comment with feedback if provided
     const comment =
       context && context.trim().length > 0
-        ? `Plan rejected with feedback: ${context}\nReplanning...`
-        : "Plan rejected. Replanning...";
+        ? `Plan rejected (${mode}) with feedback: ${context}\nReplanning...`
+        : `Plan rejected (${mode}). Replanning...`;
     await this.linearClient.postComment(run.linearIssueId, comment);
-
-    // s5c: Trigger replanning, injecting humanFeedback from RejectionContext artifact if present
-    const rejectionArtifact = await this.artifactRepo.findLatestByType(runId, "RejectionContext");
-    const rejectionContext = rejectionArtifact?.payloadJson as RejectionContextPayload | undefined;
 
     const issue = await this.linearClient.getIssue(run.linearIssueId);
     const bundle = await this.buildTaskBundle(issue, run);
 
-    // Persist TaskBundle for re-use (mirrors the clarification flow)
     const existingBundle = await this.artifactRepo.findLatestByType(runId, "TaskBundle");
     if (!existingBundle) {
       await this.artifactRepo.create({
@@ -675,8 +692,15 @@ export class OrchestratorService {
 
     const nextPlanVersion = run.planVersion + 1;
 
+    // In "iterate" mode, load full prior context; in "fresh" mode, only pass feedback
+    const iterateContext = mode === "iterate" ? await this.loadReplanContext(runId) : null;
+
+    const rejectionArtifact = await this.artifactRepo.findLatestByType(runId, "RejectionContext");
+    const rejectionContext = rejectionArtifact?.payloadJson as RejectionContextPayload | undefined;
+
     const newPlan = await this.plannerAgent.run(bundle, run.id, {
       planVersionOverride: nextPlanVersion,
+      ...(iterateContext?.previousPlan ? { previousPlan: iterateContext.previousPlan } : {}),
       ...(rejectionContext
         ? {
             humanFeedback: {
@@ -684,6 +708,12 @@ export class OrchestratorService {
               feedback: rejectionContext.feedback,
             },
           }
+        : {}),
+      ...(iterateContext?.humanAnswers?.length
+        ? { humanAnswers: iterateContext.humanAnswers }
+        : {}),
+      ...(iterateContext?.planReviewFindings
+        ? { planReviewFindings: iterateContext.planReviewFindings }
         : {}),
     });
 
@@ -997,6 +1027,54 @@ export class OrchestratorService {
     return run;
   }
 
+  async runManualReReview(runId: string): Promise<Run> {
+    const timer = startTimer();
+    let run = await this.requireRun(runId);
+
+    run = await this.transitionAndRecord(run, RunEvent.RE_REVIEW_REQUESTED, "human");
+
+    const planArtifact = await this.artifactRepo.findLatestByType(runId, "Plan");
+    if (!planArtifact) {
+      throw new Error(`No plan artifact found for run ${runId}`);
+    }
+    const plan = planArtifact.payloadJson as Plan;
+
+    const issue = await this.linearClient.getIssue(run.linearIssueId);
+    const bundle = await this.buildTaskBundle(issue, run);
+
+    const planReview = await this.planReviewerAgent.run(plan, bundle, runId);
+
+    // Always return to AwaitingPlanApproval so the human retains control
+    if (planReview.overallVerdict === "approved") {
+      run = await this.transitionAndRecord(
+        run,
+        RunEvent.PLAN_REVIEW_APPROVED,
+        "plan-reviewer-agent",
+      );
+    } else {
+      // Even when changes are requested, go back to AwaitingPlanApproval
+      // instead of auto-chaining into PlanRevision
+      run = await this.transitionAndRecord(
+        run,
+        RunEvent.PLAN_REVIEW_APPROVED,
+        "plan-reviewer-agent",
+      );
+    }
+
+    this.logger.info(
+      {
+        runId,
+        state: run.state,
+        verdict: planReview.overallVerdict,
+        findings: planReview.findings.length,
+        durationMs: timer.elapsed(),
+      },
+      "Manual re-review complete, returning to human approval",
+    );
+
+    return run;
+  }
+
   async approveHumanReview(runId: string): Promise<Run> {
     let run = await this.requireRun(runId);
     run = await this.transitionAndRecord(run, RunEvent.HUMAN_APPROVED, "human");
@@ -1008,6 +1086,33 @@ export class OrchestratorService {
 
     this.logger.info({ runId, state: run.state }, "Human review approved, run complete");
     return run;
+  }
+
+  private async loadReplanContext(runId: string): Promise<{
+    previousPlan?: Plan;
+    humanAnswers?: HumanAnswer[];
+    planReviewFindings?: { summary: string; findings: { id: string; severity: string; title: string; details: string }[] };
+  }> {
+    const planArtifact = await this.artifactRepo.findLatestByType(runId, "Plan");
+    const previousPlan = planArtifact?.payloadJson as Plan | undefined;
+
+    const humanAnswersArtifact = await this.artifactRepo.findLatestByType(runId, "HumanAnswers");
+    const humanAnswersPayload = humanAnswersArtifact?.payloadJson as
+      | { answers: HumanAnswer[] }
+      | undefined;
+
+    const planReviewArtifact = await this.artifactRepo.findLatestByType(runId, "PlanReview");
+    const planReview = planReviewArtifact?.payloadJson as
+      | { summary: string; findings: { id: string; severity: string; title: string; details: string }[] }
+      | undefined;
+
+    return {
+      previousPlan,
+      humanAnswers: humanAnswersPayload?.answers,
+      planReviewFindings: planReview
+        ? { summary: planReview.summary, findings: planReview.findings }
+        : undefined,
+    };
   }
 
   private async transitionAndRecord(

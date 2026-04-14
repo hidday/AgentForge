@@ -80,9 +80,8 @@ export function registerApiRoutes(
   app.post<{ Params: { id: string } }>(
     "/api/runs/:id/actions/reject-plan",
     async (request, reply) => {
-      const body = request.body as { context?: unknown } | undefined;
+      const body = request.body as { context?: unknown; mode?: unknown } | undefined;
 
-      // Validate context if provided
       if (body !== undefined && body !== null && "context" in (body as object)) {
         if (
           typeof (body as { context?: unknown }).context !== "string" &&
@@ -92,14 +91,37 @@ export function registerApiRoutes(
         }
       }
 
+      const validModes = ["iterate", "fresh"] as const;
+      const rawMode = (body as { mode?: unknown } | undefined)?.mode;
+      if (rawMode !== undefined && !validModes.includes(rawMode as (typeof validModes)[number])) {
+        return reply.code(400).send({ error: `mode must be one of: ${validModes.join(", ")}` });
+      }
+      const mode = (rawMode as "iterate" | "fresh" | undefined) ?? "iterate";
+
       const context =
         typeof (body as { context?: unknown } | undefined)?.context === "string"
           ? (body as { context: string }).context || undefined
           : undefined;
 
       try {
-        const run = await orchestrator.rejectPlan(request.params.id, context, "api");
+        const run = await orchestrator.rejectPlan(request.params.id, context, "api", mode);
         return { ok: true, state: run.state };
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        return reply.code(400).send({ error: message });
+      }
+    },
+  );
+
+  app.post<{ Params: { id: string } }>(
+    "/api/runs/:id/actions/re-review-plan",
+    async (request, reply) => {
+      try {
+        orchestrator.runManualReReview(request.params.id).catch((err: unknown) => {
+          const msg = err instanceof Error ? err.message.slice(0, 200) : String(err);
+          app.log.error({ runId: request.params.id, error: msg }, "Manual re-review failed");
+        });
+        return { ok: true, runId: request.params.id };
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         return reply.code(400).send({ error: message });

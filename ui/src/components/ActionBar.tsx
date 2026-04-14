@@ -9,6 +9,7 @@ import {
   Play,
   RotateCcw,
   MessageSquare,
+  RefreshCw,
 } from "lucide-react";
 
 const RETRY_LABELS: Record<string, string> = {
@@ -48,6 +49,8 @@ export function ActionBar({
   const [loading, setLoading] = useState(false);
   const [rejectContext, setRejectContext] = useState("");
   const [showRejectDialog, setShowRejectDialog] = useState(false);
+  const [rejectMode, setRejectMode] = useState<"iterate" | "fresh">("iterate");
+  const [reReviewLoading, setReReviewLoading] = useState(false);
 
   const category = getStateCategory(state);
 
@@ -68,7 +71,7 @@ export function ActionBar({
   async function handleRejectConfirm() {
     setLoading(true);
     try {
-      await api.rejectPlan(runId, rejectContext.trim() || undefined);
+      await api.rejectPlan(runId, rejectContext.trim() || undefined, rejectMode);
       onAction();
     } catch {
       // handled by client
@@ -76,12 +79,26 @@ export function ActionBar({
       setLoading(false);
       setShowRejectDialog(false);
       setRejectContext("");
+      setRejectMode("iterate");
     }
   }
 
   function handleRejectCancel() {
     setShowRejectDialog(false);
     setRejectContext("");
+    setRejectMode("iterate");
+  }
+
+  async function handleReReview() {
+    setReReviewLoading(true);
+    try {
+      await api.reReviewPlan(runId);
+      onAction();
+    } catch {
+      // handled by client
+    } finally {
+      setReReviewLoading(false);
+    }
   }
 
   const actions: Array<{
@@ -177,8 +194,9 @@ export function ActionBar({
   // Direct-action buttons (no confirmation dialog)
   const showAnswerQuestionsBtn = state === "HumanClarificationNeeded";
   const showAnswerOptionalBtn = state === "AwaitingPlanApproval" && hasOptionalQuestions;
+  const showReReviewBtn = state === "AwaitingPlanApproval";
 
-  if (visibleActions.length === 0 && !showAnswerQuestionsBtn && !showAnswerOptionalBtn) {
+  if (visibleActions.length === 0 && !showAnswerQuestionsBtn && !showAnswerOptionalBtn && !showReReviewBtn) {
     return null;
   }
 
@@ -205,6 +223,18 @@ export function ActionBar({
             >
               <MessageSquare size={14} />
               Answer Optional Questions
+            </button>
+          )}
+
+          {showReReviewBtn && (
+            <button
+              key="re-review-plan"
+              onClick={handleReReview}
+              disabled={reReviewLoading}
+              className="flex items-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-sm font-medium text-text-secondary transition-colors hover:bg-surface-hover disabled:opacity-50"
+            >
+              <RefreshCw size={14} className={reReviewLoading ? "animate-spin" : ""} />
+              {reReviewLoading ? "Re-reviewing..." : "Re-review Plan"}
             </button>
           )}
 
@@ -252,6 +282,32 @@ export function ActionBar({
             <p className="text-sm text-text-secondary mb-3">
               This will reject the current plan and send it back for re-planning.
             </p>
+            <div className="flex gap-1 p-0.5 bg-surface-hover rounded-lg mb-3">
+              <button
+                type="button"
+                onClick={() => setRejectMode("iterate")}
+                className={`flex-1 px-2 py-1.5 text-xs font-medium rounded-md transition-colors ${
+                  rejectMode === "iterate"
+                    ? "bg-accent text-white"
+                    : "text-text-secondary hover:text-text-primary"
+                }`}
+              >
+                <div>Revise plan</div>
+                <div className="font-normal mt-0.5 opacity-80">Iterate with full context</div>
+              </button>
+              <button
+                type="button"
+                onClick={() => setRejectMode("fresh")}
+                className={`flex-1 px-2 py-1.5 text-xs font-medium rounded-md transition-colors ${
+                  rejectMode === "fresh"
+                    ? "bg-accent text-white"
+                    : "text-text-secondary hover:text-text-primary"
+                }`}
+              >
+                <div>Start fresh</div>
+                <div className="font-normal mt-0.5 opacity-80">Clean slate, feedback only</div>
+              </button>
+            </div>
             <label className="block text-xs font-medium text-text-secondary mb-1">
               Feedback (optional)
             </label>

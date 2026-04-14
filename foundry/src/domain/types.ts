@@ -43,6 +43,7 @@ export interface RejectionContextPayload {
   planVersion: number;
   feedback: string;
   source: "api" | "linear";
+  mode: "iterate" | "fresh";
 }
 
 export interface HumanAnswer {

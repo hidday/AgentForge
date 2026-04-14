@@ -5,7 +5,7 @@ import { PlanView } from "./PlanView.tsx";
 import { ReviewView } from "./ReviewView.tsx";
 import { ExecutionReportView } from "./ExecutionReportView.tsx";
 
-type TabId = "plan" | "planReview" | "execution" | "review" | "remediation" | "rejectionFeedback";
+type TabId = "plan" | "planReview" | "planRevision" | "execution" | "review" | "remediation" | "rejectionFeedback";
 
 interface TabDef {
   id: TabId;
@@ -16,6 +16,7 @@ interface TabDef {
 const TABS: TabDef[] = [
   { id: "plan", label: "Plan", artifactType: "Plan" },
   { id: "planReview", label: "Plan Review", artifactType: "PlanReview" },
+  { id: "planRevision", label: "Plan Revision", artifactType: "PlanRevision" },
   { id: "execution", label: "Execution", artifactType: "ExecutionReport" },
   { id: "review", label: "Code Review", artifactType: "Review" },
   { id: "remediation", label: "Remediation", artifactType: "Remediation" },
@@ -109,12 +110,13 @@ function ArtifactContent({
     case "planReview":
     case "review":
       return <ReviewView review={payload} />;
+    case "planRevision":
+      return <PlanRevisionView revision={payload} />;
     case "execution":
       return <ExecutionReportView report={payload} />;
     case "remediation":
       return <RemediationView remediation={payload} />;
     case "rejectionFeedback":
-      // Handled separately via RejectionFeedbackView — should not reach here
       return null;
     default:
       return (
@@ -153,6 +155,68 @@ function RejectionFeedbackView({ artifacts }: { artifacts: Artifact[] }) {
           </div>
         );
       })}
+    </div>
+  );
+}
+
+function PlanRevisionView({
+  revision,
+}: {
+  revision: Record<string, unknown>;
+}) {
+  const dispositions = (revision.dispositions ?? []) as Array<{
+    findingId: string;
+    status: string;
+    rationale: string;
+  }>;
+
+  if (dispositions.length === 0) {
+    return (
+      <div className="text-center py-8 text-text-muted text-sm">
+        No dispositions recorded
+      </div>
+    );
+  }
+
+  const statusStyle = (status: string) => {
+    switch (status) {
+      case "accepted":
+        return "bg-state-done-bg text-state-done";
+      case "dismissed":
+        return "bg-state-blocked-bg text-state-blocked";
+      case "partially_incorporated":
+        return "bg-state-waiting-bg text-state-waiting";
+      default:
+        return "bg-surface-hover text-text-muted";
+    }
+  };
+
+  return (
+    <div className="space-y-4">
+      <h4 className="text-sm font-medium">Review Finding Dispositions</h4>
+      <div className="space-y-2">
+        {dispositions.map((d) => (
+          <div
+            key={d.findingId}
+            className="rounded border border-border-subtle p-2.5"
+          >
+            <div className="flex items-center gap-2 mb-1">
+              <span className="font-mono text-xs text-accent">
+                {d.findingId}
+              </span>
+              <span
+                className={cn(
+                  "text-[10px] px-1.5 py-0.5 rounded-full font-medium",
+                  statusStyle(d.status),
+                )}
+              >
+                {d.status.replace(/_/g, " ")}
+              </span>
+            </div>
+            <p className="text-xs text-text-secondary">{d.rationale}</p>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

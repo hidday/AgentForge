@@ -9,10 +9,19 @@ import type { HumanAnswer } from "../domain/types.js";
 import { loadPromptTemplate, renderTemplate } from "./promptRenderer.js";
 import { env } from "../config/env.js";
 
+export interface PlanReviewFindingSummary {
+  id: string;
+  severity: string;
+  title: string;
+  details: string;
+}
+
 export interface PlannerRunOptions {
   humanAnswers?: HumanAnswer[];
   planVersionOverride?: number;
   humanFeedback?: { planVersion: number; feedback: string };
+  planReviewFindings?: { summary: string; findings: PlanReviewFindingSummary[] };
+  previousPlan?: Plan;
 }
 
 export class PlannerAgent {
@@ -49,10 +58,58 @@ export class PlannerAgent {
         `Address this feedback directly in the new plan while preserving the valid parts of the previous approach.`;
     }
 
+    // Build the planReviewSection template variable
+    let planReviewSection = "";
+    if (options?.planReviewFindings) {
+      const { summary, findings } = options.planReviewFindings;
+      const findingLines = findings
+        .map((f) => `- **[${f.severity}] ${f.title}** (${f.id}): ${f.details}`)
+        .join("\n");
+      planReviewSection =
+        `## AI Plan Review Findings (from previous plan)\n` +
+        `**Review Summary:** ${summary}\n\n` +
+        `${findingLines}\n\n` +
+        `Incorporate these findings into the revised plan where appropriate.`;
+    }
+
+    // Build the previousPlanSection so the re-planner can see what was rejected
+    let previousPlanSection = "";
+    if (options?.previousPlan) {
+      const p = options.previousPlan;
+      const stepsText = p.steps
+        .map((s, i) => `${i + 1}. **${s.title}** (${s.id}): ${s.description}`)
+        .join("\n");
+      const risksText =
+        p.risks.length > 0 ? `\n**Risks:**\n${p.risks.map((r) => `- ${r}`).join("\n")}` : "";
+      const assumptionsText =
+        p.assumptions.length > 0
+          ? `\n**Assumptions:**\n${p.assumptions.map((a) => `- ${a}`).join("\n")}`
+          : "";
+      const questionLines = p.openQuestions
+        .map(
+          (q) =>
+            `- [${q.id}] ${q.question}${q.requiredForExecution ? " *(blocks execution)*" : ""}`,
+        )
+        .join("\n");
+      const questionsText =
+        p.openQuestions.length > 0 ? `\n**Open Questions:**\n${questionLines}` : "";
+
+      previousPlanSection =
+        `## Previously Rejected Plan (v${p.planVersion})\n` +
+        `**Summary:** ${p.summary}\n` +
+        `**Confidence:** ${(p.confidence * 100).toFixed(0)}%\n\n` +
+        `**Steps:**\n${stepsText}` +
+        `${assumptionsText}${risksText}${questionsText}\n\n` +
+        `**Test Plan:** ${p.testPlan}\n\n` +
+        `Use this as the starting point for the new plan. Preserve the parts that are still valid and address the issues raised in the rejection feedback and review findings.`;
+    }
+
     const userPrompt = renderTemplate(userTemplate, {
       ...taskBundle,
       humanAnswersSection,
       humanFeedbackSection,
+      planReviewSection,
+      previousPlanSection,
     } as Record<string, unknown>);
 
     const output = await this.agentRunner.run<PlannerOutput>(

@@ -10,7 +10,7 @@ const EnvSchema = z.object({
   CLAUDE_CODE_COMMAND: z.string().default("claude"),
   CLAUDE_CODE_ARGS_BASE: z.string().default("--print --output-format json"),
   CODEX_COMMAND: z.string().default("codex"),
-  CODEX_ARGS_BASE: z.string().default("--approval-mode full-auto -q"),
+  CODEX_ARGS_BASE: z.string().default("exec -"),
   CURSOR_COMMAND: z.string().default("agent"),
   CURSOR_ARGS_BASE: z.string().default("--print --output-format json --force --trust"),
   CURSOR_MODEL: z.string().default("claude-4.6-opus"),

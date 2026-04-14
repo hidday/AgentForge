@@ -97,12 +97,15 @@ export const api = {
       method: "POST",
     }),
 
-  rejectPlan: (runId: string, context?: string) =>
+  rejectPlan: (runId: string, context?: string, mode?: "iterate" | "fresh") =>
     request<{ ok: boolean; state: string }>(`/runs/${runId}/actions/reject-plan`, {
       method: "POST",
-      ...(context && context.trim().length > 0
-        ? { body: JSON.stringify({ context }) }
-        : {}),
+      body: JSON.stringify({ context: context || undefined, mode: mode ?? "iterate" }),
+    }),
+
+  reReviewPlan: (runId: string) =>
+    request<{ ok: boolean; runId: string }>(`/runs/${runId}/actions/re-review-plan`, {
+      method: "POST",
     }),
 
   approveReview: (runId: string) =>
