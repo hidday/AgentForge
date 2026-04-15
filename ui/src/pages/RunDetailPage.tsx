@@ -11,7 +11,7 @@ import { ActionBar } from "@/components/ActionBar.tsx";
 import { OpenQuestionsPanel } from "@/components/OpenQuestionsPanel.tsx";
 import type { OpenQuestion } from "@/components/OpenQuestionsPanel.tsx";
 import { formatTimestamp } from "@/lib/utils.ts";
-import { ArrowLeft, GitBranch, ExternalLink } from "lucide-react";
+import { ArrowLeft, GitBranch, ExternalLink, MonitorUp } from "lucide-react";
 
 export function RunDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -117,6 +117,17 @@ export function RunDetailPage() {
                   PR #{run.prNumber}
                 </span>
               </div>
+            )}
+
+            {run.branchName && run.workingDirectory && (
+              <a
+                href={`cursor://file${run.workingDirectory}`}
+                className="inline-flex items-center gap-1 rounded border border-border px-2 py-0.5 text-xs text-accent hover:text-accent-hover hover:bg-surface-hover transition-colors"
+                title="Open in Cursor"
+              >
+                <MonitorUp size={12} />
+                Cursor
+              </a>
             )}
 
             <StateBadge state={run.state} />
