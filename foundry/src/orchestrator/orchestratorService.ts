@@ -620,14 +620,6 @@ export class OrchestratorService {
       existingPR: run.prNumber,
     });
 
-    if (run.branchName) {
-      await this.gitService.commitAndPush(
-        run.workingDirectory,
-        run.branchName,
-        `[AI] Implement: ${bundle.issue.title}`,
-      );
-    }
-
     run = await this.runRepo.update(runId, {
       prNumber,
       executorRuntime: "claude-code",

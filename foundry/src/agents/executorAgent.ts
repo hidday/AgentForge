@@ -7,6 +7,7 @@ import { ExecutorOutputSchema, type ExecutorOutput } from "../schemas/cliProtoco
 import type { ExecutionReport } from "../schemas/executionReport.js";
 import { AGENT_STAGES } from "../domain/types.js";
 import type { GitHubClient } from "../github/githubClient.js";
+import type { GitService } from "../git/gitService.js";
 import { loadPromptTemplate, renderTemplate } from "./promptRenderer.js";
 import { env } from "../config/env.js";
 
@@ -20,6 +21,7 @@ export class ExecutorAgent {
     private readonly agentRunner: AgentRunner,
     private readonly artifactRepo: ArtifactRepository,
     private readonly githubClient: GitHubClient,
+    private readonly gitService: GitService,
     private readonly logger: Logger,
   ) {}
 
@@ -67,6 +69,12 @@ export class ExecutorAgent {
 
     const report = output.parsed.payload;
     const branchName = retry?.existingBranch ?? taskBundle.repo.workingBranch;
+
+    await this.gitService.commitAndPush(
+      taskBundle.repo.repoPath,
+      branchName,
+      `[AI] Implement: ${taskBundle.issue.title}`,
+    );
 
     let prNumber: number;
     if (retry?.existingPR) {

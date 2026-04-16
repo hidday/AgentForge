@@ -82,10 +82,12 @@ async function simulate(): Promise<void> {
     const agentRunner = new AgentRunner(claudeCodeRunner, codexRunner, cursorRunner, logger);
 
     const githubClient = new MockGitHubClient();
+    const gitService = new GitService(logger);
+
     const plannerAgent = new PlannerAgent(agentRunner, artifactRepo, logger);
     const planReviewerAgent = new PlanReviewerAgent(agentRunner, artifactRepo, logger);
     const planReviserAgent = new PlanReviserAgent(agentRunner, artifactRepo, logger);
-    const executorAgent = new ExecutorAgent(agentRunner, artifactRepo, githubClient, logger);
+    const executorAgent = new ExecutorAgent(agentRunner, artifactRepo, githubClient, gitService, logger);
     const reviewerAgent = new ReviewerAgent(agentRunner, artifactRepo, logger);
     const remediationAgent = new RemediationAgent(agentRunner, artifactRepo, logger);
 
@@ -95,7 +97,6 @@ async function simulate(): Promise<void> {
     const repoRegistry = loadRepoRegistry(env.REPOS_CONFIG_PATH, env.REPOS_ROOT_PATH, logger);
     const linearSync = new LinearSyncService(linearClient, logger);
     const githubSync = new GitHubSyncService(githubClient, logger);
-    const gitService = new GitService(logger);
 
     const orchestrator = new OrchestratorService({
       runRepo,

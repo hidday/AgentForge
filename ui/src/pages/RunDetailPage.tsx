@@ -111,12 +111,16 @@ export function RunDetailPage() {
             )}
 
             {run.prNumber && (
-              <div className="flex items-center gap-1.5">
-                <ExternalLink size={12} className="text-text-muted" />
-                <span className="font-mono text-xs text-accent">
-                  PR #{run.prNumber}
-                </span>
-              </div>
+              <a
+                href={`https://github.com/${run.repo}/pull/${run.prNumber}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 rounded border border-border px-2 py-0.5 text-xs text-accent hover:text-accent-hover hover:bg-surface-hover transition-colors"
+                title="Open PR on GitHub"
+              >
+                <ExternalLink size={12} />
+                PR #{run.prNumber}
+              </a>
             )}
 
             {run.branchName && run.workingDirectory && (
