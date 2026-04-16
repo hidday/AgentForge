@@ -205,6 +205,7 @@ export class OrchestratorService {
       workingDirectory,
       run.id,
       repoEntry.defaultBranch,
+      issue.branchName,
     );
 
     run = await this.runRepo.update(run.id, {
@@ -382,6 +383,8 @@ export class OrchestratorService {
 
     this.logger.info({ runId, state: run.state }, "Retrying run from Todo");
 
+    const issue = await this.linearClient.getIssue(run.linearIssueId);
+
     if (!run.branchName) {
       const repoEntry =
         this.repoRegistry.getRepoByName(run.repo) ?? this.repoRegistry.getDefaultRepo();
@@ -391,6 +394,7 @@ export class OrchestratorService {
         mainWorkingDir,
         run.id,
         repoEntry.defaultBranch,
+        issue.branchName,
       );
 
       run = await this.runRepo.update(run.id, {
@@ -400,8 +404,6 @@ export class OrchestratorService {
     }
 
     run = await this.transitionAndRecord(run, RunEvent.RUN_REQUESTED, "orchestrator");
-
-    const issue = await this.linearClient.getIssue(run.linearIssueId);
     const bundle = await this.buildTaskBundle(issue, run);
 
     const plan = await this.plannerAgent.run(bundle, run.id);
@@ -1167,6 +1169,7 @@ export class OrchestratorService {
       id: string;
       title: string;
       description: string;
+      branchName: string;
       labels: string[];
       priority: number;
       project?: string;
@@ -1207,7 +1210,7 @@ export class OrchestratorService {
       repo: {
         name: repoEntry.name,
         defaultBranch,
-        workingBranch: run.branchName ?? `ai/${issue.id.toLowerCase().replace(/[^a-z0-9]/g, "-")}`,
+        workingBranch: run.branchName ?? issue.branchName,
         repoPath: run.workingDirectory,
         allowedPaths: repoEntry.allowedPaths,
         protectedPaths: repoEntry.protectedPaths,

@@ -152,9 +152,9 @@ export class GitService {
     repoPath: string,
     runId: string,
     defaultBranch: string,
+    branchName: string,
   ): Promise<WorktreeSetupResult> {
     const shortId = runId.slice(0, 8);
-    const branchName = `ai/run-${shortId}`;
     const worktreePath = join(repoPath, WORKTREES_DIR, `run-${shortId}`);
     const startPoint = `origin/${defaultBranch}`;
 

@@ -143,6 +143,7 @@ function buildDeps(overrides: Record<string, unknown> = {}) {
       id: "LIN-1",
       title: "Test issue",
       description: "Test description",
+      branchName: "hidday/lin-1-test-issue",
       labels: [],
       priority: 0,
       project: "test-project",

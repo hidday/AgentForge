@@ -383,6 +383,7 @@ describe("OrchestratorService.answerQuestions", () => {
         id: "LIN-1",
         title: "Test",
         description: "Test",
+        branchName: "hidday/lin-1-test",
         labels: [],
         priority: 0,
         project: undefined,
@@ -472,7 +473,7 @@ describe("OrchestratorService.answerQuestions", () => {
         overallVerdict: "approved", summary: "OK", findings: [],
       });
       (deps as never as { linearClient: { getIssue: ReturnType<typeof vi.fn> } }).linearClient.getIssue.mockResolvedValue({
-        id: "LIN-1", title: "Test", description: "Test", labels: [], priority: 0,
+        id: "LIN-1", title: "Test", description: "Test", branchName: "hidday/lin-1-test", labels: [], priority: 0,
       });
       (deps as never as { repoRegistry: { getRepoByName: ReturnType<typeof vi.fn> } }).repoRegistry.getRepoByName.mockReturnValue(null);
       (deps as never as { repoRegistry: { getDefaultRepo: ReturnType<typeof vi.fn> } }).repoRegistry.getDefaultRepo.mockReturnValue({
@@ -562,7 +563,7 @@ describe("OrchestratorService.answerQuestions", () => {
       });
 
       (deps as never as { linearClient: { getIssue: ReturnType<typeof vi.fn> } }).linearClient.getIssue.mockResolvedValue({
-        id: "LIN-1", title: "Test", description: "Test", labels: [], priority: 0,
+        id: "LIN-1", title: "Test", description: "Test", branchName: "hidday/lin-1-test", labels: [], priority: 0,
       });
       (deps as never as { repoRegistry: { resolveForIssue: ReturnType<typeof vi.fn> } }).repoRegistry.resolveForIssue.mockReturnValue({
         name: "test-repo", defaultBranch: "main",

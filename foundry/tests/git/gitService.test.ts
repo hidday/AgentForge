@@ -125,14 +125,15 @@ describe("GitService", () => {
       git(["fetch", "origin"], repoPath);
 
       const runId = "abcdef12-3456-7890-abcd-ef1234567890";
-      const result = await svc.setupRunWorktree(repoPath, runId, "main");
+      const branchName = "hidday/pry-42-test-branch";
+      const result = await svc.setupRunWorktree(repoPath, runId, "main", branchName);
 
-      expect(result.branchName).toBe("ai/run-abcdef12");
+      expect(result.branchName).toBe(branchName);
       expect(result.worktreePath).toContain(".worktrees");
       expect(existsSync(result.worktreePath)).toBe(true);
 
       const branch = await svc.currentBranch(result.worktreePath);
-      expect(branch).toBe("ai/run-abcdef12");
+      expect(branch).toBe(branchName);
 
       // Clean up
       await svc.removeWorktree(repoPath, result.worktreePath);

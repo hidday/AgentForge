@@ -3,6 +3,7 @@ import type { LinearIssue } from "../linear/linearClient.js";
 export const MOCK_ISSUE: LinearIssue = {
   id: "LIN-1042",
   title: "Add request validation middleware to API endpoints",
+  branchName: "mock/lin-1042-add-request-validation-middleware",
   description: [
     "## Problem",
     "Our API endpoints lack consistent input validation. Several endpoints accept",

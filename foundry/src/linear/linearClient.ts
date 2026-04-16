@@ -2,6 +2,7 @@ export interface LinearIssue {
   id: string;
   title: string;
   description: string;
+  branchName: string;
   state: string;
   labels: string[];
   priority: number;
