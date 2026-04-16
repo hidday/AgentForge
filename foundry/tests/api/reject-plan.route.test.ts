@@ -87,6 +87,7 @@ describe("POST /api/runs/:id/actions/reject-plan", () => {
       "run-1",
       "Use OAuth2 not API keys",
       "api",
+      "iterate",
     );
   });
 
@@ -103,7 +104,7 @@ describe("POST /api/runs/:id/actions/reject-plan", () => {
     expect(response.statusCode).toBe(200);
     const body = JSON.parse(response.body) as { ok: boolean; state: string };
     expect(body.ok).toBe(true);
-    expect(mockOrchestrator.rejectPlan).toHaveBeenCalledWith("run-1", undefined, "api");
+    expect(mockOrchestrator.rejectPlan).toHaveBeenCalledWith("run-1", undefined, "api", "iterate");
   });
 
   it("returns 200 when context is empty string (treated as no context)", async () => {
@@ -119,7 +120,7 @@ describe("POST /api/runs/:id/actions/reject-plan", () => {
 
     expect(response.statusCode).toBe(200);
     // Empty string should resolve to undefined in the route
-    expect(mockOrchestrator.rejectPlan).toHaveBeenCalledWith("run-1", undefined, "api");
+    expect(mockOrchestrator.rejectPlan).toHaveBeenCalledWith("run-1", undefined, "api", "iterate");
   });
 
   it("returns 400 when context is not a string", async () => {

@@ -326,7 +326,7 @@ describe("OrchestratorService.rejectPlan", () => {
       );
       expect(commentCall).toBeDefined();
       expect(commentCall![1]).toContain("Use OAuth2 not API keys");
-      expect(commentCall![1]).toContain("Plan rejected with feedback:");
+      expect(commentCall![1]).toContain("Plan rejected (iterate) with feedback:");
     });
 
     it("posts generic 'Plan rejected. Replanning...' when context is absent", async () => {
@@ -338,10 +338,10 @@ describe("OrchestratorService.rejectPlan", () => {
       const commentCall = (linearClient.postComment as ReturnType<typeof vi.fn>).mock.calls.find(
         (call: unknown[]) =>
           typeof call[1] === "string" &&
-          (call[1] as string).includes("Plan rejected. Replanning"),
+          (call[1] as string).includes("Plan rejected"),
       );
       expect(commentCall).toBeDefined();
-      expect(commentCall![1]).toBe("Plan rejected. Replanning...");
+      expect(commentCall![1]).toBe("Plan rejected (iterate). Replanning...");
     });
   });
 
