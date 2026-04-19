@@ -1,5 +1,6 @@
 import { cn } from "@/lib/utils.ts";
 import { AlertTriangle, HelpCircle, ListChecks, GitCompareArrows } from "lucide-react";
+import { Markdown } from "./Markdown.tsx";
 
 interface PlanViewProps {
   plan: Record<string, unknown>;
@@ -58,7 +59,7 @@ export function PlanView({ plan }: PlanViewProps) {
 
       {/* Summary */}
       {summary && (
-        <p className="text-sm text-text-secondary leading-relaxed">{summary}</p>
+        <Markdown className="text-sm leading-relaxed">{summary}</Markdown>
       )}
 
       {/* Requirements Traceability */}
@@ -68,9 +69,9 @@ export function PlanView({ plan }: PlanViewProps) {
             <GitCompareArrows size={14} className="text-accent" />
             <h4 className="text-sm font-medium">Requirements Traceability</h4>
           </div>
-          <p className="text-xs text-text-secondary leading-relaxed whitespace-pre-line">
+          <Markdown className="text-xs leading-relaxed">
             {requirementsTraceability}
-          </p>
+          </Markdown>
         </div>
       )}
 
@@ -91,11 +92,11 @@ export function PlanView({ plan }: PlanViewProps) {
                   <span className="text-[10px] font-mono text-text-muted min-w-[1.5rem]">
                     {i + 1}.
                   </span>
-                  <div>
+                  <div className="min-w-0 flex-1">
                     <div className="text-xs font-medium">{step.title}</div>
-                    <div className="text-xs text-text-secondary mt-0.5">
+                    <Markdown className="text-xs mt-1">
                       {step.description}
-                    </div>
+                    </Markdown>
                   </div>
                 </div>
               </div>
@@ -110,9 +111,9 @@ export function PlanView({ plan }: PlanViewProps) {
           <h4 className="text-sm font-medium mb-1.5">Assumptions</h4>
           <ul className="space-y-1">
             {assumptions.map((a, i) => (
-              <li key={i} className="text-xs text-text-secondary flex gap-2">
-                <span className="text-text-muted">&#x2022;</span>
-                {a}
+              <li key={i} className="text-xs flex gap-2">
+                <span className="text-text-muted shrink-0">&#x2022;</span>
+                <Markdown className="text-xs min-w-0 flex-1">{a}</Markdown>
               </li>
             ))}
           </ul>
@@ -128,9 +129,9 @@ export function PlanView({ plan }: PlanViewProps) {
           </div>
           <ul className="space-y-1">
             {risks.map((r, i) => (
-              <li key={i} className="text-xs text-text-secondary flex gap-2">
-                <span className="text-state-blocked">&#x2022;</span>
-                {r}
+              <li key={i} className="text-xs flex gap-2">
+                <span className="text-state-blocked shrink-0">&#x2022;</span>
+                <Markdown className="text-xs min-w-0 flex-1">{r}</Markdown>
               </li>
             ))}
           </ul>
@@ -148,17 +149,17 @@ export function PlanView({ plan }: PlanViewProps) {
             {openQuestions.map((q) => (
               <div
                 key={q.id}
-                className="text-xs text-text-secondary flex items-start gap-2"
+                className="text-xs flex items-start gap-2"
               >
-                <span className="text-state-waiting mt-px">?</span>
-                <span>
-                  {q.question}
+                <span className="text-state-waiting mt-px shrink-0">?</span>
+                <div className="min-w-0 flex-1">
+                  <Markdown className="text-xs inline">{q.question}</Markdown>
                   {q.requiredForExecution && (
                     <span className="ml-1.5 text-[10px] text-state-blocked font-medium">
                       blocks execution
                     </span>
                   )}
-                </span>
+                </div>
               </div>
             ))}
           </div>
