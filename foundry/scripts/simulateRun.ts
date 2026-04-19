@@ -76,7 +76,7 @@ async function simulate(): Promise<void> {
       processRunner,
       "agent",
       parseBaseArgs("--print --output-format json --force --trust"),
-      "claude-4.6-opus",
+      "claude-4.7-opus",
       logger,
     );
     const agentRunner = new AgentRunner(claudeCodeRunner, codexRunner, cursorRunner, logger);
