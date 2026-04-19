@@ -1197,6 +1197,22 @@ export class OrchestratorService {
       );
     }
 
+    let relatedContext: TaskBundle["relatedContext"];
+    try {
+      const fetched = await this.linearClient.getRelatedContext(issue.id);
+      if (fetched.parent || fetched.blockers.length > 0) {
+        relatedContext = fetched;
+      }
+    } catch (err) {
+      this.logger.warn(
+        {
+          issueId: issue.id,
+          error: err instanceof Error ? err.message : String(err),
+        },
+        "Failed to fetch related Linear context; proceeding without it",
+      );
+    }
+
     return {
       issue: {
         id: issue.id,
@@ -1223,6 +1239,7 @@ export class OrchestratorService {
         "Changes align with approved plan",
         "Review findings addressed or explicitly waived",
       ],
+      ...(relatedContext ? { relatedContext } : {}),
     };
   }
 

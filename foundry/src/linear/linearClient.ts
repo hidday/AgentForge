@@ -12,6 +12,27 @@ export interface LinearIssue {
   cycle?: string;
 }
 
+/**
+ * A Linear issue surfaced as background context for the focus issue
+ * (e.g. its parent or a blocker). Captures the same descriptive fields
+ * as `LinearIssue` plus the human-readable identifier (e.g. "PRY-123").
+ */
+export interface RelatedLinearIssue {
+  id: string;
+  identifier?: string;
+  title: string;
+  description: string;
+  state: string;
+  labels: string[];
+  priority: number;
+  url?: string;
+}
+
+export interface RelatedIssueContext {
+  parent?: RelatedLinearIssue;
+  blockers: RelatedLinearIssue[];
+}
+
 export interface IssueSearchFilter {
   /** Match issues belonging to a specific Linear project name (exact match). */
   projectName?: string;
@@ -25,6 +46,13 @@ export interface IssueSearchFilter {
 
 export interface LinearClient {
   getIssue(issueId: string): Promise<LinearIssue>;
+  /**
+   * Fetches the immediate parent issue and any direct blockers (issues that
+   * block the focus issue) for use as background planning context. Implementations
+   * SHOULD return an empty `blockers` array (rather than throwing) when the focus
+   * issue exists but has no related issues.
+   */
+  getRelatedContext(issueId: string): Promise<RelatedIssueContext>;
   searchIssues(filter: IssueSearchFilter): Promise<LinearIssue[]>;
   postComment(issueId: string, body: string): Promise<void>;
   updateIssueState(issueId: string, state: string): Promise<void>;
@@ -36,9 +64,21 @@ export interface LinearClient {
 export class MockLinearClient implements LinearClient {
   private issues = new Map<string, LinearIssue>();
   private comments: { issueId: string; body: string }[] = [];
+  private relations = new Map<string, RelatedIssueContext>();
 
   seedIssue(issue: LinearIssue): void {
     this.issues.set(issue.id, { ...issue });
+  }
+
+  /**
+   * Test helper: associate a parent and/or blockers with an existing seeded issue.
+   * Overwrites any previously-seeded relations for the same `issueId`.
+   */
+  seedRelations(issueId: string, related: RelatedIssueContext): void {
+    this.relations.set(issueId, {
+      parent: related.parent ? { ...related.parent } : undefined,
+      blockers: related.blockers.map((b) => ({ ...b })),
+    });
   }
 
   getPostedComments(): { issueId: string; body: string }[] {
@@ -51,6 +91,17 @@ export class MockLinearClient implements LinearClient {
       throw new Error(`Mock: Issue ${issueId} not found`);
     }
     return Promise.resolve({ ...issue });
+  }
+
+  getRelatedContext(issueId: string): Promise<RelatedIssueContext> {
+    const seeded = this.relations.get(issueId);
+    if (!seeded) {
+      return Promise.resolve({ blockers: [] });
+    }
+    return Promise.resolve({
+      parent: seeded.parent ? { ...seeded.parent } : undefined,
+      blockers: seeded.blockers.map((b) => ({ ...b })),
+    });
   }
 
   searchIssues(filter: IssueSearchFilter): Promise<LinearIssue[]> {

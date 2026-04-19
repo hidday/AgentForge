@@ -30,6 +30,7 @@ Create an implementation plan for the following issue.
 
 {{definitionOfDone}}
 
+{{relatedContextSection}}
 ## Instructions
 
 1. Analyze the issue thoroughly

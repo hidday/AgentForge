@@ -1,6 +1,19 @@
-import { LinearClient as LinearSdk } from "@linear/sdk";
-import type { LinearClient, LinearIssue, IssueSearchFilter } from "./linearClient.js";
+import { LinearClient as LinearSdk, IssueRelationType } from "@linear/sdk";
+import type {
+  LinearClient,
+  LinearIssue,
+  IssueSearchFilter,
+  RelatedIssueContext,
+  RelatedLinearIssue,
+} from "./linearClient.js";
 import type { Logger } from "../utils/logger.js";
+
+type SdkIssue = Awaited<ReturnType<LinearSdk["issue"]>>;
+
+// The Linear SDK types `IssueRelation.type` as `string`, so a direct enum
+// comparison trips `no-unsafe-enum-comparison`. Compare against the literal
+// value of `IssueRelationType.Blocks` instead.
+const BLOCKS_RELATION_TYPE: string = IssueRelationType.Blocks;
 
 export class RealLinearClient implements LinearClient {
   private readonly sdk: LinearSdk;
@@ -36,6 +49,74 @@ export class RealLinearClient implements LinearClient {
       project: project?.name ?? undefined,
       team: team?.key ?? undefined,
       cycle: cycle?.name ?? undefined,
+    };
+  }
+
+  async getRelatedContext(issueId: string): Promise<RelatedIssueContext> {
+    const issue = await this.sdk.issue(issueId);
+
+    const [parentIssue, blockerIssues] = await Promise.all([
+      this.fetchParent(issue),
+      this.fetchBlockers(issue),
+    ]);
+
+    const [parent, blockers] = await Promise.all([
+      parentIssue ? this.toRelatedLinearIssue(parentIssue) : Promise.resolve(undefined),
+      Promise.all(blockerIssues.map((b) => this.toRelatedLinearIssue(b))),
+    ]);
+
+    this.logger.debug(
+      {
+        issueId,
+        hasParent: parent !== undefined,
+        blockerCount: blockers.length,
+      },
+      "Fetched related Linear context",
+    );
+
+    return { parent, blockers };
+  }
+
+  private async fetchParent(issue: SdkIssue): Promise<SdkIssue | undefined> {
+    const parent = await issue.parent;
+    return parent ?? undefined;
+  }
+
+  private async fetchBlockers(issue: SdkIssue): Promise<SdkIssue[]> {
+    // Blockers of the focus issue live on `inverseRelations`: each relation has
+    // `issue` = the issue describing the relationship, `relatedIssue` = the focus
+    // issue. For type "blocks", `relation.issue` is the blocker.
+    const inverse = await issue.inverseRelations();
+    const relations = (inverse?.nodes ?? []).filter((r) => r.type === BLOCKS_RELATION_TYPE);
+    const blockers = await Promise.all(
+      relations.map(async (rel) => {
+        try {
+          return await rel.issue;
+        } catch (err) {
+          this.logger.warn(
+            { err, relationId: rel.id, focusIssueId: issue.id },
+            "Failed to hydrate blocker issue from relation",
+          );
+          return undefined;
+        }
+      }),
+    );
+    return blockers.filter((b): b is SdkIssue => b !== undefined);
+  }
+
+  private async toRelatedLinearIssue(issue: SdkIssue): Promise<RelatedLinearIssue> {
+    const [labelsConn, state] = await Promise.all([issue.labels(), issue.state]);
+    const labels = labelsConn?.nodes?.map((l) => l.name) ?? [];
+
+    return {
+      id: issue.id,
+      identifier: issue.identifier,
+      title: issue.title,
+      description: issue.description ?? "",
+      state: state?.name ?? "Unknown",
+      labels,
+      priority: issue.priority,
+      url: issue.url,
     };
   }
 

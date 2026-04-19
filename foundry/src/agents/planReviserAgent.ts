@@ -8,6 +8,7 @@ import type { PlanRevision } from "../schemas/planRevision.js";
 import { PlanReviserOutputSchema, type PlanReviserOutput } from "../schemas/cliProtocol.js";
 import { AGENT_STAGES } from "../domain/types.js";
 import { loadPromptTemplate, renderTemplate } from "./promptRenderer.js";
+import { renderRelatedContextSection } from "./sections.js";
 import { env } from "../config/env.js";
 
 export interface PlanRevisionResult {
@@ -40,7 +41,8 @@ export class PlanReviserAgent {
 
     const systemTemplate = loadPromptTemplate("plan-reviser.system.md");
     const userTemplate = loadPromptTemplate("plan-reviser.user.md");
-    const vars = { ...taskBundle, plan, planReview };
+    const relatedContextSection = renderRelatedContextSection(taskBundle.relatedContext);
+    const vars = { ...taskBundle, plan, planReview, relatedContextSection };
     const systemPrompt = renderTemplate(systemTemplate, vars);
     const userPrompt = renderTemplate(userTemplate, vars);
 

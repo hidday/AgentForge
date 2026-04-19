@@ -7,6 +7,7 @@ import { PlanReviewerOutputSchema, type PlanReviewerOutput } from "../schemas/cl
 import type { PlanReview } from "../schemas/planReview.js";
 import { AGENT_STAGES } from "../domain/types.js";
 import { loadPromptTemplate, renderTemplate } from "./promptRenderer.js";
+import { renderRelatedContextSection } from "./sections.js";
 import { env } from "../config/env.js";
 
 export class PlanReviewerAgent {
@@ -24,7 +25,8 @@ export class PlanReviewerAgent {
 
     const systemTemplate = loadPromptTemplate("plan-reviewer.system.md");
     const userTemplate = loadPromptTemplate("plan-reviewer.user.md");
-    const vars = { ...taskBundle, plan };
+    const relatedContextSection = renderRelatedContextSection(taskBundle.relatedContext);
+    const vars = { ...taskBundle, plan, relatedContextSection };
     const systemPrompt = renderTemplate(systemTemplate, vars);
     const userPrompt = renderTemplate(userTemplate, vars);
 

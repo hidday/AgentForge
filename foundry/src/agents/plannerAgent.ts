@@ -7,6 +7,7 @@ import type { Plan } from "../schemas/plan.js";
 import { AGENT_STAGES } from "../domain/types.js";
 import type { HumanAnswer } from "../domain/types.js";
 import { loadPromptTemplate, renderTemplate } from "./promptRenderer.js";
+import { renderRelatedContextSection } from "./sections.js";
 import { env } from "../config/env.js";
 
 export interface PlanReviewFindingSummary {
@@ -104,12 +105,15 @@ export class PlannerAgent {
         `Use this as the starting point for the new plan. Preserve the parts that are still valid and address the issues raised in the rejection feedback and review findings.`;
     }
 
+    const relatedContextSection = renderRelatedContextSection(taskBundle.relatedContext);
+
     const userPrompt = renderTemplate(userTemplate, {
       ...taskBundle,
       humanAnswersSection,
       humanFeedbackSection,
       planReviewSection,
       previousPlanSection,
+      relatedContextSection,
     } as Record<string, unknown>);
 
     const output = await this.agentRunner.run<PlannerOutput>(

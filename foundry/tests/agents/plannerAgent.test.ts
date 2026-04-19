@@ -158,4 +158,67 @@ describe("PlannerAgent.run()", () => {
       expect(prompt).toContain("Keep it simple");
     });
   });
+
+  describe("relatedContext rendering", () => {
+    it("renders the Related Linear Context section when bundle has parent and blockers", async () => {
+      const { agent, getPrompt } = buildPlannerAgent();
+      const bundle: TaskBundle = {
+        ...makeTaskBundle(),
+        relatedContext: {
+          parent: {
+            id: "p1",
+            identifier: "PRY-100",
+            title: "Umbrella feature X",
+            description: "Roll-up effort tracking feature X.",
+            state: "In Progress",
+            labels: ["epic"],
+            priority: 2,
+            url: "https://linear.app/team/issue/PRY-100",
+          },
+          blockers: [
+            {
+              id: "b1",
+              identifier: "PRY-101",
+              title: "Migration must complete first",
+              description: "Schema migration prerequisite.",
+              state: "Todo",
+              labels: ["infra"],
+              priority: 1,
+              url: "https://linear.app/team/issue/PRY-101",
+            },
+          ],
+        },
+      };
+
+      await agent.run(bundle, "run-1");
+
+      const prompt = getPrompt();
+      expect(prompt).toContain("===== BEGIN BACKGROUND CONTEXT");
+      expect(prompt).toContain("===== END BACKGROUND CONTEXT");
+      expect(prompt).toContain("## Background: Related Linear Context (NOT the focus issue)");
+      expect(prompt).toContain("STRICTLY ADDITIONAL BACKGROUND");
+      expect(prompt).toContain("### Background: Parent Issue");
+      expect(prompt).toContain("PRY-100");
+      expect(prompt).toContain("Umbrella feature X");
+      expect(prompt).toContain(
+        "### Background: Blocker Issues (must be understood before the focus issue can ship)",
+      );
+      expect(prompt).toContain("#### Background: Blocker 1");
+      expect(prompt).toContain("PRY-101");
+      expect(prompt).toContain("Migration must complete first");
+      expect(prompt).toContain("Schema migration prerequisite.");
+    });
+
+    it("omits the Related Linear Context section when bundle has no relatedContext", async () => {
+      const { agent, getPrompt } = buildPlannerAgent();
+      const bundle = makeTaskBundle();
+
+      await agent.run(bundle, "run-1");
+
+      const prompt = getPrompt();
+      expect(prompt).not.toContain("BEGIN BACKGROUND CONTEXT");
+      expect(prompt).not.toContain("Background: Related Linear Context");
+      expect(prompt).not.toContain("{{relatedContextSection}}");
+    });
+  });
 });
