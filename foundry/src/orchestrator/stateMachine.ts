@@ -63,6 +63,22 @@ function buildTransitionTable(): TransitionTable {
     RunEvent.NEEDS_HUMAN_CLARIFICATION,
     RunState.HumanClarificationNeeded,
   );
+  add(
+    RunState.PlanRevision,
+    RunEvent.NEEDS_HUMAN_CLARIFICATION,
+    RunState.HumanClarificationNeeded,
+  );
+  add(
+    RunState.Implementing,
+    RunEvent.NEEDS_HUMAN_CLARIFICATION,
+    RunState.HumanClarificationNeeded,
+  );
+  add(RunState.AIReview, RunEvent.NEEDS_HUMAN_CLARIFICATION, RunState.HumanClarificationNeeded);
+  add(
+    RunState.AddressingReview,
+    RunEvent.NEEDS_HUMAN_CLARIFICATION,
+    RunState.HumanClarificationNeeded,
+  );
 
   // Recovery: RESET_TO_TODO always returns to Todo.
   // V1 limitation: prior meaningful state is not preserved. A future enhancement

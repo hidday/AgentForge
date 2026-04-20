@@ -79,3 +79,35 @@ export class PreflightError extends Error {
     this.result = result;
   }
 }
+
+export interface RetryAttempt {
+  attempt: number;
+  error: string;
+  durationMs: number;
+}
+
+export class RetryExhaustedError extends Error {
+  constructor(
+    public readonly stage: string,
+    public readonly runtime: string,
+    public readonly attempts: RetryAttempt[],
+    public readonly circuitBreakerTriggered: boolean,
+  ) {
+    const base = circuitBreakerTriggered
+      ? `Circuit breaker open for ${stage}:${runtime}`
+      : `Retry exhausted for ${stage}:${runtime} after ${attempts.length} attempt(s)`;
+    super(base);
+    this.name = "RetryExhaustedError";
+  }
+}
+
+export class RuntimeExecutionError extends Error {
+  constructor(
+    message: string,
+    public readonly exitCode: number,
+    public readonly stderr: string,
+  ) {
+    super(message);
+    this.name = "RuntimeExecutionError";
+  }
+}
