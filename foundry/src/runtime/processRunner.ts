@@ -17,7 +17,7 @@ import { generateId } from "../utils/ids.js";
 import type { ProcessResult, ProcessSpawnOptions, ProcessContext } from "./runnerTypes.js";
 import type { RunEventEmitter } from "../api/runEventEmitter.js";
 import { CircuitBreaker } from "./circuitBreaker.js";
-import { isTransientError, isDeterministicError } from "./errorClassifier.js";
+import { isDeterministicError } from "./errorClassifier.js";
 import { env } from "../config/env.js";
 
 const ROLLING_BUFFER_MAX = 8 * 1024;

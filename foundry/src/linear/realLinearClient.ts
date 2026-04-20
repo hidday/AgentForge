@@ -48,15 +48,15 @@ export class RealLinearClient implements LinearClient {
     };
 
     if (projectName) {
-      gqlFilter["project"] = { name: { eq: projectName } };
+      gqlFilter.project = { name: { eq: projectName } };
     }
 
     if (assigneeMe) {
-      gqlFilter["assignee"] = { isMe: { eq: true } };
+      gqlFilter.assignee = { isMe: { eq: true } };
     }
 
     if (team) {
-      gqlFilter["team"] = { or: [{ name: { eq: team } }, { key: { eq: team } }] };
+      gqlFilter.team = { or: [{ name: { eq: team } }, { key: { eq: team } }] };
     }
 
     const issuesConn = await this.sdk.issues({ filter: gqlFilter });

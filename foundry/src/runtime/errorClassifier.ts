@@ -29,7 +29,7 @@ const TRANSIENT_EXIT_CODES = [
 function getStatusCode(err: unknown): number | undefined {
   if (err && typeof err === "object") {
     const e = err as Record<string, unknown>;
-    const code = e["statusCode"] ?? e["status"];
+    const code = e.statusCode ?? e.status;
     if (typeof code === "number") return code;
   }
   return undefined;
@@ -38,7 +38,7 @@ function getStatusCode(err: unknown): number | undefined {
 function getExitCode(err: unknown): number | undefined {
   if (err && typeof err === "object") {
     const e = err as Record<string, unknown>;
-    const code = e["exitCode"] ?? e["code"];
+    const code = e.exitCode ?? e.code;
     if (typeof code === "number") return code;
   }
   return undefined;
