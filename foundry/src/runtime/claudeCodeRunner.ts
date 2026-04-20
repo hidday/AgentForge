@@ -39,16 +39,28 @@ export class ClaudeCodeRunner {
     });
 
     // Claude CLI output varies by format:
-    //   --output-format json: single JSON envelope { type, result }
+    //   --output-format json: single JSON envelope { type, result, is_error }
     //   --output-format stream-json --verbose: NDJSON stream, last line with
     //     type "result" contains the final output
     // In either case, extract the result text for structured output parsing.
-    const outputText = this.unwrapClaudeEnvelope(result.stdout);
+    const { text: outputText, isApiError } = this.unwrapClaudeEnvelope(result.stdout);
 
     if (result.exitCode !== 0 && !outputText.includes("BEGIN_STRUCTURED_OUTPUT")) {
       this.logger.error(
-        { stage, exitCode: result.exitCode, stderr: result.stderr.slice(0, 500) },
-        "Claude Code CLI returned non-zero exit code with no structured output",
+        {
+          stage,
+          exitCode: result.exitCode,
+          stderr: tailSnippet(result.stderr),
+          // The unwrapped model/CLI output is where the real failure cause lives
+          // (e.g. "API Error: Stream idle timeout - partial response received").
+          // stderr is often empty for Claude CLI failures because errors are
+          // surfaced through the JSON envelope on stdout.
+          outputSnippet: tailSnippet(outputText),
+          ...(isApiError ? { upstreamApiError: true } : {}),
+        },
+        isApiError
+          ? "Claude Code CLI reported upstream API error"
+          : "Claude Code CLI returned non-zero exit code with no structured output",
       );
     }
 
@@ -85,18 +97,23 @@ export class ClaudeCodeRunner {
    *
    * Handles two formats:
    *   1. Single JSON envelope (--output-format json):
-   *      { "type": "result", "result": "<text>" }
+   *      { "type": "result", "result": "<text>", "is_error": <bool> }
    *   2. NDJSON stream (--output-format stream-json --verbose):
    *      Multiple JSON lines; the last one with type "result" has the text.
    *
-   * Falls back to raw output if parsing fails entirely.
+   * Also surfaces the envelope's `is_error` flag so callers can distinguish a
+   * model-side failure (e.g. an upstream Anthropic API stream timeout) from a
+   * generic non-zero exit. When the CLI reports `is_error: true` the `result`
+   * string is the human-readable failure message, NOT a model response.
+   *
+   * Falls back to raw output (and `isApiError: false`) if parsing fails.
    */
-  private unwrapClaudeEnvelope(raw: string): string {
+  private unwrapClaudeEnvelope(raw: string): { text: string; isApiError: boolean } {
     // Try single-JSON envelope first (fast path for --output-format json)
     try {
       const envelope = JSON.parse(raw) as Record<string, unknown>;
       if (typeof envelope.result === "string") {
-        return envelope.result;
+        return { text: envelope.result, isApiError: envelope.is_error === true };
       }
     } catch {
       // Not single JSON -- try NDJSON stream format
@@ -110,13 +127,23 @@ export class ClaudeCodeRunner {
       try {
         const obj = JSON.parse(line) as Record<string, unknown>;
         if (obj.type === "result" && typeof obj.result === "string") {
-          return obj.result;
+          return { text: obj.result, isApiError: obj.is_error === true };
         }
       } catch {
         continue;
       }
     }
 
-    return raw;
+    return { text: raw, isApiError: false };
   }
+}
+
+/**
+ * Truncate a string to its tail, keeping the most recent characters since
+ * trailing content (final API errors, last log lines) is typically the most
+ * informative when diagnosing a failure.
+ */
+function tailSnippet(s: string, max = 500): string {
+  if (s.length <= max) return s;
+  return `…${s.slice(-max)}`;
 }

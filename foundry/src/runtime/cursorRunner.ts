@@ -43,7 +43,14 @@ export class CursorRunner {
 
     if (result.exitCode !== 0 && !outputText.includes("BEGIN_STRUCTURED_OUTPUT")) {
       this.logger.error(
-        { stage, exitCode: result.exitCode, stderr: result.stderr.slice(0, 500) },
+        {
+          stage,
+          exitCode: result.exitCode,
+          stderr: tailSnippet(result.stderr),
+          // The unwrapped CLI output is where the actual failure cause lives
+          // when the wrapper format is JSON; stderr may be empty for these.
+          outputSnippet: tailSnippet(outputText),
+        },
         "Cursor CLI returned non-zero exit code with no structured output",
       );
     }
@@ -92,4 +99,14 @@ export class CursorRunner {
     }
     return raw;
   }
+}
+
+/**
+ * Truncate a string to its tail, keeping the most recent characters since
+ * trailing content (final API errors, last log lines) is typically the most
+ * informative when diagnosing a failure.
+ */
+function tailSnippet(s: string, max = 500): string {
+  if (s.length <= max) return s;
+  return `…${s.slice(-max)}`;
 }

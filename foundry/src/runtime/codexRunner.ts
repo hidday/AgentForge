@@ -40,7 +40,14 @@ export class CodexRunner {
 
     if (result.exitCode !== 0 && !result.stdout.includes("BEGIN_STRUCTURED_OUTPUT")) {
       this.logger.error(
-        { stage, exitCode: result.exitCode, stderr: result.stderr.slice(0, 500) },
+        {
+          stage,
+          exitCode: result.exitCode,
+          stderr: tailSnippet(result.stderr),
+          // Codex prints model/CLI errors to stdout (interleaved with thinking),
+          // so include a tail snippet to surface the final failure message.
+          outputSnippet: tailSnippet(result.stdout),
+        },
         "Codex CLI returned non-zero exit code with no structured output",
       );
     }
@@ -71,4 +78,14 @@ export class CodexRunner {
     }
     return input.prompt;
   }
+}
+
+/**
+ * Truncate a string to its tail, keeping the most recent characters since
+ * trailing content (final API errors, last log lines) is typically the most
+ * informative when diagnosing a failure.
+ */
+function tailSnippet(s: string, max = 500): string {
+  if (s.length <= max) return s;
+  return `…${s.slice(-max)}`;
 }
