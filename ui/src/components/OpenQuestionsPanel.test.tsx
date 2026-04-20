@@ -137,6 +137,79 @@ describe("OpenQuestionsPanel", () => {
     });
   });
 
+  it("shows AwaitingPlanApproval-specific confirmation after successful submit", async () => {
+    mockApi.answerQuestions.mockResolvedValue({ ok: true, run: {} });
+
+    render(
+      <OpenQuestionsPanel
+        questions={[requiredQuestion]}
+        runId="run-1"
+        runState="AwaitingPlanApproval"
+      />,
+    );
+
+    const textarea = screen.getAllByRole("textbox")[0] as HTMLTextAreaElement;
+    await userEvent.type(textarea, "My answer");
+
+    const submitBtn = screen.getByRole("button", { name: /submit answers/i });
+    await userEvent.click(submitBtn);
+
+    await waitFor(() => {
+      const status = screen.getByRole("status");
+      expect(status.textContent).toContain("Answers saved");
+      expect(status.textContent).toContain("Approve or reject the plan");
+    });
+  });
+
+  it("shows re-planning confirmation after successful submit in HumanClarificationNeeded", async () => {
+    mockApi.answerQuestions.mockResolvedValue({ ok: true, run: {} });
+
+    render(
+      <OpenQuestionsPanel
+        questions={[requiredQuestion]}
+        runId="run-1"
+        runState="HumanClarificationNeeded"
+      />,
+    );
+
+    const textarea = screen.getAllByRole("textbox")[0] as HTMLTextAreaElement;
+    await userEvent.type(textarea, "My answer");
+
+    const submitBtn = screen.getByRole("button", { name: /submit answers/i });
+    await userEvent.click(submitBtn);
+
+    await waitFor(() => {
+      const status = screen.getByRole("status");
+      expect(status.textContent).toContain("Re-planning");
+    });
+  });
+
+  it("clears the success message when the user edits an answer again", async () => {
+    mockApi.answerQuestions.mockResolvedValue({ ok: true, run: {} });
+
+    render(
+      <OpenQuestionsPanel
+        questions={[requiredQuestion]}
+        runId="run-1"
+        runState="AwaitingPlanApproval"
+      />,
+    );
+
+    const textarea = screen.getAllByRole("textbox")[0] as HTMLTextAreaElement;
+    await userEvent.type(textarea, "My answer");
+
+    const submitBtn = screen.getByRole("button", { name: /submit answers/i });
+    await userEvent.click(submitBtn);
+
+    await waitFor(() => {
+      expect(screen.getByRole("status")).toBeDefined();
+    });
+
+    await userEvent.type(textarea, " more");
+
+    expect(screen.queryByRole("status")).toBeNull();
+  });
+
   it("shows error message on failed submission", async () => {
     mockApi.answerQuestions.mockRejectedValue(new Error("Unrecognised questionId"));
 

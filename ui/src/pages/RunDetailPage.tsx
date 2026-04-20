@@ -159,6 +159,7 @@ export function RunDetailPage() {
                 questions={allOpenQuestions}
                 runId={run.id}
                 readOnly={false}
+                runState={run.state}
                 onSubmitted={refetch}
               />
             </div>
@@ -174,6 +175,7 @@ export function RunDetailPage() {
                 questions={optionalQuestions}
                 runId={run.id}
                 readOnly={false}
+                runState={run.state}
                 onSubmitted={refetch}
               />
             </div>

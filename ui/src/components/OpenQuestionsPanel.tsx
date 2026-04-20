@@ -11,6 +11,13 @@ interface OpenQuestionsPanelProps {
   questions: OpenQuestion[];
   runId: string;
   readOnly?: boolean;
+  /**
+   * Current run state. Used to tailor the post-submit confirmation message,
+   * since answering questions in `AwaitingPlanApproval` only records the
+   * answers (no re-plan), while in `HumanClarificationNeeded` it triggers
+   * a re-plan.
+   */
+  runState?: string;
   onSubmitted?: () => void;
 }
 
@@ -18,15 +25,18 @@ export function OpenQuestionsPanel({
   questions,
   runId,
   readOnly = false,
+  runState,
   onSubmitted,
 }: OpenQuestionsPanelProps) {
   const panelId = useId();
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
   function handleChange(questionId: string, value: string) {
     setAnswers((prev) => ({ ...prev, [questionId]: value }));
+    if (successMessage) setSuccessMessage(null);
   }
 
   const requiredQuestions = questions.filter((q) => q.requiredForExecution);
@@ -37,12 +47,18 @@ export function OpenQuestionsPanel({
   async function handleSubmit() {
     setLoading(true);
     setError(null);
+    setSuccessMessage(null);
     try {
       const payload = questions
         .filter((q) => (answers[q.id] ?? "").trim().length > 0)
         .map((q) => ({ questionId: q.id, answer: answers[q.id].trim() }));
 
       await api.answerQuestions(runId, payload);
+      setSuccessMessage(
+        runState === "AwaitingPlanApproval"
+          ? "Answers saved. Approve or reject the plan with feedback to apply them."
+          : "Answers submitted. Re-planning…",
+      );
       onSubmitted?.();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to submit answers");
@@ -112,6 +128,12 @@ export function OpenQuestionsPanel({
           {error && (
             <p className="text-sm text-state-blocked" role="alert">
               {error}
+            </p>
+          )}
+
+          {!error && successMessage && (
+            <p className="text-sm text-state-done" role="status">
+              {successMessage}
             </p>
           )}
         </div>
