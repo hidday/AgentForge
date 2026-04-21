@@ -1,7 +1,8 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { api, type LinearIssue } from "@/api/client.ts";
+import { useSSE, type DashboardEvent } from "@/hooks/useSSE.ts";
 import { cn } from "@/lib/utils.ts";
-import { RefreshCw, Check, AlertTriangle, Inbox } from "lucide-react";
+import { RefreshCw, AlertTriangle, Inbox } from "lucide-react";
 
 const PRIORITY_LABELS: Record<number, { label: string; className: string }> = {
   0: { label: "None", className: "text-text-muted" },
@@ -11,26 +12,89 @@ const PRIORITY_LABELS: Record<number, { label: string; className: string }> = {
   4: { label: "Low", className: "text-text-muted" },
 };
 
+/**
+ * Minimum time (ms) the "Starting..." loader stays visible after the user
+ * clicks Start, even if the runs show up faster. Avoids a jarring flash and
+ * gives the user a clear visual confirmation that something happened.
+ */
+const MIN_LOADER_MS = 600;
+
+export interface IngestSummary {
+  started: number;
+  skipped: number;
+}
+
 interface LinearSyncDialogProps {
   open: boolean;
   onClose: () => void;
+  /**
+   * Called when at least one run has been successfully started so the parent
+   * can refetch the runs list. Equivalent to the prior onIngested signal.
+   */
   onIngested: () => void;
+  /**
+   * Called once when the dialog auto-closes following a successful ingest.
+   * The summary may be synthesized from observed SSE events (started =
+   * pendingIds.length, skipped = 0) when the long backend response hasn't
+   * landed yet, and may be called a second time with the authoritative
+   * counts once the HTTP response resolves.
+   */
+  onIngestComplete?: (summary: IngestSummary) => void;
 }
 
-export function LinearSyncDialog({ open, onClose, onIngested }: LinearSyncDialogProps) {
+export function LinearSyncDialog({
+  open,
+  onClose,
+  onIngested,
+  onIngestComplete,
+}: LinearSyncDialogProps) {
   const [issues, setIssues] = useState<LinearIssue[]>([]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(false);
   const [ingesting, setIngesting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [result, setResult] = useState<{ started: string[]; skipped: string[] } | null>(null);
+
+  // Set of pending issue IDs we're currently waiting on (a snapshot of
+  // `selected` at the moment Start was clicked). Empty when not ingesting.
+  const pendingIdsRef = useRef<string[]>([]);
+  // Issue IDs we've observed via SSE `run:created` since clicking Start.
+  const seenIdsRef = useRef<Set<string>>(new Set());
+  // Authoritative response from /linear/ingest, once it arrives.
+  const ingestResultRef = useRef<{ started: string[]; skipped: string[] } | null>(null);
+  // Whether the HTTP request has settled (resolved or rejected). Tracked
+  // separately from `ingestResultRef` so error paths still let the close
+  // logic decide what to do.
+  const ingestSettledRef = useRef(false);
+  // Timestamp (ms) of the click, used to enforce MIN_LOADER_MS.
+  const startedAtRef = useRef<number>(0);
+  // Whether we've already triggered the auto-close for this ingest cycle.
+  const closedRef = useRef(false);
+  // Retained timer id for the MIN_LOADER_MS-delayed close, so we can clear
+  // it if the dialog is unmounted mid-flight.
+  const minDelayTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     if (!open) return;
-    setResult(null);
     setError(null);
     void fetchIssues();
+    // Reset all ingest tracking state when the dialog re-opens.
+    pendingIdsRef.current = [];
+    seenIdsRef.current = new Set();
+    ingestResultRef.current = null;
+    ingestSettledRef.current = false;
+    closedRef.current = false;
+    setIngesting(false);
+    if (minDelayTimerRef.current) {
+      clearTimeout(minDelayTimerRef.current);
+      minDelayTimerRef.current = null;
+    }
   }, [open]);
+
+  useEffect(() => {
+    return () => {
+      if (minDelayTimerRef.current) clearTimeout(minDelayTimerRef.current);
+    };
+  }, []);
 
   async function fetchIssues() {
     setLoading(true);
@@ -64,20 +128,104 @@ export function LinearSyncDialog({ open, onClose, onIngested }: LinearSyncDialog
     setSelected(next);
   }
 
+  /**
+   * Closes the dialog if the close conditions are met:
+   *  - we haven't already closed for this cycle (closedRef),
+   *  - we're inside an ingest cycle (pendingIdsRef populated),
+   *  - either every selected issue has been observed via SSE OR the HTTP
+   *    request has settled with a usable result, and
+   *  - at least MIN_LOADER_MS has passed since the user clicked Start.
+   *
+   * If the conditions are otherwise met but we're inside the minimum-delay
+   * window, schedules a follow-up evaluation to fire as soon as the window
+   * elapses.
+   *
+   * Note: this function intentionally reads ingest state exclusively from
+   * refs (not the `ingesting` state value) so callers invoked from
+   * already-suspended async closures (e.g. inside the awaited ingestIssues
+   * promise) see fresh values rather than the stale render snapshot.
+   */
+  const maybeAutoClose = useCallback(() => {
+    if (closedRef.current) return;
+    const pendingIds = pendingIdsRef.current;
+    if (pendingIds.length === 0) return;
+
+    const allSeen = pendingIds.every((id) => seenIdsRef.current.has(id));
+    const settled = ingestSettledRef.current;
+    if (!allSeen && !settled) return;
+
+    const elapsed = Date.now() - startedAtRef.current;
+    if (elapsed < MIN_LOADER_MS) {
+      if (minDelayTimerRef.current) return; // already scheduled
+      minDelayTimerRef.current = setTimeout(() => {
+        minDelayTimerRef.current = null;
+        maybeAutoClose();
+      }, MIN_LOADER_MS - elapsed);
+      return;
+    }
+
+    closedRef.current = true;
+    const result = ingestResultRef.current;
+    const summary: IngestSummary = result
+      ? { started: result.started.length, skipped: result.skipped.length }
+      : { started: pendingIds.length, skipped: 0 };
+    onIngestComplete?.(summary);
+    setIngesting(false);
+    onClose();
+  }, [onClose, onIngestComplete]);
+
+  const handleSSE = useCallback(
+    (event: DashboardEvent) => {
+      if (event.type !== "run:created") return;
+      const issueId = event.issueId as string | undefined;
+      if (!issueId) return;
+      if (!pendingIdsRef.current.includes(issueId)) return;
+      seenIdsRef.current.add(issueId);
+      maybeAutoClose();
+    },
+    [maybeAutoClose],
+  );
+
+  useSSE(handleSSE);
+
   async function handleIngest() {
     if (selected.size === 0) return;
-    setIngesting(true);
+    const pendingIds = [...selected];
+    pendingIdsRef.current = pendingIds;
+    seenIdsRef.current = new Set();
+    ingestResultRef.current = null;
+    ingestSettledRef.current = false;
+    closedRef.current = false;
+    startedAtRef.current = Date.now();
     setError(null);
+    setIngesting(true);
+
+    let sawAtLeastOneStart = false;
+
     try {
-      const data = await api.ingestIssues([...selected]);
-      setResult(data);
-      if (data.started.length > 0) {
-        onIngested();
-      }
+      const data = await api.ingestIssues(pendingIds);
+      ingestResultRef.current = data;
+      ingestSettledRef.current = true;
+      sawAtLeastOneStart = data.started.length > 0;
+      maybeAutoClose();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to ingest issues");
-    } finally {
+      ingestSettledRef.current = true;
+      // On error: keep the dialog open so the user can see what went wrong.
+      // Don't auto-close. Reset the pending tracker so a subsequent retry
+      // starts cleanly.
+      pendingIdsRef.current = [];
       setIngesting(false);
+      setError(err instanceof Error ? err.message : "Failed to ingest issues");
+      return;
+    }
+
+    // Even if we already triggered the optimistic close from SSE, fire
+    // onIngested + a final onIngestComplete so the dashboard sees the
+    // authoritative started/skipped counts.
+    if (sawAtLeastOneStart) onIngested();
+    if (closedRef.current && ingestResultRef.current) {
+      const r = ingestResultRef.current;
+      onIngestComplete?.({ started: r.started.length, skipped: r.skipped.length });
     }
   }
 
@@ -122,24 +270,6 @@ export function LinearSyncDialog({ open, onClose, onIngested }: LinearSyncDialog
               <Inbox size={32} className="mb-2 opacity-50" />
               <p className="text-sm">No pending issues found</p>
               <p className="text-xs mt-1">All "Todo" issues already have active runs</p>
-            </div>
-          ) : result ? (
-            <div className="space-y-3 py-4">
-              {result.started.length > 0 && (
-                <div className="rounded-md border border-state-done/30 bg-state-done-bg p-3">
-                  <div className="flex items-center gap-2 text-state-done text-sm font-medium">
-                    <Check size={14} />
-                    Started {result.started.length} run{result.started.length > 1 ? "s" : ""}
-                  </div>
-                </div>
-              )}
-              {result.skipped.length > 0 && (
-                <div className="rounded-md border border-border-subtle bg-surface p-3">
-                  <div className="text-text-muted text-sm">
-                    Skipped {result.skipped.length} (already tracked or failed)
-                  </div>
-                </div>
-              )}
             </div>
           ) : (
             <>
@@ -209,9 +339,9 @@ export function LinearSyncDialog({ open, onClose, onIngested }: LinearSyncDialog
             onClick={onClose}
             className="px-3 py-1.5 text-sm rounded-md border border-border text-text-secondary hover:bg-surface-hover transition-colors"
           >
-            {result ? "Close" : "Cancel"}
+            Cancel
           </button>
-          {!result && issues.length > 0 && (
+          {issues.length > 0 && (
             <button
               onClick={handleIngest}
               disabled={selected.size === 0 || ingesting}

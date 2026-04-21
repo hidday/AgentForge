@@ -1,10 +1,13 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRuns } from "@/hooks/useRuns.ts";
 import { RunsTable } from "@/components/RunsTable.tsx";
 import { LinearSyncDialog } from "@/components/LinearSyncDialog.tsx";
+import { IngestSummaryBanner } from "@/components/IngestSummaryBanner.tsx";
 import { cn } from "@/lib/utils.ts";
 import type { StateCategory } from "@/lib/stateColors.ts";
 import { RefreshCw } from "lucide-react";
+
+const INGEST_BANNER_AUTO_DISMISS_MS = 5000;
 
 const FILTERS: { label: string; value: StateCategory | "all" }[] = [
   { label: "All", value: "all" },
@@ -29,10 +32,24 @@ const STATE_CATEGORY_MAP: Record<string, StateCategory> = {
   HumanClarificationNeeded: "waiting",
 };
 
+interface IngestSummaryState {
+  started: number;
+  skipped: number;
+  /** Bumped on each onIngestComplete so the auto-dismiss timer restarts. */
+  key: number;
+}
+
 export function DashboardPage() {
   const [filter, setFilter] = useState<StateCategory | "all">("all");
   const [syncOpen, setSyncOpen] = useState(false);
+  const [ingestSummary, setIngestSummary] = useState<IngestSummaryState | null>(null);
   const { runs, loading, error, refetch } = useRuns();
+
+  useEffect(() => {
+    if (!ingestSummary) return;
+    const id = setTimeout(() => setIngestSummary(null), INGEST_BANNER_AUTO_DISMISS_MS);
+    return () => clearTimeout(id);
+  }, [ingestSummary]);
 
   const filteredRuns =
     filter === "all"
@@ -105,6 +122,14 @@ export function DashboardPage() {
         ))}
       </div>
 
+      {ingestSummary && (
+        <IngestSummaryBanner
+          started={ingestSummary.started}
+          skipped={ingestSummary.skipped}
+          onDismiss={() => setIngestSummary(null)}
+        />
+      )}
+
       {loading ? (
         <div className="flex items-center justify-center py-20 text-text-muted">
           <div className="h-5 w-5 animate-spin rounded-full border-2 border-accent border-t-transparent mr-3" />
@@ -122,6 +147,9 @@ export function DashboardPage() {
         open={syncOpen}
         onClose={() => setSyncOpen(false)}
         onIngested={refetch}
+        onIngestComplete={(s) =>
+          setIngestSummary({ started: s.started, skipped: s.skipped, key: Date.now() })
+        }
       />
     </div>
   );
