@@ -3,7 +3,12 @@ import { mkdtempSync, writeFileSync, rmSync, existsSync, readFileSync } from "no
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { execFileSync } from "node:child_process";
-import { GitService, BranchMismatchError, GitError } from "../../src/git/gitService.js";
+import {
+  GitService,
+  BranchMismatchError,
+  GitError,
+  buildWorktreeDirName,
+} from "../../src/git/gitService.js";
 
 function git(args: string[], cwd: string): string {
   return execFileSync("git", args, { cwd, encoding: "utf-8" }).trim();
@@ -130,6 +135,7 @@ describe("GitService", () => {
 
       expect(result.branchName).toBe(branchName);
       expect(result.worktreePath).toContain(".worktrees");
+      expect(result.worktreePath).toContain("run-abcdef12-pry-42-test-branch");
       expect(existsSync(result.worktreePath)).toBe(true);
 
       const branch = await svc.currentBranch(result.worktreePath);
@@ -138,6 +144,42 @@ describe("GitService", () => {
       // Clean up
       await svc.removeWorktree(repoPath, result.worktreePath);
       rmSync(bareDir, { recursive: true, force: true });
+    });
+  });
+
+  describe("buildWorktreeDirName", () => {
+    it("appends the linear issue id and the first slug words", () => {
+      expect(
+        buildWorktreeDirName(
+          "abcdefgh",
+          "hidday/pry-751-fixpayments-server-side-search-with-proper-debounce-loading",
+        ),
+      ).toBe("run-abcdefgh-pry-751-fixpayments-server-side-search");
+    });
+
+    it("works without a user prefix", () => {
+      expect(buildWorktreeDirName("abcdefgh", "pry-42-do-the-thing")).toBe(
+        "run-abcdefgh-pry-42-do-the-thing",
+      );
+    });
+
+    it("includes only the issue id when there is no slug", () => {
+      expect(buildWorktreeDirName("abcdefgh", "hidday/pry-42")).toBe(
+        "run-abcdefgh-pry-42",
+      );
+    });
+
+    it("lowercases the issue id", () => {
+      expect(buildWorktreeDirName("abcdefgh", "hidday/PRY-12-FIX-Bug")).toBe(
+        "run-abcdefgh-pry-12-fix-bug",
+      );
+    });
+
+    it("falls back to run-<shortId> when no issue id is present", () => {
+      expect(buildWorktreeDirName("abcdefgh", "hidday/some-branch-name")).toBe(
+        "run-abcdefgh",
+      );
+      expect(buildWorktreeDirName("abcdefgh", "")).toBe("run-abcdefgh");
     });
   });
 

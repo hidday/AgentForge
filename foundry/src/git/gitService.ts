@@ -44,6 +44,41 @@ export interface WorktreeSetupResult {
   branchName: string;
 }
 
+/**
+ * Builds a worktree directory name like "run-abcdefgh-pry-751-fix-server-side"
+ * by combining the short run id with the Linear issue id and the first few
+ * slug words extracted from the branch name.
+ *
+ * Falls back to "run-{shortId}" when the branch name doesn't contain a
+ * recognizable Linear-style issue identifier.
+ */
+export function buildWorktreeDirName(shortId: string, branchName: string): string {
+  const base = `run-${shortId}`;
+  if (!branchName) return base;
+
+  const lower = branchName.toLowerCase();
+  // Match a Linear-style issue id (e.g., "pry-751") that appears either at the
+  // start of the branch or right after a "/" prefix (e.g., "hidday/pry-751-...").
+  const match = lower.match(/(?:^|\/)([a-z0-9]+-\d+)(?:-(.+))?$/);
+  if (!match) return base;
+
+  const issueId = match[1];
+  const rest = match[2] ?? "";
+  const slug = shortenSlug(rest);
+  return slug ? `${base}-${issueId}-${slug}` : `${base}-${issueId}`;
+}
+
+function shortenSlug(slug: string, maxParts = 4, maxLen = 30): string {
+  const parts = slug.split("-").filter(Boolean);
+  let result = "";
+  for (let i = 0; i < parts.length && i < maxParts; i++) {
+    const next = result ? `${result}-${parts[i]}` : parts[i];
+    if (next.length > maxLen) break;
+    result = next;
+  }
+  return result;
+}
+
 export class GitService {
   constructor(private readonly logger: Logger) {}
 
@@ -155,7 +190,8 @@ export class GitService {
     branchName: string,
   ): Promise<WorktreeSetupResult> {
     const shortId = runId.slice(0, 8);
-    const worktreePath = join(repoPath, WORKTREES_DIR, `run-${shortId}`);
+    const dirName = buildWorktreeDirName(shortId, branchName);
+    const worktreePath = join(repoPath, WORKTREES_DIR, dirName);
     const startPoint = `origin/${defaultBranch}`;
 
     if (existsSync(worktreePath)) {
