@@ -87,7 +87,13 @@ async function simulate(): Promise<void> {
     const plannerAgent = new PlannerAgent(agentRunner, artifactRepo, logger);
     const planReviewerAgent = new PlanReviewerAgent(agentRunner, artifactRepo, logger);
     const planReviserAgent = new PlanReviserAgent(agentRunner, artifactRepo, logger);
-    const executorAgent = new ExecutorAgent(agentRunner, artifactRepo, githubClient, gitService, logger);
+    const executorAgent = new ExecutorAgent(
+      agentRunner,
+      artifactRepo,
+      githubClient,
+      gitService,
+      logger,
+    );
     const reviewerAgent = new ReviewerAgent(agentRunner, artifactRepo, logger);
     const remediationAgent = new RemediationAgent(agentRunner, artifactRepo, logger);
 

@@ -19,6 +19,7 @@ export class AgentRunner {
     runtime: AgentRuntime,
     input: AgentInput,
     stage: Stage,
+    // Zod's Input/Def defaults need `any` for concrete ZodObject<> to be assignable at call sites.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     schema: ZodType<T, any, any>,
   ): Promise<AgentOutput<T>> {

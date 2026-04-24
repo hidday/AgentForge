@@ -6,11 +6,7 @@ import type { Logger } from "../utils/logger.js";
 const WORKTREES_DIR = ".worktrees";
 
 export class GitError extends Error {
-  constructor(
-    operation: string,
-    cwd: string,
-    cause: unknown,
-  ) {
+  constructor(operation: string, cwd: string, cause: unknown) {
     const detail = cause instanceof Error ? cause.message : String(cause);
     super(`git ${operation} failed in ${cwd}: ${detail}`);
     this.name = "GitError";
@@ -59,7 +55,8 @@ export function buildWorktreeDirName(shortId: string, branchName: string): strin
   const lower = branchName.toLowerCase();
   // Match a Linear-style issue id (e.g., "pry-751") that appears either at the
   // start of the branch or right after a "/" prefix (e.g., "hidday/pry-751-...").
-  const match = lower.match(/(?:^|\/)([a-z0-9]+-\d+)(?:-(.+))?$/);
+  const branchIssueRe = /(?:^|\/)([a-z0-9]+-\d+)(?:-(.+))?$/;
+  const match = branchIssueRe.exec(lower);
   if (!match) return base;
 
   const issueId = match[1];
@@ -72,7 +69,9 @@ function shortenSlug(slug: string, maxParts = 4, maxLen = 30): string {
   const parts = slug.split("-").filter(Boolean);
   let result = "";
   for (let i = 0; i < parts.length && i < maxParts; i++) {
-    const next = result ? `${result}-${parts[i]}` : parts[i];
+    const part = parts[i];
+    if (part === undefined) break;
+    const next = result ? `${result}-${part}` : part;
     if (next.length > maxLen) break;
     result = next;
   }
@@ -99,10 +98,7 @@ export class GitService {
   ): Promise<void> {
     this.logger.info({ repoPath, worktreePath, branchName, startPoint }, "Creating worktree");
     try {
-      await exec(
-        ["worktree", "add", "-b", branchName, worktreePath, startPoint],
-        repoPath,
-      );
+      await exec(["worktree", "add", "-b", branchName, worktreePath, startPoint], repoPath);
     } catch (err) {
       throw new GitError("worktree add", repoPath, err);
     }
@@ -169,11 +165,7 @@ export class GitService {
     }
   }
 
-  async commitAndPush(
-    worktreePath: string,
-    branchName: string,
-    message: string,
-  ): Promise<void> {
+  async commitAndPush(worktreePath: string, branchName: string, message: string): Promise<void> {
     await this.assertBranch(worktreePath, branchName);
     await this.commitAll(worktreePath, message);
     await this.push(worktreePath, branchName);
@@ -202,10 +194,7 @@ export class GitService {
     await this.fetch(repoPath);
     await this.createWorktree(repoPath, worktreePath, branchName, startPoint);
 
-    this.logger.info(
-      { repoPath, worktreePath, branchName, startPoint },
-      "Run worktree ready",
-    );
+    this.logger.info({ repoPath, worktreePath, branchName, startPoint }, "Run worktree ready");
 
     return { worktreePath, branchName };
   }

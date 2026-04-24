@@ -43,9 +43,9 @@ export class NotificationService {
   ) {}
 
   isConfigured(): boolean {
-    return Boolean(
-      this.config.slackWebhookUrl || (this.config.emailTo && this.config.resendApiKey),
-    );
+    if (this.config.slackWebhookUrl) return true;
+    if (this.config.emailTo && this.config.resendApiKey) return true;
+    return false;
   }
 
   async sendHumanRequest(payload: NotificationPayload): Promise<NotificationResult> {
@@ -136,9 +136,7 @@ export class NotificationService {
     if (payload.openQuestions && payload.openQuestions.length > 0) {
       const lines = payload.openQuestions
         .slice(0, 3)
-        .map(
-          (q) => `• ${q.requiredForExecution ? "[required] " : ""}${truncate(q.question, 200)}`,
-        )
+        .map((q) => `• ${q.requiredForExecution ? "[required] " : ""}${truncate(q.question, 200)}`)
         .join("\n");
       blocks.push({
         type: "section",

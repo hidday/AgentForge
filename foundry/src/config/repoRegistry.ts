@@ -147,9 +147,7 @@ export class RepoRegistry {
 
     const stat = statSync(workingDirectory);
     if (!stat.isDirectory()) {
-      throw new Error(
-        `Working directory path is not a directory: ${workingDirectory}.`,
-      );
+      throw new Error(`Working directory path is not a directory: ${workingDirectory}.`);
     }
   }
 

@@ -136,10 +136,10 @@ export class RealGitHubClient implements GitHubClient {
           base,
           state: "open",
         });
-        if (pulls.length > 0) {
-          const prNumber = pulls[0]!.number;
-          this.logger.info({ repo, prNumber }, "Found existing open PR");
-          return prNumber;
+        const existing = pulls[0];
+        if (existing) {
+          this.logger.info({ repo, prNumber: existing.number }, "Found existing open PR");
+          return existing.number;
         }
       }
       throw this.wrapError("createDraftPR", repo, err, { head, base });

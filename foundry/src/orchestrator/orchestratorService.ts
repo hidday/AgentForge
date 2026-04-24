@@ -317,7 +317,10 @@ export class OrchestratorService {
 
     const planReviewArtifact = await this.artifactRepo.findLatestByType(runId, "PlanReview");
     const planReview = planReviewArtifact?.payloadJson as
-      | { summary: string; findings: { id: string; severity: string; title: string; details: string }[] }
+      | {
+          summary: string;
+          findings: { id: string; severity: string; title: string; details: string }[];
+        }
       | undefined;
 
     const nextPlanVersion = run.planVersion + 1;
@@ -362,7 +365,12 @@ export class OrchestratorService {
       );
 
       this.logger.info(
-        { runId: run.id, state: run.state, blockingCount: blockingQuestions.length, durationMs: timer.elapsed() },
+        {
+          runId: run.id,
+          state: run.state,
+          blockingCount: blockingQuestions.length,
+          durationMs: timer.elapsed(),
+        },
         "Re-plan has blocking questions, pausing for human clarification",
       );
       return run;
@@ -439,7 +447,12 @@ export class OrchestratorService {
       );
 
       this.logger.info(
-        { runId: run.id, state: run.state, blockingCount: blockingQuestions.length, durationMs: timer.elapsed() },
+        {
+          runId: run.id,
+          state: run.state,
+          blockingCount: blockingQuestions.length,
+          durationMs: timer.elapsed(),
+        },
         "Plan has blocking questions, pausing for human clarification",
       );
       return run;
@@ -1091,7 +1104,10 @@ export class OrchestratorService {
   private async loadReplanContext(runId: string): Promise<{
     previousPlan?: Plan;
     humanAnswers?: HumanAnswer[];
-    planReviewFindings?: { summary: string; findings: { id: string; severity: string; title: string; details: string }[] };
+    planReviewFindings?: {
+      summary: string;
+      findings: { id: string; severity: string; title: string; details: string }[];
+    };
   }> {
     const planArtifact = await this.artifactRepo.findLatestByType(runId, "Plan");
     const previousPlan = planArtifact?.payloadJson as Plan | undefined;
@@ -1103,7 +1119,10 @@ export class OrchestratorService {
 
     const planReviewArtifact = await this.artifactRepo.findLatestByType(runId, "PlanReview");
     const planReview = planReviewArtifact?.payloadJson as
-      | { summary: string; findings: { id: string; severity: string; title: string; details: string }[] }
+      | {
+          summary: string;
+          findings: { id: string; severity: string; title: string; details: string }[];
+        }
       | undefined;
 
     return {
