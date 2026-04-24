@@ -44,6 +44,10 @@ enum ArtifactType {
 model AiRun {
   id                     String       @id @default(uuid())
   linearIssueId          String
+  /// Human-readable key from Linear (e.g. ENG-42); distinct from internal UUID.
+  linearIssueIdentifier  String?
+  /// Snapshot of the issue body at run start (requirements for plan approval checks).
+  linearIssueDescription String?
   linearIssueTitle       String?
   linearIssueUrl         String?
   repo                   String

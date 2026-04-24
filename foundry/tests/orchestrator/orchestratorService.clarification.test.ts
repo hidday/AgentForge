@@ -12,6 +12,10 @@ function makeRun(overrides: Partial<Run> = {}): Run {
   return {
     id: "run-1",
     linearIssueId: "LIN-1",
+    linearIssueIdentifier: null,
+    linearIssueDescription: null,
+    linearIssueTitle: null,
+    linearIssueUrl: null,
     repo: "test-repo",
     branchName: null,
     prNumber: null,

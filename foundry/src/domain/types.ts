@@ -4,6 +4,8 @@ import type { RunEvent } from "./runEvent.js";
 export interface Run {
   id: string;
   linearIssueId: string;
+  linearIssueIdentifier: string | null;
+  linearIssueDescription: string | null;
   linearIssueTitle: string | null;
   linearIssueUrl: string | null;
   repo: string;

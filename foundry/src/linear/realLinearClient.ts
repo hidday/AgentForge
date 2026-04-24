@@ -39,6 +39,7 @@ export class RealLinearClient implements LinearClient {
 
     return {
       id: issue.id,
+      identifier: issue.identifier,
       title: issue.title,
       description: issue.description ?? "",
       branchName: issue.branchName,
@@ -153,6 +154,7 @@ export class RealLinearClient implements LinearClient {
 
       results.push({
         id: issue.id,
+        identifier: issue.identifier,
         title: issue.title,
         description: issue.description ?? "",
         branchName: issue.branchName,

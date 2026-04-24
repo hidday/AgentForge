@@ -1,5 +1,7 @@
 export interface LinearIssue {
   id: string;
+  /** Team issue key, e.g. "ENG-42" (from Linear `identifier`). */
+  identifier?: string;
   title: string;
   description: string;
   branchName: string;

@@ -78,7 +78,9 @@ export function RunDetailPage() {
             <div className="flex items-center gap-2">
               <span className="text-xs text-text-muted">Issue:</span>
               <span className="text-xs text-accent font-medium">
-                {run.linearIssueTitle || run.linearIssueId.slice(0, 8)}
+                {run.linearIssueTitle ||
+                  run.linearIssueIdentifier ||
+                  run.linearIssueId.slice(0, 8)}
               </span>
               {run.linearIssueUrl && (
                 <a

@@ -3,11 +3,13 @@ import type { RunState as PrismaRunState } from "../generated/prisma/enums.js";
 import { RunState } from "../domain/runState.js";
 import type { Run } from "../domain/types.js";
 
-const TERMINAL_STATES: RunState[] = [RunState.Done];
+const TERMINAL_STATES: RunState[] = [RunState.Done, RunState.Failed];
 
 function toDomain(row: {
   id: string;
   linearIssueId: string;
+  linearIssueIdentifier: string | null;
+  linearIssueDescription: string | null;
   linearIssueTitle: string | null;
   linearIssueUrl: string | null;
   repo: string;
@@ -36,6 +38,8 @@ export class RunRepository {
 
   async create(params: {
     linearIssueId: string;
+    linearIssueIdentifier?: string;
+    linearIssueDescription?: string;
     linearIssueTitle?: string;
     linearIssueUrl?: string;
     repo: string;
@@ -44,6 +48,8 @@ export class RunRepository {
     const row = await this.prisma.aiRun.create({
       data: {
         linearIssueId: params.linearIssueId,
+        linearIssueIdentifier: params.linearIssueIdentifier ?? null,
+        linearIssueDescription: params.linearIssueDescription ?? null,
         linearIssueTitle: params.linearIssueTitle ?? null,
         linearIssueUrl: params.linearIssueUrl ?? null,
         repo: params.repo,
@@ -55,8 +61,20 @@ export class RunRepository {
   }
 
   async findAll(stateFilter?: string): Promise<Run[]> {
+    let where: { state?: PrismaRunState | { in: PrismaRunState[] } } | undefined;
+    if (stateFilter) {
+      const states = stateFilter
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean);
+      if (states.length === 1) {
+        where = { state: states[0] as PrismaRunState };
+      } else if (states.length > 1) {
+        where = { state: { in: states as PrismaRunState[] } };
+      }
+    }
     const rows = await this.prisma.aiRun.findMany({
-      where: stateFilter ? { state: stateFilter as PrismaRunState } : undefined,
+      where,
       orderBy: { createdAt: "desc" },
     });
     return rows.map(toDomain);
@@ -94,9 +112,12 @@ export class RunRepository {
     return toDomain(row);
   }
 
-  async findMissingTitles(): Promise<Run[]> {
+  /** Runs missing title and/or issue-body snapshot; safe to backfill from Linear. */
+  async findRunsNeedingLinearBackfill(): Promise<Run[]> {
     const rows = await this.prisma.aiRun.findMany({
-      where: { linearIssueTitle: null },
+      where: {
+        OR: [{ linearIssueTitle: null }, { linearIssueDescription: null }],
+      },
     });
     return rows.map(toDomain);
   }
@@ -106,6 +127,8 @@ export class RunRepository {
     data: Partial<
       Pick<
         Run,
+        | "linearIssueIdentifier"
+        | "linearIssueDescription"
         | "linearIssueTitle"
         | "linearIssueUrl"
         | "branchName"
