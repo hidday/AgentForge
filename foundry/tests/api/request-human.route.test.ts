@@ -8,6 +8,8 @@ function makeRun(state = RunState.AwaitingPlanApproval) {
   return {
     id: "run-1",
     linearIssueId: "LIN-1",
+    linearIssueIdentifier: "LIN-1",
+    linearIssueDescription: "Test issue body for request-human route tests.",
     linearIssueTitle: "Add login",
     linearIssueUrl: "https://linear.app/team/issue/LIN-1",
     repo: "test-repo",
@@ -160,10 +162,12 @@ describe("POST /api/runs/:id/actions/request-human", () => {
       reason: string;
       runUrl: string;
       planConfidence: number;
+      linearIssue: { identifier?: string; id: string };
     };
     expect(payload.reason).toBe("plan_ambiguous");
     expect(payload.runUrl).toBe("http://localhost:5173/runs/run-1");
     expect(payload.planConfidence).toBe(0.7);
+    expect(payload.linearIssue.identifier).toBe("LIN-1");
     expect(mockEventRepo.create).toHaveBeenCalledTimes(1);
     const eventArgs = mockEventRepo.create.mock.calls[0][0];
     expect(eventArgs.eventType).toBe(RunEvent.HUMAN_REQUESTED);

@@ -19,6 +19,8 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 export interface Run {
   id: string;
   linearIssueId: string;
+  linearIssueIdentifier: string | null;
+  linearIssueDescription: string | null;
   linearIssueTitle: string | null;
   linearIssueUrl: string | null;
   repo: string;
@@ -69,6 +71,7 @@ export interface ActiveProcess {
 
 export interface LinearIssue {
   id: string;
+  identifier?: string;
   title: string;
   description: string;
   state: string;

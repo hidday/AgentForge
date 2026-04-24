@@ -84,7 +84,9 @@ export function RunsTable({ runs, onAction }: RunsTableProps) {
                       to={`/runs/${run.id}`}
                       className="text-xs text-accent hover:text-accent-hover transition-colors truncate max-w-[280px]"
                     >
-                      {run.linearIssueTitle || run.linearIssueId.slice(0, 8)}
+                      {run.linearIssueTitle ||
+                        run.linearIssueIdentifier ||
+                        run.linearIssueId.slice(0, 8)}
                     </Link>
                     {run.linearIssueUrl && (
                       <a

@@ -346,19 +346,24 @@ async function main(): Promise<void> {
   await app.listen({ port: env.PORT, host: "0.0.0.0" });
   app.log.info(`Server running on port ${env.PORT} in ${env.AGENT_RUNTIME_MODE} mode`);
 
-  // Backfill runs that are missing Linear issue titles
+  // Backfill runs that are missing Linear title and/or description snapshot
   {
     const runRepo = orchestrator.getRunRepo();
     const linearClient = orchestrator.getLinearClient();
-    const runsWithoutTitle = await runRepo.findMissingTitles();
-    if (runsWithoutTitle.length > 0) {
-      app.log.info({ count: runsWithoutTitle.length }, "Backfilling missing Linear issue titles");
-      for (const run of runsWithoutTitle) {
+    const runsNeedingBackfill = await runRepo.findRunsNeedingLinearBackfill();
+    if (runsNeedingBackfill.length > 0) {
+      app.log.info(
+        { count: runsNeedingBackfill.length },
+        "Backfilling missing Linear issue metadata (title / description / identifier)",
+      );
+      for (const run of runsNeedingBackfill) {
         try {
           const issue = await linearClient.getIssue(run.linearIssueId);
           await runRepo.update(run.id, {
             linearIssueTitle: issue.title,
             linearIssueUrl: issue.url ?? null,
+            linearIssueIdentifier: issue.identifier ?? null,
+            linearIssueDescription: issue.description,
           });
           app.log.info({ runId: run.id, title: issue.title }, "Backfilled issue title");
         } catch (err) {

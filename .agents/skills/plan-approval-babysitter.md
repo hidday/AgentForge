@@ -23,9 +23,10 @@ You do **not** answer open questions (that requires judgment calls the user want
 1. **Fetch runs needing your attention**:
    `GET {API}/api/runs?state=AwaitingPlanApproval` — returns runs in that state.
 2. For each run, **fetch its summary**:
-   `GET {API}/api/runs/:id/summary` — returns `{ run, plan, planReview, … }`. The `plan` block contains `{ confidence, openQuestions, summary, steps, stepCount, riskCount, testPlan }`.
-3. Also **read the Linear issue** to compare plan to requirements:
-   `GET {API}/api/runs/:id` gives you the run's `linearIssueId` and `linearIssueUrl`. For the full description, you can dereference via the Linear web URL the run carries, or (simpler) trust the `plan.summary` + issue title you already have from the earlier call. If you need the full issue body and it's not in the summary response, fall back to reading it via the Linear web URL in a `WebFetch` — but prefer staying inside the AgentForge API.
+   `GET {API}/api/runs/:id/summary` — returns `{ run, plan, planReview, … }`.
+   - `run.linearIssue` has `id`, `identifier`, `title`, `url`, and **`description`** (snapshot of the issue body at run start). Use that as the **requirements source of truth** for sanity-checking the plan.
+   - `plan` includes `summary`, `confidence`, `openQuestions`, full **`steps`** (id, title, **description**), **`risks`** (string list — look for high/critical severity in the text), `riskCount`, `testPlan`, `stepCount`, `version`.
+3. If `run.linearIssue.description` is null (legacy run), use `GET {API}/api/runs/:id` for ids/urls, or the Linear `url` with `WebFetch` only as a last resort. Prefer the summary payload.
 
 ## Decision gates (apply in order — first match wins)
 
@@ -66,8 +67,8 @@ Call: `POST /api/runs/:id/actions/reject-plan` with
 **4. APPROVE if ALL of:**
 - `plan.confidence >= 0.8`
 - No `requiredForExecution` open questions
-- `plan.summary` + `plan.steps` cover every requirement in the Linear issue (do the sanity check — list the issue's requirements, then match each to a step or statement)
-- No `risks` tagged `high` / `critical`
+- `plan.summary` + `plan.steps` cover every requirement in `run.linearIssue.description` (do the sanity check — list the requirements, then match each to a step or statement)
+- No material **high** / **critical** risk called out in `plan.risks` (plain-text list; look for those words or equivalent severity)
 - Plan's proposed scope matches the issue (not larger, not smaller)
 
 Call: `POST /api/runs/:id/actions/approve-plan` (empty body).

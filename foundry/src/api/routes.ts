@@ -307,10 +307,33 @@ export function registerApiRoutes(
         }
       | undefined;
 
+    const riskTexts =
+      plan && Array.isArray(plan.risks)
+        ? plan.risks.map((r) => {
+            if (typeof r === "string") return r;
+            if (r && typeof r === "object" && "description" in r) {
+              const d = (r as { description?: unknown }).description;
+              if (typeof d === "string") return d;
+            }
+            try {
+              return JSON.stringify(r);
+            } catch {
+              return String(r);
+            }
+          })
+        : [];
+
     return {
       run: {
         id: run.id,
         state: run.state,
+        linearIssue: {
+          id: run.linearIssueId,
+          identifier: run.linearIssueIdentifier,
+          title: run.linearIssueTitle,
+          url: run.linearIssueUrl,
+          description: run.linearIssueDescription,
+        },
         linearIssueId: run.linearIssueId,
         linearIssueTitle: run.linearIssueTitle,
         linearIssueUrl: run.linearIssueUrl,
@@ -330,9 +353,14 @@ export function registerApiRoutes(
             openQuestions: plan.openQuestions ?? [],
             stepCount: Array.isArray(plan.steps) ? plan.steps.length : 0,
             steps: Array.isArray(plan.steps)
-              ? plan.steps.map((s) => ({ id: s.id, title: s.title }))
+              ? plan.steps.map((s) => ({
+                  id: s.id,
+                  title: s.title,
+                  description: s.description,
+                }))
               : [],
-            riskCount: Array.isArray(plan.risks) ? plan.risks.length : 0,
+            risks: riskTexts,
+            riskCount: riskTexts.length,
             testPlan: plan.testPlan,
           }
         : null,
@@ -391,7 +419,7 @@ export function registerApiRoutes(
       const cutoff = Date.now() - debounceHours * 60 * 60 * 1000;
       const events = await eventRepo.findByRunId(run.id);
       const recent = events.find((e) => {
-        if (e.eventType !== RunEvent.HUMAN_REQUESTED) return false;
+        if (e.eventType !== "HUMAN_REQUESTED") return false;
         if (e.createdAt.getTime() < cutoff) return false;
         const payload = e.payloadJson as { reason?: string } | null;
         return payload?.reason === reason;
@@ -428,6 +456,7 @@ export function registerApiRoutes(
         context,
         linearIssue: {
           id: run.linearIssueId,
+          identifier: run.linearIssueIdentifier ?? undefined,
           title: run.linearIssueTitle,
           url: run.linearIssueUrl,
         },

@@ -12,15 +12,15 @@ You do **not** approve or reject plans or implementations. Another agent handles
 
 ## Inputs (every tick)
 
-1. `GET {API}/api/linear/pending` — list of Linear issues that haven't been started yet. Each issue has `id`, `identifier`, `title`, `description`, `labels`, `priority`, `url`, `project`, `team`.
-2. `GET {API}/api/runs` — all runs. Use this to know which issues already have active runs and to count concurrent work-in-progress.
+1. `GET {API}/api/linear/pending` — list of Linear issues that haven't been started yet. Each issue has `id`, `identifier` (team key, e.g. `ENG-42`), `title`, `description`, `labels`, `priority`, `url`, `project`, `team`.
+2. `GET {API}/api/runs` — all runs. Use this to know which issues already have active runs and to count concurrent work-in-progress. **Active** means a run whose `state` is not terminal: `Done` and **`Failed`** are terminal (a failed issue can be picked up again on a later tick once no non-terminal run exists for that issue).
 
 ## Decision procedure
 
 1. **Fetch** both endpoints above.
-2. **Compute active run count**: count runs whose `state` is not `Done` and not `Failed`. If it's at or above **the concurrency cap (default: 3)**, stop — do not start new runs this tick. Log and exit.
+2. **Compute active run count**: count runs whose `state` is not `Done` and not `Failed` (same notion Foundry uses for “already running”). If it's at or above **the concurrency cap (default: 3)**, stop — do not start new runs this tick. Log and exit.
 3. **Filter pending issues** down to candidates:
-   - Skip if a run already exists for the `linearIssueId` (check `GET /api/runs` response).
+   - Skip if a **non-terminal** run already exists for the `linearIssueId` (same as Foundry: not `Done` or `Failed` — check `GET /api/runs` response).
    - Skip if issue has label `do-not-auto-start` or `manual-only`.
    - Skip if `description` is shorter than 200 characters (too thin to plan from reliably).
    - Skip if `description` contains `TBD` / `TODO` / `[to fill in]` / `???` — it's not ready.
