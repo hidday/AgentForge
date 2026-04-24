@@ -55,8 +55,20 @@ export class RunRepository {
   }
 
   async findAll(stateFilter?: string): Promise<Run[]> {
+    let where: { state?: PrismaRunState | { in: PrismaRunState[] } } | undefined;
+    if (stateFilter) {
+      const states = stateFilter
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean);
+      if (states.length === 1) {
+        where = { state: states[0] as PrismaRunState };
+      } else if (states.length > 1) {
+        where = { state: { in: states as PrismaRunState[] } };
+      }
+    }
     const rows = await this.prisma.aiRun.findMany({
-      where: stateFilter ? { state: stateFilter as PrismaRunState } : undefined,
+      where,
       orderBy: { createdAt: "desc" },
     });
     return rows.map(toDomain);

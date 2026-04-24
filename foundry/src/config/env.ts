@@ -24,6 +24,12 @@ const EnvSchema = z.object({
     .enum(["true", "false", "1", "0"])
     .default("false")
     .transform((v) => v === "true" || v === "1"),
+  NOTIFY_EMAIL_TO: z.string().optional(),
+  NOTIFY_EMAIL_FROM: z.string().default("AgentForge <onboarding@resend.dev>"),
+  NOTIFY_SLACK_WEBHOOK_URL: z.string().url().optional(),
+  RESEND_API_KEY: z.string().optional(),
+  FOUNDRY_UI_BASE_URL: z.string().url().default("http://localhost:5173"),
+  NOTIFY_DEBOUNCE_HOURS: z.coerce.number().positive().default(6),
 });
 
 export type Env = z.infer<typeof EnvSchema>;

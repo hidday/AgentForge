@@ -3,8 +3,28 @@ import type { OrchestratorService } from "../orchestrator/orchestratorService.js
 import type { RunEventEmitter, DashboardEvent } from "./runEventEmitter.js";
 import type { LinearPollService } from "../sync/linearPoll.js";
 import type { ProcessRunner } from "../runtime/processRunner.js";
+import type {
+  NotificationService,
+  HumanRequestReason,
+  NotificationPayload,
+} from "../notifications/notificationService.js";
+import { RunEvent } from "../domain/runEvent.js";
 import { RunState } from "../domain/runState.js";
 import { PolicyError, ValidationError } from "../utils/errors.js";
+
+const VALID_HUMAN_REQUEST_REASONS: HumanRequestReason[] = [
+  "plan_ambiguous",
+  "plan_low_confidence",
+  "impl_rejected",
+  "impl_uncertain",
+  "other",
+];
+
+export interface RegisterApiRoutesOptions {
+  notificationService?: NotificationService;
+  uiBaseUrl?: string;
+  debounceHours?: number;
+}
 
 export function registerApiRoutes(
   app: FastifyInstance,
@@ -12,6 +32,7 @@ export function registerApiRoutes(
   emitter: RunEventEmitter,
   processRunner: ProcessRunner,
   linearPollService?: LinearPollService,
+  options: RegisterApiRoutesOptions = {},
 ): void {
   const runRepo = orchestrator.getRunRepo();
   const artifactRepo = orchestrator.getArtifactRepo();
@@ -259,6 +280,190 @@ export function registerApiRoutes(
     trigger();
     return { ok: true, runId: run.id, state: run.state, retrying: true };
   });
+
+  // ── Trimmed summary for external monitors ───────────────────────────────
+
+  app.get<{ Params: { id: string } }>("/api/runs/:id/summary", async (request, reply) => {
+    const run = await runRepo.findById(request.params.id);
+    if (!run) return reply.code(404).send({ error: "Run not found" });
+
+    const [planArtifact, planReviewArtifact, reviewArtifact, executionArtifact] = await Promise.all(
+      [
+        artifactRepo.findLatestByType(run.id, "Plan"),
+        artifactRepo.findLatestByType(run.id, "PlanReview"),
+        artifactRepo.findLatestByType(run.id, "Review"),
+        artifactRepo.findLatestByType(run.id, "ExecutionReport"),
+      ],
+    );
+
+    const plan = planArtifact?.payloadJson as
+      | {
+          summary?: string;
+          confidence?: number;
+          openQuestions?: { id: string; question: string; requiredForExecution: boolean }[];
+          steps?: { id: string; title: string; description: string }[];
+          risks?: unknown[];
+          testPlan?: string;
+        }
+      | undefined;
+
+    return {
+      run: {
+        id: run.id,
+        state: run.state,
+        linearIssueId: run.linearIssueId,
+        linearIssueTitle: run.linearIssueTitle,
+        linearIssueUrl: run.linearIssueUrl,
+        repo: run.repo,
+        branchName: run.branchName,
+        prNumber: run.prNumber,
+        planVersion: run.planVersion,
+        approvedPlanVersion: run.approvedPlanVersion,
+        createdAt: run.createdAt,
+        updatedAt: run.updatedAt,
+      },
+      plan: plan
+        ? {
+            version: planArtifact?.version,
+            summary: plan.summary,
+            confidence: plan.confidence,
+            openQuestions: plan.openQuestions ?? [],
+            stepCount: Array.isArray(plan.steps) ? plan.steps.length : 0,
+            steps: Array.isArray(plan.steps)
+              ? plan.steps.map((s) => ({ id: s.id, title: s.title }))
+              : [],
+            riskCount: Array.isArray(plan.risks) ? plan.risks.length : 0,
+            testPlan: plan.testPlan,
+          }
+        : null,
+      planReview: planReviewArtifact
+        ? {
+            version: planReviewArtifact.version,
+            payload: planReviewArtifact.payloadJson,
+          }
+        : null,
+      review: reviewArtifact
+        ? {
+            version: reviewArtifact.version,
+            payload: reviewArtifact.payloadJson,
+          }
+        : null,
+      executionReport: executionArtifact
+        ? {
+            version: executionArtifact.version,
+            payload: executionArtifact.payloadJson,
+          }
+        : null,
+    };
+  });
+
+  // ── Request human intervention (notification hook) ─────────────────────
+
+  app.post<{ Params: { id: string } }>(
+    "/api/runs/:id/actions/request-human",
+    async (request, reply) => {
+      const body = request.body as
+        | { reason?: unknown; summary?: unknown; context?: unknown }
+        | undefined;
+
+      const reason = body?.reason;
+      if (
+        typeof reason !== "string" ||
+        !VALID_HUMAN_REQUEST_REASONS.includes(reason as HumanRequestReason)
+      ) {
+        return reply.code(400).send({
+          error: `reason must be one of: ${VALID_HUMAN_REQUEST_REASONS.join(", ")}`,
+        });
+      }
+
+      const summary = body?.summary;
+      if (typeof summary !== "string" || !summary.trim()) {
+        return reply.code(400).send({ error: "summary (non-empty string) is required" });
+      }
+
+      const context =
+        typeof body?.context === "string" && body.context.trim() ? body.context : undefined;
+
+      const run = await runRepo.findById(request.params.id);
+      if (!run) return reply.code(404).send({ error: "Run not found" });
+
+      const debounceHours = options.debounceHours ?? 6;
+      const cutoff = Date.now() - debounceHours * 60 * 60 * 1000;
+      const events = await eventRepo.findByRunId(run.id);
+      const recent = events.find((e) => {
+        if (e.eventType !== RunEvent.HUMAN_REQUESTED) return false;
+        if (e.createdAt.getTime() < cutoff) return false;
+        const payload = e.payloadJson as { reason?: string } | null;
+        return payload?.reason === reason;
+      });
+
+      const uiBaseUrl = options.uiBaseUrl ?? "http://localhost:5173";
+      const runUrl = `${uiBaseUrl.replace(/\/$/, "")}/runs/${run.id}`;
+
+      if (recent) {
+        app.log.info(
+          { runId: run.id, reason, lastNotifiedAt: recent.createdAt },
+          "Skipping human-request notification (debounced)",
+        );
+        return {
+          ok: true,
+          debounced: true,
+          lastNotifiedAt: recent.createdAt,
+          notified: { slack: false, email: false },
+        };
+      }
+
+      const planArtifact = await artifactRepo.findLatestByType(run.id, "Plan");
+      const plan = planArtifact?.payloadJson as
+        | {
+            confidence?: number;
+            openQuestions?: { id: string; question: string; requiredForExecution: boolean }[];
+          }
+        | undefined;
+
+      const notificationPayload: NotificationPayload = {
+        runId: run.id,
+        reason: reason as HumanRequestReason,
+        summary: summary.trim(),
+        context,
+        linearIssue: {
+          id: run.linearIssueId,
+          title: run.linearIssueTitle,
+          url: run.linearIssueUrl,
+        },
+        runState: run.state,
+        runUrl,
+        planConfidence: plan?.confidence,
+        openQuestions: plan?.openQuestions ?? [],
+      };
+
+      let notified = { slack: false, email: false };
+      if (options.notificationService?.isConfigured()) {
+        const result = await options.notificationService.sendHumanRequest(notificationPayload);
+        notified = { slack: result.slack.ok, email: result.email.ok };
+      } else {
+        app.log.warn(
+          { runId: run.id, reason },
+          "No notification channel configured — recording event only",
+        );
+      }
+
+      await eventRepo.create({
+        runId: run.id,
+        eventType: RunEvent.HUMAN_REQUESTED,
+        source: "api",
+        payloadJson: {
+          reason,
+          summary: summary.trim(),
+          context: context ?? null,
+          runUrl,
+          notified,
+        },
+      });
+
+      return { ok: true, debounced: false, notified };
+    },
+  );
 
   // ── Active processes ────────────────────────────────────────────────────
 

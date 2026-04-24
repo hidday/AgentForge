@@ -37,6 +37,7 @@ import { registerApiRoutes } from "./api/routes.js";
 import { LinearPollService } from "./sync/linearPoll.js";
 import { RuntimeHealthCheck } from "./runtime/runtimeHealthCheck.js";
 import { GitService } from "./git/gitService.js";
+import { NotificationService } from "./notifications/notificationService.js";
 
 function buildServices() {
   const prisma = getPrismaClient();
@@ -130,6 +131,23 @@ function buildServices() {
     ? new LinearPollService(linearClient, runRepo, orchestrator, repoRegistry, logger)
     : undefined;
 
+  const notificationService = new NotificationService(
+    {
+      emailTo: env.NOTIFY_EMAIL_TO,
+      emailFrom: env.NOTIFY_EMAIL_FROM,
+      slackWebhookUrl: env.NOTIFY_SLACK_WEBHOOK_URL,
+      resendApiKey: env.RESEND_API_KEY,
+    },
+    logger,
+  );
+  logger.info(
+    {
+      slack: Boolean(env.NOTIFY_SLACK_WEBHOOK_URL),
+      email: Boolean(env.NOTIFY_EMAIL_TO && env.RESEND_API_KEY),
+    },
+    "Notification channels",
+  );
+
   const preflightProcessRunner = new ProcessRunner("real", logger);
   const runtimeConfigs = RuntimeHealthCheck.buildRuntimeConfigs(
     env.CLAUDE_CODE_COMMAND,
@@ -149,6 +167,7 @@ function buildServices() {
     runtimeHealthCheck,
     githubClient,
     repoRegistry,
+    notificationService,
   };
 }
 
@@ -172,6 +191,7 @@ async function main(): Promise<void> {
     runtimeHealthCheck,
     githubClient,
     repoRegistry,
+    notificationService,
   } = buildServices();
 
   if (env.AGENT_RUNTIME_MODE === "real") {
@@ -240,7 +260,11 @@ async function main(): Promise<void> {
 
   registerLinearWebhook(app, orchestrator, idempotencyRepo);
   registerGitHubWebhook(app, orchestrator);
-  registerApiRoutes(app, orchestrator, dashboardEmitter, processRunner, linearPollService);
+  registerApiRoutes(app, orchestrator, dashboardEmitter, processRunner, linearPollService, {
+    notificationService,
+    uiBaseUrl: env.FOUNDRY_UI_BASE_URL,
+    debounceHours: env.NOTIFY_DEBOUNCE_HOURS,
+  });
 
   app.post<{ Params: { issueId: string } }>("/simulate/run/:issueId", async (request, reply) => {
     const { issueId } = request.params;
