@@ -27,7 +27,7 @@ import type { GitHubSyncService } from "../sync/githubSync.js";
 import type { RunEventEmitter } from "../api/runEventEmitter.js";
 import type { GitService } from "../git/gitService.js";
 import { startTimer } from "../utils/time.js";
-import { PolicyError, ValidationError } from "../utils/errors.js";
+import { PolicyError, ValidationError, RetryExhaustedError } from "../utils/errors.js";
 
 const MAX_CLARIFICATION_ITERATIONS = 3;
 
@@ -226,7 +226,13 @@ export class OrchestratorService {
       `AI planning started for "${issue.title}". Will produce a plan, have it AI-reviewed, then present for approval.`,
     );
 
-    const plan = await this.plannerAgent.run(bundle, run.id);
+    let plan: Plan;
+    try {
+      plan = await this.plannerAgent.run(bundle, run.id);
+    } catch (err) {
+      if (err instanceof RetryExhaustedError) return this.handleRetryExhausted(run, err);
+      throw err;
+    }
 
     run = await this.runRepo.update(run.id, {
       planVersion: plan.planVersion,
@@ -320,24 +326,30 @@ export class OrchestratorService {
 
     const nextPlanVersion = run.planVersion + 1;
 
-    const plan = await this.plannerAgent.run(bundle, run.id, {
-      planVersionOverride: nextPlanVersion,
-      ...(previousPlan ? { previousPlan } : {}),
-      ...(rejectionContext
-        ? {
-            humanFeedback: {
-              planVersion: rejectionContext.planVersion,
-              feedback: rejectionContext.feedback,
-            },
-          }
-        : {}),
-      ...(humanAnswersPayload?.answers?.length
-        ? { humanAnswers: humanAnswersPayload.answers }
-        : {}),
-      ...(planReview
-        ? { planReviewFindings: { summary: planReview.summary, findings: planReview.findings } }
-        : {}),
-    });
+    let plan: Plan;
+    try {
+      plan = await this.plannerAgent.run(bundle, run.id, {
+        planVersionOverride: nextPlanVersion,
+        ...(previousPlan ? { previousPlan } : {}),
+        ...(rejectionContext
+          ? {
+              humanFeedback: {
+                planVersion: rejectionContext.planVersion,
+                feedback: rejectionContext.feedback,
+              },
+            }
+          : {}),
+        ...(humanAnswersPayload?.answers?.length
+          ? { humanAnswers: humanAnswersPayload.answers }
+          : {}),
+        ...(planReview
+          ? { planReviewFindings: { summary: planReview.summary, findings: planReview.findings } }
+          : {}),
+      });
+    } catch (err) {
+      if (err instanceof RetryExhaustedError) return this.handleRetryExhausted(run, err);
+      throw err;
+    }
 
     run = await this.runRepo.update(run.id, {
       planVersion: plan.planVersion,
@@ -406,7 +418,13 @@ export class OrchestratorService {
     run = await this.transitionAndRecord(run, RunEvent.RUN_REQUESTED, "orchestrator");
     const bundle = await this.buildTaskBundle(issue, run);
 
-    const plan = await this.plannerAgent.run(bundle, run.id);
+    let plan: Plan;
+    try {
+      plan = await this.plannerAgent.run(bundle, run.id);
+    } catch (err) {
+      if (err instanceof RetryExhaustedError) return this.handleRetryExhausted(run, err);
+      throw err;
+    }
 
     run = await this.runRepo.update(run.id, {
       planVersion: plan.planVersion,
@@ -467,7 +485,13 @@ export class OrchestratorService {
     const issue = await this.linearClient.getIssue(run.linearIssueId);
     const bundle = await this.buildTaskBundle(issue, run);
 
-    const planReview = await this.planReviewerAgent.run(plan, bundle, runId);
+    let planReview: Awaited<ReturnType<typeof this.planReviewerAgent.run>>;
+    try {
+      planReview = await this.planReviewerAgent.run(plan, bundle, runId);
+    } catch (err) {
+      if (err instanceof RetryExhaustedError) return this.handleRetryExhausted(run, err);
+      throw err;
+    }
 
     if (planReview.overallVerdict === "approved") {
       run = await this.transitionAndRecord(
@@ -525,12 +549,14 @@ export class OrchestratorService {
     const issue = await this.linearClient.getIssue(run.linearIssueId);
     const bundle = await this.buildTaskBundle(issue, run);
 
-    const { revision, revisedPlan } = await this.planReviserAgent.run(
-      plan,
-      planReview,
-      bundle,
-      runId,
-    );
+    let revision: Awaited<ReturnType<typeof this.planReviserAgent.run>>["revision"];
+    let revisedPlan: Awaited<ReturnType<typeof this.planReviserAgent.run>>["revisedPlan"];
+    try {
+      ({ revision, revisedPlan } = await this.planReviserAgent.run(plan, planReview, bundle, runId));
+    } catch (err) {
+      if (err instanceof RetryExhaustedError) return this.handleRetryExhausted(run, err);
+      throw err;
+    }
 
     run = await this.runRepo.update(runId, {
       planVersion: revisedPlan.planVersion,
@@ -617,10 +643,17 @@ export class OrchestratorService {
       source: "orchestrator",
     });
 
-    const { report, prNumber } = await this.executorAgent.run(plan, bundle, runId, {
-      existingBranch: run.branchName,
-      existingPR: run.prNumber,
-    });
+    let report: Awaited<ReturnType<typeof this.executorAgent.run>>["report"];
+    let prNumber: Awaited<ReturnType<typeof this.executorAgent.run>>["prNumber"];
+    try {
+      ({ report, prNumber } = await this.executorAgent.run(plan, bundle, runId, {
+        existingBranch: run.branchName,
+        existingPR: run.prNumber,
+      }));
+    } catch (err) {
+      if (err instanceof RetryExhaustedError) return this.handleRetryExhausted(run, err);
+      throw err;
+    }
 
     run = await this.runRepo.update(runId, {
       prNumber,
@@ -696,24 +729,30 @@ export class OrchestratorService {
     const rejectionArtifact = await this.artifactRepo.findLatestByType(runId, "RejectionContext");
     const rejectionContext = rejectionArtifact?.payloadJson as RejectionContextPayload | undefined;
 
-    const newPlan = await this.plannerAgent.run(bundle, run.id, {
-      planVersionOverride: nextPlanVersion,
-      ...(iterateContext?.previousPlan ? { previousPlan: iterateContext.previousPlan } : {}),
-      ...(rejectionContext
-        ? {
-            humanFeedback: {
-              planVersion: rejectionContext.planVersion,
-              feedback: rejectionContext.feedback,
-            },
-          }
-        : {}),
-      ...(iterateContext?.humanAnswers?.length
-        ? { humanAnswers: iterateContext.humanAnswers }
-        : {}),
-      ...(iterateContext?.planReviewFindings
-        ? { planReviewFindings: iterateContext.planReviewFindings }
-        : {}),
-    });
+    let newPlan: Plan;
+    try {
+      newPlan = await this.plannerAgent.run(bundle, run.id, {
+        planVersionOverride: nextPlanVersion,
+        ...(iterateContext?.previousPlan ? { previousPlan: iterateContext.previousPlan } : {}),
+        ...(rejectionContext
+          ? {
+              humanFeedback: {
+                planVersion: rejectionContext.planVersion,
+                feedback: rejectionContext.feedback,
+              },
+            }
+          : {}),
+        ...(iterateContext?.humanAnswers?.length
+          ? { humanAnswers: iterateContext.humanAnswers }
+          : {}),
+        ...(iterateContext?.planReviewFindings
+          ? { planReviewFindings: iterateContext.planReviewFindings }
+          : {}),
+      });
+    } catch (err) {
+      if (err instanceof RetryExhaustedError) return this.handleRetryExhausted(run, err);
+      throw err;
+    }
 
     run = await this.runRepo.update(run.id, {
       planVersion: newPlan.planVersion,
@@ -772,7 +811,13 @@ export class OrchestratorService {
 
     const diff = run.prNumber ? await this.githubClient.getPRDiff(run.repo, run.prNumber) : "";
 
-    const review = await this.reviewerAgent.run(plan, executionReport, diff, bundle, runId);
+    let review: Awaited<ReturnType<typeof this.reviewerAgent.run>>;
+    try {
+      review = await this.reviewerAgent.run(plan, executionReport, diff, bundle, runId);
+    } catch (err) {
+      if (err instanceof RetryExhaustedError) return this.handleRetryExhausted(run, err);
+      throw err;
+    }
 
     run = await this.runRepo.update(runId, { reviewerRuntime: "codex" });
 
@@ -832,12 +877,18 @@ export class OrchestratorService {
     const execArtifact = await this.artifactRepo.findLatestByType(runId, "ExecutionReport");
     const executionReport = execArtifact?.payloadJson as ExecutionReport;
 
-    const remediation = await this.remediationAgent.run(
-      review,
-      executionReport,
-      run.workingDirectory,
-      runId,
-    );
+    let remediation: Awaited<ReturnType<typeof this.remediationAgent.run>>;
+    try {
+      remediation = await this.remediationAgent.run(
+        review,
+        executionReport,
+        run.workingDirectory,
+        runId,
+      );
+    } catch (err) {
+      if (err instanceof RetryExhaustedError) return this.handleRetryExhausted(run, err);
+      throw err;
+    }
 
     if (run.branchName) {
       await this.gitService.commitAndPush(
@@ -975,10 +1026,16 @@ export class OrchestratorService {
     const nextPlanVersion = run.planVersion + 1;
 
     // Re-run the planner with human answers injected
-    const newPlan = await this.plannerAgent.run(taskBundle, runId, {
-      humanAnswers: answers,
-      planVersionOverride: nextPlanVersion,
-    });
+    let newPlan: Plan;
+    try {
+      newPlan = await this.plannerAgent.run(taskBundle, runId, {
+        humanAnswers: answers,
+        planVersionOverride: nextPlanVersion,
+      });
+    } catch (err) {
+      if (err instanceof RetryExhaustedError) return this.handleRetryExhausted(run, err);
+      throw err;
+    }
 
     run = await this.runRepo.update(runId, {
       planVersion: newPlan.planVersion,
@@ -1040,7 +1097,13 @@ export class OrchestratorService {
     const issue = await this.linearClient.getIssue(run.linearIssueId);
     const bundle = await this.buildTaskBundle(issue, run);
 
-    const planReview = await this.planReviewerAgent.run(plan, bundle, runId);
+    let planReview: Awaited<ReturnType<typeof this.planReviewerAgent.run>>;
+    try {
+      planReview = await this.planReviewerAgent.run(plan, bundle, runId);
+    } catch (err) {
+      if (err instanceof RetryExhaustedError) return this.handleRetryExhausted(run, err);
+      throw err;
+    }
 
     // Always return to AwaitingPlanApproval so the human retains control
     if (planReview.overallVerdict === "approved") {
@@ -1084,6 +1147,47 @@ export class OrchestratorService {
 
     this.logger.info({ runId, state: run.state }, "Human review approved, run complete");
     return run;
+  }
+
+  private async handleRetryExhausted(run: Run, err: RetryExhaustedError): Promise<Run> {
+    const attemptLines =
+      err.attempts.length > 0
+        ? err.attempts
+            .map(
+              (a) =>
+                `- Attempt ${a.attempt}: ${a.error} (${a.durationMs}ms)`,
+            )
+            .join("\n")
+        : "_No attempts made (circuit breaker was already open)_";
+
+    const summary = [
+      `## ⚠️ Agent Retry Exhausted`,
+      ``,
+      `**Stage**: ${err.stage}`,
+      `**Runtime**: ${err.runtime}`,
+      `**Circuit breaker triggered**: ${err.circuitBreakerTriggered ? "yes" : "no"}`,
+      ``,
+      `### Attempts`,
+      attemptLines,
+    ].join("\n");
+
+    await this.linearClient.postComment(run.linearIssueId, summary);
+
+    const updatedRun = await this.transitionAndRecord(
+      run,
+      RunEvent.NEEDS_HUMAN_CLARIFICATION,
+      "retry-exhausted",
+      {
+        failureSummary: {
+          stage: err.stage,
+          runtime: err.runtime,
+          circuitBreakerTriggered: err.circuitBreakerTriggered,
+          attempts: err.attempts,
+        },
+      },
+    );
+
+    return updatedRun;
   }
 
   private async loadReplanContext(runId: string): Promise<{

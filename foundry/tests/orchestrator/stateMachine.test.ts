@@ -3,6 +3,26 @@ import { transition, getValidEvents } from "../../src/orchestrator/stateMachine.
 import { RunState } from "../../src/domain/runState.js";
 import { RunEvent } from "../../src/domain/runEvent.js";
 
+describe("stateMachine - NEEDS_HUMAN_CLARIFICATION from all active states", () => {
+  const newStates: RunState[] = [
+    RunState.PlanRevision,
+    RunState.Implementing,
+    RunState.AIReview,
+    RunState.AddressingReview,
+  ];
+
+  for (const state of newStates) {
+    it(`${state} + NEEDS_HUMAN_CLARIFICATION → HumanClarificationNeeded`, () => {
+      const next = transition(state, RunEvent.NEEDS_HUMAN_CLARIFICATION);
+      expect(next).toBe(RunState.HumanClarificationNeeded);
+    });
+
+    it(`getValidEvents(${state}) includes NEEDS_HUMAN_CLARIFICATION`, () => {
+      expect(getValidEvents(state)).toContain(RunEvent.NEEDS_HUMAN_CLARIFICATION);
+    });
+  }
+});
+
 describe("stateMachine - clarification transitions", () => {
   it("HumanClarificationNeeded + CLARIFICATION_PROVIDED → Planning", () => {
     const next = transition(RunState.HumanClarificationNeeded, RunEvent.CLARIFICATION_PROVIDED);

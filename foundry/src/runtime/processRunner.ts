@@ -11,11 +11,14 @@ import {
 import { join, resolve } from "node:path";
 import { watch } from "node:fs";
 import type { Logger } from "../utils/logger.js";
-import { AgentTimeoutError } from "../utils/errors.js";
+import { AgentTimeoutError, RetryExhaustedError, RuntimeExecutionError, type RetryAttempt } from "../utils/errors.js";
 import { startTimer } from "../utils/time.js";
 import { generateId } from "../utils/ids.js";
 import type { ProcessResult, ProcessSpawnOptions, ProcessContext } from "./runnerTypes.js";
 import type { RunEventEmitter } from "../api/runEventEmitter.js";
+import { CircuitBreaker } from "./circuitBreaker.js";
+import { isDeterministicError } from "./errorClassifier.js";
+import { env } from "../config/env.js";
 
 const ROLLING_BUFFER_MAX = 8 * 1024;
 const OUTPUT_THROTTLE_MS = 250;
@@ -64,15 +67,26 @@ export class ProcessRunner {
   private mockHandler: MockProcessHandler | null = null;
   private readonly activeProcesses = new Map<string, ActiveProcessEntry>();
   private readonly spoolDir: string;
+  private readonly circuitBreaker: CircuitBreaker;
+  private readonly retryMaxAttempts: number;
+  private readonly retryBaseDelayMs: number;
 
   constructor(
     private readonly mode: "mock" | "real",
     private readonly logger: Logger,
     private readonly emitter?: RunEventEmitter,
     spoolDir?: string,
+    circuitBreaker?: CircuitBreaker,
+    retryMaxAttempts?: number,
+    retryBaseDelayMs?: number,
   ) {
     this.spoolDir = resolve(spoolDir ?? ".foundry/processes");
     mkdirSync(this.spoolDir, { recursive: true });
+    this.circuitBreaker =
+      circuitBreaker ??
+      new CircuitBreaker(env.CB_FAILURE_THRESHOLD, env.CB_WINDOW_MS, logger);
+    this.retryMaxAttempts = retryMaxAttempts ?? env.RETRY_MAX_ATTEMPTS;
+    this.retryBaseDelayMs = retryBaseDelayMs ?? env.RETRY_BASE_DELAY_MS;
   }
 
   setMockHandler(handler: MockProcessHandler): void {
@@ -80,6 +94,128 @@ export class ProcessRunner {
   }
 
   async execute(options: ProcessSpawnOptions): Promise<ProcessResult> {
+    const context = options.context;
+
+    // If no context, fall through to underlying execution without retry/CB logic
+    if (!context) {
+      return this.executeOnce(options);
+    }
+
+    const cbKey = `${context.stage}:${context.runtime}`;
+
+    // No-retry mode: single attempt with normalizeResult
+    if (this.retryMaxAttempts === 0) {
+      const result = await this.executeOnce(options);
+      this.normalizeResult(result);
+      return result;
+    }
+
+    // Check circuit breaker before any attempt
+    if (this.circuitBreaker.isOpen(cbKey)) {
+      this.logger.info(
+        {
+          event: "circuit_breaker_short_circuit",
+          stage: context.stage,
+          runtime: context.runtime,
+        },
+        "Circuit breaker open — skipping execution",
+      );
+      throw new RetryExhaustedError(context.stage, context.runtime, [], true);
+    }
+
+    const attempts: RetryAttempt[] = [];
+
+    for (let attempt = 0; attempt < this.retryMaxAttempts; attempt++) {
+      const attemptTimer = startTimer();
+      try {
+        const result = await this.executeOnce(options);
+        this.normalizeResult(result);
+        // Success — reset the circuit breaker
+        this.circuitBreaker.recordSuccess(cbKey);
+        return result;
+      } catch (err: unknown) {
+        const durationMs = attemptTimer.elapsed();
+        const errorMessage = err instanceof Error ? err.message : String(err);
+        attempts.push({ attempt: attempt + 1, error: errorMessage, durationMs });
+
+        // Deterministic errors are not worth retrying
+        if (isDeterministicError(err)) {
+          this.circuitBreaker.recordFailure(cbKey);
+          throw err;
+        }
+
+        this.circuitBreaker.recordFailure(cbKey);
+
+        const remaining = this.retryMaxAttempts - attempt - 1;
+        if (remaining > 0) {
+          const nextRetryMs = this.retryBaseDelayMs * Math.pow(2, attempt);
+          this.logger.warn(
+            {
+              stage: context.stage,
+              runtime: context.runtime,
+              attempt: attempt + 1,
+              error: errorMessage,
+              nextRetryMs,
+            },
+            "Agent attempt failed, retrying",
+          );
+          await this.delay(nextRetryMs);
+        }
+      }
+    }
+
+    throw new RetryExhaustedError(context.stage, context.runtime, attempts, false);
+  }
+
+  /**
+   * Inspect a ProcessResult for known failure patterns and throw a typed error.
+   * Called immediately after executeOnce() resolves before the success path returns.
+   */
+  private normalizeResult(result: ProcessResult): void {
+    if (result.exitCode === 137) {
+      throw new RuntimeExecutionError(
+        "Process killed: out of memory (exit code 137)",
+        137,
+        result.stderr,
+      );
+    }
+    if (result.exitCode === 124) {
+      throw new RuntimeExecutionError(
+        "Process timed out (exit code 124)",
+        124,
+        result.stderr,
+      );
+    }
+
+    // Check stderr for rate-limit patterns
+    const stderrLower = result.stderr.toLowerCase();
+    if (stderrLower.includes("rate limit") || stderrLower.includes("429")) {
+      throw new RuntimeExecutionError(
+        "Rate limit detected in stderr",
+        result.exitCode,
+        result.stderr,
+      );
+    }
+
+    // Check stderr for auth patterns — these are deterministic
+    if (
+      stderrLower.includes("authentication") ||
+      stderrLower.includes("unauthorized") ||
+      stderrLower.includes("invalid api key")
+    ) {
+      throw new RuntimeExecutionError(
+        "Authentication error detected in stderr",
+        result.exitCode,
+        result.stderr,
+      );
+    }
+  }
+
+  private delay(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  private executeOnce(options: ProcessSpawnOptions): Promise<ProcessResult> {
     if (this.mode === "mock") {
       return this.executeMock(options);
     }
