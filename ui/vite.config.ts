@@ -11,6 +11,8 @@ export default defineConfig({
     },
   },
   server: {
+    host: true,
+    allowedHosts: ["macbook-pro-3.tail05bae6.ts.net"],
     proxy: {
       "/api": {
         target: "http://localhost:3100",
