@@ -39,6 +39,7 @@ enum ArtifactType {
   HumanAnswers
   TaskBundle
   RejectionContext
+  Skill
 }
 
 model AiRun {
@@ -108,4 +109,21 @@ model ProcessedEvent {
 
   @@unique([source, externalEventId])
   @@map("processed_events")
+}
+
+model AgentSkill {
+  id            String    @id @default(uuid())
+  repoSlug      String
+  taskCategory  String
+  skillMarkdown String
+  successCount  Int       @default(0)
+  failureCount  Int       @default(0)
+  utilityScore  Float     @default(0.0)
+  createdAt     DateTime  @default(now())
+  lastUsedAt    DateTime  @default(now())
+  archivedAt    DateTime?
+
+  @@index([repoSlug, archivedAt])
+  @@index([repoSlug, utilityScore])
+  @@map("agent_skills")
 }

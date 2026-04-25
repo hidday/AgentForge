@@ -31,6 +31,7 @@ Create an implementation plan for the following issue.
 {{definitionOfDone}}
 
 {{relatedContextSection}}
+{{priorSkillsSection}}
 ## Instructions
 
 1. Analyze the issue thoroughly
