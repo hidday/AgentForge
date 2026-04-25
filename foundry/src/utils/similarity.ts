@@ -55,7 +55,7 @@ export function scoreSkillRelevance(
  * Returns 0 if the array is empty.
  */
 export function maxNoveltyOverlap(
-  existingSkills: Array<{ taskCategory: string; skillMarkdown: string }>,
+  existingSkills: { taskCategory: string; skillMarkdown: string }[],
   query: string,
 ): number {
   if (existingSkills.length === 0) return 0;

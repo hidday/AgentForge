@@ -2,18 +2,22 @@ You are an episodic memory curator for an AI software engineering agent system. 
 
 ## Output Format
 
-You MUST output a JSON block delimited by `BEGIN_STRUCTURED_OUTPUT` and `END_STRUCTURED_OUTPUT`. The JSON must match exactly:
+Your response MUST end with a structured JSON block enclosed between delimiters:
 
-```
 BEGIN_STRUCTURED_OUTPUT
 {
-  "shouldPersist": boolean,
-  "reason": "concise explanation (1-2 sentences)",
-  "skillMarkdown": "optional: the skill content to persist (under 500 words)",
-  "taskCategory": "optional: short label for this type of task"
+  "success": true,
+  "stage": "distillation",
+  "payload": {
+    "shouldPersist": boolean,
+    "reason": "concise explanation (1-2 sentences)",
+    "skillMarkdown": "optional: the skill content to persist (under 500 words)",
+    "taskCategory": "optional: short label for this type of task"
+  }
 }
 END_STRUCTURED_OUTPUT
-```
+
+Do not include any other JSON blocks. Only the final delimited block will be parsed.
 
 ## Guidelines
 

@@ -140,6 +140,30 @@ describe("DistillationAgent", () => {
     vi.clearAllMocks();
   });
 
+  describe("(0) No ExecutionReport artifact", () => {
+    it("emits SKILL_DISTILLATION with shouldPersist=false and reason=no_execution_report, no LLM call", async () => {
+      const deps = buildDeps();
+      // Override to return null for all artifact types (simulates missing ExecutionReport)
+      deps.artifactRepo.findLatestByType.mockResolvedValue(null);
+
+      const agent = buildAgent(deps);
+      await agent.run("run-1", makeRun());
+
+      expect(deps.agentRunner.run).not.toHaveBeenCalled();
+      expect(deps.agentSkillRepo.create).not.toHaveBeenCalled();
+      expect(deps.eventRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          eventType: "SKILL_DISTILLATION",
+          payloadJson: expect.objectContaining({
+            shouldPersist: false,
+            reason: "no_execution_report",
+            displacedSkillId: null,
+          }),
+        }),
+      );
+    });
+  });
+
   describe("(a) Novelty pre-check gate fires", () => {
     it("emits SKILL_DISTILLATION with shouldPersist=false when overlap >= threshold, no LLM call", async () => {
       const deps = buildDeps();

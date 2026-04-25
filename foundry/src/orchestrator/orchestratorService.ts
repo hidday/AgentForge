@@ -1410,11 +1410,17 @@ export class OrchestratorService {
   private async updateSkillMetrics(runId: string, success: boolean): Promise<void> {
     if (!this.agentSkillRepo) return;
     const events = await this.eventRepo.findByRunId(runId);
-    const injectionEvent = events.find((e) => e.eventType === "SKILL_INJECTION");
-    if (!injectionEvent) return;
+    const injectionEvents = events.filter((e) => e.eventType === "SKILL_INJECTION");
+    if (injectionEvents.length === 0) return;
 
-    const payload = injectionEvent.payloadJson as { skillIds?: string[] };
-    const skillIds = payload.skillIds ?? [];
+    // Collect all injected skill IDs across all injection events (initial plan + any replans),
+    // deduplicating so a skill injected in multiple planning passes is only updated once.
+    const seenIds = new Set<string>();
+    for (const evt of injectionEvents) {
+      const ids = (evt.payloadJson as { skillIds?: string[] }).skillIds ?? [];
+      for (const id of ids) seenIds.add(id);
+    }
+    const skillIds = Array.from(seenIds);
 
     for (const id of skillIds) {
       try {

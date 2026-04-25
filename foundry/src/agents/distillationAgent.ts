@@ -35,6 +35,16 @@ export class DistillationAgent {
 
     if (!executionArtifact) {
       this.logger.warn({ runId }, "No ExecutionReport artifact found, skipping distillation");
+      await this.eventRepo.create({
+        runId,
+        eventType: SKILL_DISTILLATION_EVENT,
+        source: "distillation-agent",
+        payloadJson: {
+          shouldPersist: false,
+          reason: "no_execution_report",
+          displacedSkillId: null,
+        },
+      });
       return;
     }
 
@@ -42,12 +52,10 @@ export class DistillationAgent {
     const taskQuery =
       (run.linearIssueTitle ?? "") +
       " " +
-      (
-        (run as unknown as { linearIssueDescription?: string }).linearIssueDescription?.slice(
-          0,
-          200,
-        ) ?? ""
-      );
+      ((run as unknown as { linearIssueDescription?: string }).linearIssueDescription?.slice(
+        0,
+        200,
+      ) ?? "");
 
     // (3) Fetch active skill pool and build CompactSkillSummary[]
     const activeSkills = await this.agentSkillRepo.findActiveByRepo(run.repo);
@@ -95,9 +103,7 @@ export class DistillationAgent {
 
     const existingSkillsSummaryText =
       existingSkillsSummary.length > 0
-        ? existingSkillsSummary
-            .map((s) => `- [${s.taskCategory}] ${s.snippet}`)
-            .join("\n")
+        ? existingSkillsSummary.map((s) => `- [${s.taskCategory}] ${s.snippet}`).join("\n")
         : "No existing skills.";
 
     const userPrompt = renderTemplate(userTemplate, {
@@ -109,7 +115,12 @@ export class DistillationAgent {
       remediationSummary,
     } as Record<string, unknown>);
 
-    let decision: { shouldPersist: boolean; reason: string; skillMarkdown?: string; taskCategory?: string };
+    let decision: {
+      shouldPersist: boolean;
+      reason: string;
+      skillMarkdown?: string;
+      taskCategory?: string;
+    };
 
     try {
       const output = await this.agentRunner.run(

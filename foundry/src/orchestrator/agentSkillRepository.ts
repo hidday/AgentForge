@@ -56,11 +56,7 @@ export class AgentSkillRepository {
     });
   }
 
-  async findTopKByRelevance(
-    repoSlug: string,
-    query: string,
-    k: number,
-  ): Promise<SkillDocument[]> {
+  async findTopKByRelevance(repoSlug: string, query: string, k: number): Promise<SkillDocument[]> {
     const activeSkills = await this.findActiveByRepo(repoSlug);
     const maxK = Math.min(k, env.MAX_SKILLS_INJECTED);
 

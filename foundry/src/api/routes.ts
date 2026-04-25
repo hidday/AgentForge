@@ -89,13 +89,17 @@ export function registerApiRoutes(
     const agentSkillRepo = orchestrator.getAgentSkillRepo();
     const events = await eventRepo.findByRunId(runId);
 
-    // Extract injected skills
-    const injectionEvent = events.find((e) => e.eventType === "SKILL_INJECTION");
+    // Extract injected skills — aggregate across all SKILL_INJECTION events (initial plan + replans)
+    const injectionEvents = events.filter((e) => e.eventType === "SKILL_INJECTION");
     const injectedSkills: SkillDocument[] = [];
-    if (injectionEvent && agentSkillRepo) {
-      const payload = injectionEvent.payloadJson as { skillIds?: string[] };
-      const skillIds = payload.skillIds ?? [];
-      for (const id of skillIds) {
+    if (injectionEvents.length > 0 && agentSkillRepo) {
+      // Deduplicate skill IDs in case the same skill was injected in multiple planning passes
+      const seenIds = new Set<string>();
+      for (const evt of injectionEvents) {
+        const ids = (evt.payloadJson as { skillIds?: string[] }).skillIds ?? [];
+        for (const id of ids) seenIds.add(id);
+      }
+      for (const id of seenIds) {
         const skill = await agentSkillRepo.findById(id);
         if (skill) {
           injectedSkills.push({
