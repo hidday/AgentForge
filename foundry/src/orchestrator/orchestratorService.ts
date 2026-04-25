@@ -118,6 +118,10 @@ export class OrchestratorService {
     return this.eventRepo;
   }
 
+  getAgentSkillRepo(): AgentSkillRepository | undefined {
+    return this.agentSkillRepo;
+  }
+
   getLinearClient(): LinearClient {
     return this.linearClient;
   }
@@ -1111,6 +1115,16 @@ export class OrchestratorService {
     );
 
     this.logger.info({ runId, state: run.state }, "Human review approved, run complete");
+
+    try {
+      await this.distillationAgent?.run(runId, run);
+    } catch (err) {
+      this.logger.warn(
+        { runId, error: err instanceof Error ? err.message : String(err) },
+        "Distillation agent failed (best-effort, ignoring)",
+      );
+    }
+
     return run;
   }
 
@@ -1175,6 +1189,7 @@ export class OrchestratorService {
 
     if (newState === RunState.Done || newState === RunState.Failed) {
       await this.cleanupRunWorktree(updatedRun);
+      await this.updateSkillMetrics(updatedRun.id, newState === RunState.Done);
     }
 
     return updatedRun;
@@ -1372,12 +1387,10 @@ export class OrchestratorService {
     const query =
       (run.linearIssueTitle ?? "") +
       " " +
-      (
-        (run as unknown as { linearIssueDescription?: string }).linearIssueDescription?.slice(
-          0,
-          200,
-        ) ?? ""
-      );
+      ((run as unknown as { linearIssueDescription?: string }).linearIssueDescription?.slice(
+        0,
+        200,
+      ) ?? "");
     const skills = await this.agentSkillRepo.findTopKByRelevance(
       run.repo,
       query,
