@@ -39,7 +39,30 @@ export type ArtifactType =
   | "RemediationTranscript"
   | "HumanAnswers"
   | "TaskBundle"
-  | "RejectionContext";
+  | "RejectionContext"
+  | "Skill";
+
+export interface SkillDocument {
+  id: string;
+  repoSlug: string;
+  taskCategory: string;
+  skillMarkdown: string;
+  utilityScore: number;
+  lastUsedAt: Date;
+}
+
+export interface CompactSkillSummary {
+  id: string;
+  taskCategory: string;
+  snippet: string;
+}
+
+export interface DistillationDecision {
+  shouldPersist: boolean;
+  reason: string;
+  skillMarkdown?: string;
+  taskCategory?: string;
+}
 
 export interface RejectionContextPayload {
   planVersion: number;

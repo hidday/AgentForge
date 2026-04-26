@@ -11,6 +11,7 @@ import type {
 import { RunEvent } from "../domain/runEvent.js";
 import { RunState } from "../domain/runState.js";
 import { PolicyError, ValidationError } from "../utils/errors.js";
+import type { SkillDocument } from "../domain/types.js";
 
 const VALID_HUMAN_REQUEST_REASONS: HumanRequestReason[] = [
   "plan_ambiguous",
@@ -77,6 +78,67 @@ export function registerApiRoutes(
 
     const events = await eventRepo.findByRunId(run.id);
     return { events };
+  });
+
+  // ── Skills for a run ──────────────────────────────────────────────────
+
+  app.get<{ Params: { id: string } }>("/api/runs/:id/skills", async (request, reply) => {
+    const runId = request.params.id;
+    if (!runId) return reply.code(400).send({ error: "runId is required" });
+
+    const agentSkillRepo = orchestrator.getAgentSkillRepo();
+    const events = await eventRepo.findByRunId(runId);
+
+    // Extract injected skills — aggregate across all SKILL_INJECTION events (initial plan + replans)
+    const injectionEvents = events.filter((e) => e.eventType === "SKILL_INJECTION");
+    const injectedSkills: SkillDocument[] = [];
+    if (injectionEvents.length > 0 && agentSkillRepo) {
+      // Deduplicate skill IDs in case the same skill was injected in multiple planning passes
+      const seenIds = new Set<string>();
+      for (const evt of injectionEvents) {
+        const ids = (evt.payloadJson as { skillIds?: string[] }).skillIds ?? [];
+        for (const id of ids) seenIds.add(id);
+      }
+      for (const id of seenIds) {
+        const skill = await agentSkillRepo.findById(id);
+        if (skill) {
+          injectedSkills.push({
+            id: skill.id,
+            repoSlug: skill.repoSlug,
+            taskCategory: skill.taskCategory,
+            skillMarkdown: skill.skillMarkdown,
+            utilityScore: skill.utilityScore,
+            lastUsedAt: skill.lastUsedAt,
+          });
+        }
+      }
+    }
+
+    // Extract distillation decision
+    const distillationEvent = events.find((e) => e.eventType === "SKILL_DISTILLATION");
+    let distillationDecision: {
+      shouldPersist: boolean;
+      reason: string;
+      taskCategory: string | null;
+      displacedSkillId: string | null;
+    } | null = null;
+
+    if (distillationEvent) {
+      const payload = distillationEvent.payloadJson as {
+        shouldPersist?: boolean;
+        reason?: string;
+        taskCategory?: string | null;
+        displacedSkillId?: string | null;
+      };
+      distillationDecision = {
+        shouldPersist: payload.shouldPersist ?? false,
+        reason: payload.reason ?? "",
+        taskCategory: payload.taskCategory ?? null,
+        displacedSkillId: payload.displacedSkillId ?? null,
+      };
+    }
+
+    return { injectedSkills, distillationDecision };
   });
 
   // ── Actions ────────────────────────────────────────────────────────────

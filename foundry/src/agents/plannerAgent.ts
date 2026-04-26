@@ -5,7 +5,7 @@ import type { TaskBundle } from "../schemas/taskBundle.js";
 import { PlannerOutputSchema, type PlannerOutput } from "../schemas/cliProtocol.js";
 import type { Plan } from "../schemas/plan.js";
 import { AGENT_STAGES } from "../domain/types.js";
-import type { HumanAnswer } from "../domain/types.js";
+import type { HumanAnswer, SkillDocument } from "../domain/types.js";
 import { loadPromptTemplate, renderTemplate } from "./promptRenderer.js";
 import { renderRelatedContextSection } from "./sections.js";
 import { env } from "../config/env.js";
@@ -23,6 +23,7 @@ export interface PlannerRunOptions {
   humanFeedback?: { planVersion: number; feedback: string };
   planReviewFindings?: { summary: string; findings: PlanReviewFindingSummary[] };
   previousPlan?: Plan;
+  priorSkills?: SkillDocument[];
 }
 
 export class PlannerAgent {
@@ -107,6 +108,15 @@ export class PlannerAgent {
 
     const relatedContextSection = renderRelatedContextSection(taskBundle.relatedContext);
 
+    // Build priorSkillsSection
+    let priorSkillsSection = "";
+    if (options?.priorSkills && options.priorSkills.length > 0) {
+      const skillBlocks = options.priorSkills
+        .map((skill) => `### ${skill.taskCategory}\n\n${skill.skillMarkdown}`)
+        .join("\n\n");
+      priorSkillsSection = `## Prior Skills from Similar Tasks\n\n${skillBlocks}`;
+    }
+
     const userPrompt = renderTemplate(userTemplate, {
       ...taskBundle,
       humanAnswersSection,
@@ -114,6 +124,7 @@ export class PlannerAgent {
       planReviewSection,
       previousPlanSection,
       relatedContextSection,
+      priorSkillsSection,
     } as Record<string, unknown>);
 
     const output = await this.agentRunner.run<PlannerOutput>(

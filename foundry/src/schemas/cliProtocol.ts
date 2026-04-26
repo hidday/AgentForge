@@ -13,6 +13,7 @@ export const Stage = z.enum([
   "executor",
   "reviewer",
   "remediation",
+  "distillation",
 ]);
 export type Stage = z.infer<typeof Stage>;
 
@@ -56,6 +57,18 @@ export const RemediationOutputSchema = CliOutputBaseSchema.extend({
   payload: RemediationSchema,
 });
 
+export const DistillationDecisionSchema = z.object({
+  shouldPersist: z.boolean(),
+  reason: z.string(),
+  skillMarkdown: z.string().optional(),
+  taskCategory: z.string().optional(),
+});
+
+export const DistillationOutputSchema = CliOutputBaseSchema.extend({
+  stage: z.literal("distillation"),
+  payload: DistillationDecisionSchema,
+});
+
 export const CliOutputSchema = z.discriminatedUnion("stage", [
   PlannerOutputSchema,
   PlanReviewerOutputSchema,
@@ -63,6 +76,7 @@ export const CliOutputSchema = z.discriminatedUnion("stage", [
   ExecutorOutputSchema,
   ReviewerOutputSchema,
   RemediationOutputSchema,
+  DistillationOutputSchema,
 ]);
 
 export type CliOutput = z.infer<typeof CliOutputSchema>;
@@ -72,6 +86,7 @@ export type PlanReviserOutput = z.infer<typeof PlanReviserOutputSchema>;
 export type ExecutorOutput = z.infer<typeof ExecutorOutputSchema>;
 export type ReviewerOutput = z.infer<typeof ReviewerOutputSchema>;
 export type RemediationOutput = z.infer<typeof RemediationOutputSchema>;
+export type DistillationOutput = z.infer<typeof DistillationOutputSchema>;
 
 export const STRUCTURED_OUTPUT_BEGIN = "BEGIN_STRUCTURED_OUTPUT";
 export const STRUCTURED_OUTPUT_END = "END_STRUCTURED_OUTPUT";

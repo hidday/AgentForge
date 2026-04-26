@@ -18,6 +18,8 @@ import { PlanReviserAgent } from "./agents/planReviserAgent.js";
 import { ExecutorAgent } from "./agents/executorAgent.js";
 import { ReviewerAgent } from "./agents/reviewerAgent.js";
 import { RemediationAgent } from "./agents/remediationAgent.js";
+import { DistillationAgent } from "./agents/distillationAgent.js";
+import { AgentSkillRepository } from "./orchestrator/agentSkillRepository.js";
 import { MockLinearClient } from "./linear/linearClient.js";
 import type { LinearClient } from "./linear/linearClient.js";
 import { RealLinearClient } from "./linear/realLinearClient.js";
@@ -113,6 +115,19 @@ function buildServices() {
   const linearSync = new LinearSyncService(linearClient, logger);
   const githubSync = new GitHubSyncService(githubClient, logger);
 
+  const agentSkillRepo = new AgentSkillRepository(prisma);
+  const distillationAgent = new DistillationAgent(
+    agentRunner,
+    artifactRepo,
+    agentSkillRepo,
+    eventRepo,
+    {
+      MAX_SKILLS_PER_REPO: env.MAX_SKILLS_PER_REPO,
+      NOVELTY_SIMILARITY_THRESHOLD: env.NOVELTY_SIMILARITY_THRESHOLD,
+    },
+    logger,
+  );
+
   const orchestrator = new OrchestratorService({
     runRepo,
     artifactRepo,
@@ -131,6 +146,8 @@ function buildServices() {
     remediationAgent,
     logger,
     dashboardEmitter,
+    agentSkillRepo,
+    distillationAgent,
   });
 
   const linearPollService = env.LINEAR_API_KEY

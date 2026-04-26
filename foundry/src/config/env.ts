@@ -30,6 +30,9 @@ const EnvSchema = z.object({
   RESEND_API_KEY: z.string().optional(),
   FOUNDRY_UI_BASE_URL: z.string().url().default("http://localhost:5173"),
   NOTIFY_DEBOUNCE_HOURS: z.coerce.number().positive().default(6),
+  MAX_SKILLS_PER_REPO: z.coerce.number().int().positive().default(200),
+  MAX_SKILLS_INJECTED: z.coerce.number().int().min(1).max(10).default(3),
+  NOVELTY_SIMILARITY_THRESHOLD: z.coerce.number().min(0).max(1).default(0.5),
 });
 
 export type Env = z.infer<typeof EnvSchema>;

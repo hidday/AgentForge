@@ -1,7 +1,7 @@
 import type { Logger } from "../utils/logger.js";
 import { RunEvent } from "../domain/runEvent.js";
 import { RunState } from "../domain/runState.js";
-import type { Run, HumanAnswer, RejectionContextPayload } from "../domain/types.js";
+import type { Run, HumanAnswer, RejectionContextPayload, SkillDocument } from "../domain/types.js";
 import type { TaskBundle } from "../schemas/taskBundle.js";
 import type { Plan } from "../schemas/plan.js";
 import type { PlanReview } from "../schemas/planReview.js";
@@ -21,6 +21,8 @@ import type { PlanReviserAgent } from "../agents/planReviserAgent.js";
 import type { ExecutorAgent } from "../agents/executorAgent.js";
 import type { ReviewerAgent } from "../agents/reviewerAgent.js";
 import type { RemediationAgent } from "../agents/remediationAgent.js";
+import type { DistillationAgent } from "../agents/distillationAgent.js";
+import type { AgentSkillRepository } from "./agentSkillRepository.js";
 import type { RepoRegistry } from "../config/repoRegistry.js";
 import type { LinearSyncService } from "../sync/linearSync.js";
 import type { GitHubSyncService } from "../sync/githubSync.js";
@@ -28,6 +30,7 @@ import type { RunEventEmitter } from "../api/runEventEmitter.js";
 import type { GitService } from "../git/gitService.js";
 import { startTimer } from "../utils/time.js";
 import { PolicyError, ValidationError } from "../utils/errors.js";
+import { env } from "../config/env.js";
 
 const MAX_CLARIFICATION_ITERATIONS = 3;
 
@@ -55,6 +58,8 @@ interface OrchestratorDeps {
   remediationAgent: RemediationAgent;
   logger: Logger;
   dashboardEmitter?: RunEventEmitter;
+  agentSkillRepo?: AgentSkillRepository;
+  distillationAgent?: DistillationAgent;
 }
 
 export class OrchestratorService {
@@ -73,6 +78,8 @@ export class OrchestratorService {
   private readonly executorAgent: ExecutorAgent;
   private readonly reviewerAgent: ReviewerAgent;
   private readonly remediationAgent: RemediationAgent;
+  private readonly agentSkillRepo?: AgentSkillRepository;
+  private readonly distillationAgent?: DistillationAgent;
   private readonly policy = new PolicyEngine();
   private readonly logger: Logger;
   private readonly dashboardEmitter?: RunEventEmitter;
@@ -93,6 +100,8 @@ export class OrchestratorService {
     this.executorAgent = deps.executorAgent;
     this.reviewerAgent = deps.reviewerAgent;
     this.remediationAgent = deps.remediationAgent;
+    this.agentSkillRepo = deps.agentSkillRepo;
+    this.distillationAgent = deps.distillationAgent;
     this.logger = deps.logger;
     this.dashboardEmitter = deps.dashboardEmitter;
   }
@@ -107,6 +116,10 @@ export class OrchestratorService {
 
   getEventRepo(): EventRepository {
     return this.eventRepo;
+  }
+
+  getAgentSkillRepo(): AgentSkillRepository | undefined {
+    return this.agentSkillRepo;
   }
 
   getLinearClient(): LinearClient {
@@ -228,7 +241,8 @@ export class OrchestratorService {
       `AI planning started for "${issue.title}". Will produce a plan, have it AI-reviewed, then present for approval.`,
     );
 
-    const plan = await this.plannerAgent.run(bundle, run.id);
+    const priorSkillsForStart = await this.retrieveSkillsForPlanning(run);
+    const plan = await this.plannerAgent.run(bundle, run.id, { priorSkills: priorSkillsForStart });
 
     run = await this.runRepo.update(run.id, {
       planVersion: plan.planVersion,
@@ -416,7 +430,8 @@ export class OrchestratorService {
     run = await this.transitionAndRecord(run, RunEvent.RUN_REQUESTED, "orchestrator");
     const bundle = await this.buildTaskBundle(issue, run);
 
-    const plan = await this.plannerAgent.run(bundle, run.id);
+    const priorSkillsForRetry = await this.retrieveSkillsForPlanning(run);
+    const plan = await this.plannerAgent.run(bundle, run.id, { priorSkills: priorSkillsForRetry });
 
     run = await this.runRepo.update(run.id, {
       planVersion: plan.planVersion,
@@ -711,7 +726,9 @@ export class OrchestratorService {
     const rejectionArtifact = await this.artifactRepo.findLatestByType(runId, "RejectionContext");
     const rejectionContext = rejectionArtifact?.payloadJson as RejectionContextPayload | undefined;
 
+    const priorSkillsForReject = await this.retrieveSkillsForPlanning(run);
     const newPlan = await this.plannerAgent.run(bundle, run.id, {
+      priorSkills: priorSkillsForReject,
       planVersionOverride: nextPlanVersion,
       ...(iterateContext?.previousPlan ? { previousPlan: iterateContext.previousPlan } : {}),
       ...(rejectionContext
@@ -1098,6 +1115,16 @@ export class OrchestratorService {
     );
 
     this.logger.info({ runId, state: run.state }, "Human review approved, run complete");
+
+    try {
+      await this.distillationAgent?.run(runId, run);
+    } catch (err) {
+      this.logger.warn(
+        { runId, error: err instanceof Error ? err.message : String(err) },
+        "Distillation agent failed (best-effort, ignoring)",
+      );
+    }
+
     return run;
   }
 
@@ -1162,6 +1189,7 @@ export class OrchestratorService {
 
     if (newState === RunState.Done || newState === RunState.Failed) {
       await this.cleanupRunWorktree(updatedRun);
+      await this.updateSkillMetrics(updatedRun.id, newState === RunState.Done);
     }
 
     return updatedRun;
@@ -1352,5 +1380,63 @@ export class OrchestratorService {
       .join("\n");
 
     return ["## Remediation Summary", "", items].join("\n");
+  }
+
+  private async retrieveSkillsForPlanning(run: Run): Promise<SkillDocument[]> {
+    if (!this.agentSkillRepo) return [];
+    const query =
+      (run.linearIssueTitle ?? "") +
+      " " +
+      ((run as unknown as { linearIssueDescription?: string }).linearIssueDescription?.slice(
+        0,
+        200,
+      ) ?? "");
+    const skills = await this.agentSkillRepo.findTopKByRelevance(
+      run.repo,
+      query,
+      env.MAX_SKILLS_INJECTED,
+    );
+    if (skills.length > 0) {
+      await this.eventRepo.create({
+        runId: run.id,
+        eventType: "SKILL_INJECTION",
+        source: "orchestrator",
+        payloadJson: { skillIds: skills.map((s) => s.id) },
+      });
+    }
+    return skills;
+  }
+
+  private async updateSkillMetrics(runId: string, success: boolean): Promise<void> {
+    if (!this.agentSkillRepo) return;
+    const events = await this.eventRepo.findByRunId(runId);
+    const injectionEvents = events.filter((e) => e.eventType === "SKILL_INJECTION");
+    if (injectionEvents.length === 0) return;
+
+    // Collect all injected skill IDs across all injection events (initial plan + any replans),
+    // deduplicating so a skill injected in multiple planning passes is only updated once.
+    const seenIds = new Set<string>();
+    for (const evt of injectionEvents) {
+      const ids = (evt.payloadJson as { skillIds?: string[] }).skillIds ?? [];
+      for (const id of ids) seenIds.add(id);
+    }
+    const skillIds = Array.from(seenIds);
+
+    for (const id of skillIds) {
+      try {
+        let updatedSkill;
+        if (success) {
+          updatedSkill = await this.agentSkillRepo.incrementSuccess(id);
+        } else {
+          updatedSkill = await this.agentSkillRepo.incrementFailure(id);
+        }
+        await this.agentSkillRepo.archiveIfLowUtility(updatedSkill);
+      } catch (err) {
+        this.logger.warn(
+          { runId, skillId: id, error: err instanceof Error ? err.message : String(err) },
+          "Failed to update skill metric",
+        );
+      }
+    }
   }
 }
