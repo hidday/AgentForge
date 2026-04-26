@@ -202,8 +202,8 @@ export function ActionBar({
 
   return (
     <>
-      <div className="sticky bottom-0 z-10 border-t border-border bg-surface/80 backdrop-blur-sm px-6 py-3">
-        <div className="flex items-center justify-end gap-2">
+      <div className="sticky bottom-0 z-10 border-t border-border bg-surface/80 backdrop-blur-sm px-4 lg:px-6 py-3">
+        <div className="flex items-center justify-end gap-2 flex-wrap">
           {showAnswerQuestionsBtn && (
             <button
               key="answer-questions"

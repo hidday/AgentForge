@@ -57,13 +57,13 @@ export function ArtifactTabs({ artifacts }: ArtifactTabsProps) {
 
   return (
     <div>
-      <div className="flex gap-1 p-1 bg-surface rounded-lg border border-border mb-4">
+      <div className="flex gap-1 p-1 bg-surface rounded-lg border border-border mb-4 overflow-x-auto">
         {availableTabs.map((tab) => (
           <button
             key={tab.id}
             onClick={() => setActiveTab(tab.id)}
             className={cn(
-              "px-3 py-1.5 text-xs font-medium rounded-md transition-colors",
+              "shrink-0 px-3 py-1.5 text-xs font-medium rounded-md transition-colors",
               activeTab === tab.id
                 ? "bg-accent text-white"
                 : "text-text-secondary hover:text-text-primary hover:bg-surface-hover",
@@ -276,7 +276,7 @@ function RemediationView({
       {rerunChecks && (
         <div>
           <h4 className="text-sm font-medium mb-2">Re-run Checks</h4>
-          <div className="grid grid-cols-3 gap-2">
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
             {Object.entries(rerunChecks).map(([name, check]) => (
               <div
                 key={name}

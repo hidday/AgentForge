@@ -55,7 +55,7 @@ export function RunDetailPage() {
   return (
     <div className="min-h-screen flex flex-col">
       {/* Header */}
-      <header className="border-b border-border px-6 py-4">
+      <header className="border-b border-border px-4 lg:px-6 py-4">
         <div className="max-w-7xl mx-auto">
           <div className="flex items-center gap-3 mb-3">
             <Link
@@ -146,14 +146,14 @@ export function RunDetailPage() {
       </header>
 
       {/* Three-panel layout */}
-      <div className="flex-1 max-w-7xl mx-auto w-full grid grid-cols-[220px_1fr_260px] gap-4 px-6 py-5">
+      <div className="flex-1 max-w-7xl mx-auto w-full grid grid-cols-1 lg:grid-cols-[220px_1fr_260px] gap-4 px-4 lg:px-6 py-5">
         {/* Left: Workflow */}
-        <aside className="overflow-y-auto">
+        <aside className="overflow-y-auto order-2 lg:order-none">
           <WorkflowStepper currentState={run.state} events={events} />
         </aside>
 
         {/* Center: Artifacts + Agent Output */}
-        <main className="min-w-0 space-y-4">
+        <main className="min-w-0 space-y-4 order-1 lg:order-none">
           {/* HumanClarificationNeeded: show interactive questions panel prominently */}
           {run.state === "HumanClarificationNeeded" && allOpenQuestions.length > 0 && (
             <div ref={questionsRef}>
@@ -185,7 +185,7 @@ export function RunDetailPage() {
         </main>
 
         {/* Right: Events */}
-        <aside className="overflow-y-auto">
+        <aside className="overflow-y-auto order-3 lg:order-none">
           <EventTimeline events={events} />
         </aside>
       </div>
