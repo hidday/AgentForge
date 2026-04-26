@@ -121,14 +121,20 @@ describe("GitService", () => {
   });
 
   describe("setupRunWorktree", () => {
-    it("creates a worktree branched from main", async () => {
-      // setupRunWorktree calls fetch, which needs a remote.
-      // Set up a bare remote so fetch works.
-      const bareDir = mkdtempSync(join(tmpdir(), "gitservice-bare-"));
+    let bareDir: string;
+
+    beforeEach(() => {
+      bareDir = mkdtempSync(join(tmpdir(), "gitservice-bare-"));
       git(["clone", "--bare", repoPath, bareDir], tmpdir());
       git(["remote", "add", "origin", bareDir], repoPath);
       git(["fetch", "origin"], repoPath);
+    });
 
+    afterEach(() => {
+      rmSync(bareDir, { recursive: true, force: true });
+    });
+
+    it("creates a worktree branched from main", async () => {
       const runId = "abcdef12-3456-7890-abcd-ef1234567890";
       const branchName = "hidday/pry-42-test-branch";
       const result = await svc.setupRunWorktree(repoPath, runId, "main", branchName);
@@ -141,9 +147,59 @@ describe("GitService", () => {
       const branch = await svc.currentBranch(result.worktreePath);
       expect(branch).toBe(branchName);
 
-      // Clean up
       await svc.removeWorktree(repoPath, result.worktreePath);
-      rmSync(bareDir, { recursive: true, force: true });
+    });
+
+    it("recovers when the branch already exists locally (no worktree)", async () => {
+      // Simulate a crashed prior run: branch left behind, no worktree record.
+      const branchName = "hidday/pry-99-leftover";
+      git(["branch", branchName, "main"], repoPath);
+
+      const runId = "beefcafe-3456-7890-abcd-ef1234567890";
+      const result = await svc.setupRunWorktree(repoPath, runId, "main", branchName);
+
+      expect(existsSync(result.worktreePath)).toBe(true);
+      expect(await svc.currentBranch(result.worktreePath)).toBe(branchName);
+
+      await svc.removeWorktree(repoPath, result.worktreePath);
+    });
+
+    it("recovers when the branch is checked out in a stale worktree", async () => {
+      // Simulate a prior run that left both a branch and a worktree admin record.
+      const branchName = "hidday/pry-100-stale-wt";
+      const stalePath = join(repoPath, ".worktrees", "run-stale-xyz");
+      await svc.createWorktree(repoPath, stalePath, branchName, "main");
+      expect(existsSync(stalePath)).toBe(true);
+
+      const runId = "deadbeef-3456-7890-abcd-ef1234567890";
+      const result = await svc.setupRunWorktree(repoPath, runId, "main", branchName);
+
+      expect(existsSync(result.worktreePath)).toBe(true);
+      expect(await svc.currentBranch(result.worktreePath)).toBe(branchName);
+      expect(result.worktreePath).not.toBe(stalePath);
+      expect(existsSync(stalePath)).toBe(false);
+
+      await svc.removeWorktree(repoPath, result.worktreePath);
+    });
+  });
+
+  describe("findWorktreeForBranch", () => {
+    it("returns null when no worktree has the branch", async () => {
+      expect(await svc.findWorktreeForBranch(repoPath, "nope")).toBeNull();
+    });
+
+    it("returns the worktree path when a worktree has the branch", async () => {
+      const wtPath = join(repoPath, ".worktrees", "feat-wt");
+      await svc.createWorktree(repoPath, wtPath, "feat-branch", "main");
+
+      const found = await svc.findWorktreeForBranch(repoPath, "feat-branch");
+      expect(found).not.toBeNull();
+      // macOS resolves /var -> /private/var; compare by realpath.
+      expect(readFileSync(join(wtPath, ".git"), "utf-8")).toContain("gitdir:");
+      // We only assert the basename to avoid /var vs /private/var symlink issues.
+      expect(found?.endsWith("feat-wt")).toBe(true);
+
+      await svc.removeWorktree(repoPath, wtPath);
     });
   });
 

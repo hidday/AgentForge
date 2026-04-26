@@ -90,17 +90,76 @@ export class GitService {
     }
   }
 
+  /**
+   * Creates a worktree at `worktreePath` checking out a new branch.
+   *
+   * When `resetIfExists` is true, a leftover local branch with the same name
+   * is force-reset to `startPoint` (uses `git worktree add -B`). This does
+   * not rescue cases where the branch is currently checked out in another
+   * worktree — the caller must remove that worktree first.
+   */
   async createWorktree(
     repoPath: string,
     worktreePath: string,
     branchName: string,
     startPoint: string,
+    options: { resetIfExists?: boolean } = {},
   ): Promise<void> {
-    this.logger.info({ repoPath, worktreePath, branchName, startPoint }, "Creating worktree");
+    const branchFlag = options.resetIfExists ? "-B" : "-b";
+    this.logger.info(
+      { repoPath, worktreePath, branchName, startPoint, branchFlag },
+      "Creating worktree",
+    );
     try {
-      await exec(["worktree", "add", "-b", branchName, worktreePath, startPoint], repoPath);
+      await exec(["worktree", "add", branchFlag, branchName, worktreePath, startPoint], repoPath);
     } catch (err) {
       throw new GitError("worktree add", repoPath, err);
+    }
+  }
+
+  /** Prune stale worktree admin records for directories that no longer exist. */
+  async pruneWorktrees(repoPath: string): Promise<void> {
+    try {
+      await exec(["worktree", "prune"], repoPath);
+    } catch (err) {
+      this.logger.warn(
+        { repoPath, error: err instanceof Error ? err.message : String(err) },
+        "Failed to prune worktrees (best-effort cleanup)",
+      );
+    }
+  }
+
+  /**
+   * Returns the filesystem path of the worktree that currently has
+   * `branchName` checked out, or null if no worktree holds it.
+   */
+  async findWorktreeForBranch(repoPath: string, branchName: string): Promise<string | null> {
+    let stdout: string;
+    try {
+      ({ stdout } = await exec(["worktree", "list", "--porcelain"], repoPath));
+    } catch (err) {
+      throw new GitError("worktree list", repoPath, err);
+    }
+    const target = `refs/heads/${branchName}`;
+    let currentPath: string | null = null;
+    for (const line of stdout.split("\n")) {
+      if (line.startsWith("worktree ")) {
+        currentPath = line.slice("worktree ".length).trim();
+      } else if (line.startsWith("branch ")) {
+        const ref = line.slice("branch ".length).trim();
+        if (ref === target && currentPath) return currentPath;
+      }
+    }
+    return null;
+  }
+
+  /** Returns true if `origin/<branchName>` exists. */
+  async remoteBranchExists(repoPath: string, branchName: string): Promise<boolean> {
+    try {
+      await exec(["rev-parse", "--verify", `refs/remotes/origin/${branchName}`], repoPath);
+      return true;
+    } catch {
+      return false;
     }
   }
 
@@ -186,13 +245,38 @@ export class GitService {
     const worktreePath = join(repoPath, WORKTREES_DIR, dirName);
     const startPoint = `origin/${defaultBranch}`;
 
+    await this.pruneWorktrees(repoPath);
+
     if (existsSync(worktreePath)) {
       this.logger.warn({ worktreePath }, "Worktree path already exists, removing first");
       await this.removeWorktree(repoPath, worktreePath);
     }
 
+    const conflictingWorktree = await this.findWorktreeForBranch(repoPath, branchName);
+    if (conflictingWorktree && conflictingWorktree !== worktreePath) {
+      this.logger.warn(
+        { branchName, conflictingWorktree },
+        "Branch is checked out in a stale worktree; removing before recreating",
+      );
+      await this.removeWorktree(repoPath, conflictingWorktree);
+    }
+
     await this.fetch(repoPath);
-    await this.createWorktree(repoPath, worktreePath, branchName, startPoint);
+
+    if (await this.remoteBranchExists(repoPath, branchName)) {
+      this.logger.warn(
+        { repoPath, branchName },
+        "origin/<branch> already exists; local branch will be reset to startPoint. " +
+          "If the remote has unmerged commits, the final push will fail (non-fast-forward) " +
+          "and must be resolved manually.",
+      );
+    }
+
+    // resetIfExists handles leftover local branches from crashed prior runs:
+    // `worktree add -B` force-creates (or resets) the local branch to startPoint.
+    await this.createWorktree(repoPath, worktreePath, branchName, startPoint, {
+      resetIfExists: true,
+    });
 
     this.logger.info({ repoPath, worktreePath, branchName, startPoint }, "Run worktree ready");
 
