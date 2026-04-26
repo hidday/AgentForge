@@ -6,3 +6,4 @@ dist/
 workspace/
 .foundry/
 src/generated/
+backups/

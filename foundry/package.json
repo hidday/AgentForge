@@ -13,6 +13,7 @@
     "db:migrate": "prisma migrate dev",
     "db:push": "prisma db push",
     "db:seed": "tsx scripts/seed.ts",
+    "db:backup": "scripts/pg-backup.sh",
     "simulate:webhook": "tsx scripts/simulateLinearWebhook.ts",
     "simulate:run": "tsx scripts/simulateRun.ts",
     "test": "vitest run",

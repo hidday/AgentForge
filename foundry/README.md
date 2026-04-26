@@ -198,18 +198,45 @@ AGENT_RUNTIME_MODE=real
 cd foundry
 pnpm install
 
-# Set up PostgreSQL
-docker run -d --name ai-orch-pg \
+# Set up PostgreSQL (named volume + restart policy -- survives `docker volume prune`)
+docker volume create agentforge_pg_data
+docker run -d --name agentforge-postgres --restart unless-stopped \
+  -e POSTGRES_USER=postgres \
   -e POSTGRES_PASSWORD=postgres \
   -e POSTGRES_DB=ai_orchestrator \
-  -p 5432:5432 postgres:16
+  -p 5433:5432 \
+  -v agentforge_pg_data:/var/lib/postgresql/data \
+  postgres:16
 
 cp .env.example .env
+# DATABASE_URL should reference port 5433 (avoids colliding with other projects on 5432):
+#   postgresql://postgres:postgres@localhost:5433/ai_orchestrator?schema=public
 pnpm db:push && pnpm db:generate
 
 # Run full workflow simulation
 pnpm simulate:run
 ```
+
+### Backups
+
+The dev DB lives inside a Docker named volume (`agentforge_pg_data`). Named
+volumes survive `docker container prune` but **can still be deleted by
+`docker volume prune` / `docker system prune --volumes` / Docker Desktop's
+"Clean / Purge Data"**, so take regular dumps:
+
+```bash
+# One-off backup (writes to foundry/backups/ai_orchestrator-<ts>.sql.gz)
+pnpm db:backup
+
+# Keep a rolling window (default retains the 7 most recent dumps)
+RETAIN=14 pnpm db:backup
+
+# Restore a dump
+gunzip -c backups/ai_orchestrator-<ts>.sql.gz \
+  | docker exec -i agentforge-postgres psql -U postgres -d ai_orchestrator
+```
+
+For scheduled backups, wire `scripts/pg-backup.sh` into `launchd`/`cron`.
 
 The simulation walks through:
 1. Planning (Claude) -> AI Plan Review (Codex) -> Plan Revision (Claude, boss mode) -> AwaitingPlanApproval
