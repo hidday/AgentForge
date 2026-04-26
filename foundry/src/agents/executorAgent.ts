@@ -52,7 +52,7 @@ export class ExecutorAgent {
         prompt: userPrompt,
         systemPrompt,
         workingDirectory: taskBundle.repo.repoPath,
-        timeoutMs: env.AGENT_TIMEOUT_MS,
+        timeoutMs: env.EXECUTOR_TIMEOUT_MS,
         runId,
       },
       "executor",

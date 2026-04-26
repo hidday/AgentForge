@@ -29,7 +29,7 @@ import type { GitHubSyncService } from "../sync/githubSync.js";
 import type { RunEventEmitter } from "../api/runEventEmitter.js";
 import type { GitService } from "../git/gitService.js";
 import { startTimer } from "../utils/time.js";
-import { PolicyError, ValidationError } from "../utils/errors.js";
+import { AgentTimeoutError, PolicyError, ValidationError } from "../utils/errors.js";
 import { env } from "../config/env.js";
 
 const MAX_CLARIFICATION_ITERATIONS = 3;
@@ -647,10 +647,42 @@ export class OrchestratorService {
       source: "orchestrator",
     });
 
-    const { report, prNumber } = await this.executorAgent.run(plan, bundle, runId, {
-      existingBranch: run.branchName,
-      existingPR: run.prNumber,
-    });
+    let report: ExecutionReport;
+    let prNumber: number;
+    try {
+      const result = await this.executorAgent.run(plan, bundle, runId, {
+        existingBranch: run.branchName,
+        existingPR: run.prNumber,
+      });
+      report = result.report;
+      prNumber = result.prNumber;
+    } catch (err) {
+      if (err instanceof AgentTimeoutError) {
+        this.logger.error(
+          { runId, timeoutMs: err.timeoutMs, agent: err.agent, durationMs: timer.elapsed() },
+          "Executor agent timed out",
+        );
+
+        await this.eventRepo.create({
+          runId,
+          eventType: "EXECUTION_TIMEOUT",
+          source: "orchestrator",
+          payloadJson: { agent: err.agent, timeoutMs: err.timeoutMs },
+        });
+
+        run = await this.transitionAndRecord(run, RunEvent.BLOCKED, "orchestrator", {
+          reason: `Executor timed out after ${Math.round(err.timeoutMs / 60_000)}m. Increase EXECUTOR_TIMEOUT_MS or retry.`,
+        });
+
+        await this.linearClient.postComment(
+          run.linearIssueId,
+          `Executor timed out after ${Math.round(err.timeoutMs / 60_000)} minutes. The run has been paused — use the dashboard retry button or increase \`EXECUTOR_TIMEOUT_MS\` and retry.`,
+        );
+
+        return run;
+      }
+      throw err;
+    }
 
     run = await this.runRepo.update(runId, {
       prNumber,
