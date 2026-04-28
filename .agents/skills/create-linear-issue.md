@@ -20,10 +20,166 @@ The orchestrator consumes these fields from every issue:
 
 1. Gather the user's intent (what they want built/fixed/changed)
 2. Ask clarifying questions if requirements are ambiguous
-3. Look up the target team and project using `linear_get_teams` and `linear_search_projects`
-4. Compose the title, description, priority, and labels following the format below
-5. Call `linear_create_issue` via the Linear MCP server
-6. Return the created issue ID and URL to the user
+3. Analyse scope — unless the user has explicitly requested a single issue, evaluate the heuristics in the Scope Analysis section to determine whether decomposition is warranted.
+4. Look up the target team and project using `linear_get_teams` and `linear_search_projects`
+5. Compose the title, description, priority, and labels following the format below
+6. Call `linear_create_issue` via the Linear MCP server
+7. Return the created issue ID and URL to the user
+
+## Scope Analysis
+
+Evaluate these heuristics whenever step 3 of the Workflow is reached (unless
+the skip condition applies).
+
+### Skip condition
+
+If the user has explicitly asked for a single issue — e.g. "just one ticket",
+"don't split", "single issue only" — skip this entire section and proceed
+directly to step 4.
+
+### Heuristic signals
+
+The following signals, individually or in combination, warrant decomposition:
+
+1. **Many acceptance criteria spanning different concerns** — more than ~5
+   acceptance criteria that cut across different modules or concerns (e.g. one
+   criterion touches auth, another touches persistence, a third touches the API
+   surface).
+
+2. **Multiple distinct system areas** — the requirements touch 3 or more
+   distinct system areas. Count by domain, not by file count. Example domains:
+   auth/identity, persistence/database, API surface, UI/frontend, logging/
+   observability, background jobs, infrastructure/config.
+
+3. **Implied sequential or independent work streams** — the description uses
+   connectives suggesting parallel or additive work: "and also", "plus",
+   "as well as", "in addition to"; or it contains multiple unrelated imperative
+   verbs aimed at different subsystems (e.g. "add rate limiting **and** set up
+   audit logging **and** implement OAuth").
+
+### Decision rule
+
+- **One strong signal** (any single heuristic clearly fires) → propose
+  decomposition; proceed to the
+  [Decomposition Confirmation Flow](#decomposition-confirmation-flow) section.
+- **Two weak signals** (two heuristics partially fire) → propose decomposition;
+  proceed to the
+  [Decomposition Confirmation Flow](#decomposition-confirmation-flow) section.
+- **Zero or one weak signal** → proceed as a single issue (continue to step 4
+  of the Workflow).
+
+### Escape hatch
+
+When in doubt, ask the user rather than silently decomposing.
+
+---
+
+## Decomposition Confirmation Flow
+
+When the decision rule in Scope Analysis indicates decomposition, follow these
+steps before creating any issues:
+
+1. **Synthesise a parent issue title** using the standard convention:
+   `type(scope): summary encompassing all sub-streams`. The scope should be
+   the broadest common area (e.g. `service`, `platform`).
+
+2. **Identify sub-issues** — one per independent work stream. Each sub-issue
+   gets a focused title and a one-sentence description of its scope.
+
+3. **Present the breakdown to the user** in readable markdown:
+
+   ```
+   This request spans multiple distinct work streams. Here is my proposed breakdown:
+
+   **Parent**: `feat(service): add auth, rate limiting, and audit logging`
+
+   Sub-issues:
+   1. `feat(auth): implement user authentication` — add JWT-based login and
+      session management
+   2. `feat(api): add request rate limiting` — enforce per-client limits with
+      429 responses
+   3. `feat(observability): add audit logging` — record security-relevant
+      events to the audit log
+
+   Shall I create a parent issue with these sub-issues, or would you prefer a
+   single issue?
+   ```
+
+4. **If the user confirms decomposition**: proceed to the
+   [Creating Parent and Sub-Issues](#creating-parent-and-sub-issues) section.
+
+5. **If the user declines or requests a single issue**: skip the decomposition
+   flow entirely. Return to step 5 of the Workflow (Compose title/description)
+   and treat the full scope as one issue, creating it via `linear_create_issue`
+   as normal.
+
+---
+
+## Creating Parent and Sub-Issues
+
+This section applies only when the user has confirmed the decomposition
+proposal. Use `save_issue` (on the same Linear MCP server as the rest of the
+workflow) for every call in this sequence — **not** `linear_create_issue`.
+
+### Step 1 — Create the parent issue
+
+Call `save_issue` **without** a `parentId`. The parent description should be a
+high-level summary that references the sub-issues by name.
+
+```json
+{
+  "title": "feat(service): add auth, rate limiting, and audit logging",
+  "description": "## Context\n\nThis parent issue tracks three related but independent improvements ...\n\n## Requirements\n\nSee sub-issues for detailed requirements.\n\n## Acceptance Criteria\n\n- [ ] All sub-issues completed and merged\n\n## Scope\n\n- **In scope**: Auth, rate limiting, audit logging (see sub-issues)\n- **Out of scope**: Anything not covered by the sub-issues",
+  "team": "<team-name or team-id>",
+  "project": "<project-name or project-id>",
+  "priority": 2
+}
+```
+
+Capture the returned issue ID — call it `PARENT_ID`.
+
+**If the parent `save_issue` call fails**: abort the entire decomposition.
+Report the error clearly. Do not attempt to create any sub-issues.
+
+### Step 2 — Create each sub-issue
+
+For each confirmed sub-issue (in the order presented to the user), call
+`save_issue` with `parentId` set to `PARENT_ID`. Example:
+
+```json
+{
+  "title": "feat(auth): implement user authentication",
+  "description": "## Context\n\nThis is a sub-issue of PARENT_ID ...\n\n## Requirements\n\n1. ...\n\n## Technical Hints\n\n- ...\n\n## Acceptance Criteria\n\n- [ ] ...\n\n## Scope\n\n- **In scope**: ...\n- **Out of scope**: rate limiting, audit logging (covered by sibling issues)",
+  "team": "<same team as parent>",
+  "project": "<same project as parent>",
+  "priority": 2,
+  "parentId": "PARENT_ID"
+}
+```
+
+**Each sub-issue MUST include a full five-section description** following the
+Description Template (Context, Requirements, Technical Hints, Acceptance
+Criteria, Scope). A title or one-liner is not sufficient. The Context section
+should reference the parent issue ID. The Scope section must explicitly exclude
+the concerns covered by sibling sub-issues.
+
+Sub-issues inherit `team` and `project` from the parent — use the same values.
+
+**If any sub-issue `save_issue` call fails**: stop immediately. Report:
+- Which sub-issues were created successfully (with their IDs/URLs)
+- Which sub-issue failed and the error
+- The parent issue ID (`PARENT_ID`) so the user can manually create remaining
+  sub-issues
+
+Do not attempt to create further sub-issues in the sequence.
+
+### Step 3 — Report success
+
+On full success, return:
+- The parent issue ID and URL
+- Each sub-issue ID and URL
+
+---
 
 ## Title Convention
 
@@ -143,6 +299,7 @@ Required parameters:
 Optional but recommended:
 - `projectId` -- the orchestrator uses the Linear project name to resolve the target repository; always set this
 - `priority` -- defaults to 0 (no priority) if omitted
+- `parentId` -- set when creating a sub-issue during the decomposition flow; use the ID returned from the parent issue `save_issue` call. When using the decomposition path, use `save_issue` (see [Creating Parent and Sub-Issues](#creating-parent-and-sub-issues)) rather than `linear_create_issue`, as `save_issue` supports `parentId`.
 
 ### Discovering teamId and projectId
 
