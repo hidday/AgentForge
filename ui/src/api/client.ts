@@ -149,4 +149,10 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ answers }),
     }),
+
+  sendChatMessage: (runId: string, message: string) =>
+    request<{ reply: string; durationMs: number }>(`/runs/${runId}/chat`, {
+      method: "POST",
+      body: JSON.stringify({ message }),
+    }),
 };

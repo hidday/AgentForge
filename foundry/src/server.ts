@@ -186,6 +186,7 @@ function buildServices() {
     idempotencyRepo,
     dashboardEmitter,
     processRunner,
+    claudeCodeRunner,
     linearPollService,
     runtimeHealthCheck,
     githubClient,
@@ -210,6 +211,7 @@ async function main(): Promise<void> {
     idempotencyRepo,
     dashboardEmitter,
     processRunner,
+    claudeCodeRunner,
     linearPollService,
     runtimeHealthCheck,
     githubClient,
@@ -287,6 +289,7 @@ async function main(): Promise<void> {
     notificationService,
     uiBaseUrl: env.FOUNDRY_UI_BASE_URL,
     debounceHours: env.NOTIFY_DEBOUNCE_HOURS,
+    claudeCodeRunner,
   });
 
   app.post<{ Params: { issueId: string } }>("/simulate/run/:issueId", async (request, reply) => {

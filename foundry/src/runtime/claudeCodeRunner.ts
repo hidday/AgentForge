@@ -75,6 +75,61 @@ export class ClaudeCodeRunner {
     };
   }
 
+  /**
+   * Runs Claude Code in a read-only advisory mode for chat queries.
+   *
+   * Requirement 8 (issue spec): The chat endpoint MUST NOT pass
+   * --dangerously-skip-permissions to the subprocess, regardless of how
+   * CLAUDE_CODE_ARGS_BASE is configured. This method enforces that invariant
+   * by filtering the flag out of the resolved arg list before spawning.
+   */
+  async chatRun(input: AgentInput, stage: string): Promise<{ text: string; durationMs: number }> {
+    // Build base args then strip --dangerously-skip-permissions (req 8)
+    const rawArgs = this.buildArgs(input);
+    const args = rawArgs.filter((arg) => arg !== "--dangerously-skip-permissions");
+
+    const stdinData = this.buildStdinPayload(input);
+
+    this.logger.info(
+      { stage, cwd: input.workingDirectory, command: this.command, chatReadOnly: true },
+      "Invoking Claude Code CLI (chat/read-only mode)",
+    );
+
+    const result = await this.processRunner.execute({
+      command: this.command,
+      args,
+      cwd: input.workingDirectory,
+      env: input.env,
+      timeoutMs: input.timeoutMs,
+      stdinData,
+      context: input.runId ? { runId: input.runId, stage, runtime: "claude-code" } : undefined,
+    });
+
+    const { text, isApiError } = this.unwrapClaudeEnvelope(result.stdout);
+
+    if (result.exitCode !== 0 || isApiError) {
+      this.logger.error(
+        {
+          stage,
+          exitCode: result.exitCode,
+          stderr: tailSnippet(result.stderr),
+          outputSnippet: tailSnippet(text),
+          ...(isApiError ? { upstreamApiError: true } : {}),
+        },
+        isApiError
+          ? "Claude Code CLI reported upstream API error (chat)"
+          : "Claude Code CLI returned non-zero exit code (chat)",
+      );
+      throw new Error(
+        isApiError
+          ? `Claude CLI API error: ${tailSnippet(text, 200)}`
+          : `Claude CLI exited with code ${result.exitCode}`,
+      );
+    }
+
+    return { text, durationMs: result.durationMs };
+  }
+
   private buildArgs(input: AgentInput): string[] {
     const args = [...this.baseArgs];
 

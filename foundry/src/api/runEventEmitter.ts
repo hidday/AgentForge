@@ -53,6 +53,18 @@ export type DashboardEvent =
       runId: string;
       questionCount: number;
       timestamp: string;
+    }
+  | {
+      /**
+       * Colloquially referred to as 'chat_reply' in the issue spec.
+       * Canonical internal type string is 'run:chat-reply' for consistency
+       * with the existing event naming convention.
+       */
+      type: "run:chat-reply";
+      runId: string;
+      reply: string;
+      durationMs: number;
+      timestamp: string;
     };
 
 export class RunEventEmitter extends EventEmitter {
@@ -145,6 +157,17 @@ export class RunEventEmitter extends EventEmitter {
       type: "run:questions-answered",
       runId,
       questionCount,
+      timestamp: new Date().toISOString(),
+    };
+    this.emit("dashboard", event);
+  }
+
+  emitChatReply(runId: string, reply: string, durationMs: number): void {
+    const event: DashboardEvent = {
+      type: "run:chat-reply",
+      runId,
+      reply,
+      durationMs,
       timestamp: new Date().toISOString(),
     };
     this.emit("dashboard", event);
