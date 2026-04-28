@@ -105,7 +105,28 @@ export class ClaudeCodeRunner {
       context: input.runId ? { runId: input.runId, stage, runtime: "claude-code" } : undefined,
     });
 
-    const { text } = this.unwrapClaudeEnvelope(result.stdout);
+    const { text, isApiError } = this.unwrapClaudeEnvelope(result.stdout);
+
+    if (result.exitCode !== 0 || isApiError) {
+      this.logger.error(
+        {
+          stage,
+          exitCode: result.exitCode,
+          stderr: tailSnippet(result.stderr),
+          outputSnippet: tailSnippet(text),
+          ...(isApiError ? { upstreamApiError: true } : {}),
+        },
+        isApiError
+          ? "Claude Code CLI reported upstream API error (chat)"
+          : "Claude Code CLI returned non-zero exit code (chat)",
+      );
+      throw new Error(
+        isApiError
+          ? `Claude CLI API error: ${tailSnippet(text, 200)}`
+          : `Claude CLI exited with code ${result.exitCode}`,
+      );
+    }
+
     return { text, durationMs: result.durationMs };
   }
 

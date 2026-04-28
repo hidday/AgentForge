@@ -45,12 +45,14 @@ export function ChatPanel({ runId, artifacts }: ChatPanelProps) {
       };
     });
 
-  // Auto-scroll to bottom after each render
+  // Auto-scroll to bottom when message count changes or loading state changes.
+  // Intentionally NOT triggered by input keystrokes or error updates so users
+  // can scroll up to read earlier messages without being bounced back down.
   useEffect(() => {
     if (bottomRef.current && typeof bottomRef.current.scrollIntoView === "function") {
       bottomRef.current.scrollIntoView({ behavior: "smooth" });
     }
-  });
+  }, [messages.length, isLoading]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

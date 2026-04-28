@@ -218,3 +218,147 @@ describe("ClaudeCodeRunner.run() error reporting", () => {
     expect(logger.error).not.toHaveBeenCalled();
   });
 });
+
+describe("ClaudeCodeRunner.chatRun() — arg filtering and error surfacing", () => {
+  const successEnvelope = JSON.stringify({
+    type: "result",
+    is_error: false,
+    result: "The current plan looks good.",
+  });
+
+  const errorEnvelope = JSON.stringify({
+    type: "result",
+    is_error: true,
+    result: "API Error: Stream idle timeout",
+  });
+
+  it("never passes --dangerously-skip-permissions to the subprocess even if present in baseArgs", async () => {
+    const processRunner = makeMockProcessRunner({
+      stdout: successEnvelope,
+      stderr: "",
+      exitCode: 0,
+      durationMs: 100,
+      timedOut: false,
+    });
+    const logger = makeMockLogger();
+
+    // Intentionally inject the dangerous flag into baseArgs to verify it is stripped.
+    const runner = new ClaudeCodeRunner(
+      processRunner as never,
+      "claude",
+      ["--output-format", "json", "--dangerously-skip-permissions"],
+      logger as never,
+    );
+
+    await runner.chatRun(
+      { prompt: "What's the plan?", workingDirectory: "/tmp", timeoutMs: 1000 },
+      "chat",
+    );
+
+    expect(processRunner.execute).toHaveBeenCalledOnce();
+    const { args } = processRunner.execute.mock.calls[0]![0] as { args: string[] };
+    expect(args).not.toContain("--dangerously-skip-permissions");
+    // Other args are preserved
+    expect(args).toContain("--output-format");
+    expect(args).toContain("json");
+  });
+
+  it("strips --dangerously-skip-permissions even when it appears multiple times in baseArgs", async () => {
+    const processRunner = makeMockProcessRunner({
+      stdout: successEnvelope,
+      stderr: "",
+      exitCode: 0,
+      durationMs: 50,
+      timedOut: false,
+    });
+    const logger = makeMockLogger();
+
+    const runner = new ClaudeCodeRunner(
+      processRunner as never,
+      "claude",
+      ["--dangerously-skip-permissions", "--verbose", "--dangerously-skip-permissions"],
+      logger as never,
+    );
+
+    await runner.chatRun(
+      { prompt: "Hello", workingDirectory: "/tmp", timeoutMs: 1000 },
+      "chat",
+    );
+
+    const { args } = processRunner.execute.mock.calls[0]![0] as { args: string[] };
+    expect(args.filter((a) => a === "--dangerously-skip-permissions")).toHaveLength(0);
+  });
+
+  it("returns { text, durationMs } on success", async () => {
+    const processRunner = makeMockProcessRunner({
+      stdout: successEnvelope,
+      stderr: "",
+      exitCode: 0,
+      durationMs: 123,
+      timedOut: false,
+    });
+    const logger = makeMockLogger();
+    const runner = new ClaudeCodeRunner(
+      processRunner as never,
+      "claude",
+      [],
+      logger as never,
+    );
+
+    const result = await runner.chatRun(
+      { prompt: "Hello", workingDirectory: "/tmp", timeoutMs: 1000 },
+      "chat",
+    );
+
+    expect(result.text).toBe("The current plan looks good.");
+    expect(result.durationMs).toBe(123);
+  });
+
+  it("throws and logs when CLI exits non-zero", async () => {
+    const processRunner = makeMockProcessRunner({
+      stdout: JSON.stringify({ type: "result", result: "Something went wrong", is_error: false }),
+      stderr: "signal: killed",
+      exitCode: 1,
+      durationMs: 50,
+      timedOut: false,
+    });
+    const logger = makeMockLogger();
+    const runner = new ClaudeCodeRunner(
+      processRunner as never,
+      "claude",
+      [],
+      logger as never,
+    );
+
+    await expect(
+      runner.chatRun({ prompt: "Hello", workingDirectory: "/tmp", timeoutMs: 1000 }, "chat"),
+    ).rejects.toThrow(/Claude CLI exited with code 1/);
+
+    expect(logger.error).toHaveBeenCalledOnce();
+  });
+
+  it("throws and logs when CLI reports is_error: true in the envelope", async () => {
+    const processRunner = makeMockProcessRunner({
+      stdout: errorEnvelope,
+      stderr: "",
+      exitCode: 0,
+      durationMs: 200,
+      timedOut: false,
+    });
+    const logger = makeMockLogger();
+    const runner = new ClaudeCodeRunner(
+      processRunner as never,
+      "claude",
+      [],
+      logger as never,
+    );
+
+    await expect(
+      runner.chatRun({ prompt: "Hello", workingDirectory: "/tmp", timeoutMs: 1000 }, "chat"),
+    ).rejects.toThrow(/Claude CLI API error/);
+
+    expect(logger.error).toHaveBeenCalledOnce();
+    const [logFields] = logger.error.mock.calls[0]!;
+    expect(logFields).toMatchObject({ upstreamApiError: true });
+  });
+});
