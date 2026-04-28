@@ -10,6 +10,7 @@ import { EventTimeline } from "@/components/EventTimeline.tsx";
 import { ActionBar } from "@/components/ActionBar.tsx";
 import { OpenQuestionsPanel } from "@/components/OpenQuestionsPanel.tsx";
 import type { OpenQuestion } from "@/components/OpenQuestionsPanel.tsx";
+import { ChatPanel } from "@/components/ChatPanel.tsx";
 import { formatTimestamp } from "@/lib/utils.ts";
 import { ArrowLeft, GitBranch, ExternalLink, MonitorUp } from "lucide-react";
 
@@ -182,6 +183,9 @@ export function RunDetailPage() {
               />
             </div>
           )}
+
+          {/* Chat panel — always rendered so operators can start a conversation at any state */}
+          <ChatPanel runId={run.id} artifacts={artifacts} />
         </main>
 
         {/* Right: Events */}

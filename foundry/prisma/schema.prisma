@@ -40,6 +40,7 @@ enum ArtifactType {
   TaskBundle
   RejectionContext
   Skill
+  ChatMessage
 }
 
 model AiRun {

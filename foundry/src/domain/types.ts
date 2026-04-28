@@ -40,7 +40,8 @@ export type ArtifactType =
   | "HumanAnswers"
   | "TaskBundle"
   | "RejectionContext"
-  | "Skill";
+  | "Skill"
+  | "ChatMessage";
 
 export interface SkillDocument {
   id: string;

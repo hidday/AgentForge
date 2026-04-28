@@ -3,6 +3,7 @@ import type { OrchestratorService } from "../orchestrator/orchestratorService.js
 import type { RunEventEmitter, DashboardEvent } from "./runEventEmitter.js";
 import type { LinearPollService } from "../sync/linearPoll.js";
 import type { ProcessRunner } from "../runtime/processRunner.js";
+import type { ClaudeCodeRunner } from "../runtime/claudeCodeRunner.js";
 import type {
   NotificationService,
   HumanRequestReason,
@@ -12,6 +13,8 @@ import { RunEvent } from "../domain/runEvent.js";
 import { RunState } from "../domain/runState.js";
 import { PolicyError, ValidationError } from "../utils/errors.js";
 import type { SkillDocument } from "../domain/types.js";
+import { buildChatSystemPrompt } from "../chat/chatContextBuilder.js";
+import { env } from "../config/env.js";
 
 const VALID_HUMAN_REQUEST_REASONS: HumanRequestReason[] = [
   "plan_ambiguous",
@@ -25,6 +28,7 @@ export interface RegisterApiRoutesOptions {
   notificationService?: NotificationService;
   uiBaseUrl?: string;
   debounceHours?: number;
+  claudeCodeRunner?: ClaudeCodeRunner;
 }
 
 export function registerApiRoutes(
@@ -68,6 +72,69 @@ export function registerApiRoutes(
 
     const artifacts = await artifactRepo.findByRunId(run.id);
     return { artifacts };
+  });
+
+  // ── Chat with run ─────────────────────────────────────────────────────
+
+  app.post<{ Params: { id: string } }>("/api/runs/:id/chat", async (request, reply) => {
+    if (!options.claudeCodeRunner) {
+      return reply
+        .code(501)
+        .send({ error: "Chat is not available (claudeCodeRunner not configured)" });
+    }
+
+    const body = request.body as { message?: unknown } | undefined;
+    const message = body?.message;
+    if (typeof message !== "string" || !message.trim()) {
+      return reply.code(400).send({ error: "message (non-empty string) is required" });
+    }
+
+    const run = await runRepo.findById(request.params.id);
+    if (!run) return reply.code(404).send({ error: "Run not found" });
+
+    const artifacts = await artifactRepo.findByRunId(run.id);
+    const systemPrompt = buildChatSystemPrompt(run, artifacts);
+
+    let replyText: string;
+    let durationMs: number;
+    try {
+      const result = await options.claudeCodeRunner.chatRun(
+        {
+          prompt: message,
+          systemPrompt,
+          workingDirectory: run.workingDirectory,
+          timeoutMs: env.CHAT_TIMEOUT_MS,
+          runId: run.id,
+        },
+        "chat",
+      );
+      replyText = result.text;
+      durationMs = result.durationMs;
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      app.log.error({ runId: run.id, error: errMsg }, "Chat run failed");
+      return reply.code(500).send({ error: "Chat request failed" });
+    }
+
+    // Persist both user and assistant ChatMessage artifacts
+    await artifactRepo.create({
+      runId: run.id,
+      type: "ChatMessage",
+      version: 1,
+      payloadJson: { role: "user", content: message },
+      rawText: message,
+    });
+    await artifactRepo.create({
+      runId: run.id,
+      type: "ChatMessage",
+      version: 1,
+      payloadJson: { role: "assistant", content: replyText },
+      rawText: replyText,
+    });
+
+    emitter.emitChatReply(run.id, replyText, durationMs);
+
+    return { reply: replyText, durationMs };
   });
 
   // ── Events for a run ──────────────────────────────────────────────────

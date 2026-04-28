@@ -7,7 +7,12 @@ export interface DashboardEvent {
     | "run:created"
     | "process:started"
     | "process:output"
-    | "process:completed";
+    | "process:completed"
+    /**
+     * Emitted when a chat reply is ready.
+     * Colloquially referred to as 'chat_reply' in the issue spec.
+     */
+    | "run:chat-reply";
   runId: string;
   processId?: string;
   chunk?: string;
