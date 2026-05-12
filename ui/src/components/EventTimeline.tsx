@@ -61,7 +61,7 @@ export function EventTimeline({ events }: EventTimelineProps) {
       <h3 className="text-xs font-medium text-text-muted uppercase tracking-wider mb-3">
         Events
       </h3>
-      <div className="space-y-2 max-h-[600px] overflow-y-auto pr-1">
+      <div className="space-y-2">
         {[...events].reverse().map((event) => {
           const Icon = EVENT_ICONS[event.eventType] ?? Zap;
           const SourceIcon = SOURCE_ICONS[event.source] ?? Bot;

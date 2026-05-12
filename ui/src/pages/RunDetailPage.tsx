@@ -149,7 +149,7 @@ export function RunDetailPage() {
       {/* Three-panel layout */}
       <div className="flex-1 max-w-7xl mx-auto w-full grid grid-cols-1 lg:grid-cols-[220px_1fr_260px] gap-4 px-4 lg:px-6 py-5">
         {/* Left: Workflow */}
-        <aside className="overflow-y-auto order-2 lg:order-none">
+        <aside className="overflow-y-auto order-2 lg:order-none lg:sticky lg:top-4 lg:self-start lg:max-h-[calc(100vh-6rem)]">
           <WorkflowStepper currentState={run.state} events={events} />
         </aside>
 
@@ -189,7 +189,7 @@ export function RunDetailPage() {
         </main>
 
         {/* Right: Events */}
-        <aside className="overflow-y-auto order-3 lg:order-none">
+        <aside className="overflow-y-auto order-3 lg:order-none lg:sticky lg:top-4 lg:self-start lg:max-h-[calc(100vh-6rem)]">
           <EventTimeline events={events} />
         </aside>
       </div>
