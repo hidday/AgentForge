@@ -10,6 +10,7 @@ import {
   RotateCcw,
   MessageSquare,
   RefreshCw,
+  PenLine,
 } from "lucide-react";
 
 const RETRY_LABELS: Record<string, string> = {
@@ -51,6 +52,7 @@ export function ActionBar({
   const [showRejectDialog, setShowRejectDialog] = useState(false);
   const [rejectMode, setRejectMode] = useState<"iterate" | "fresh">("iterate");
   const [reReviewLoading, setReReviewLoading] = useState(false);
+  const [revisePlanLoading, setRevisePlanLoading] = useState(false);
 
   const category = getStateCategory(state);
 
@@ -98,6 +100,18 @@ export function ActionBar({
       // handled by client
     } finally {
       setReReviewLoading(false);
+    }
+  }
+
+  async function handleRevisePlan() {
+    setRevisePlanLoading(true);
+    try {
+      await api.revisePlan(runId);
+      onAction();
+    } catch {
+      // handled by client
+    } finally {
+      setRevisePlanLoading(false);
     }
   }
 
@@ -195,8 +209,9 @@ export function ActionBar({
   const showAnswerQuestionsBtn = state === "HumanClarificationNeeded";
   const showAnswerOptionalBtn = state === "AwaitingPlanApproval" && hasOptionalQuestions;
   const showReReviewBtn = state === "AwaitingPlanApproval";
+  const showRevisePlanBtn = state === "AwaitingPlanApproval";
 
-  if (visibleActions.length === 0 && !showAnswerQuestionsBtn && !showAnswerOptionalBtn && !showReReviewBtn) {
+  if (visibleActions.length === 0 && !showAnswerQuestionsBtn && !showAnswerOptionalBtn && !showReReviewBtn && !showRevisePlanBtn) {
     return null;
   }
 
@@ -235,6 +250,18 @@ export function ActionBar({
             >
               <RefreshCw size={14} className={reReviewLoading ? "animate-spin" : ""} />
               {reReviewLoading ? "Re-reviewing..." : "Re-review Plan"}
+            </button>
+          )}
+
+          {showRevisePlanBtn && (
+            <button
+              key="revise-plan"
+              onClick={handleRevisePlan}
+              disabled={revisePlanLoading}
+              className="flex items-center gap-1.5 rounded-md border border-accent/40 px-3 py-1.5 text-sm font-medium text-accent transition-colors hover:bg-accent/10 disabled:opacity-50"
+            >
+              <PenLine size={14} className={revisePlanLoading ? "animate-pulse" : ""} />
+              {revisePlanLoading ? "Revising..." : "Revise Plan"}
             </button>
           )}
 

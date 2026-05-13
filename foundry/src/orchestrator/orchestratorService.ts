@@ -1137,6 +1137,63 @@ export class OrchestratorService {
     return run;
   }
 
+  async runManualPlanRevision(runId: string): Promise<Run> {
+    const timer = startTimer();
+    let run = await this.requireRun(runId);
+
+    run = await this.transitionAndRecord(run, RunEvent.RE_REVIEW_REQUESTED, "human");
+
+    const planArtifact = await this.artifactRepo.findLatestByType(runId, "Plan");
+    if (!planArtifact) {
+      throw new Error(`No plan artifact found for run ${runId}`);
+    }
+    const plan = planArtifact.payloadJson as Plan;
+
+    const issue = await this.linearClient.getIssue(run.linearIssueId);
+    const bundle = await this.buildTaskBundle(issue, run);
+
+    const planReview = await this.planReviewerAgent.run(plan, bundle, runId);
+
+    if (planReview.overallVerdict === "approved") {
+      run = await this.transitionAndRecord(
+        run,
+        RunEvent.PLAN_REVIEW_APPROVED,
+        "plan-reviewer-agent",
+      );
+
+      this.logger.info(
+        {
+          runId,
+          state: run.state,
+          verdict: "approved",
+          durationMs: timer.elapsed(),
+        },
+        "Manual plan revision: reviewer approved, no revision needed",
+      );
+    } else {
+      run = await this.transitionAndRecord(
+        run,
+        RunEvent.PLAN_REVIEW_CHANGES_REQUESTED,
+        "plan-reviewer-agent",
+      );
+
+      run = await this.runPlanRevision(runId);
+
+      this.logger.info(
+        {
+          runId,
+          state: run.state,
+          verdict: "changes_requested",
+          findings: planReview.findings.length,
+          durationMs: timer.elapsed(),
+        },
+        "Manual plan revision complete, revised plan awaiting human approval",
+      );
+    }
+
+    return run;
+  }
+
   async approveHumanReview(runId: string): Promise<Run> {
     let run = await this.requireRun(runId);
     run = await this.transitionAndRecord(run, RunEvent.HUMAN_APPROVED, "human");

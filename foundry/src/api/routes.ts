@@ -280,6 +280,22 @@ export function registerApiRoutes(
   );
 
   app.post<{ Params: { id: string } }>(
+    "/api/runs/:id/actions/revise-plan",
+    async (request, reply) => {
+      try {
+        orchestrator.runManualPlanRevision(request.params.id).catch((err: unknown) => {
+          const msg = err instanceof Error ? err.message.slice(0, 200) : String(err);
+          app.log.error({ runId: request.params.id, error: msg }, "Manual plan revision failed");
+        });
+        return { ok: true, runId: request.params.id };
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        return reply.code(400).send({ error: message });
+      }
+    },
+  );
+
+  app.post<{ Params: { id: string } }>(
     "/api/runs/:id/actions/approve-review",
     async (request, reply) => {
       try {

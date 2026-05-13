@@ -111,6 +111,11 @@ export const api = {
       method: "POST",
     }),
 
+  revisePlan: (runId: string) =>
+    request<{ ok: boolean; runId: string }>(`/runs/${runId}/actions/revise-plan`, {
+      method: "POST",
+    }),
+
   approveReview: (runId: string) =>
     request<{ ok: boolean; state: string }>(`/runs/${runId}/actions/approve-review`, {
       method: "POST",
