@@ -629,6 +629,52 @@ export class OrchestratorService {
 
     this.policy.assertCanExecute(run, plan);
 
+    // Idempotency / crash recovery: if the executor already produced an
+    // ExecutionReport for the latest run attempt but EXECUTION_FINISHED never
+    // fired (e.g. process crashed between artifact persistence and state
+    // transition), don't re-run the executor. Pick up where we left off by
+    // recording EXECUTION_FINISHED and proceeding to code review. Otherwise
+    // we would duplicate work, push redundant commits, and risk a timeout.
+    const existingReport = await this.artifactRepo.findLatestByType(runId, "ExecutionReport");
+    if (existingReport && run.prNumber) {
+      const events = await this.eventRepo.findByRunId(runId);
+      const lastStarted = [...events]
+        .reverse()
+        .find((e) => e.eventType === RunEvent.EXECUTION_STARTED);
+      const lastFinished = [...events]
+        .reverse()
+        .find((e) => e.eventType === RunEvent.EXECUTION_FINISHED);
+
+      const reportAfterLastStart =
+        !!lastStarted && existingReport.createdAt > lastStarted.createdAt;
+      const noFinishAfterReport =
+        !lastFinished || lastFinished.createdAt < existingReport.createdAt;
+
+      if (reportAfterLastStart && noFinishAfterReport) {
+        this.logger.warn(
+          {
+            runId,
+            reportCreatedAt: existingReport.createdAt,
+            prNumber: run.prNumber,
+          },
+          "Recovered stranded execution: ExecutionReport exists but EXECUTION_FINISHED was never recorded. Skipping executor and transitioning to AIReview.",
+        );
+
+        run = await this.transitionAndRecord(
+          run,
+          RunEvent.EXECUTION_FINISHED,
+          "executor-agent",
+          {
+            recovered: true,
+            reportCreatedAt: existingReport.createdAt.toISOString(),
+          },
+        );
+
+        run = await this.runReview(runId);
+        return run;
+      }
+    }
+
     if (run.branchName) {
       await this.gitService.assertBranch(run.workingDirectory, run.branchName);
       await this.gitService.commitAndPush(
