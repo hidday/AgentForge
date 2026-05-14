@@ -12,7 +12,7 @@ import { OpenQuestionsPanel } from "@/components/OpenQuestionsPanel.tsx";
 import type { OpenQuestion } from "@/components/OpenQuestionsPanel.tsx";
 import { ChatPanel } from "@/components/ChatPanel.tsx";
 import { formatTimestamp } from "@/lib/utils.ts";
-import { ArrowLeft, GitBranch, ExternalLink, MonitorUp } from "lucide-react";
+import { ArrowLeft, GitBranch, ExternalLink, MonitorUp, Terminal, Sparkles } from "lucide-react";
 
 export function RunDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -134,6 +134,28 @@ export function RunDetailPage() {
               >
                 <MonitorUp size={12} />
                 Cursor
+              </a>
+            )}
+
+            {run.branchName && run.workingDirectory && (
+              <a
+                href={`claude-cli://open?cwd=${encodeURIComponent(run.workingDirectory)}`}
+                className="inline-flex items-center gap-1 rounded border border-border px-2 py-0.5 text-xs text-accent hover:text-accent-hover hover:bg-surface-hover transition-colors"
+                title="Open Claude Code session in this run's worktree"
+              >
+                <Terminal size={12} />
+                Claude Code
+              </a>
+            )}
+
+            {run.branchName && run.workingDirectory && (
+              <a
+                href={`claude://code/new?folder=${encodeURIComponent(run.workingDirectory)}`}
+                className="inline-flex items-center gap-1 rounded border border-border px-2 py-0.5 text-xs text-accent hover:text-accent-hover hover:bg-surface-hover transition-colors"
+                title="Open Claude Desktop (Code) in this run's worktree"
+              >
+                <Sparkles size={12} />
+                Claude
               </a>
             )}
 
