@@ -15,7 +15,7 @@ const EnvSchema = z.object({
   CURSOR_ARGS_BASE: z.string().default("--print --output-format json --force --trust"),
   CURSOR_MODEL: z.string().default("claude-4.7-opus"),
   AGENT_TIMEOUT_MS: z.coerce.number().int().positive().default(120_000),
-  EXECUTOR_TIMEOUT_MS: z.coerce.number().int().positive().default(1_800_000),
+  EXECUTOR_TIMEOUT_MS: z.coerce.number().int().positive().default(3_600_000),
   CHAT_TIMEOUT_MS: z.coerce.number().int().positive().default(120_000),
   REPOS_ROOT_PATH: z.string().default("./workspace"),
   REPOS_CONFIG_PATH: z.string().default("./repos.config.json"),
