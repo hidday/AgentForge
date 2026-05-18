@@ -22,7 +22,30 @@ For every finding, produce a disposition with:
 - `action`: what you did (or "No changes made" if dismissed)
 - `rationale`: your engineering reasoning for the decision
 
-Also rerun all checks after making any changes.
+After making any changes, rerun lint, typecheck, and tests, and produce an updated `executionReport` describing the **post-remediation** state of the implementation. Score the post-remediation work using the same rubric the original executor used.
+
+## Self-Assessment
+
+{{executionScoreRubric}}
+
+The previous implementation pass had `executionVersion: {{prevExecutionVersion}}`. Your new `executionReport.executionVersion` MUST be `{{nextExecutionVersion}}`. The orchestrator will override the value server-side, but emitting it correctly keeps the structured output internally consistent.
+
+Score the **post-remediation** implementation -- not the original. The new score should reflect the state of the code after your fixes, including any tradeoffs you made while addressing the review.
+
+## Writing the `executionReport.summary`
+
+The `summary` field on your new `executionReport` is the headline of this remediation pass. It is rendered as **markdown** in three places:
+
+- a comment posted to the PR (so reviewers can see the updated state without leaving the diff),
+- a comment on the Linear issue (alongside the new score and check status),
+- the Execution tab in the AgentForge dashboard (latest version always wins).
+
+Write it in markdown so it reads well in all three. Concretely:
+
+- Open with a one- or two-sentence overview of the post-remediation state.
+- Use `###` sub-headings, bullet lists, and inline `` `code` `` for file/function references when it improves scanability.
+- Reference touched files with backticked paths (e.g. `` `src/foo.ts` ``).
+- Focus on **what changed in this pass** -- which findings were accepted, what fixes shipped, and any meaningful tradeoffs. The per-finding `resolution` entries and the check status / files-changed list are surfaced separately, so don't duplicate them verbatim.
 
 Your response MUST end with a structured JSON block enclosed between delimiters:
 
@@ -46,12 +69,21 @@ BEGIN_STRUCTURED_OUTPUT
         "rationale": "This suggestion adds complexity without addressing a real issue in the current scope"
       }
     ],
-    "rerunChecks": {
-      "lint": {"status": "pass", "details": "No lint errors"},
-      "typecheck": {"status": "pass", "details": "No type errors"},
-      "tests": {"status": "pass", "details": "All 44 tests passed"}
-    },
-    "readyForHumanReview": true
+    "readyForHumanReview": true,
+    "executionReport": {
+      "executionVersion": {{nextExecutionVersion}},
+      "summary": "Post-remediation state: null guard added, edge cases handled. Other findings rejected with rationale.",
+      "filesChanged": ["src/foo.ts", "src/bar.ts"],
+      "checks": {
+        "lint": {"status": "pass", "details": "No lint errors"},
+        "typecheck": {"status": "pass", "details": "No type errors"},
+        "tests": {"status": "pass", "details": "All 44 tests passed"}
+      },
+      "notes": ["Addressed f1; dismissed f2 with rationale."],
+      "prDraftCreated": true,
+      "score": 0.9,
+      "scoreRationale": "Genuine bug (f1) fixed with a small targeted change; check status improved from previous pass. The dismissed finding (f2) was out of scope and well-justified."
+    }
   }
 }
 END_STRUCTURED_OUTPUT

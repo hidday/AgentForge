@@ -38,6 +38,8 @@ export type ArtifactType =
   | "ReviewerTranscript"
   | "RemediationTranscript"
   | "HumanAnswers"
+  | "ResearchedAnswers"
+  | "ResearcherTranscript"
   | "TaskBundle"
   | "RejectionContext"
   | "Skill"
@@ -82,6 +84,22 @@ export interface HumanAnswersPayload {
   submittedAt: string;
 }
 
+export type ResearchedAnswerConfidence = "high" | "medium" | "low" | "unresolved";
+
+export interface ResearchedAnswer {
+  questionId: string;
+  question: string;
+  answer: string;
+  confidence: ResearchedAnswerConfidence;
+  sources?: string[];
+}
+
+export interface ResearchedAnswersPayload {
+  summary: string;
+  answers: ResearchedAnswer[];
+  completedAt: string;
+}
+
 export interface Artifact {
   id: string;
   runId: string;
@@ -112,6 +130,7 @@ export const AGENT_STAGES = {
   planner: { runtime: "claude-code" as const, name: "planner" },
   planReviewer: { runtime: "codex" as const, name: "plan-reviewer" },
   planReviser: { runtime: "claude-code" as const, name: "plan-reviser" },
+  answerResearcher: { runtime: "claude-code" as const, name: "answer-researcher" },
   executor: { runtime: "claude-code" as const, name: "executor" },
   reviewer: { runtime: "codex" as const, name: "reviewer" },
   remediation: { runtime: "claude-code" as const, name: "remediation" },

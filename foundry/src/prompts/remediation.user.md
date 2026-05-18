@@ -13,6 +13,9 @@ A code reviewer provided feedback on your implementation. Evaluate each finding 
 
 ### Your Implementation Context
 
+**Prior Execution Version**: v{{prevExecutionVersion}}
+**Prior Self-Assessed Score**: {{executionReport.score}}
+**Prior Score Rationale**: {{executionReport.scoreRationale}}
 **Files Changed**: {{executionReport.filesChanged}}
 **Current Check Status**:
 - Lint: {{executionReport.checks.lint.status}}
@@ -33,5 +36,6 @@ You are working in an **isolated Git worktree** on a dedicated branch. Do NOT sw
 6. Partially incorporate findings where the concern is valid but the fix should be different
 7. Provide a clear rationale for every decision
 8. Implement fixes for accepted findings
-9. Rerun all checks
-10. Indicate whether code is now ready for human review
+9. Rerun all checks (lint, typecheck, tests)
+10. Produce a new `executionReport` describing the **post-remediation** state -- you own this summary now, just as the original executor owned v{{prevExecutionVersion}}. Score the new state honestly using the rubric; set `executionVersion` to {{nextExecutionVersion}}.
+11. Indicate whether code is now ready for human review

@@ -15,6 +15,7 @@ import { AgentRunner } from "./runtime/agentRunner.js";
 import { PlannerAgent } from "./agents/plannerAgent.js";
 import { PlanReviewerAgent } from "./agents/planReviewerAgent.js";
 import { PlanReviserAgent } from "./agents/planReviserAgent.js";
+import { AnswerResearcherAgent } from "./agents/answerResearcherAgent.js";
 import { ExecutorAgent } from "./agents/executorAgent.js";
 import { ReviewerAgent } from "./agents/reviewerAgent.js";
 import { RemediationAgent } from "./agents/remediationAgent.js";
@@ -103,6 +104,7 @@ function buildServices() {
   const plannerAgent = new PlannerAgent(agentRunner, artifactRepo, logger);
   const planReviewerAgent = new PlanReviewerAgent(agentRunner, artifactRepo, logger);
   const planReviserAgent = new PlanReviserAgent(agentRunner, artifactRepo, logger);
+  const answerResearcherAgent = new AnswerResearcherAgent(agentRunner, artifactRepo, logger);
   const executorAgent = new ExecutorAgent(
     agentRunner,
     artifactRepo,
@@ -141,6 +143,7 @@ function buildServices() {
     plannerAgent,
     planReviewerAgent,
     planReviserAgent,
+    answerResearcherAgent,
     executorAgent,
     reviewerAgent,
     remediationAgent,

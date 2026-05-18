@@ -19,11 +19,14 @@ export const ChecksSchema = z.object({
 });
 
 export const ExecutionReportSchema = z.object({
+  executionVersion: z.number().int().positive().default(1),
   summary: z.string(),
   filesChanged: z.array(z.string()),
   checks: ChecksSchema,
   notes: z.array(z.string()),
   prDraftCreated: z.boolean(),
+  score: z.number().min(0).max(1),
+  scoreRationale: z.string(),
 });
 
 export type ExecutionReport = z.infer<typeof ExecutionReportSchema>;

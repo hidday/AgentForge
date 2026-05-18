@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { ChecksSchema } from "./executionReport.js";
+import { ExecutionReportSchema } from "./executionReport.js";
 
 export const ResolutionStatus = z.enum(["accepted", "rejected", "partially_addressed"]);
 export type ResolutionStatus = z.infer<typeof ResolutionStatus>;
@@ -14,8 +14,8 @@ export const ResolutionItemSchema = z.object({
 export const RemediationSchema = z.object({
   reviewId: z.string(),
   resolution: z.array(ResolutionItemSchema),
-  rerunChecks: ChecksSchema,
   readyForHumanReview: z.boolean(),
+  executionReport: ExecutionReportSchema,
 });
 
 export type Remediation = z.infer<typeof RemediationSchema>;

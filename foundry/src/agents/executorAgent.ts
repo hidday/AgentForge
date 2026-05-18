@@ -42,7 +42,8 @@ export class ExecutorAgent {
 
     const systemTemplate = loadPromptTemplate("executor.system.md");
     const userTemplate = loadPromptTemplate("executor.user.md");
-    const vars = { ...taskBundle, plan };
+    const executionScoreRubric = loadPromptTemplate("_execution-score-rubric.md");
+    const vars = { ...taskBundle, plan, executionScoreRubric };
     const systemPrompt = renderTemplate(systemTemplate, vars);
     const userPrompt = renderTemplate(userTemplate, vars);
 
@@ -68,6 +69,7 @@ export class ExecutorAgent {
     });
 
     const report = output.parsed.payload;
+    report.executionVersion = 1;
     const branchName = retry?.existingBranch ?? taskBundle.repo.workingBranch;
 
     await this.gitService.commitAndPush(
@@ -96,7 +98,7 @@ export class ExecutorAgent {
     await this.artifactRepo.create({
       runId,
       type: "ExecutionReport",
-      version: 1,
+      version: report.executionVersion,
       payloadJson: report as unknown as object,
       rawText: JSON.stringify(report, null, 2),
     });
@@ -104,6 +106,8 @@ export class ExecutorAgent {
     this.logger.info(
       {
         runId,
+        executionVersion: report.executionVersion,
+        score: report.score,
         filesChanged: report.filesChanged.length,
         prNumber,
         checksPass:

@@ -47,5 +47,6 @@ Do NOT write any code. Produce only a plan.
 
 {{previousPlanSection}}
 {{humanAnswersSection}}
+{{researchedAnswersSection}}
 {{humanFeedbackSection}}
 {{planReviewSection}}

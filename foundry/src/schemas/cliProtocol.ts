@@ -5,11 +5,13 @@ import { PlanRevisionSchema } from "./planRevision.js";
 import { ExecutionReportSchema } from "./executionReport.js";
 import { ReviewSchema } from "./review.js";
 import { RemediationSchema } from "./remediation.js";
+import { ResearchedAnswersSchema } from "./researchedAnswers.js";
 
 export const Stage = z.enum([
   "planner",
   "plan-reviewer",
   "plan-reviser",
+  "answer-researcher",
   "executor",
   "reviewer",
   "remediation",
@@ -40,6 +42,11 @@ export const PlanReviserOutputSchema = CliOutputBaseSchema.extend({
     revision: PlanRevisionSchema,
     revisedPlan: PlanSchema,
   }),
+});
+
+export const AnswerResearcherOutputSchema = CliOutputBaseSchema.extend({
+  stage: z.literal("answer-researcher"),
+  payload: ResearchedAnswersSchema,
 });
 
 export const ExecutorOutputSchema = CliOutputBaseSchema.extend({
@@ -73,6 +80,7 @@ export const CliOutputSchema = z.discriminatedUnion("stage", [
   PlannerOutputSchema,
   PlanReviewerOutputSchema,
   PlanReviserOutputSchema,
+  AnswerResearcherOutputSchema,
   ExecutorOutputSchema,
   ReviewerOutputSchema,
   RemediationOutputSchema,
@@ -83,6 +91,7 @@ export type CliOutput = z.infer<typeof CliOutputSchema>;
 export type PlannerOutput = z.infer<typeof PlannerOutputSchema>;
 export type PlanReviewerOutput = z.infer<typeof PlanReviewerOutputSchema>;
 export type PlanReviserOutput = z.infer<typeof PlanReviserOutputSchema>;
+export type AnswerResearcherOutput = z.infer<typeof AnswerResearcherOutputSchema>;
 export type ExecutorOutput = z.infer<typeof ExecutorOutputSchema>;
 export type ReviewerOutput = z.infer<typeof ReviewerOutputSchema>;
 export type RemediationOutput = z.infer<typeof RemediationOutputSchema>;

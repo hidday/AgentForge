@@ -522,10 +522,23 @@ export function registerApiRoutes(
           }
         : null,
       executionReport: executionArtifact
-        ? {
-            version: executionArtifact.version,
-            payload: executionArtifact.payloadJson,
-          }
+        ? (() => {
+            const payload = executionArtifact.payloadJson as
+              | {
+                  executionVersion?: number;
+                  score?: number;
+                  scoreRationale?: string;
+                }
+              | null
+              | undefined;
+            return {
+              version: executionArtifact.version,
+              executionVersion: payload?.executionVersion ?? executionArtifact.version,
+              score: payload?.score,
+              scoreRationale: payload?.scoreRationale,
+              payload: executionArtifact.payloadJson,
+            };
+          })()
         : null,
     };
   });

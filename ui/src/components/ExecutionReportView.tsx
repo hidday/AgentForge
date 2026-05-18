@@ -1,5 +1,6 @@
 import { cn } from "@/lib/utils.ts";
-import { FileText, CheckCircle2, XCircle, MinusCircle } from "lucide-react";
+import { FileText, CheckCircle2, XCircle, MinusCircle, GitPullRequest } from "lucide-react";
+import { Markdown } from "./Markdown.tsx";
 
 interface ExecutionReportViewProps {
   report: Record<string, unknown>;
@@ -14,18 +15,62 @@ export function ExecutionReportView({ report }: ExecutionReportViewProps) {
   > | null;
   const notes = (report.notes ?? []) as string[];
   const prDraftCreated = report.prDraftCreated as boolean | undefined;
+  const executionVersion = (report.executionVersion as number | undefined) ?? 1;
+  const score = report.score as number | undefined;
+  const scoreRationale = report.scoreRationale as string | undefined;
 
   return (
-    <div className="space-y-4">
-      {/* Summary */}
+    <div className="space-y-5">
+      {/* Header: version + score bar (mirrors PlanView confidence) */}
+      <div className="flex items-center justify-between">
+        <div>
+          <span className="text-xs font-mono text-text-muted">
+            v{executionVersion}
+          </span>
+        </div>
+        {score != null && (
+          <div className="flex items-center gap-2">
+            <div className="h-1.5 w-24 rounded-full bg-border overflow-hidden">
+              <div
+                className={cn(
+                  "h-full rounded-full transition-all",
+                  score >= 0.7
+                    ? "bg-state-done"
+                    : score >= 0.4
+                      ? "bg-state-waiting"
+                      : "bg-state-blocked",
+                )}
+                style={{ width: `${score * 100}%` }}
+              />
+            </div>
+            <span className="text-xs font-medium tabular-nums">
+              Score: {(score * 100).toFixed(0)}%
+            </span>
+          </div>
+        )}
+      </div>
+
+      {/* Score rationale (italicized below the score bar, like PlanView's
+          confidence-adjacent context) */}
+      {score != null && scoreRationale && (
+        <div className="text-xs italic text-text-muted -mt-3">
+          {scoreRationale}
+        </div>
+      )}
+
+      {/* Summary — rendered as markdown (executor is instructed to write
+          markdown: headings, bullets, code refs). */}
       {summary && (
-        <p className="text-sm text-text-secondary leading-relaxed">{summary}</p>
+        <Markdown className="text-sm leading-relaxed">{summary}</Markdown>
       )}
 
       {/* Checks */}
       {checks && (
         <div>
-          <h4 className="text-sm font-medium mb-2">Checks</h4>
+          <div className="flex items-center gap-1.5 mb-2">
+            <CheckCircle2 size={14} className="text-accent" />
+            <h4 className="text-sm font-medium">Checks</h4>
+          </div>
           <div className="grid grid-cols-3 gap-2">
             {Object.entries(checks).map(([name, check]) => {
               const Icon =
@@ -71,9 +116,12 @@ export function ExecutionReportView({ report }: ExecutionReportViewProps) {
       {/* Files Changed */}
       {filesChanged.length > 0 && (
         <div>
-          <h4 className="text-sm font-medium mb-2">
-            Files Changed ({filesChanged.length})
-          </h4>
+          <div className="flex items-center gap-1.5 mb-2">
+            <FileText size={14} className="text-accent" />
+            <h4 className="text-sm font-medium">
+              Files Changed ({filesChanged.length})
+            </h4>
+          </div>
           <div className="rounded border border-border-subtle bg-background p-2 max-h-48 overflow-y-auto">
             {filesChanged.map((file) => (
               <div
@@ -94,9 +142,9 @@ export function ExecutionReportView({ report }: ExecutionReportViewProps) {
           <h4 className="text-sm font-medium mb-1.5">Notes</h4>
           <ul className="space-y-1">
             {notes.map((note, i) => (
-              <li key={i} className="text-xs text-text-secondary flex gap-2">
-                <span className="text-text-muted">&#x2022;</span>
-                {note}
+              <li key={i} className="text-xs flex gap-2">
+                <span className="text-text-muted shrink-0">&#x2022;</span>
+                <Markdown className="text-xs min-w-0 flex-1">{note}</Markdown>
               </li>
             ))}
           </ul>
@@ -104,7 +152,8 @@ export function ExecutionReportView({ report }: ExecutionReportViewProps) {
       )}
 
       {prDraftCreated != null && (
-        <div className="text-xs text-text-muted">
+        <div className="flex items-center gap-1.5 text-xs text-text-muted">
+          <GitPullRequest size={12} />
           PR Draft: {prDraftCreated ? "Created" : "Not created"}
         </div>
       )}

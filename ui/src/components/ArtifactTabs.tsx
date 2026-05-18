@@ -232,10 +232,6 @@ function RemediationView({
     action: string;
     rationale: string;
   }>;
-  const rerunChecks = remediation.rerunChecks as Record<
-    string,
-    { status: string; details: string }
-  > | null;
 
   return (
     <div className="space-y-4">
@@ -273,33 +269,13 @@ function RemediationView({
         </div>
       </div>
 
-      {rerunChecks && (
-        <div>
-          <h4 className="text-sm font-medium mb-2">Re-run Checks</h4>
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-            {Object.entries(rerunChecks).map(([name, check]) => (
-              <div
-                key={name}
-                className="rounded border border-border-subtle p-2 text-center"
-              >
-                <div className="text-xs font-medium capitalize">{name}</div>
-                <div
-                  className={cn(
-                    "text-xs mt-1",
-                    check.status === "pass"
-                      ? "text-state-done"
-                      : check.status === "fail"
-                        ? "text-state-blocked"
-                        : "text-text-muted",
-                  )}
-                >
-                  {check.status}
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
+      <p className="text-[10px] text-text-muted italic">
+        Post-remediation lint/typecheck/test status and the updated implementation
+        score live in the latest Execution tab — open it to see the v
+        {(remediation.executionReport as { executionVersion?: number } | undefined)
+          ?.executionVersion ?? 2}{" "}
+        report.
+      </p>
     </div>
   );
 }

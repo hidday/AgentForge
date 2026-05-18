@@ -159,6 +159,89 @@ describe("PlannerAgent.run()", () => {
     });
   });
 
+  describe("researchedAnswers injection", () => {
+    it("renders '## Researched Answers to Open Questions' section when researchedAnswers is provided", async () => {
+      const { agent, getPrompt } = buildPlannerAgent();
+      const bundle = makeTaskBundle();
+
+      await agent.run(bundle, "run-1", {
+        researchedAnswers: [
+          {
+            questionId: "q1",
+            question: "Should we use Postgres?",
+            answer: "Yes, existing schema uses it.",
+            confidence: "high",
+            sources: ["foundry/prisma/schema.prisma"],
+          },
+        ],
+      });
+
+      const prompt = getPrompt();
+      expect(prompt).toContain("## Researched Answers to Open Questions");
+      expect(prompt).toContain("[q1] (confidence: high)");
+      expect(prompt).toContain("Yes, existing schema uses it.");
+      expect(prompt).toContain("foundry/prisma/schema.prisma");
+      expect(prompt).toContain("AI best-effort, not authoritative");
+    });
+
+    it("omits the researched answers section when no researchedAnswers are provided", async () => {
+      const { agent, getPrompt } = buildPlannerAgent();
+      const bundle = makeTaskBundle();
+
+      await agent.run(bundle, "run-1");
+
+      const prompt = getPrompt();
+      expect(prompt).not.toContain("## Researched Answers to Open Questions");
+      expect(prompt).not.toContain("{{researchedAnswersSection}}");
+    });
+
+    it("renders both humanAnswersSection and researchedAnswersSection when both are provided", async () => {
+      const { agent, getPrompt } = buildPlannerAgent();
+      const bundle = makeTaskBundle();
+
+      await agent.run(bundle, "run-1", {
+        humanAnswers: [{ questionId: "q1", answer: "Human says Postgres" }],
+        researchedAnswers: [
+          {
+            questionId: "q2",
+            question: "Optional convention?",
+            answer: "Use camelCase per existing pattern.",
+            confidence: "medium",
+          },
+        ],
+      });
+
+      const prompt = getPrompt();
+      expect(prompt).toContain("## Human Answers to Open Questions");
+      expect(prompt).toContain("Human says Postgres");
+      expect(prompt).toContain("## Researched Answers to Open Questions");
+      expect(prompt).toContain("[q2] (confidence: medium)");
+    });
+
+    it("renders confidence levels and skips sources line when sources are absent", async () => {
+      const { agent, getPrompt } = buildPlannerAgent();
+      const bundle = makeTaskBundle();
+
+      await agent.run(bundle, "run-1", {
+        researchedAnswers: [
+          {
+            questionId: "q1",
+            question: "Q?",
+            answer: "A without sources",
+            confidence: "low",
+          },
+        ],
+      });
+
+      const prompt = getPrompt();
+      expect(prompt).toContain("[q1] (confidence: low)");
+      expect(prompt).toContain("A without sources");
+      const researchedIdx = prompt.indexOf("## Researched Answers to Open Questions");
+      const section = prompt.slice(researchedIdx, researchedIdx + 400);
+      expect(section).not.toContain("- sources:");
+    });
+  });
+
   describe("relatedContext rendering", () => {
     it("renders the Related Linear Context section when bundle has parent and blockers", async () => {
       const { agent, getPrompt } = buildPlannerAgent();

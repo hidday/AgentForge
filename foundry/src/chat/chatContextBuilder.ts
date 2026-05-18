@@ -1,6 +1,6 @@
 import type { Run, Artifact } from "../domain/types.js";
 
-const EXEC_REPORT_MAX_CHARS = 4000;
+const EXEC_REPORT_SUMMARY_MAX_CHARS = 4000;
 
 /**
  * Assembles a markdown system prompt for the chat advisor from run context.
@@ -91,6 +91,34 @@ export function buildChatSystemPrompt(run: Run, artifacts: Artifact[]): string {
     }
   }
 
+  // 5b. Researched answers (ResearchedAnswers artifact, AI best-effort)
+  const researchedAnswersArtifact = findLatest(artifacts, "ResearchedAnswers");
+  if (researchedAnswersArtifact) {
+    const payload = researchedAnswersArtifact.payloadJson as {
+      summary?: string;
+      answers?: {
+        questionId?: string;
+        question?: string;
+        answer?: string;
+        confidence?: string;
+        sources?: string[];
+      }[];
+    };
+    if (Array.isArray(payload.answers) && payload.answers.length > 0) {
+      const answerLines = payload.answers.map((a) => {
+        const sources =
+          Array.isArray(a.sources) && a.sources.length > 0
+            ? ` _(sources: ${a.sources.join(", ")})_`
+            : "";
+        return `  - **[${a.questionId ?? ""}] (${a.confidence ?? ""}):** ${a.answer ?? ""}${sources}`;
+      });
+      const summaryLine = payload.summary ? `**Summary:** ${payload.summary}\n` : "";
+      sections.push(
+        `## Researched Answers (AI best-effort, not authoritative)\n${summaryLine}${answerLines.join("\n")}`,
+      );
+    }
+  }
+
   // 6. Plan review findings (latest PlanReview artifact)
   const planReviewArtifact = findLatest(artifacts, "PlanReview");
   if (planReviewArtifact) {
@@ -112,15 +140,66 @@ export function buildChatSystemPrompt(run: Run, artifacts: Artifact[]): string {
     }
   }
 
-  // 7. Execution report (latest ExecutionReport artifact, truncated to 4000 chars)
+  // 7. Execution report (latest ExecutionReport artifact, structured markdown
+  //    mirroring how ExecutionReportView renders in the dashboard and how
+  //    formatExecutionReportComment posts to Linear.)
   const execReportArtifact = findLatest(artifacts, "ExecutionReport");
   if (execReportArtifact) {
-    let rawText = execReportArtifact.rawText ?? "";
-    if (rawText.length > EXEC_REPORT_MAX_CHARS) {
-      rawText = rawText.slice(0, EXEC_REPORT_MAX_CHARS) + "\n…(truncated)";
+    const payload = execReportArtifact.payloadJson as {
+      executionVersion?: number;
+      summary?: string;
+      filesChanged?: unknown[];
+      checks?: {
+        lint?: { status?: string; details?: string };
+        typecheck?: { status?: string; details?: string };
+        tests?: { status?: string; details?: string };
+      };
+      notes?: unknown[];
+      score?: number;
+      scoreRationale?: string;
+      prDraftCreated?: boolean;
+    };
+    const reportLines: string[] = [];
+    if (typeof payload.score === "number") {
+      const scorePct = (payload.score * 100).toFixed(0);
+      reportLines.push(`**Score:** ${payload.score.toFixed(2)} (${scorePct}%)`);
     }
-    if (rawText.trim()) {
-      sections.push(`## Execution Report\n${rawText}`);
+    if (payload.scoreRationale) {
+      reportLines.push(`**Score Rationale:** ${payload.scoreRationale}`);
+    }
+    if (payload.summary) {
+      let summary = payload.summary;
+      if (summary.length > EXEC_REPORT_SUMMARY_MAX_CHARS) {
+        summary = summary.slice(0, EXEC_REPORT_SUMMARY_MAX_CHARS) + "\n…(truncated)";
+      }
+      reportLines.push(`**Summary:**\n${summary}`);
+    }
+    if (payload.checks) {
+      const checkLine = (label: string, c?: { status?: string; details?: string }): string =>
+        `  - **${label}:** ${c?.status ?? "?"}${c?.details ? ` — ${c.details}` : ""}`;
+      reportLines.push(`**Checks:**`);
+      reportLines.push(checkLine("Lint", payload.checks.lint));
+      reportLines.push(checkLine("Typecheck", payload.checks.typecheck));
+      reportLines.push(checkLine("Tests", payload.checks.tests));
+    }
+    if (Array.isArray(payload.filesChanged) && payload.filesChanged.length > 0) {
+      reportLines.push(`**Files Changed (${String(payload.filesChanged.length)}):**`);
+      for (const file of payload.filesChanged) {
+        reportLines.push(`  - \`${typeof file === "string" ? file : JSON.stringify(file)}\``);
+      }
+    }
+    if (Array.isArray(payload.notes) && payload.notes.length > 0) {
+      reportLines.push(`**Notes:**`);
+      for (const note of payload.notes) {
+        reportLines.push(`  - ${typeof note === "string" ? note : JSON.stringify(note)}`);
+      }
+    }
+    if (typeof payload.prDraftCreated === "boolean") {
+      reportLines.push(`**PR Draft Created:** ${payload.prDraftCreated ? "yes" : "no"}`);
+    }
+    if (reportLines.length > 0) {
+      const version = payload.executionVersion ?? execReportArtifact.version;
+      sections.push(`## Execution Report (v${String(version)})\n${reportLines.join("\n")}`);
     }
   }
 

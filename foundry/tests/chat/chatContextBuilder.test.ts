@@ -101,6 +101,60 @@ describe("buildChatSystemPrompt", () => {
     expect(result).toContain("Answer to question 1");
   });
 
+  it("includes researched answers section when ResearchedAnswers artifact present", () => {
+    const artifact = makeArtifact({
+      type: "ResearchedAnswers",
+      version: 1,
+      payloadJson: {
+        summary: "Resolved 1 of 1 open questions using repo conventions.",
+        answers: [
+          {
+            questionId: "q1",
+            question: "Should we use camelCase?",
+            answer: "Yes, all existing schemas use camelCase.",
+            confidence: "high",
+            sources: ["src/schemas/foo.ts"],
+          },
+        ],
+        completedAt: "2026-05-17T12:00:00Z",
+      },
+    });
+    const result = buildChatSystemPrompt(makeRun(), [artifact]);
+    expect(result).toContain("## Researched Answers");
+    expect(result).toContain("AI best-effort, not authoritative");
+    expect(result).toContain("Resolved 1 of 1 open questions");
+    expect(result).toContain("[q1] (high)");
+    expect(result).toContain("Yes, all existing schemas use camelCase.");
+    expect(result).toContain("sources: src/schemas/foo.ts");
+  });
+
+  it("renders Researched Answers without sources when sources are absent", () => {
+    const artifact = makeArtifact({
+      type: "ResearchedAnswers",
+      version: 1,
+      payloadJson: {
+        summary: "Partial coverage.",
+        answers: [
+          {
+            questionId: "q1",
+            question: "Q?",
+            answer: "A.",
+            confidence: "medium",
+          },
+        ],
+      },
+    });
+    const result = buildChatSystemPrompt(makeRun(), [artifact]);
+    expect(result).toContain("## Researched Answers");
+    expect(result).toContain("[q1] (medium)");
+    expect(result).not.toContain("sources:");
+  });
+
+  it("omits Researched Answers section when no ResearchedAnswers artifact present", () => {
+    const result = buildChatSystemPrompt(makeRun(), []);
+    expect(result).not.toContain("## Researched Answers");
+  });
+
   it("includes rejection context when RejectionContext artifact present", () => {
     const artifact = makeArtifact({
       type: "RejectionContext",
@@ -117,20 +171,64 @@ describe("buildChatSystemPrompt", () => {
     expect(result).toContain("The plan was incomplete");
   });
 
-  it("truncates very long execution report rawText to 4000 chars", () => {
-    const longText = "x".repeat(10000);
+  it("renders execution report as structured markdown with score, checks, files", () => {
+    const artifact = makeArtifact({
+      type: "ExecutionReport",
+      version: 2,
+      payloadJson: {
+        executionVersion: 2,
+        summary: "Shipped the feature.",
+        filesChanged: ["src/foo.ts", "src/bar.ts"],
+        checks: {
+          lint: { status: "pass", details: "ok" },
+          typecheck: { status: "pass", details: "ok" },
+          tests: { status: "fail", details: "1 flake" },
+        },
+        notes: ["Skipped boundary tests"],
+        prDraftCreated: true,
+        score: 0.82,
+        scoreRationale: "Solid implementation; one flaky test remains.",
+      },
+    });
+    const result = buildChatSystemPrompt(makeRun(), [artifact]);
+    expect(result).toContain("## Execution Report (v2)");
+    expect(result).toContain("**Score:** 0.82 (82%)");
+    expect(result).toContain("**Score Rationale:** Solid implementation");
+    expect(result).toContain("**Summary:**");
+    expect(result).toContain("Shipped the feature.");
+    expect(result).toContain("**Checks:**");
+    expect(result).toContain("**Lint:** pass");
+    expect(result).toContain("**Tests:** fail");
+    expect(result).toContain("**Files Changed (2):**");
+    expect(result).toContain("`src/foo.ts`");
+    expect(result).toContain("**Notes:**");
+    expect(result).toContain("Skipped boundary tests");
+    expect(result).toContain("**PR Draft Created:** yes");
+  });
+
+  it("truncates very long execution report summary to 4000 chars", () => {
+    const longSummary = "x".repeat(10000);
     const artifact = makeArtifact({
       type: "ExecutionReport",
       version: 1,
-      payloadJson: {},
-      rawText: longText,
+      payloadJson: {
+        executionVersion: 1,
+        summary: longSummary,
+        filesChanged: [],
+        checks: {
+          lint: { status: "pass", details: "ok" },
+          typecheck: { status: "pass", details: "ok" },
+          tests: { status: "pass", details: "ok" },
+        },
+        notes: [],
+        prDraftCreated: false,
+        score: 0.7,
+        scoreRationale: "Truncation fixture: score not the focus of this test.",
+      },
     });
     const result = buildChatSystemPrompt(makeRun(), [artifact]);
-    // Should not contain more than 4000 x's + truncation marker
     expect(result).toContain("(truncated)");
-    // The 4000 chars of x's should be present
     expect(result).toContain("x".repeat(4000));
-    // But the 4001st+ should be cut off
     expect(result).not.toContain("x".repeat(4001));
   });
 

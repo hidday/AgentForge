@@ -37,6 +37,8 @@ enum ArtifactType {
   ReviewerTranscript
   RemediationTranscript
   HumanAnswers
+  ResearchedAnswers
+  ResearcherTranscript
   TaskBundle
   RejectionContext
   Skill

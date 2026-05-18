@@ -103,7 +103,20 @@ function buildDeps(overrides: Record<string, unknown> = {}) {
     runId: "run-1",
     type: "ExecutionReport" as const,
     version: 1,
-    payloadJson: { outcome: "success" },
+    payloadJson: {
+      executionVersion: 1,
+      summary: "Implemented JWT auth middleware.",
+      filesChanged: ["src/middleware/auth.ts"],
+      checks: {
+        lint: { status: "pass", details: "ok" },
+        typecheck: { status: "pass", details: "ok" },
+        tests: { status: "pass", details: "ok" },
+      },
+      notes: [],
+      prDraftCreated: true,
+      score: 0.82,
+      scoreRationale: "Implementation matches plan and all checks pass.",
+    },
     rawText: '{"outcome":"success"}',
     createdAt: new Date(),
   };

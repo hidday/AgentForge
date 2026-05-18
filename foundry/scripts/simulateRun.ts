@@ -17,6 +17,7 @@ import { AgentRunner } from "../src/runtime/agentRunner.js";
 import { PlannerAgent } from "../src/agents/plannerAgent.js";
 import { PlanReviewerAgent } from "../src/agents/planReviewerAgent.js";
 import { PlanReviserAgent } from "../src/agents/planReviserAgent.js";
+import { AnswerResearcherAgent } from "../src/agents/answerResearcherAgent.js";
 import { ExecutorAgent } from "../src/agents/executorAgent.js";
 import { ReviewerAgent } from "../src/agents/reviewerAgent.js";
 import { RemediationAgent } from "../src/agents/remediationAgent.js";
@@ -87,6 +88,7 @@ async function simulate(): Promise<void> {
     const plannerAgent = new PlannerAgent(agentRunner, artifactRepo, logger);
     const planReviewerAgent = new PlanReviewerAgent(agentRunner, artifactRepo, logger);
     const planReviserAgent = new PlanReviserAgent(agentRunner, artifactRepo, logger);
+    const answerResearcherAgent = new AnswerResearcherAgent(agentRunner, artifactRepo, logger);
     const executorAgent = new ExecutorAgent(
       agentRunner,
       artifactRepo,
@@ -117,6 +119,7 @@ async function simulate(): Promise<void> {
       plannerAgent,
       planReviewerAgent,
       planReviserAgent,
+      answerResearcherAgent,
       executorAgent,
       reviewerAgent,
       remediationAgent,

@@ -197,10 +197,40 @@ const MOCK_PLAN_REVISER_OUTPUT = wrap({
   },
 });
 
+const MOCK_ANSWER_RESEARCHER_OUTPUT = wrap({
+  success: true,
+  stage: "answer-researcher",
+  payload: {
+    summary:
+      "Researched 2 open questions. Both resolved using existing repository conventions and the issue description.",
+    answers: [
+      {
+        questionId: "q1",
+        question: "Should validation strip unknown fields or reject them?",
+        answer:
+          "Strip unknown fields (Zod `.strip()` mode). The repository's existing schemas use the same convention to avoid breaking older clients that may send extra metadata fields.",
+        confidence: "high",
+        sources: ["src/schemas/userSchemas.ts", "docs/api-conventions.md"],
+      },
+      {
+        questionId: "q2",
+        question:
+          "Are there rate-limiting or auth middleware that should run before validation?",
+        answer:
+          "Yes — the auth middleware in src/middleware/auth.ts is registered globally on the Fastify instance; rate limiting is applied per-route. Validation should run AFTER both so that 401/429 take priority over 400.",
+        confidence: "medium",
+        sources: ["src/middleware/auth.ts", "src/server.ts"],
+      },
+    ],
+    completedAt: "2026-05-17T12:00:00Z",
+  },
+});
+
 const MOCK_EXECUTOR_OUTPUT = wrap({
   success: true,
   stage: "executor",
   payload: {
+    executionVersion: 1,
     summary:
       "Implemented Zod validation middleware and applied it to all POST/PUT endpoints. Added query param validation for list endpoints. All checks pass.",
     filesChanged: [
@@ -222,6 +252,9 @@ const MOCK_EXECUTOR_OUTPUT = wrap({
       "Used strip() mode for unknown fields to avoid breaking existing clients",
     ],
     prDraftCreated: true,
+    score: 0.78,
+    scoreRationale:
+      "Plan steps fully implemented and all checks pass. Self-flagged: validation test coverage is shallow for boundary values (e.g. numeric overflow, very long strings), and the body-parser error path is only covered by one test. Reviewer is likely to ask for more test cases.",
   },
 });
 
@@ -315,12 +348,34 @@ const MOCK_REMEDIATION_OUTPUT = wrap({
           "Email validation appears in exactly one schema. Extracting a shared helper for a single use site adds indirection without benefit. If email validation is needed in additional schemas later, this refactor can be done then.",
       },
     ],
-    rerunChecks: {
-      lint: { status: "pass", details: "No lint errors found" },
-      typecheck: { status: "pass", details: "No type errors" },
-      tests: { status: "pass", details: "48 tests passed, 0 failed" },
-    },
     readyForHumanReview: true,
+    executionReport: {
+      executionVersion: 2,
+      summary:
+        "Post-remediation: added null/undefined guard on req.body before Zod validation, addressing the reviewer's bug finding. Dismissed two suggestions with documented rationale. Re-ran all checks; tests now also cover the missing-body path.",
+      filesChanged: [
+        "src/middleware/validation.ts",
+        "src/routes/users.ts",
+        "src/routes/products.ts",
+        "src/schemas/userSchemas.ts",
+        "src/schemas/productSchemas.ts",
+        "tests/middleware/validation.test.ts",
+        "tests/routes/users.test.ts",
+      ],
+      checks: {
+        lint: { status: "pass", details: "No lint errors found" },
+        typecheck: { status: "pass", details: "No type errors" },
+        tests: { status: "pass", details: "48 tests passed, 0 failed" },
+      },
+      notes: [
+        "Fixed the missing-body bug flagged in review (f1)",
+        "Dismissed f2 and f3 with rationale",
+      ],
+      prDraftCreated: true,
+      score: 0.9,
+      scoreRationale:
+        "Bug from review fixed with a small targeted change; checks still green and now exercise the previously-missing path. Two dismissed findings are well-justified and out of scope, so the implementation is in solid shape for human review.",
+    },
   },
 });
 
@@ -338,6 +393,11 @@ export function createMockProcessHandler(): (
 
     if (isClaude) {
       if (
+        stdinContent.includes("answer-researcher") ||
+        stdinContent.includes("open questions to research")
+      ) {
+        stdout = MOCK_ANSWER_RESEARCHER_OUTPUT;
+      } else if (
         stdinContent.includes("plan revision") ||
         stdinContent.includes("plan-reviser") ||
         stdinContent.includes("lead engineer")

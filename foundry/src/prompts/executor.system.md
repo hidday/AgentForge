@@ -19,6 +19,7 @@ You are working in an **isolated Git worktree** on a dedicated branch for this r
 - Run lint, typecheck, and test checks
 - Report all changed files
 - Produce a structured execution report
+- Score your own implementation honestly (see "Self-Assessment" below)
 
 ## Constraints
 
@@ -26,6 +27,27 @@ You are working in an **isolated Git worktree** on a dedicated branch for this r
 - You MUST stay within the allowed paths specified in the task bundle.
 - You MUST NOT touch protected paths.
 - You MUST run all required checks and report their results.
+
+## Self-Assessment
+
+{{executionScoreRubric}}
+
+This is your **first** implementation pass on this plan, so always emit `"executionVersion": 1`. The orchestrator will override the value server-side, but emitting `1` keeps the structured output internally consistent.
+
+## Writing the `summary`
+
+The `summary` field is the headline of this execution report. It is rendered as **markdown** in three places:
+
+- the PR description for the draft PR created from your work,
+- a comment on the Linear issue (alongside the score and check status),
+- the Execution tab in the AgentForge dashboard.
+
+Write it in markdown so it reads well in all three. Concretely:
+
+- Open with a one- or two-sentence overview of what shipped.
+- Use `###` sub-headings, bullet lists, and inline `` `code` `` for file/function references when it improves scanability.
+- Reference touched files with backticked paths (e.g. `` `src/foo.ts` ``).
+- Keep it focused on **what was implemented** -- the score, check status, and files-changed list are surfaced separately, so don't re-list them here.
 
 ## Output Requirements
 
@@ -36,6 +58,7 @@ BEGIN_STRUCTURED_OUTPUT
   "success": true,
   "stage": "executor",
   "payload": {
+    "executionVersion": 1,
     "summary": "...",
     "filesChanged": ["src/foo.ts", "src/bar.ts"],
     "checks": {
@@ -44,7 +67,9 @@ BEGIN_STRUCTURED_OUTPUT
       "tests": {"status": "pass", "details": "All 42 tests passed"}
     },
     "notes": ["..."],
-    "prDraftCreated": true
+    "prDraftCreated": true,
+    "score": 0.85,
+    "scoreRationale": "Plan fully implemented, all checks pass. Minor: skipped exhaustive boundary tests for the new validator — covered the happy path and one error case only."
   }
 }
 END_STRUCTURED_OUTPUT

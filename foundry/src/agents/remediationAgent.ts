@@ -22,14 +22,30 @@ export class RemediationAgent {
     workingDirectory: string,
     runId: string,
   ): Promise<Remediation> {
+    const prevExecutionVersion = executionReport.executionVersion;
+    const nextExecutionVersion = prevExecutionVersion + 1;
+
     this.logger.info(
-      { runId, reviewId: review.reviewId, findings: review.findings.length },
+      {
+        runId,
+        reviewId: review.reviewId,
+        findings: review.findings.length,
+        prevExecutionVersion,
+        nextExecutionVersion,
+      },
       "Starting remediation agent",
     );
 
     const systemTemplate = loadPromptTemplate("remediation.system.md");
     const userTemplate = loadPromptTemplate("remediation.user.md");
-    const vars = { review, executionReport };
+    const executionScoreRubric = loadPromptTemplate("_execution-score-rubric.md");
+    const vars = {
+      review,
+      executionReport,
+      executionScoreRubric,
+      prevExecutionVersion,
+      nextExecutionVersion,
+    };
     const systemPrompt = renderTemplate(systemTemplate, vars);
     const userPrompt = renderTemplate(userTemplate, vars);
 
@@ -56,6 +72,30 @@ export class RemediationAgent {
 
     const remediation = output.parsed.payload;
 
+    // Server-side override: never trust the model to number its own report.
+    // Mirrors how PlannerAgent applies planVersionOverride.
+    if (remediation.executionReport.executionVersion !== nextExecutionVersion) {
+      this.logger.warn(
+        {
+          runId,
+          modelExecutionVersion: remediation.executionReport.executionVersion,
+          expected: nextExecutionVersion,
+        },
+        "RemediationAgent: model returned wrong executionVersion, overriding server-side",
+      );
+      remediation.executionReport.executionVersion = nextExecutionVersion;
+    }
+
+    const newReport = remediation.executionReport;
+
+    await this.artifactRepo.create({
+      runId,
+      type: "ExecutionReport",
+      version: newReport.executionVersion,
+      payloadJson: newReport as unknown as object,
+      rawText: JSON.stringify(newReport, null, 2),
+    });
+
     await this.artifactRepo.create({
       runId,
       type: "Remediation",
@@ -67,6 +107,7 @@ export class RemediationAgent {
     const accepted = remediation.resolution.filter((r) => r.status === "accepted").length;
     const rejected = remediation.resolution.filter((r) => r.status === "rejected").length;
     const partial = remediation.resolution.filter((r) => r.status === "partially_addressed").length;
+    const scoreDelta = newReport.score - executionReport.score;
 
     this.logger.info(
       {
@@ -76,6 +117,11 @@ export class RemediationAgent {
         rejected,
         partial,
         readyForHumanReview: remediation.readyForHumanReview,
+        prevExecutionVersion,
+        newExecutionVersion: newReport.executionVersion,
+        prevScore: executionReport.score,
+        newScore: newReport.score,
+        scoreDelta,
       },
       "Remediation completed",
     );

@@ -6,6 +6,7 @@ import { PlannerOutputSchema, type PlannerOutput } from "../schemas/cliProtocol.
 import type { Plan } from "../schemas/plan.js";
 import { AGENT_STAGES } from "../domain/types.js";
 import type { HumanAnswer, SkillDocument } from "../domain/types.js";
+import type { ResearchedAnswer } from "../schemas/researchedAnswers.js";
 import { loadPromptTemplate, renderTemplate } from "./promptRenderer.js";
 import { renderRelatedContextSection } from "./sections.js";
 import { env } from "../config/env.js";
@@ -19,6 +20,7 @@ export interface PlanReviewFindingSummary {
 
 export interface PlannerRunOptions {
   humanAnswers?: HumanAnswer[];
+  researchedAnswers?: ResearchedAnswer[];
   planVersionOverride?: number;
   humanFeedback?: { planVersion: number; feedback: string };
   planReviewFindings?: { summary: string; findings: PlanReviewFindingSummary[] };
@@ -47,6 +49,23 @@ export class PlannerAgent {
         .map((a) => `**[${a.questionId}]**: ${a.answer}`)
         .join("\n");
       humanAnswersSection = `## Human Answers to Open Questions\n${answerLines}`;
+    }
+
+    // Build the researchedAnswersSection template variable
+    let researchedAnswersSection = "";
+    if (options?.researchedAnswers && options.researchedAnswers.length > 0) {
+      const answerLines = options.researchedAnswers
+        .map(
+          (a) =>
+            `**[${a.questionId}] (confidence: ${a.confidence})**: ${a.answer}` +
+            (a.sources && a.sources.length > 0 ? `\n  - sources: ${a.sources.join(", ")}` : ""),
+        )
+        .join("\n");
+      researchedAnswersSection =
+        `## Researched Answers to Open Questions (AI best-effort, not authoritative)\n` +
+        `${answerLines}\n\n` +
+        `Treat these as confident-but-not-authoritative context. Human answers (if any) override them. ` +
+        `Any question still marked \`unresolved\` or only \`low\` confidence should remain in the new plan's \`openQuestions\` so a human can weigh in.`;
     }
 
     // Build the humanFeedbackSection template variable
@@ -120,6 +139,7 @@ export class PlannerAgent {
     const userPrompt = renderTemplate(userTemplate, {
       ...taskBundle,
       humanAnswersSection,
+      researchedAnswersSection,
       humanFeedbackSection,
       planReviewSection,
       previousPlanSection,

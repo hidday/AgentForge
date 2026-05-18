@@ -7,6 +7,7 @@ import type { Plan } from "../schemas/plan.js";
 import type { PlanReview } from "../schemas/planReview.js";
 import type { ExecutionReport } from "../schemas/executionReport.js";
 import type { Review } from "../schemas/review.js";
+import type { ResearchedAnswer, ResearchedAnswers } from "../schemas/researchedAnswers.js";
 import type { LinearCommand } from "../linear/linearCommandParser.js";
 import type { LinearClient } from "../linear/linearClient.js";
 import type { GitHubClient } from "../github/githubClient.js";
@@ -18,6 +19,7 @@ import { transition } from "./stateMachine.js";
 import type { PlannerAgent } from "../agents/plannerAgent.js";
 import type { PlanReviewerAgent } from "../agents/planReviewerAgent.js";
 import type { PlanReviserAgent } from "../agents/planReviserAgent.js";
+import type { AnswerResearcherAgent } from "../agents/answerResearcherAgent.js";
 import type { ExecutorAgent } from "../agents/executorAgent.js";
 import type { ReviewerAgent } from "../agents/reviewerAgent.js";
 import type { RemediationAgent } from "../agents/remediationAgent.js";
@@ -60,6 +62,7 @@ interface OrchestratorDeps {
   dashboardEmitter?: RunEventEmitter;
   agentSkillRepo?: AgentSkillRepository;
   distillationAgent?: DistillationAgent;
+  answerResearcherAgent?: AnswerResearcherAgent;
 }
 
 export class OrchestratorService {
@@ -80,6 +83,7 @@ export class OrchestratorService {
   private readonly remediationAgent: RemediationAgent;
   private readonly agentSkillRepo?: AgentSkillRepository;
   private readonly distillationAgent?: DistillationAgent;
+  private readonly answerResearcherAgent?: AnswerResearcherAgent;
   private readonly policy = new PolicyEngine();
   private readonly logger: Logger;
   private readonly dashboardEmitter?: RunEventEmitter;
@@ -102,6 +106,7 @@ export class OrchestratorService {
     this.remediationAgent = deps.remediationAgent;
     this.agentSkillRepo = deps.agentSkillRepo;
     this.distillationAgent = deps.distillationAgent;
+    this.answerResearcherAgent = deps.answerResearcherAgent;
     this.logger = deps.logger;
     this.dashboardEmitter = deps.dashboardEmitter;
   }
@@ -242,25 +247,25 @@ export class OrchestratorService {
     );
 
     const priorSkillsForStart = await this.retrieveSkillsForPlanning(run);
-    const plan = await this.plannerAgent.run(bundle, run.id, { priorSkills: priorSkillsForStart });
+    let plan = await this.plannerAgent.run(bundle, run.id, { priorSkills: priorSkillsForStart });
 
     run = await this.runRepo.update(run.id, {
       planVersion: plan.planVersion,
       plannerRuntime: "claude-code",
     });
 
-    // Check for blocking open questions before proceeding to plan review
+    // Persist the task bundle as an immutable artifact for later re-use.
+    // Done up-front (regardless of blocking-question branch) so the answer
+    // researcher and any later re-plan helpers can rely on it being present.
+    await this.ensureTaskBundleArtifact(run.id, bundle);
+
+    // Run the answer researcher (best-effort, at most once per run) and
+    // possibly re-plan with researched answers before deciding clarification.
+    ({ run, plan } = await this.maybeResearchAndReplan(run, plan, bundle));
+
+    // Check for blocking open questions on the (possibly revised) plan
     const blockingQuestions = plan.openQuestions.filter((q) => q.requiredForExecution);
     if (blockingQuestions.length > 0) {
-      // Persist the task bundle as an immutable artifact for later re-use
-      await this.artifactRepo.create({
-        runId: run.id,
-        type: "TaskBundle",
-        version: 1,
-        payloadJson: bundle as unknown as object,
-        rawText: JSON.stringify(bundle, null, 2),
-      });
-
       run = await this.transitionAndRecord(run, RunEvent.PLAN_CREATED, "planner-agent");
       run = await this.transitionAndRecord(
         run,
@@ -307,16 +312,7 @@ export class OrchestratorService {
     const issue = await this.linearClient.getIssue(run.linearIssueId);
     const bundle = await this.buildTaskBundle(issue, run);
 
-    const existingBundle = await this.artifactRepo.findLatestByType(runId, "TaskBundle");
-    if (!existingBundle) {
-      await this.artifactRepo.create({
-        runId: run.id,
-        type: "TaskBundle",
-        version: 1,
-        payloadJson: bundle as unknown as object,
-        rawText: JSON.stringify(bundle, null, 2),
-      });
-    }
+    await this.ensureTaskBundleArtifact(run.id, bundle);
 
     const rejectionArtifact = await this.artifactRepo.findLatestByType(runId, "RejectionContext");
     const rejectionContext = rejectionArtifact?.payloadJson as RejectionContextPayload | undefined;
@@ -329,6 +325,14 @@ export class OrchestratorService {
       | { answers: HumanAnswer[] }
       | undefined;
 
+    const researchedAnswersArtifact = await this.artifactRepo.findLatestByType(
+      runId,
+      "ResearchedAnswers",
+    );
+    const researchedAnswersPayload = researchedAnswersArtifact?.payloadJson as
+      | ResearchedAnswers
+      | undefined;
+
     const planReviewArtifact = await this.artifactRepo.findLatestByType(runId, "PlanReview");
     const planReview = planReviewArtifact?.payloadJson as
       | {
@@ -339,7 +343,7 @@ export class OrchestratorService {
 
     const nextPlanVersion = run.planVersion + 1;
 
-    const plan = await this.plannerAgent.run(bundle, run.id, {
+    let plan = await this.plannerAgent.run(bundle, run.id, {
       planVersionOverride: nextPlanVersion,
       ...(previousPlan ? { previousPlan } : {}),
       ...(rejectionContext
@@ -353,6 +357,9 @@ export class OrchestratorService {
       ...(humanAnswersPayload?.answers?.length
         ? { humanAnswers: humanAnswersPayload.answers }
         : {}),
+      ...(researchedAnswersPayload?.answers?.length
+        ? { researchedAnswers: researchedAnswersPayload.answers }
+        : {}),
       ...(planReview
         ? { planReviewFindings: { summary: planReview.summary, findings: planReview.findings } }
         : {}),
@@ -362,6 +369,9 @@ export class OrchestratorService {
       planVersion: plan.planVersion,
       plannerRuntime: "claude-code",
     });
+
+    // Best-effort answer research (loop-guarded by artifact existence)
+    ({ run, plan } = await this.maybeResearchAndReplan(run, plan, bundle));
 
     const blockingQuestions = plan.openQuestions.filter((q) => q.requiredForExecution);
     if (blockingQuestions.length > 0) {
@@ -431,23 +441,19 @@ export class OrchestratorService {
     const bundle = await this.buildTaskBundle(issue, run);
 
     const priorSkillsForRetry = await this.retrieveSkillsForPlanning(run);
-    const plan = await this.plannerAgent.run(bundle, run.id, { priorSkills: priorSkillsForRetry });
+    let plan = await this.plannerAgent.run(bundle, run.id, { priorSkills: priorSkillsForRetry });
 
     run = await this.runRepo.update(run.id, {
       planVersion: plan.planVersion,
       plannerRuntime: "claude-code",
     });
 
+    await this.ensureTaskBundleArtifact(run.id, bundle);
+
+    ({ run, plan } = await this.maybeResearchAndReplan(run, plan, bundle));
+
     const blockingQuestions = plan.openQuestions.filter((q) => q.requiredForExecution);
     if (blockingQuestions.length > 0) {
-      await this.artifactRepo.create({
-        runId: run.id,
-        type: "TaskBundle",
-        version: 1,
-        payloadJson: bundle as unknown as object,
-        rawText: JSON.stringify(bundle, null, 2),
-      });
-
       run = await this.transitionAndRecord(run, RunEvent.PLAN_CREATED, "planner-agent");
       run = await this.transitionAndRecord(
         run,
@@ -739,6 +745,11 @@ export class OrchestratorService {
 
     run = await this.transitionAndRecord(run, RunEvent.EXECUTION_FINISHED, "executor-agent");
 
+    await this.linearClient.postComment(
+      run.linearIssueId,
+      this.formatExecutionReportComment(report),
+    );
+
     this.logger.info(
       { runId, state: run.state, prNumber, durationMs: timer.elapsed() },
       "Execution complete, starting code review",
@@ -785,16 +796,7 @@ export class OrchestratorService {
     const issue = await this.linearClient.getIssue(run.linearIssueId);
     const bundle = await this.buildTaskBundle(issue, run);
 
-    const existingBundle = await this.artifactRepo.findLatestByType(runId, "TaskBundle");
-    if (!existingBundle) {
-      await this.artifactRepo.create({
-        runId: run.id,
-        type: "TaskBundle",
-        version: 1,
-        payloadJson: bundle as unknown as object,
-        rawText: JSON.stringify(bundle, null, 2),
-      });
-    }
+    await this.ensureTaskBundleArtifact(run.id, bundle);
 
     const nextPlanVersion = run.planVersion + 1;
 
@@ -805,7 +807,7 @@ export class OrchestratorService {
     const rejectionContext = rejectionArtifact?.payloadJson as RejectionContextPayload | undefined;
 
     const priorSkillsForReject = await this.retrieveSkillsForPlanning(run);
-    const newPlan = await this.plannerAgent.run(bundle, run.id, {
+    let newPlan = await this.plannerAgent.run(bundle, run.id, {
       priorSkills: priorSkillsForReject,
       planVersionOverride: nextPlanVersion,
       ...(iterateContext?.previousPlan ? { previousPlan: iterateContext.previousPlan } : {}),
@@ -820,6 +822,9 @@ export class OrchestratorService {
       ...(iterateContext?.humanAnswers?.length
         ? { humanAnswers: iterateContext.humanAnswers }
         : {}),
+      ...(iterateContext?.researchedAnswers?.length
+        ? { researchedAnswers: iterateContext.researchedAnswers }
+        : {}),
       ...(iterateContext?.planReviewFindings
         ? { planReviewFindings: iterateContext.planReviewFindings }
         : {}),
@@ -830,7 +835,9 @@ export class OrchestratorService {
       plannerRuntime: "claude-code",
     });
 
-    // Check for blocking open questions before proceeding to plan review
+    // Best-effort answer research (loop-guarded; no-op if already ran for this run).
+    ({ run, plan: newPlan } = await this.maybeResearchAndReplan(run, newPlan, bundle));
+
     const blockingQuestions = newPlan.openQuestions.filter((q) => q.requiredForExecution);
     if (blockingQuestions.length > 0) {
       run = await this.transitionAndRecord(run, RunEvent.PLAN_CREATED, "planner-agent");
@@ -960,12 +967,24 @@ export class OrchestratorService {
     run = await this.runRepo.update(runId, { remediationRuntime: "claude-code" });
     run = await this.transitionAndRecord(run, RunEvent.REMEDIATION_FINISHED, "remediation-agent");
 
+    // Post the new v2+ ExecutionReport first so the human reading top-to-bottom
+    // sees the updated implementation state before the per-finding resolutions.
     await this.linearClient.postComment(
       run.linearIssueId,
-      this.formatRemediationComment(remediation.resolution),
+      this.formatExecutionReportComment(remediation.executionReport),
+    );
+
+    await this.linearClient.postComment(
+      run.linearIssueId,
+      this.formatRemediationComment(remediation),
     );
 
     if (run.prNumber) {
+      await this.githubSync.postExecutionReportUpdate(
+        run.repo,
+        run.prNumber,
+        remediation.executionReport,
+      );
       await this.githubSync.postRemediationResolutions(
         run.repo,
         run.prNumber,
@@ -975,7 +994,16 @@ export class OrchestratorService {
     }
 
     this.logger.info(
-      { runId, state: run.state, durationMs: timer.elapsed() },
+      {
+        runId,
+        state: run.state,
+        durationMs: timer.elapsed(),
+        prevExecutionVersion: executionReport.executionVersion,
+        newExecutionVersion: remediation.executionReport.executionVersion,
+        prevScore: executionReport.score,
+        newScore: remediation.executionReport.score,
+        scoreDelta: remediation.executionReport.score - executionReport.score,
+      },
       "Remediation complete, marking ready for human review",
     );
 
@@ -1084,15 +1112,28 @@ export class OrchestratorService {
     // relied upon here; planVersion is updated on every plan creation/revision.
     const nextPlanVersion = run.planVersion + 1;
 
+    // Preserve any prior researched answers so the re-plan keeps that context
+    // alongside the new human answers.
+    const priorResearchedArtifact = await this.artifactRepo.findLatestByType(
+      runId,
+      "ResearchedAnswers",
+    );
+    const priorResearched = priorResearchedArtifact?.payloadJson as ResearchedAnswers | undefined;
+
     // Re-run the planner with human answers injected
-    const newPlan = await this.plannerAgent.run(taskBundle, runId, {
+    let newPlan = await this.plannerAgent.run(taskBundle, runId, {
       humanAnswers: answers,
+      ...(priorResearched?.answers?.length ? { researchedAnswers: priorResearched.answers } : {}),
       planVersionOverride: nextPlanVersion,
     });
 
     run = await this.runRepo.update(runId, {
       planVersion: newPlan.planVersion,
     });
+
+    // Best-effort answer research (loop-guarded; typically a no-op here because
+    // a ResearchedAnswers artifact already exists from the initial planning pass).
+    ({ run, plan: newPlan } = await this.maybeResearchAndReplan(run, newPlan, taskBundle));
 
     // Record PLAN_CREATED to satisfy the Planning → PlanReview state machine
     run = await this.transitionAndRecord(run, RunEvent.PLAN_CREATED, "planner-agent");
@@ -1263,9 +1304,122 @@ export class OrchestratorService {
     return run;
   }
 
+  /**
+   * Persist the run's `TaskBundle` artifact if (and only if) one doesn't
+   * already exist. Used to consolidate the previously duplicated checks at
+   * the planner call sites.
+   */
+  private async ensureTaskBundleArtifact(runId: string, bundle: TaskBundle): Promise<void> {
+    const existing = await this.artifactRepo.findLatestByType(runId, "TaskBundle");
+    if (existing) return;
+    await this.artifactRepo.create({
+      runId,
+      type: "TaskBundle",
+      version: 1,
+      payloadJson: bundle as unknown as object,
+      rawText: JSON.stringify(bundle, null, 2),
+    });
+  }
+
+  /**
+   * If the freshly created `plan` has any open questions AND the researcher is
+   * available AND we haven't already produced a `ResearchedAnswers` artifact
+   * for this run, invoke the researcher, persist its output, record a
+   * `RESEARCH_COMPLETED` event, and re-run the planner with the researched
+   * answers injected. Returns the (possibly revised) plan + run.
+   *
+   * Loop guard: the artifact-existence check means the researcher fires at
+   * most ONCE per run lifecycle. Subsequent re-plans (e.g. after human
+   * answers or plan rejection) will inject the existing ResearchedAnswers
+   * via PlannerRunOptions but will NOT trigger another research pass.
+   */
+  private async maybeResearchAndReplan(
+    run: Run,
+    plan: Plan,
+    bundle: TaskBundle,
+  ): Promise<{ run: Run; plan: Plan }> {
+    if (plan.openQuestions.length === 0) return { run, plan };
+    if (!this.answerResearcherAgent) return { run, plan };
+
+    const existing = await this.artifactRepo.findLatestByType(run.id, "ResearchedAnswers");
+    if (existing) {
+      this.logger.info(
+        { runId: run.id, planVersion: plan.planVersion },
+        "Answer researcher skipped (ResearchedAnswers artifact already exists for run)",
+      );
+      return { run, plan };
+    }
+
+    const humanAnswersArtifact = await this.artifactRepo.findLatestByType(run.id, "HumanAnswers");
+    const humanAnswersPayload = humanAnswersArtifact?.payloadJson as
+      | { answers: HumanAnswer[] }
+      | undefined;
+
+    this.logger.info(
+      {
+        runId: run.id,
+        planVersion: plan.planVersion,
+        openQuestionCount: plan.openQuestions.length,
+      },
+      "Triggering answer researcher for plan with open questions",
+    );
+
+    const researched = await this.answerResearcherAgent.run(plan, bundle, run.id, {
+      ...(humanAnswersPayload?.answers?.length
+        ? { humanAnswers: humanAnswersPayload.answers }
+        : {}),
+    });
+
+    const resolvedCount = researched.answers.filter((a) => a.confidence !== "unresolved").length;
+    const unresolvedCount = researched.answers.length - resolvedCount;
+
+    await this.eventRepo.create({
+      runId: run.id,
+      eventType: "RESEARCH_COMPLETED",
+      source: "answer-researcher-agent",
+      payloadJson: {
+        planVersion: plan.planVersion,
+        answeredCount: researched.answers.length,
+        resolvedCount,
+        unresolvedCount,
+      },
+    });
+
+    const nextPlanVersion = plan.planVersion + 1;
+    const revisedPlan = await this.plannerAgent.run(bundle, run.id, {
+      planVersionOverride: nextPlanVersion,
+      previousPlan: plan,
+      researchedAnswers: researched.answers,
+      ...(humanAnswersPayload?.answers?.length
+        ? { humanAnswers: humanAnswersPayload.answers }
+        : {}),
+    });
+
+    const updatedRun = await this.runRepo.update(run.id, {
+      planVersion: revisedPlan.planVersion,
+      plannerRuntime: "claude-code",
+    });
+
+    this.logger.info(
+      {
+        runId: run.id,
+        originalPlanVersion: plan.planVersion,
+        revisedPlanVersion: revisedPlan.planVersion,
+        originalOpenQuestionCount: plan.openQuestions.length,
+        revisedOpenQuestionCount: revisedPlan.openQuestions.length,
+        revisedBlockingCount: revisedPlan.openQuestions.filter((q) => q.requiredForExecution)
+          .length,
+      },
+      "Re-planned after answer research",
+    );
+
+    return { run: updatedRun, plan: revisedPlan };
+  }
+
   private async loadReplanContext(runId: string): Promise<{
     previousPlan?: Plan;
     humanAnswers?: HumanAnswer[];
+    researchedAnswers?: ResearchedAnswer[];
     planReviewFindings?: {
       summary: string;
       findings: { id: string; severity: string; title: string; details: string }[];
@@ -1279,6 +1433,14 @@ export class OrchestratorService {
       | { answers: HumanAnswer[] }
       | undefined;
 
+    const researchedAnswersArtifact = await this.artifactRepo.findLatestByType(
+      runId,
+      "ResearchedAnswers",
+    );
+    const researchedAnswersPayload = researchedAnswersArtifact?.payloadJson as
+      | ResearchedAnswers
+      | undefined;
+
     const planReviewArtifact = await this.artifactRepo.findLatestByType(runId, "PlanReview");
     const planReview = planReviewArtifact?.payloadJson as
       | {
@@ -1290,6 +1452,7 @@ export class OrchestratorService {
     return {
       previousPlan,
       humanAnswers: humanAnswersPayload?.answers,
+      researchedAnswers: researchedAnswersPayload?.answers,
       planReviewFindings: planReview
         ? { summary: planReview.summary, findings: planReview.findings }
         : undefined,
@@ -1455,6 +1618,62 @@ export class OrchestratorService {
     ].join("\n");
   }
 
+  private formatExecutionReportComment(report: ExecutionReport): string {
+    const scorePct = (report.score * 100).toFixed(0);
+    const checkIcon = (status: string): string =>
+      status === "pass" ? ":white_check_mark:" : status === "fail" ? ":x:" : ":heavy_minus_sign:";
+    const checkRows = (
+      [
+        ["Lint", report.checks.lint],
+        ["Typecheck", report.checks.typecheck],
+        ["Tests", report.checks.tests],
+      ] as const
+    )
+      .map(([label, c]) => `- ${checkIcon(c.status)} **${label}** -- ${c.details}`)
+      .join("\n");
+
+    // Collapse the file list inside a <details> when there are many files to
+    // keep the Linear comment scannable; <details> is rendered natively by
+    // both Linear and GitHub.
+    const FILE_COLLAPSE_THRESHOLD = 8;
+    const filesSection =
+      report.filesChanged.length === 0
+        ? ""
+        : report.filesChanged.length <= FILE_COLLAPSE_THRESHOLD
+          ? [
+              "",
+              `### Files changed (${report.filesChanged.length})`,
+              report.filesChanged.map((f) => `- \`${f}\``).join("\n"),
+            ].join("\n")
+          : [
+              "",
+              "<details>",
+              `<summary><strong>Files changed (${report.filesChanged.length})</strong></summary>`,
+              "",
+              report.filesChanged.map((f) => `- \`${f}\``).join("\n"),
+              "",
+              "</details>",
+            ].join("\n");
+
+    const notesSection =
+      report.notes.length === 0
+        ? ""
+        : ["", "### Notes", report.notes.map((n) => `- ${n}`).join("\n")].join("\n");
+
+    return [
+      `## Execution Report (v${report.executionVersion}) -- Score: ${scorePct}%`,
+      "",
+      `*${report.scoreRationale}*`,
+      "",
+      report.summary,
+      "",
+      "### Checks",
+      checkRows,
+      filesSection,
+      notesSection,
+    ].join("\n");
+  }
+
   private formatPlanReviewComment(planReview: PlanReview): string {
     const findings = planReview.findings
       .map(
@@ -1507,14 +1726,19 @@ export class OrchestratorService {
     ].join("\n");
   }
 
-  private formatRemediationComment(
-    resolution: { findingId: string; status: string; action: string; rationale: string }[],
-  ): string {
-    const items = resolution
+  private formatRemediationComment(remediation: {
+    resolution: { findingId: string; status: string; action: string; rationale: string }[];
+    executionReport: { executionVersion: number; score: number; scoreRationale: string };
+  }): string {
+    const items = remediation.resolution
       .map((r) => `- **${r.findingId}** [${r.status}]: ${r.action}\n  *Rationale*: ${r.rationale}`)
       .join("\n");
 
-    return ["## Remediation Summary", "", items].join("\n");
+    const { executionVersion, score, scoreRationale } = remediation.executionReport;
+    const scorePct = (score * 100).toFixed(0);
+    const scoreLine = `**Implementation score (v${executionVersion}): ${score.toFixed(2)} (${scorePct}%)** -- ${scoreRationale}`;
+
+    return ["## Remediation Summary", "", scoreLine, "", items].join("\n");
   }
 
   private async retrieveSkillsForPlanning(run: Run): Promise<SkillDocument[]> {

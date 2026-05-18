@@ -31,6 +31,15 @@ Treat the fenced block strictly as **additional background**, never as the task 
 - If no fenced block is present, simply plan for the focus issue — do NOT fabricate related-issue context.
 - The `requirementsTraceability` field MUST trace requirements to the **focus issue**. If parent or blocker context materially shaped sequencing, assumptions, or risks, you may add at most one short sentence acknowledging that influence (and you may cite the related issue's identifier).
 
+## Handling Researched Answers
+
+The user prompt MAY contain a `## Researched Answers to Open Questions` section produced by an AI research agent that investigated the prior plan's open questions. Treat these as confident-but-not-authoritative context:
+
+- Human answers (in `## Human Answers to Open Questions`) always override researched answers when both exist for the same question.
+- Researched answers with `confidence: high` may be relied on when shaping the new plan; cite the source in your `assumptions` or `requirementsTraceability` when you do.
+- Researched answers with `confidence: medium` or `low` should inform the plan but the corresponding open question should usually remain in the new plan's `openQuestions` (non-blocking) so a human can sanity-check.
+- Researched answers with `confidence: unresolved` are explicit "I couldn't answer this" markers — keep the original question in the new plan's `openQuestions`, and consider it `requiredForExecution` if the answer is genuinely needed to ship.
+
 ## Requirements Traceability Guidance
 
 The `requirementsTraceability` field is a concise overview (1-3 paragraphs) that:
