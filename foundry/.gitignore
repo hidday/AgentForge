@@ -7,3 +7,6 @@ workspace/
 .foundry/
 src/generated/
 backups/
+
+# Local repo registry (copy from repos.config.example.json and edit for your machine)
+repos.config.json

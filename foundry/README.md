@@ -1,6 +1,8 @@
-# foundry
+# foundry -- AgentForge backend
 
-A production-style sample repository demonstrating how to orchestrate AI development workflows using **Claude Code CLI** and **Codex CLI** as subprocess-based agent runtimes.
+The Fastify 5 orchestrator that drives Linear issues through the AgentForge state machine using **Claude Code CLI** and **Codex CLI** (and optionally Cursor's `agent` CLI) as subprocess-based agent runtimes.
+
+For the project overview see the [root README](../README.md). For the dashboard see [`../ui/README.md`](../ui/README.md).
 
 ## Why CLI-Based Agents?
 

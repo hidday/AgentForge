@@ -41,7 +41,7 @@ export interface WorktreeSetupResult {
 }
 
 /**
- * Builds a worktree directory name like "run-abcdefgh-pry-751-fix-server-side"
+ * Builds a worktree directory name like "run-abcdefgh-eng-42-fix-something"
  * by combining the short run id with the Linear issue id and the first few
  * slug words extracted from the branch name.
  *
@@ -53,8 +53,8 @@ export function buildWorktreeDirName(shortId: string, branchName: string): strin
   if (!branchName) return base;
 
   const lower = branchName.toLowerCase();
-  // Match a Linear-style issue id (e.g., "pry-751") that appears either at the
-  // start of the branch or right after a "/" prefix (e.g., "hidday/pry-751-...").
+  // Match a Linear-style issue id (e.g., "eng-42") that appears either at the
+  // start of the branch or right after a "/" prefix (e.g., "alice/eng-42-...").
   const branchIssueRe = /(?:^|\/)([a-z0-9]+-\d+)(?:-(.+))?$/;
   const match = branchIssueRe.exec(lower);
   if (!match) return base;

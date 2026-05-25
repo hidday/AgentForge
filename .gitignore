@@ -7,10 +7,18 @@
 # Dependencies
 node_modules/
 
-# Tool-generated
+# Build outputs
+dist/
+
+# Tool-generated / runtime state
 .superset/
 .claude/worktrees/
 .worktrees/
 
 # Logs
 *.log
+
+# Local env files (never commit real credentials)
+.env
+.env.local
+.env.*.local

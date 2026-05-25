@@ -161,12 +161,33 @@ export function loadRepoRegistry(
   reposRootPath: string,
   logger: Logger,
 ): RepoRegistry {
-  const raw = readFileSync(resolve(configPath), "utf-8");
+  // Resolve the live config; if it's missing, transparently fall back to the
+  // committed `*.example.json` template so a fresh clone boots without errors.
+  // The user can copy and customize the example at their convenience.
+  const resolvedPath = resolve(configPath);
+  let effectivePath = resolvedPath;
+  if (!existsSync(resolvedPath)) {
+    const examplePath = resolvedPath.replace(/\.json$/, ".example.json");
+    if (existsSync(examplePath)) {
+      logger.warn(
+        { expected: resolvedPath, fallback: examplePath },
+        "repos.config.json not found -- falling back to the committed example. " +
+          "Copy it and edit for your environment: cp foundry/repos.config.example.json foundry/repos.config.json",
+      );
+      effectivePath = examplePath;
+    } else {
+      throw new Error(
+        `Repo config not found at ${resolvedPath} and no example fallback at ${examplePath}.`,
+      );
+    }
+  }
+
+  const raw = readFileSync(effectivePath, "utf-8");
   const parsed = JSON.parse(raw) as unknown;
   const config = ReposConfigSchema.parse(parsed);
 
   logger.info(
-    { configPath, repoCount: config.repos.length, defaultRepo: config.defaultRepo },
+    { configPath: effectivePath, repoCount: config.repos.length, defaultRepo: config.defaultRepo },
     "Loaded repo registry",
   );
 

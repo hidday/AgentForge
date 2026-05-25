@@ -1,0 +1,54 @@
+name: Feature request
+description: Propose an enhancement or new capability
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for thinking about how to make AgentForge better. Fill in as much detail as you can.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem does this solve?
+      description: Describe the current limitation or gap. Concrete examples help.
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed solution
+      description: How would you like this to work? What does success look like?
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Have you tried workarounds? Are there other approaches you ruled out?
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Primary area
+      multiple: true
+      options:
+        - orchestrator / state machine
+        - agent runtime (CLI invocation)
+        - planning / review / execution prompts
+        - Linear or GitHub integration
+        - UI / dashboard
+        - database / schema
+        - developer experience
+        - documentation
+        - other
+    validations:
+      required: true
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Links to related issues, research, or prior art that inspired this.

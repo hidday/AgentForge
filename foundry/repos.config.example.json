@@ -1,0 +1,20 @@
+{
+  "repos": [
+    {
+      "name": "your-org/AgentForge",
+      "directory": "AgentForge",
+      "linearProject": "AgentForge",
+      "defaultBranch": "master",
+      "allowedPaths": ["src/", "tests/", "scripts/"],
+      "protectedPaths": [".github/", "prisma/migrations/"],
+      "constraints": {
+        "requiredChecks": ["lint", "typecheck", "tests"],
+        "maxFilesChanged": 30,
+        "maxDiffLines": 2000,
+        "forbiddenPatterns": [],
+        "mustNotTouch": []
+      }
+    }
+  ],
+  "defaultRepo": "your-org/AgentForge"
+}

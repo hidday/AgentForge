@@ -12,7 +12,12 @@ export default defineConfig({
   },
   server: {
     host: true,
-    allowedHosts: ["macbook-pro-3.tail05bae6.ts.net"],
+    // Add LAN/VPN hostnames here (or via VITE_ALLOWED_HOSTS as a comma-separated
+    // list) when accessing the dev UI from another device on your network.
+    allowedHosts: (process.env.VITE_ALLOWED_HOSTS ?? "")
+      .split(",")
+      .map((h) => h.trim())
+      .filter(Boolean),
     proxy: {
       "/api": {
         target: "http://localhost:3100",
