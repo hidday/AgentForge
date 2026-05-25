@@ -548,7 +548,7 @@ export class OrchestratorService {
     return run;
   }
 
-  async runPlanRevision(runId: string): Promise<Run> {
+  async runPlanRevision(runId: string, opts?: { note?: string }): Promise<Run> {
     const timer = startTimer();
     let run = await this.requireRun(runId);
 
@@ -566,6 +566,7 @@ export class OrchestratorService {
       planReview,
       bundle,
       runId,
+      opts?.note ? { operatorNote: opts.note } : undefined,
     );
 
     run = await this.runRepo.update(runId, {
@@ -594,7 +595,7 @@ export class OrchestratorService {
     return run;
   }
 
-  async approvePlan(runId: string): Promise<Run> {
+  async approvePlan(runId: string, opts?: { note?: string }): Promise<Run> {
     await this.requireRun(runId);
 
     const planArtifact = await this.artifactRepo.findLatestByType(runId, "Plan");
@@ -611,22 +612,28 @@ export class OrchestratorService {
       runWithApproval,
       RunEvent.PLAN_APPROVED,
       "human",
+      opts?.note ? { note: opts.note } : undefined,
     );
 
-    await this.linearClient.postComment(
-      updatedRun.linearIssueId,
-      `Plan v${plan.planVersion} approved. Starting implementation...`,
-    );
+    const approvalComment = opts?.note
+      ? `Plan v${plan.planVersion} approved with operator note. Starting implementation...\n\n> ${opts.note}`
+      : `Plan v${plan.planVersion} approved. Starting implementation...`;
+    await this.linearClient.postComment(updatedRun.linearIssueId, approvalComment);
 
     this.logger.info(
-      { runId, approvedPlanVersion: plan.planVersion, state: updatedRun.state },
+      {
+        runId,
+        approvedPlanVersion: plan.planVersion,
+        state: updatedRun.state,
+        hasOperatorNote: !!opts?.note,
+      },
       "Plan approved",
     );
 
     return updatedRun;
   }
 
-  async runExecution(runId: string): Promise<Run> {
+  async runExecution(runId: string, opts?: { note?: string }): Promise<Run> {
     const timer = startTimer();
     let run = await this.requireRun(runId);
 
@@ -702,10 +709,16 @@ export class OrchestratorService {
     let report: ExecutionReport;
     let prNumber: number;
     try {
-      const result = await this.executorAgent.run(plan, bundle, runId, {
-        existingBranch: run.branchName,
-        existingPR: run.prNumber,
-      });
+      const result = await this.executorAgent.run(
+        plan,
+        bundle,
+        runId,
+        {
+          existingBranch: run.branchName,
+          existingPR: run.prNumber,
+        },
+        opts?.note ? { operatorNote: opts.note } : undefined,
+      );
       report = result.report;
       prNumber = result.prNumber;
     } catch (err) {
@@ -1176,11 +1189,16 @@ export class OrchestratorService {
     return run;
   }
 
-  async runManualReReview(runId: string): Promise<Run> {
+  async runManualReReview(runId: string, opts?: { note?: string }): Promise<Run> {
     const timer = startTimer();
     let run = await this.requireRun(runId);
 
-    run = await this.transitionAndRecord(run, RunEvent.RE_REVIEW_REQUESTED, "human");
+    run = await this.transitionAndRecord(
+      run,
+      RunEvent.RE_REVIEW_REQUESTED,
+      "human",
+      opts?.note ? { trigger: "re-review", note: opts.note } : { trigger: "re-review" },
+    );
 
     const planArtifact = await this.artifactRepo.findLatestByType(runId, "Plan");
     if (!planArtifact) {
@@ -1191,7 +1209,12 @@ export class OrchestratorService {
     const issue = await this.linearClient.getIssue(run.linearIssueId);
     const bundle = await this.buildTaskBundle(issue, run);
 
-    const planReview = await this.planReviewerAgent.run(plan, bundle, runId);
+    const planReview = await this.planReviewerAgent.run(
+      plan,
+      bundle,
+      runId,
+      opts?.note ? { operatorNote: opts.note } : undefined,
+    );
 
     // Always return to AwaitingPlanApproval so the human retains control
     if (planReview.overallVerdict === "approved") {
@@ -1224,11 +1247,16 @@ export class OrchestratorService {
     return run;
   }
 
-  async runManualPlanRevision(runId: string): Promise<Run> {
+  async runManualPlanRevision(runId: string, opts?: { note?: string }): Promise<Run> {
     const timer = startTimer();
     let run = await this.requireRun(runId);
 
-    run = await this.transitionAndRecord(run, RunEvent.RE_REVIEW_REQUESTED, "human");
+    run = await this.transitionAndRecord(
+      run,
+      RunEvent.RE_REVIEW_REQUESTED,
+      "human",
+      opts?.note ? { trigger: "revise", note: opts.note } : { trigger: "revise" },
+    );
 
     const planArtifact = await this.artifactRepo.findLatestByType(runId, "Plan");
     if (!planArtifact) {
@@ -1239,7 +1267,12 @@ export class OrchestratorService {
     const issue = await this.linearClient.getIssue(run.linearIssueId);
     const bundle = await this.buildTaskBundle(issue, run);
 
-    const planReview = await this.planReviewerAgent.run(plan, bundle, runId);
+    const planReview = await this.planReviewerAgent.run(
+      plan,
+      bundle,
+      runId,
+      opts?.note ? { operatorNote: opts.note } : undefined,
+    );
 
     if (planReview.overallVerdict === "approved") {
       run = await this.transitionAndRecord(
@@ -1264,7 +1297,7 @@ export class OrchestratorService {
         "plan-reviewer-agent",
       );
 
-      run = await this.runPlanRevision(runId);
+      run = await this.runPlanRevision(runId, opts?.note ? { note: opts.note } : undefined);
 
       this.logger.info(
         {

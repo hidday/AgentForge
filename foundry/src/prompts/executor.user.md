@@ -25,6 +25,7 @@ Implement the following approved plan.
 - Max diff lines: {{constraints.maxDiffLines}}
 - Forbidden patterns: {{constraints.forbiddenPatterns}}
 
+{{operatorNoteSection}}
 ## Instructions
 
 1. Implement each plan step in order

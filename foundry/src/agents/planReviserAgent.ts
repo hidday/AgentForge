@@ -28,6 +28,7 @@ export class PlanReviserAgent {
     planReview: PlanReview,
     taskBundle: TaskBundle,
     runId: string,
+    options?: { operatorNote?: string },
   ): Promise<PlanRevisionResult> {
     this.logger.info(
       {
@@ -35,6 +36,7 @@ export class PlanReviserAgent {
         planVersion: plan.planVersion,
         reviewId: planReview.reviewId,
         findings: planReview.findings.length,
+        hasOperatorNote: !!options?.operatorNote,
       },
       "Starting plan reviser agent (Claude CLI, boss mode)",
     );
@@ -42,7 +44,10 @@ export class PlanReviserAgent {
     const systemTemplate = loadPromptTemplate("plan-reviser.system.md");
     const userTemplate = loadPromptTemplate("plan-reviser.user.md");
     const relatedContextSection = renderRelatedContextSection(taskBundle.relatedContext);
-    const vars = { ...taskBundle, plan, planReview, relatedContextSection };
+    const operatorNoteSection = options?.operatorNote
+      ? `## Operator Note\n\nThe operator triggered this revision and left this note. Apply it alongside the existing reviewer findings: do not drop the findings in favor of the note, and do not drop the note in favor of the findings. If the note conflicts with a reviewer finding, surface the conflict in your revision rationale and choose the option that best serves the original issue.\n\n${options.operatorNote}\n`
+      : "";
+    const vars = { ...taskBundle, plan, planReview, relatedContextSection, operatorNoteSection };
     const systemPrompt = renderTemplate(systemTemplate, vars);
     const userPrompt = renderTemplate(userTemplate, vars);
 

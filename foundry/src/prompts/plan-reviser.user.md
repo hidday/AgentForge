@@ -32,6 +32,7 @@ A secondary reviewer has reviewed your plan. Evaluate their feedback and produce
 {{definitionOfDone}}
 
 {{relatedContextSection}}
+{{operatorNoteSection}}
 ## Instructions
 
 1. Read each finding carefully

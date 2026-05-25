@@ -17,16 +17,24 @@ export class PlanReviewerAgent {
     private readonly logger: Logger,
   ) {}
 
-  async run(plan: Plan, taskBundle: TaskBundle, runId: string): Promise<PlanReview> {
+  async run(
+    plan: Plan,
+    taskBundle: TaskBundle,
+    runId: string,
+    options?: { operatorNote?: string },
+  ): Promise<PlanReview> {
     this.logger.info(
-      { runId, planVersion: plan.planVersion },
+      { runId, planVersion: plan.planVersion, hasOperatorNote: !!options?.operatorNote },
       "Starting plan reviewer agent (Codex CLI)",
     );
 
     const systemTemplate = loadPromptTemplate("plan-reviewer.system.md");
     const userTemplate = loadPromptTemplate("plan-reviewer.user.md");
     const relatedContextSection = renderRelatedContextSection(taskBundle.relatedContext);
-    const vars = { ...taskBundle, plan, relatedContextSection };
+    const operatorNoteSection = options?.operatorNote
+      ? `## Operator Note\n\nThe operator triggered this review and left this note. Weight it heavily: if the note describes a concern the operator wants addressed in the plan, prefer \`changes_requested\` (with a finding that captures the concern) so the reviser picks it up. If the note merely confirms the plan looks correct, treat it as confirmation rather than as a blocking objection.\n\n${options.operatorNote}\n`
+      : "";
+    const vars = { ...taskBundle, plan, relatedContextSection, operatorNoteSection };
     const systemPrompt = renderTemplate(systemTemplate, vars);
     const userPrompt = renderTemplate(userTemplate, vars);
 

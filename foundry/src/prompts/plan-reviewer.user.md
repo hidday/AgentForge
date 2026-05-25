@@ -42,6 +42,7 @@ Review the following implementation plan against the issue requirements and cons
 {{definitionOfDone}}
 
 {{relatedContextSection}}
+{{operatorNoteSection}}
 ## Instructions
 
 1. Evaluate the plan against the issue requirements

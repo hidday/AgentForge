@@ -24,6 +24,20 @@ const VALID_HUMAN_REQUEST_REASONS: HumanRequestReason[] = [
   "other",
 ];
 
+const MAX_OPERATOR_NOTE_LENGTH = 4000;
+
+/**
+ * Normalize a free-text operator note from the action APIs:
+ * trim whitespace, cap to MAX_OPERATOR_NOTE_LENGTH, and treat
+ * empty / non-string values as "no note provided".
+ */
+function sanitizeNote(raw: unknown): string | undefined {
+  if (typeof raw !== "string") return undefined;
+  const trimmed = raw.trim();
+  if (trimmed.length === 0) return undefined;
+  return trimmed.slice(0, MAX_OPERATOR_NOTE_LENGTH);
+}
+
 export interface RegisterApiRoutesOptions {
   notificationService?: NotificationService;
   uiBaseUrl?: string;
@@ -210,12 +224,13 @@ export function registerApiRoutes(
 
   // ── Actions ────────────────────────────────────────────────────────────
 
-  app.post<{ Params: { id: string } }>(
+  app.post<{ Params: { id: string }; Body: { note?: string } }>(
     "/api/runs/:id/actions/approve-plan",
     async (request, reply) => {
       try {
-        const run = await orchestrator.approvePlan(request.params.id);
-        orchestrator.runExecution(run.id).catch((err: unknown) => {
+        const note = sanitizeNote(request.body?.note);
+        const run = await orchestrator.approvePlan(request.params.id, { note });
+        orchestrator.runExecution(run.id, { note }).catch((err: unknown) => {
           const msg = err instanceof Error ? err.message.slice(0, 200) : String(err);
           app.log.error({ runId: run.id, error: msg }, "Execution failed");
         });
@@ -263,11 +278,12 @@ export function registerApiRoutes(
     },
   );
 
-  app.post<{ Params: { id: string } }>(
+  app.post<{ Params: { id: string }; Body: { note?: string } }>(
     "/api/runs/:id/actions/re-review-plan",
     async (request, reply) => {
       try {
-        orchestrator.runManualReReview(request.params.id).catch((err: unknown) => {
+        const note = sanitizeNote(request.body?.note);
+        orchestrator.runManualReReview(request.params.id, { note }).catch((err: unknown) => {
           const msg = err instanceof Error ? err.message.slice(0, 200) : String(err);
           app.log.error({ runId: request.params.id, error: msg }, "Manual re-review failed");
         });
@@ -279,11 +295,12 @@ export function registerApiRoutes(
     },
   );
 
-  app.post<{ Params: { id: string } }>(
+  app.post<{ Params: { id: string }; Body: { note?: string } }>(
     "/api/runs/:id/actions/revise-plan",
     async (request, reply) => {
       try {
-        orchestrator.runManualPlanRevision(request.params.id).catch((err: unknown) => {
+        const note = sanitizeNote(request.body?.note);
+        orchestrator.runManualPlanRevision(request.params.id, { note }).catch((err: unknown) => {
           const msg = err instanceof Error ? err.message.slice(0, 200) : String(err);
           app.log.error({ runId: request.params.id, error: msg }, "Manual plan revision failed");
         });

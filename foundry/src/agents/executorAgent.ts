@@ -30,12 +30,14 @@ export class ExecutorAgent {
     taskBundle: TaskBundle,
     runId: string,
     retry?: ExecutorRetryContext,
+    options?: { operatorNote?: string },
   ): Promise<{ report: ExecutionReport; prNumber: number }> {
     this.logger.info(
       {
         runId,
         planVersion: plan.planVersion,
         isRetry: retry?.existingBranch != null || retry?.existingPR != null,
+        hasOperatorNote: !!options?.operatorNote,
       },
       "Starting executor agent",
     );
@@ -43,7 +45,10 @@ export class ExecutorAgent {
     const systemTemplate = loadPromptTemplate("executor.system.md");
     const userTemplate = loadPromptTemplate("executor.user.md");
     const executionScoreRubric = loadPromptTemplate("_execution-score-rubric.md");
-    const vars = { ...taskBundle, plan, executionScoreRubric };
+    const operatorNoteSection = options?.operatorNote
+      ? `## Operator Note\n\nThe operator left this note when approving the plan and triggering execution. Treat it as a high-priority clarification on top of the approved plan; if it contradicts the plan, flag the conflict in your execution report rather than silently ignoring either side.\n\n${options.operatorNote}\n`
+      : "";
+    const vars = { ...taskBundle, plan, executionScoreRubric, operatorNoteSection };
     const systemPrompt = renderTemplate(systemTemplate, vars);
     const userPrompt = renderTemplate(userTemplate, vars);
 

@@ -36,7 +36,11 @@ type DialogConfig = {
   description: string;
   confirmLabel: string;
   variant: "default" | "destructive";
-  action: () => Promise<unknown>;
+  action: (note?: string) => Promise<unknown>;
+  notes?: {
+    label?: string;
+    placeholder?: string;
+  };
 } | null;
 
 export function ActionBar({
@@ -51,16 +55,14 @@ export function ActionBar({
   const [rejectContext, setRejectContext] = useState("");
   const [showRejectDialog, setShowRejectDialog] = useState(false);
   const [rejectMode, setRejectMode] = useState<"iterate" | "fresh">("iterate");
-  const [reReviewLoading, setReReviewLoading] = useState(false);
-  const [revisePlanLoading, setRevisePlanLoading] = useState(false);
 
   const category = getStateCategory(state);
 
-  async function handleConfirm() {
+  async function handleConfirm(note?: string) {
     if (!dialog) return;
     setLoading(true);
     try {
-      await dialog.action();
+      await dialog.action(note);
       onAction();
     } catch {
       // handled by client
@@ -91,29 +93,31 @@ export function ActionBar({
     setRejectMode("iterate");
   }
 
-  async function handleReReview() {
-    setReReviewLoading(true);
-    try {
-      await api.reReviewPlan(runId);
-      onAction();
-    } catch {
-      // handled by client
-    } finally {
-      setReReviewLoading(false);
-    }
-  }
+  const reReviewDialog: DialogConfig = {
+    title: "Re-review Plan",
+    description:
+      "Run the plan reviewer again against the current plan. The run will return to Awaiting Plan Approval after the review completes.",
+    confirmLabel: "Re-review",
+    variant: "default",
+    action: (note) => api.reReviewPlan(runId, note),
+    notes: {
+      label: "Notes for the plan reviewer (optional)",
+      placeholder: "e.g. focus on the test plan, or flag risks I've raised below...",
+    },
+  };
 
-  async function handleRevisePlan() {
-    setRevisePlanLoading(true);
-    try {
-      await api.revisePlan(runId);
-      onAction();
-    } catch {
-      // handled by client
-    } finally {
-      setRevisePlanLoading(false);
-    }
-  }
+  const revisePlanDialog: DialogConfig = {
+    title: "Revise Plan",
+    description:
+      "Run the plan reviewer and, if changes are requested, automatically run the plan reviser to produce a new plan version.",
+    confirmLabel: "Revise",
+    variant: "default",
+    action: (note) => api.revisePlan(runId, note),
+    notes: {
+      label: "Notes for the plan reviser (optional)",
+      placeholder: "e.g. tighten the rollout step, or expand testing for X...",
+    },
+  };
 
   const actions: Array<{
     show: boolean;
@@ -133,7 +137,11 @@ export function ActionBar({
           "This will approve the current plan and start implementation. The AI agent will begin coding.",
         confirmLabel: "Approve & Start",
         variant: "default",
-        action: () => api.approvePlan(runId),
+        action: (note) => api.approvePlan(runId, note),
+        notes: {
+          label: "Notes for the executor (optional)",
+          placeholder: "e.g. extra context, edge cases to watch, gotchas the plan glossed over...",
+        },
       },
     },
     {
@@ -244,24 +252,22 @@ export function ActionBar({
           {showReReviewBtn && (
             <button
               key="re-review-plan"
-              onClick={handleReReview}
-              disabled={reReviewLoading}
-              className="flex items-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-sm font-medium text-text-secondary transition-colors hover:bg-surface-hover disabled:opacity-50"
+              onClick={() => setDialog(reReviewDialog)}
+              className="flex items-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-sm font-medium text-text-secondary transition-colors hover:bg-surface-hover"
             >
-              <RefreshCw size={14} className={reReviewLoading ? "animate-spin" : ""} />
-              {reReviewLoading ? "Re-reviewing..." : "Re-review Plan"}
+              <RefreshCw size={14} />
+              Re-review Plan
             </button>
           )}
 
           {showRevisePlanBtn && (
             <button
               key="revise-plan"
-              onClick={handleRevisePlan}
-              disabled={revisePlanLoading}
-              className="flex items-center gap-1.5 rounded-md border border-accent/40 px-3 py-1.5 text-sm font-medium text-accent transition-colors hover:bg-accent/10 disabled:opacity-50"
+              onClick={() => setDialog(revisePlanDialog)}
+              className="flex items-center gap-1.5 rounded-md border border-accent/40 px-3 py-1.5 text-sm font-medium text-accent transition-colors hover:bg-accent/10"
             >
-              <PenLine size={14} className={revisePlanLoading ? "animate-pulse" : ""} />
-              {revisePlanLoading ? "Revising..." : "Revise Plan"}
+              <PenLine size={14} />
+              Revise Plan
             </button>
           )}
 
@@ -293,6 +299,7 @@ export function ActionBar({
         description={dialog?.description ?? ""}
         confirmLabel={dialog?.confirmLabel ?? ""}
         variant={dialog?.variant ?? "default"}
+        notes={dialog?.notes}
         loading={loading}
         onConfirm={handleConfirm}
         onCancel={() => setDialog(null)}

@@ -95,9 +95,10 @@ export const api = {
   getEvents: (runId: string) =>
     request<{ events: RunEventRecord[] }>(`/runs/${runId}/events`),
 
-  approvePlan: (runId: string) =>
+  approvePlan: (runId: string, note?: string) =>
     request<{ ok: boolean; state: string }>(`/runs/${runId}/actions/approve-plan`, {
       method: "POST",
+      body: JSON.stringify({ note: note || undefined }),
     }),
 
   rejectPlan: (runId: string, context?: string, mode?: "iterate" | "fresh") =>
@@ -106,14 +107,16 @@ export const api = {
       body: JSON.stringify({ context: context || undefined, mode: mode ?? "iterate" }),
     }),
 
-  reReviewPlan: (runId: string) =>
+  reReviewPlan: (runId: string, note?: string) =>
     request<{ ok: boolean; runId: string }>(`/runs/${runId}/actions/re-review-plan`, {
       method: "POST",
+      body: JSON.stringify({ note: note || undefined }),
     }),
 
-  revisePlan: (runId: string) =>
+  revisePlan: (runId: string, note?: string) =>
     request<{ ok: boolean; runId: string }>(`/runs/${runId}/actions/revise-plan`, {
       method: "POST",
+      body: JSON.stringify({ note: note || undefined }),
     }),
 
   approveReview: (runId: string) =>
