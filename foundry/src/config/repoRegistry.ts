@@ -171,8 +171,9 @@ export function loadRepoRegistry(
     if (existsSync(examplePath)) {
       logger.warn(
         { expected: resolvedPath, fallback: examplePath },
-        "repos.config.json not found -- falling back to the committed example. " +
-          "Copy it and edit for your environment: cp foundry/repos.config.example.json foundry/repos.config.json",
+        "repos.config.json not found -- falling back to the committed example (contains placeholder repo names). " +
+          "In real mode the GitHub preflight will fail for the placeholder repo. " +
+          "Copy and edit for your environment: cp foundry/repos.config.example.json foundry/repos.config.json",
       );
       effectivePath = examplePath;
     } else {
