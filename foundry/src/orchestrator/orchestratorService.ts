@@ -1316,15 +1316,9 @@ export class OrchestratorService {
 
   async approveHumanReview(runId: string): Promise<Run> {
     let run = await this.requireRun(runId);
-    run = await this.transitionAndRecord(run, RunEvent.HUMAN_APPROVED, "human");
 
-    await this.linearClient.postComment(
-      run.linearIssueId,
-      "Human review approved. Run is **Done**.",
-    );
-
-    this.logger.info({ runId, state: run.state }, "Human review approved, run complete");
-
+    // Distillation invokes Claude from run.workingDirectory; run the worktree
+    // cleanup only after distillation so the subprocess cwd still exists.
     try {
       await this.distillationAgent?.run(runId, run);
     } catch (err) {
@@ -1333,6 +1327,15 @@ export class OrchestratorService {
         "Distillation agent failed (best-effort, ignoring)",
       );
     }
+
+    run = await this.transitionAndRecord(run, RunEvent.HUMAN_APPROVED, "human");
+
+    await this.linearClient.postComment(
+      run.linearIssueId,
+      "Human review approved. Run is **Done**.",
+    );
+
+    this.logger.info({ runId, state: run.state }, "Human review approved, run complete");
 
     return run;
   }
