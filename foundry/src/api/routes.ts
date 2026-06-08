@@ -195,7 +195,7 @@ export function registerApiRoutes(
       }
     }
 
-    // Extract distillation decision
+    // Extract distillation decision and the skill produced by this run (if any)
     const distillationEvent = events.find((e) => e.eventType === "SKILL_DISTILLATION");
     let distillationDecision: {
       shouldPersist: boolean;
@@ -203,12 +203,14 @@ export function registerApiRoutes(
       taskCategory: string | null;
       displacedSkillId: string | null;
     } | null = null;
+    let distilledSkill: SkillDocument | null = null;
 
     if (distillationEvent) {
       const payload = distillationEvent.payloadJson as {
         shouldPersist?: boolean;
         reason?: string;
         taskCategory?: string | null;
+        skillId?: string | null;
         displacedSkillId?: string | null;
       };
       distillationDecision = {
@@ -217,9 +219,35 @@ export function registerApiRoutes(
         taskCategory: payload.taskCategory ?? null,
         displacedSkillId: payload.displacedSkillId ?? null,
       };
+
+      if (distillationDecision.shouldPersist && agentSkillRepo) {
+        let skill = payload.skillId ? await agentSkillRepo.findById(payload.skillId) : null;
+
+        if (!skill && payload.taskCategory) {
+          const run = await runRepo.findById(runId);
+          if (run) {
+            skill = await agentSkillRepo.findByRepoCategoryNearTime(
+              run.repo,
+              payload.taskCategory,
+              distillationEvent.createdAt,
+            );
+          }
+        }
+
+        if (skill) {
+          distilledSkill = {
+            id: skill.id,
+            repoSlug: skill.repoSlug,
+            taskCategory: skill.taskCategory,
+            skillMarkdown: skill.skillMarkdown,
+            utilityScore: skill.utilityScore,
+            lastUsedAt: skill.lastUsedAt,
+          };
+        }
+      }
     }
 
-    return { injectedSkills, distillationDecision };
+    return { injectedSkills, distillationDecision, distilledSkill };
   });
 
   // ── Actions ────────────────────────────────────────────────────────────

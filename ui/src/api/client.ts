@@ -58,6 +58,28 @@ export interface RunEventRecord {
   createdAt: string;
 }
 
+export interface SkillDocument {
+  id: string;
+  repoSlug: string;
+  taskCategory: string;
+  skillMarkdown: string;
+  utilityScore: number;
+  lastUsedAt: string;
+}
+
+export interface DistillationDecision {
+  shouldPersist: boolean;
+  reason: string;
+  taskCategory: string | null;
+  displacedSkillId: string | null;
+}
+
+export interface RunSkillsResponse {
+  injectedSkills: SkillDocument[];
+  distillationDecision: DistillationDecision | null;
+  distilledSkill: SkillDocument | null;
+}
+
 export interface ActiveProcess {
   id: string;
   pid: number;
@@ -88,6 +110,9 @@ export const api = {
 
   getRun: (id: string) =>
     request<{ run: Run; artifacts: Artifact[]; events: RunEventRecord[] }>(`/runs/${id}`),
+
+  getRunSkills: (runId: string) =>
+    request<RunSkillsResponse>(`/runs/${runId}/skills`),
 
   getArtifacts: (runId: string) =>
     request<{ artifacts: Artifact[] }>(`/runs/${runId}/artifacts`),

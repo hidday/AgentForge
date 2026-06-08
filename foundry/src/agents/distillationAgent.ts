@@ -175,7 +175,7 @@ export class DistillationAgent {
 
     if (activeCount >= this.config.MAX_SKILLS_PER_REPO) {
       // Pool at capacity — displace lowest utility skill
-      const { displacedSkillId } = await this.agentSkillRepo.displaceAndCreate(run.repo, {
+      const { newSkill, displacedSkillId } = await this.agentSkillRepo.displaceAndCreate(run.repo, {
         taskCategory: decision.taskCategory!,
         skillMarkdown: decision.skillMarkdown!,
       });
@@ -193,12 +193,13 @@ export class DistillationAgent {
           shouldPersist: true,
           reason: decision.reason,
           taskCategory: decision.taskCategory,
+          skillId: newSkill.id,
           displacedSkillId,
         },
       });
     } else {
       // Headroom available — create directly
-      await this.agentSkillRepo.create({
+      const newSkill = await this.agentSkillRepo.create({
         repoSlug: run.repo,
         taskCategory: decision.taskCategory!,
         skillMarkdown: decision.skillMarkdown!,
@@ -217,6 +218,7 @@ export class DistillationAgent {
           shouldPersist: true,
           reason: decision.reason,
           taskCategory: decision.taskCategory,
+          skillId: newSkill.id,
           displacedSkillId: null,
         },
       });

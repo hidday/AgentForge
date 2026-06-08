@@ -264,6 +264,7 @@ describe("DistillationAgent", () => {
           eventType: "SKILL_DISTILLATION",
           payloadJson: expect.objectContaining({
             shouldPersist: true,
+            skillId: "new-skill-1",
             displacedSkillId: null,
           }),
         }),
@@ -302,7 +303,7 @@ describe("DistillationAgent", () => {
           eventType: "SKILL_DISTILLATION",
           payloadJson: expect.objectContaining({
             shouldPersist: true,
-            displacedSkillId: "displaced-skill-xyz",
+            skillId: "new-skill-123",
           }),
         }),
       );

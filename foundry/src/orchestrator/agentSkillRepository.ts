@@ -30,6 +30,25 @@ export class AgentSkillRepository {
     return this.prisma.agentSkill.findUnique({ where: { id } });
   }
 
+  /** Fallback for runs distilled before skillId was stored on SKILL_DISTILLATION events. */
+  async findByRepoCategoryNearTime(
+    repoSlug: string,
+    taskCategory: string,
+    around: Date,
+    windowMs = 5000,
+  ): Promise<AgentSkill | null> {
+    const from = new Date(around.getTime() - windowMs);
+    const to = new Date(around.getTime() + windowMs);
+    return this.prisma.agentSkill.findFirst({
+      where: {
+        repoSlug,
+        taskCategory,
+        createdAt: { gte: from, lte: to },
+      },
+      orderBy: { createdAt: "desc" },
+    });
+  }
+
   async findActiveByRepo(repoSlug: string): Promise<AgentSkill[]> {
     return this.prisma.agentSkill.findMany({
       where: { repoSlug, archivedAt: null },

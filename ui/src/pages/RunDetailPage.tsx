@@ -11,12 +11,19 @@ import { ActionBar } from "@/components/ActionBar.tsx";
 import { OpenQuestionsPanel } from "@/components/OpenQuestionsPanel.tsx";
 import type { OpenQuestion } from "@/components/OpenQuestionsPanel.tsx";
 import { ChatPanel } from "@/components/ChatPanel.tsx";
+import { DistilledSkillPanel } from "@/components/DistilledSkillPanel.tsx";
 import { formatTimestamp } from "@/lib/utils.ts";
+import { useRunSkills } from "@/hooks/useRunSkills.ts";
 import { ArrowLeft, GitBranch, ExternalLink, MonitorUp, Terminal, Sparkles } from "lucide-react";
 
 export function RunDetailPage() {
   const { id } = useParams<{ id: string }>();
   const { data, loading, error, refetch } = useRun(id!);
+  const {
+    data: skillsData,
+    loading: skillsLoading,
+    error: skillsError,
+  } = useRunSkills(id!);
   const { processes, output } = useActiveProcesses(id!);
   const questionsRef = useRef<HTMLDivElement>(null);
 
@@ -191,6 +198,12 @@ export function RunDetailPage() {
           )}
 
           <AgentOutputPanel processes={processes} output={output} />
+          <DistilledSkillPanel
+            distilledSkill={skillsData?.distilledSkill ?? null}
+            distillationDecision={skillsData?.distillationDecision ?? null}
+            loading={skillsLoading}
+            error={skillsError}
+          />
           <ArtifactTabs artifacts={artifacts} />
 
           {/* AwaitingPlanApproval: optional questions as collapsible secondary panel */}

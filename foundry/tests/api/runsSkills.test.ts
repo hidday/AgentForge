@@ -61,6 +61,7 @@ async function buildApp(overrides: {
     findById: vi.fn().mockImplementation((id: string) =>
       Promise.resolve(skillsMap[id] ?? null)
     ),
+    findByRepoCategoryNearTime: vi.fn().mockResolvedValue(null),
     findActiveByRepo: vi.fn().mockResolvedValue([]),
     countActiveByRepo: vi.fn().mockResolvedValue(0),
     create: vi.fn(),
@@ -180,6 +181,98 @@ describe("GET /api/runs/:id/skills", () => {
         taskCategory: "auth middleware",
         displacedSkillId: null,
       });
+      expect(body.distilledSkill).toBeNull();
+    });
+  });
+
+  describe("(n) Distilled skill: SKILL_DISTILLATION with skillId returns full skill", () => {
+    it("returns distilledSkill when event payload includes skillId", async () => {
+      const distilled = makeSkill("distilled-skill-1");
+      distilled.taskCategory = "database optimization";
+      distilled.skillMarkdown = "Always cache DB connections.";
+
+      const events = [
+        {
+          id: "event-1",
+          runId: "run-1",
+          eventType: "SKILL_DISTILLATION",
+          source: "distillation-agent",
+          payloadJson: {
+            shouldPersist: true,
+            reason: "architectural insight",
+            taskCategory: "database optimization",
+            skillId: "distilled-skill-1",
+            displacedSkillId: null,
+          },
+          createdAt: new Date(),
+        },
+      ];
+
+      const { app } = await buildApp({
+        events,
+        skills: { "distilled-skill-1": distilled },
+      });
+
+      const response = await app.inject({
+        method: "GET",
+        url: "/api/runs/run-1/skills",
+      });
+
+      expect(response.statusCode).toBe(200);
+      const body = response.json() as {
+        distilledSkill: { id: string; skillMarkdown: string } | null;
+      };
+      expect(body.distilledSkill).toMatchObject({
+        id: "distilled-skill-1",
+        skillMarkdown: "Always cache DB connections.",
+      });
+    });
+  });
+
+  describe("(o) Distilled skill fallback: lookup by repo + category near event time", () => {
+    it("returns distilledSkill when skillId is absent but fallback finds a match", async () => {
+      const distilled = makeSkill("legacy-skill-1");
+      distilled.taskCategory = "auth middleware";
+      distilled.skillMarkdown = "Legacy distilled skill.";
+
+      const eventTime = new Date("2026-06-08T16:26:58.000Z");
+      const events = [
+        {
+          id: "event-1",
+          runId: "run-1",
+          eventType: "SKILL_DISTILLATION",
+          source: "distillation-agent",
+          payloadJson: {
+            shouldPersist: true,
+            reason: "architectural insight",
+            taskCategory: "auth middleware",
+            displacedSkillId: null,
+          },
+          createdAt: eventTime,
+        },
+      ];
+
+      const { app, mockAgentSkillRepo } = await buildApp({ events });
+      mockAgentSkillRepo.findByRepoCategoryNearTime.mockResolvedValue(distilled);
+
+      const response = await app.inject({
+        method: "GET",
+        url: "/api/runs/run-1/skills",
+      });
+
+      expect(response.statusCode).toBe(200);
+      const body = response.json() as {
+        distilledSkill: { id: string; skillMarkdown: string } | null;
+      };
+      expect(body.distilledSkill).toMatchObject({
+        id: "legacy-skill-1",
+        skillMarkdown: "Legacy distilled skill.",
+      });
+      expect(mockAgentSkillRepo.findByRepoCategoryNearTime).toHaveBeenCalledWith(
+        "test-repo",
+        "auth middleware",
+        eventTime,
+      );
     });
   });
 
