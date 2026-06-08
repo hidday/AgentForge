@@ -69,6 +69,8 @@ export const DistillationDecisionSchema = z.object({
   reason: z.string(),
   skillMarkdown: z.string().optional(),
   taskCategory: z.string().optional(),
+  name: z.string().optional(),
+  description: z.string().optional(),
 });
 
 export const DistillationOutputSchema = CliOutputBaseSchema.extend({

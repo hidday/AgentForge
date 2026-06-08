@@ -42,12 +42,25 @@ export function trigramSimilarity(a: string, b: string): number {
  * Returns the max of similarity against taskCategory and the first 200 chars of skillMarkdown.
  */
 export function scoreSkillRelevance(
-  skill: { taskCategory: string; skillMarkdown: string },
+  skill: {
+    taskCategory: string;
+    skillMarkdown: string;
+    name?: string | null;
+    description?: string | null;
+  },
   query: string,
 ): number {
-  const categoryScore = trigramSimilarity(query, skill.taskCategory);
-  const contentScore = trigramSimilarity(query, skill.skillMarkdown.slice(0, 200));
-  return Math.max(categoryScore, contentScore);
+  const scores = [
+    trigramSimilarity(query, skill.taskCategory),
+    trigramSimilarity(query, skill.skillMarkdown.slice(0, 200)),
+  ];
+  if (skill.name) {
+    scores.push(trigramSimilarity(query, skill.name.replace(/-/g, " ")));
+  }
+  if (skill.description) {
+    scores.push(trigramSimilarity(query, skill.description));
+  }
+  return Math.max(...scores);
 }
 
 /**

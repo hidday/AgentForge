@@ -6,17 +6,38 @@ import { env } from "../config/env.js";
 
 export type AgentSkill = AgentSkillModel;
 
+function toSkillDocument(skill: AgentSkill): SkillDocument {
+  return {
+    id: skill.id,
+    repoSlug: skill.repoSlug,
+    name: skill.name,
+    description: skill.description,
+    taskCategory: skill.taskCategory,
+    skillMarkdown: skill.skillMarkdown,
+    utilityScore: skill.utilityScore,
+    lastUsedAt: skill.lastUsedAt,
+  };
+}
+
+export function mapAgentSkillToDocument(skill: AgentSkill): SkillDocument {
+  return toSkillDocument(skill);
+}
+
 export class AgentSkillRepository {
   constructor(private readonly prisma: PrismaClient) {}
 
   async create(data: {
     repoSlug: string;
+    name: string;
+    description: string;
     taskCategory: string;
     skillMarkdown: string;
   }): Promise<AgentSkill> {
     return this.prisma.agentSkill.create({
       data: {
         repoSlug: data.repoSlug,
+        name: data.name,
+        description: data.description,
         taskCategory: data.taskCategory,
         skillMarkdown: data.skillMarkdown,
         utilityScore: 0.0,
@@ -83,21 +104,19 @@ export class AgentSkillRepository {
       .map((skill) => ({
         skill,
         score: scoreSkillRelevance(
-          { taskCategory: skill.taskCategory, skillMarkdown: skill.skillMarkdown },
+          {
+            taskCategory: skill.taskCategory,
+            skillMarkdown: skill.skillMarkdown,
+            name: skill.name,
+            description: skill.description,
+          },
           query,
         ),
       }))
       .sort((a, b) => b.score - a.score)
       .slice(0, maxK);
 
-    return scored.map(({ skill }) => ({
-      id: skill.id,
-      repoSlug: skill.repoSlug,
-      taskCategory: skill.taskCategory,
-      skillMarkdown: skill.skillMarkdown,
-      utilityScore: skill.utilityScore,
-      lastUsedAt: skill.lastUsedAt,
-    }));
+    return scored.map(({ skill }) => toSkillDocument(skill));
   }
 
   async incrementSuccess(id: string): Promise<AgentSkill> {
@@ -141,7 +160,12 @@ export class AgentSkillRepository {
 
   async displaceAndCreate(
     repoSlug: string,
-    newSkillData: { taskCategory: string; skillMarkdown: string },
+    newSkillData: {
+      name: string;
+      description: string;
+      taskCategory: string;
+      skillMarkdown: string;
+    },
   ): Promise<{ newSkill: AgentSkill; displacedSkillId: string }> {
     return this.prisma.$transaction(async (tx) => {
       const lowestUtility = await tx.agentSkill.findFirst({
@@ -161,6 +185,8 @@ export class AgentSkillRepository {
       const newSkill = await tx.agentSkill.create({
         data: {
           repoSlug,
+          name: newSkillData.name,
+          description: newSkillData.description,
           taskCategory: newSkillData.taskCategory,
           skillMarkdown: newSkillData.skillMarkdown,
           utilityScore: 0.0,

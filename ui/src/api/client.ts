@@ -61,6 +61,8 @@ export interface RunEventRecord {
 export interface SkillDocument {
   id: string;
   repoSlug: string;
+  name: string | null;
+  description: string | null;
   taskCategory: string;
   skillMarkdown: string;
   utilityScore: number;
@@ -71,6 +73,8 @@ export interface DistillationDecision {
   shouldPersist: boolean;
   reason: string;
   taskCategory: string | null;
+  name: string | null;
+  description: string | null;
   displacedSkillId: string | null;
 }
 

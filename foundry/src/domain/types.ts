@@ -48,6 +48,8 @@ export type ArtifactType =
 export interface SkillDocument {
   id: string;
   repoSlug: string;
+  name: string | null;
+  description: string | null;
   taskCategory: string;
   skillMarkdown: string;
   utilityScore: number;
@@ -58,6 +60,7 @@ export interface CompactSkillSummary {
   id: string;
   taskCategory: string;
   snippet: string;
+  name?: string;
 }
 
 export interface DistillationDecision {
@@ -65,6 +68,8 @@ export interface DistillationDecision {
   reason: string;
   skillMarkdown?: string;
   taskCategory?: string;
+  name?: string;
+  description?: string;
 }
 
 export interface RejectionContextPayload {

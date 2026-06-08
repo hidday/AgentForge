@@ -29,6 +29,8 @@ function makeRun(overrides: Partial<Run> = {}): Run {
 
 function makeSkill(overrides: {
   id?: string;
+  name?: string | null;
+  description?: string | null;
   taskCategory?: string;
   skillMarkdown?: string;
   repoSlug?: string;
@@ -41,6 +43,8 @@ function makeSkill(overrides: {
   return {
     id: overrides.id ?? "skill-1",
     repoSlug: overrides.repoSlug ?? "test-repo",
+    name: overrides.name ?? "auth-middleware",
+    description: overrides.description ?? "Use when adding or changing auth middleware.",
     taskCategory: overrides.taskCategory ?? "auth middleware",
     skillMarkdown: overrides.skillMarkdown ?? "Use JWT tokens for auth.",
     successCount: overrides.successCount ?? 0,
@@ -57,6 +61,8 @@ function makeDistillationOutput(decision: {
   reason: string;
   skillMarkdown?: string;
   taskCategory?: string;
+  name?: string;
+  description?: string;
 }) {
   return {
     raw: "raw output",
@@ -243,6 +249,8 @@ describe("DistillationAgent", () => {
         makeDistillationOutput({
           shouldPersist: true,
           reason: "non-trivial architectural insight",
+          name: "auth-middleware",
+          description: "Use when adding JWT auth middleware.",
           skillMarkdown: "Use JWT with RS256 for stateless auth.",
           taskCategory: "auth middleware",
         }),
@@ -254,6 +262,8 @@ describe("DistillationAgent", () => {
       expect(deps.agentSkillRepo.create).toHaveBeenCalledWith(
         expect.objectContaining({
           repoSlug: "test-repo",
+          name: "auth-middleware",
+          description: "Use when adding JWT auth middleware.",
           taskCategory: "auth middleware",
           skillMarkdown: "Use JWT with RS256 for stateless auth.",
         }),
@@ -285,6 +295,8 @@ describe("DistillationAgent", () => {
         makeDistillationOutput({
           shouldPersist: true,
           reason: "non-trivial insight",
+          name: "database-optimization",
+          description: "Use when optimizing database access patterns.",
           skillMarkdown: "Always cache DB connections.",
           taskCategory: "database optimization",
         }),
@@ -294,6 +306,8 @@ describe("DistillationAgent", () => {
       await agent.run("run-1", makeRun());
 
       expect(deps.agentSkillRepo.displaceAndCreate).toHaveBeenCalledWith("test-repo", {
+        name: "database-optimization",
+        description: "Use when optimizing database access patterns.",
         taskCategory: "database optimization",
         skillMarkdown: "Always cache DB connections.",
       });

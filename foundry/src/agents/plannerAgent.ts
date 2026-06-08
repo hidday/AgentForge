@@ -131,7 +131,13 @@ export class PlannerAgent {
     let priorSkillsSection = "";
     if (options?.priorSkills && options.priorSkills.length > 0) {
       const skillBlocks = options.priorSkills
-        .map((skill) => `### ${skill.taskCategory}\n\n${skill.skillMarkdown}`)
+        .map((skill) => {
+          const heading = skill.name
+            ? `${skill.name} (${skill.taskCategory})`
+            : skill.taskCategory;
+          const intro = skill.description ? `${skill.description}\n\n` : "";
+          return `### ${heading}\n\n${intro}${skill.skillMarkdown}`;
+        })
         .join("\n\n");
       priorSkillsSection = `## Prior Skills from Similar Tasks\n\n${skillBlocks}`;
     }

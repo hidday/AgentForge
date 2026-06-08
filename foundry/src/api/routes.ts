@@ -13,6 +13,7 @@ import { RunEvent } from "../domain/runEvent.js";
 import { RunState } from "../domain/runState.js";
 import { PolicyError, ValidationError } from "../utils/errors.js";
 import type { SkillDocument } from "../domain/types.js";
+import { mapAgentSkillToDocument } from "../orchestrator/agentSkillRepository.js";
 import { buildChatSystemPrompt } from "../chat/chatContextBuilder.js";
 import { env } from "../config/env.js";
 
@@ -183,14 +184,7 @@ export function registerApiRoutes(
       for (const id of seenIds) {
         const skill = await agentSkillRepo.findById(id);
         if (skill) {
-          injectedSkills.push({
-            id: skill.id,
-            repoSlug: skill.repoSlug,
-            taskCategory: skill.taskCategory,
-            skillMarkdown: skill.skillMarkdown,
-            utilityScore: skill.utilityScore,
-            lastUsedAt: skill.lastUsedAt,
-          });
+          injectedSkills.push(mapAgentSkillToDocument(skill));
         }
       }
     }
@@ -201,6 +195,8 @@ export function registerApiRoutes(
       shouldPersist: boolean;
       reason: string;
       taskCategory: string | null;
+      name: string | null;
+      description: string | null;
       displacedSkillId: string | null;
     } | null = null;
     let distilledSkill: SkillDocument | null = null;
@@ -210,6 +206,8 @@ export function registerApiRoutes(
         shouldPersist?: boolean;
         reason?: string;
         taskCategory?: string | null;
+        name?: string | null;
+        description?: string | null;
         skillId?: string | null;
         displacedSkillId?: string | null;
       };
@@ -217,6 +215,8 @@ export function registerApiRoutes(
         shouldPersist: payload.shouldPersist ?? false,
         reason: payload.reason ?? "",
         taskCategory: payload.taskCategory ?? null,
+        name: payload.name ?? null,
+        description: payload.description ?? null,
         displacedSkillId: payload.displacedSkillId ?? null,
       };
 
@@ -235,13 +235,11 @@ export function registerApiRoutes(
         }
 
         if (skill) {
-          distilledSkill = {
-            id: skill.id,
-            repoSlug: skill.repoSlug,
-            taskCategory: skill.taskCategory,
-            skillMarkdown: skill.skillMarkdown,
-            utilityScore: skill.utilityScore,
-            lastUsedAt: skill.lastUsedAt,
+          distilledSkill = mapAgentSkillToDocument(skill);
+          distillationDecision = {
+            ...distillationDecision,
+            name: distillationDecision.name ?? skill.name,
+            description: distillationDecision.description ?? skill.description,
           };
         }
       }

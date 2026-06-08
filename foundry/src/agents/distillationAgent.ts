@@ -8,6 +8,7 @@ import { DistillationOutputSchema } from "../schemas/cliProtocol.js";
 import { AGENT_STAGES } from "../domain/types.js";
 import { loadPromptTemplate, renderTemplate } from "./promptRenderer.js";
 import { maxNoveltyOverlap } from "../utils/similarity.js";
+import { normalizeSkillName } from "../utils/skillNaming.js";
 import { env } from "../config/env.js";
 
 const SKILL_DISTILLATION_EVENT = "SKILL_DISTILLATION";
@@ -63,6 +64,7 @@ export class DistillationAgent {
       id: skill.id,
       taskCategory: skill.taskCategory,
       snippet: skill.skillMarkdown.slice(0, 200),
+      name: skill.name ?? undefined,
     }));
 
     // (4) NOVELTY PRE-CHECK (deterministic, no LLM)
@@ -103,7 +105,9 @@ export class DistillationAgent {
 
     const existingSkillsSummaryText =
       existingSkillsSummary.length > 0
-        ? existingSkillsSummary.map((s) => `- [${s.taskCategory}] ${s.snippet}`).join("\n")
+        ? existingSkillsSummary
+            .map((s) => `- [${s.name ?? s.taskCategory}] ${s.taskCategory}: ${s.snippet}`)
+            .join("\n")
         : "No existing skills.";
 
     const userPrompt = renderTemplate(userTemplate, {
@@ -120,6 +124,8 @@ export class DistillationAgent {
       reason: string;
       skillMarkdown?: string;
       taskCategory?: string;
+      name?: string;
+      description?: string;
     };
 
     try {
@@ -171,17 +177,46 @@ export class DistillationAgent {
     }
 
     // (7) HEADROOM GATE + DISPLACEMENT (if shouldPersist=true)
+    const taskCategory = decision.taskCategory?.trim();
+    const skillMarkdown = decision.skillMarkdown?.trim();
+    if (!taskCategory || !skillMarkdown) {
+      this.logger.warn({ runId }, "Distillation missing taskCategory or skillMarkdown, skipping persist");
+      await this.eventRepo.create({
+        runId,
+        eventType: SKILL_DISTILLATION_EVENT,
+        source: "distillation-agent",
+        payloadJson: {
+          shouldPersist: false,
+          reason: "missing_required_skill_fields",
+          displacedSkillId: null,
+        },
+      });
+      return;
+    }
+
+    const name = normalizeSkillName(decision.name, taskCategory);
+    const description =
+      decision.description?.trim() ||
+      `Use when working on ${taskCategory} in ${run.repo}.`;
+
+    const skillPayload = {
+      name,
+      description,
+      taskCategory,
+      skillMarkdown,
+    };
+
     const activeCount = await this.agentSkillRepo.countActiveByRepo(run.repo);
 
     if (activeCount >= this.config.MAX_SKILLS_PER_REPO) {
       // Pool at capacity — displace lowest utility skill
-      const { newSkill, displacedSkillId } = await this.agentSkillRepo.displaceAndCreate(run.repo, {
-        taskCategory: decision.taskCategory!,
-        skillMarkdown: decision.skillMarkdown!,
-      });
+      const { newSkill, displacedSkillId } = await this.agentSkillRepo.displaceAndCreate(
+        run.repo,
+        skillPayload,
+      );
 
       this.logger.info(
-        { runId, displacedSkillId, taskCategory: decision.taskCategory },
+        { runId, displacedSkillId, taskCategory, name },
         "Displaced skill to make room for new skill",
       );
 
@@ -192,7 +227,9 @@ export class DistillationAgent {
         payloadJson: {
           shouldPersist: true,
           reason: decision.reason,
-          taskCategory: decision.taskCategory,
+          taskCategory,
+          name,
+          description,
           skillId: newSkill.id,
           displacedSkillId,
         },
@@ -201,14 +238,10 @@ export class DistillationAgent {
       // Headroom available — create directly
       const newSkill = await this.agentSkillRepo.create({
         repoSlug: run.repo,
-        taskCategory: decision.taskCategory!,
-        skillMarkdown: decision.skillMarkdown!,
+        ...skillPayload,
       });
 
-      this.logger.info(
-        { runId, taskCategory: decision.taskCategory },
-        "Created new skill from distillation",
-      );
+      this.logger.info({ runId, taskCategory, name }, "Created new skill from distillation");
 
       await this.eventRepo.create({
         runId,
@@ -217,7 +250,9 @@ export class DistillationAgent {
         payloadJson: {
           shouldPersist: true,
           reason: decision.reason,
-          taskCategory: decision.taskCategory,
+          taskCategory,
+          name,
+          description,
           skillId: newSkill.id,
           displacedSkillId: null,
         },

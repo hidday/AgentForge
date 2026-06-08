@@ -28,7 +28,11 @@ Ask yourself:
 2. Would a future agent benefit from knowing this before starting a similar task?
 3. Is the insight specific enough to be actionable (not just "write good tests")?
 
-If yes to all three, set `shouldPersist: true` and write a concise `skillMarkdown` (under 500 words) that captures the key insight. Choose a short `taskCategory` label that helps future retrieval.
+If yes to all three, set `shouldPersist: true` and provide:
+- `name`: a kebab-case slug (e.g. `dev-env-pause-resume-footguns`) suitable for exporting to `.cursor/skills/<name>/SKILL.md`
+- `description`: a concise when-to-use blurb for SKILL.md frontmatter (what paths, commands, or task types should trigger it)
+- `skillMarkdown`: the skill body (under 500 words) capturing the key insight
+- `taskCategory`: a short retrieval label
 
 If no, set `shouldPersist: false` and explain why in `reason`.
 

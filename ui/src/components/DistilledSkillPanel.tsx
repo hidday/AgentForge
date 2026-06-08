@@ -9,6 +9,14 @@ interface DistilledSkillPanelProps {
   error?: string | null;
 }
 
+function buildSkillExportPreview(
+  name: string,
+  description: string,
+  skillMarkdown: string,
+): string {
+  return `---\nname: ${name}\ndescription: >-\n  ${description}\n---\n\n${skillMarkdown}`;
+}
+
 export function DistilledSkillPanel({
   distilledSkill,
   distillationDecision,
@@ -38,21 +46,35 @@ export function DistilledSkillPanel({
     return null;
   }
 
+  const skillName =
+    distilledSkill?.name ??
+    distillationDecision.name ??
+    distilledSkill?.taskCategory ??
+    distillationDecision.taskCategory ??
+    "distilled-skill";
+  const skillDescription =
+    distilledSkill?.description ?? distillationDecision.description ?? null;
+
   return (
     <section className="rounded-lg border border-border bg-surface overflow-hidden">
       <div className="flex items-center gap-2 border-b border-border-subtle px-4 py-3">
         <Sparkles size={16} className="text-accent flex-shrink-0" />
         <div className="min-w-0">
           <h2 className="text-sm font-semibold text-text-primary">Distilled Skill</h2>
-          {distillationDecision.taskCategory && (
+          <p className="font-mono text-xs text-accent truncate">{skillName}</p>
+          {(distilledSkill?.taskCategory ?? distillationDecision.taskCategory) && (
             <p className="text-xs text-text-muted truncate">
-              {distillationDecision.taskCategory}
+              {distilledSkill?.taskCategory ?? distillationDecision.taskCategory}
             </p>
           )}
         </div>
       </div>
 
       <div className="px-4 py-3 space-y-3">
+        {skillDescription && (
+          <p className="text-xs text-text-secondary">{skillDescription}</p>
+        )}
+
         {distillationDecision.reason && (
           <p className="text-xs text-text-muted italic border-l-2 border-border-subtle pl-2">
             {distillationDecision.reason}
@@ -67,6 +89,17 @@ export function DistilledSkillPanel({
           <p className="text-xs text-text-muted">
             A skill was persisted for this run, but its content could not be loaded.
           </p>
+        )}
+
+        {distilledSkill && skillDescription && (
+          <div className="space-y-1.5">
+            <p className="text-[10px] font-medium uppercase tracking-wider text-text-muted">
+              SKILL.md export preview
+            </p>
+            <pre className="rounded-md border border-border-subtle bg-surface-subtle/40 p-3 text-[10px] font-mono text-text-secondary overflow-x-auto whitespace-pre-wrap">
+              {buildSkillExportPreview(skillName, skillDescription, distilledSkill.skillMarkdown)}
+            </pre>
+          </div>
         )}
 
         {distillationDecision.displacedSkillId && (

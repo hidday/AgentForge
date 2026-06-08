@@ -8,9 +8,11 @@ BEGIN_STRUCTURED_OUTPUT
 {
   "success": true,
   "stage": "distillation",
-  "payload": {
+    "payload": {
     "shouldPersist": boolean,
     "reason": "concise explanation (1-2 sentences)",
+    "name": "optional: kebab-case slug for export (e.g. dev-env-pause-resume-footguns)",
+    "description": "optional: when-to-use blurb for SKILL.md frontmatter",
     "skillMarkdown": "optional: the skill content to persist (under 500 words)",
     "taskCategory": "optional: short label for this type of task"
   }
@@ -36,6 +38,8 @@ Do not include any other JSON blocks. Only the final delimited block will be par
 ## Important Constraints
 
 - `skillMarkdown` must be under 500 words
+- `name` must be kebab-case (lowercase letters, digits, hyphens only), suitable as a directory/skill filename
+- `description` should state when a future agent should apply this skill (paths, commands, or task types)
 - `taskCategory` should be a short, searchable label (e.g. "database migration", "auth middleware", "API rate limiting")
 - Set `shouldPersist: false` if you are not confident the insight will be useful for future runs
 - Always provide a `reason` regardless of the decision

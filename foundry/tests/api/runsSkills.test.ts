@@ -30,6 +30,8 @@ function makeSkill(id: string) {
   return {
     id,
     repoSlug: "test-repo",
+    name: "auth-middleware",
+    description: "Use when adding or changing auth middleware in this repo.",
     taskCategory: "auth middleware",
     skillMarkdown: "Use JWT tokens with RS256 for stateless auth.",
     successCount: 3,
