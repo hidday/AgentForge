@@ -57,6 +57,7 @@ describe("ClaudeCodeRunner.run() error reporting", () => {
       processRunner as never,
       "claude",
       [],
+      "claude-opus-4-8",
       logger as never,
     );
 
@@ -100,6 +101,7 @@ describe("ClaudeCodeRunner.run() error reporting", () => {
       processRunner as never,
       "claude",
       [],
+      "claude-opus-4-8",
       logger as never,
     );
 
@@ -142,6 +144,7 @@ describe("ClaudeCodeRunner.run() error reporting", () => {
       processRunner as never,
       "claude",
       [],
+      "claude-opus-4-8",
       logger as never,
     );
 
@@ -176,6 +179,7 @@ describe("ClaudeCodeRunner.run() error reporting", () => {
       processRunner as never,
       "claude",
       [],
+      "claude-opus-4-8",
       logger as never,
     );
 
@@ -205,6 +209,7 @@ describe("ClaudeCodeRunner.run() error reporting", () => {
       processRunner as never,
       "claude",
       [],
+      "claude-opus-4-8",
       logger as never,
     );
 
@@ -247,6 +252,7 @@ describe("ClaudeCodeRunner.chatRun() — arg filtering and error surfacing", () 
       processRunner as never,
       "claude",
       ["--output-format", "json", "--dangerously-skip-permissions"],
+      "claude-opus-4-8",
       logger as never,
     );
 
@@ -277,6 +283,7 @@ describe("ClaudeCodeRunner.chatRun() — arg filtering and error surfacing", () 
       processRunner as never,
       "claude",
       ["--dangerously-skip-permissions", "--verbose", "--dangerously-skip-permissions"],
+      "claude-opus-4-8",
       logger as never,
     );
 
@@ -302,6 +309,7 @@ describe("ClaudeCodeRunner.chatRun() — arg filtering and error surfacing", () 
       processRunner as never,
       "claude",
       [],
+      "claude-opus-4-8",
       logger as never,
     );
 
@@ -327,6 +335,7 @@ describe("ClaudeCodeRunner.chatRun() — arg filtering and error surfacing", () 
       processRunner as never,
       "claude",
       [],
+      "claude-opus-4-8",
       logger as never,
     );
 
@@ -350,6 +359,7 @@ describe("ClaudeCodeRunner.chatRun() — arg filtering and error surfacing", () 
       processRunner as never,
       "claude",
       [],
+      "claude-opus-4-8",
       logger as never,
     );
 

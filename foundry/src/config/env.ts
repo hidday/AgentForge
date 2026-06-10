@@ -9,6 +9,7 @@ const EnvSchema = z.object({
   AGENT_RUNTIME_MODE: z.enum(["mock", "real"]).default("mock"),
   CLAUDE_CODE_COMMAND: z.string().default("claude"),
   CLAUDE_CODE_ARGS_BASE: z.string().default("--print --output-format json"),
+  CLAUDE_CODE_MODEL: z.string().default("claude-opus-4-8"),
   CODEX_COMMAND: z.string().default("codex"),
   CODEX_ARGS_BASE: z.string().default("exec -"),
   CURSOR_COMMAND: z.string().default("agent"),

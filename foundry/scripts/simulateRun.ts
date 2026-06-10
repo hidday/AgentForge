@@ -65,6 +65,7 @@ async function simulate(): Promise<void> {
       processRunner,
       "claude",
       parseBaseArgs("--print --output-format json"),
+      "claude-opus-4-8",
       logger,
     );
     const codexRunner = new CodexRunner(

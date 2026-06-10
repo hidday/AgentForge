@@ -62,6 +62,7 @@ function buildServices() {
     processRunner,
     env.CLAUDE_CODE_COMMAND,
     parseBaseArgs(env.CLAUDE_CODE_ARGS_BASE),
+    env.CLAUDE_CODE_MODEL,
     logger,
   );
   const codexRunner = new CodexRunner(

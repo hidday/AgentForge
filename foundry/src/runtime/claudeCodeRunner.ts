@@ -12,6 +12,7 @@ export class ClaudeCodeRunner {
     private readonly processRunner: ProcessRunner,
     private readonly command: string,
     private readonly baseArgs: string[],
+    private readonly model: string,
     private readonly logger: Logger,
   ) {}
 
@@ -24,7 +25,7 @@ export class ClaudeCodeRunner {
     const stdinData = this.buildStdinPayload(input);
 
     this.logger.info(
-      { stage, cwd: input.workingDirectory, command: this.command },
+      { stage, cwd: input.workingDirectory, command: this.command, model: this.model },
       "Invoking Claude Code CLI",
     );
 
@@ -91,7 +92,7 @@ export class ClaudeCodeRunner {
     const stdinData = this.buildStdinPayload(input);
 
     this.logger.info(
-      { stage, cwd: input.workingDirectory, command: this.command, chatReadOnly: true },
+      { stage, cwd: input.workingDirectory, command: this.command, model: this.model, chatReadOnly: true },
       "Invoking Claude Code CLI (chat/read-only mode)",
     );
 
@@ -132,6 +133,8 @@ export class ClaudeCodeRunner {
 
   private buildArgs(input: AgentInput): string[] {
     const args = [...this.baseArgs];
+
+    args.push("--model", this.model);
 
     if (input.systemPrompt) {
       args.push("--system-prompt", input.systemPrompt);
