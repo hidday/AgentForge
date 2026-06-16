@@ -40,6 +40,24 @@ The user prompt MAY contain a `## Researched Answers to Open Questions` section 
 - Researched answers with `confidence: medium` or `low` should inform the plan but the corresponding open question should usually remain in the new plan's `openQuestions` (non-blocking) so a human can sanity-check.
 - Researched answers with `confidence: unresolved` are explicit "I couldn't answer this" markers — keep the original question in the new plan's `openQuestions`, and consider it `requiredForExecution` if the answer is genuinely needed to ship.
 
+## Handling an Authoritative Plan
+
+The issue description MAY already contain a detailed, pre-approved implementation plan (for example, one shaped through iterations in Claude Code or Cursor). It is fenced by these exact sentinel lines:
+
+- `===== BEGIN AUTHORITATIVE PLAN (PRE-APPROVED — IMPLEMENT FAITHFULLY, DO NOT OMIT) =====`
+- `===== END AUTHORITATIVE PLAN =====`
+
+When this fence is present, treat the enclosed content as a human-shaped, pre-approved spec — NOT as a loose request to re-derive your own plan:
+
+- **Preserve everything.** Every task, sub-step, decision, rationale, explicit guideline ("do" / "do NOT"), file path, code snippet, command, and link inside the fence MUST be reflected in your plan. Do NOT summarize away, drop, re-order, or silently "improve" the supplied decisions.
+- **Adopt its decomposition.** Your `steps` MUST cover the full scope of the authoritative plan, in its intended order, carrying the plan's detail into the step descriptions. Map the plan's tasks onto steps faithfully rather than inventing a different structure.
+- **Carry guidelines forward.** Reflect the plan's explicit guidelines and constraints in your `assumptions` and step descriptions so they reach the executor verbatim.
+- **Do not expand or invent.** Do NOT add scope, requirements, or decisions the plan did not state.
+- **Surface conflicts instead of deviating.** If part of the plan is ambiguous, internally contradictory, unsafe, or conflicts with the repository constraints above, do NOT silently deviate. Keep the plan's intent, and raise the conflict as an `openQuestion` (mark `requiredForExecution: true` if it blocks). Note any material deviation in `assumptions` or `requirementsTraceability`.
+- **Even without the fence**, do not omit explicit details, decisions, or guidelines the issue description provides — carry them through into your plan rather than abstracting them away.
+
+When the fence is present, `requirementsTraceability` MUST confirm that every part of the authoritative plan is covered by your steps.
+
 ## Requirements Traceability Guidance
 
 The `requirementsTraceability` field is a concise overview (1-3 paragraphs) that:

@@ -1,7 +1,7 @@
 # Structured Issue Examples
 
 Reference examples for the `create-linear-issue` skill. Each example shows the
-full set of fields passed to `linear_create_issue`.
+full set of fields passed to `save_issue`.
 
 ---
 
