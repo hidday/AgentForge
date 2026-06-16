@@ -7,7 +7,8 @@
     "dev:restart": "node scripts/run-or-rerun.mjs",
     "setup": "cd foundry && pnpm install && cd ../ui && npm install",
     "db:push": "cd foundry && npx prisma db push",
-    "build": "cd foundry && pnpm run build && cd ../ui && npm run build"
+    "build": "cd foundry && pnpm run build && cd ../ui && npm run build",
+    "sync-skills": "node scripts/sync-skill-copies.mjs"
   },
   "engines": {
     "node": ">=22.12.0"

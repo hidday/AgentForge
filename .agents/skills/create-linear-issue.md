@@ -1,3 +1,7 @@
+<!-- CANONICAL SOURCE for the create-linear-issue skill body. Edit here, then run
+`node scripts/sync-skill-copies.mjs` to propagate to the global ~/.cursor and
+~/.claude copies. In-repo .cursor/.claude stubs link to this file directly. -->
+
 # Create Structured Linear Issue
 
 This skill creates Linear issues formatted for the AgentForge Dev Orchestrator's

@@ -1,3 +1,6 @@
+<!-- CANONICAL SOURCE for the create-linear-issue skill examples. Edit here, then
+run `node scripts/sync-skill-copies.mjs` to propagate to the global copies. -->
+
 # Structured Issue Examples
 
 Reference examples for the `create-linear-issue` skill. Each example shows the
