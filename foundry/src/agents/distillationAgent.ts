@@ -5,6 +5,9 @@ import type { AgentSkillRepository } from "../orchestrator/agentSkillRepository.
 import type { EventRepository } from "../orchestrator/eventRepository.js";
 import type { Run, CompactSkillSummary } from "../domain/types.js";
 import { DistillationOutputSchema } from "../schemas/cliProtocol.js";
+import { PlanSchema } from "../schemas/plan.js";
+import { ExecutionReportSchema } from "../schemas/executionReport.js";
+import { RemediationSchema } from "../schemas/remediation.js";
 import { AGENT_STAGES } from "../domain/types.js";
 import { loadPromptTemplate, renderTemplate } from "./promptRenderer.js";
 import { maxNoveltyOverlap } from "../utils/similarity.js";
@@ -12,6 +15,111 @@ import { normalizeSkillName } from "../utils/skillNaming.js";
 import { env } from "../config/env.js";
 
 const SKILL_DISTILLATION_EVENT = "SKILL_DISTILLATION";
+
+function truncate(text: string, max: number): string {
+  const trimmed = text.trim();
+  return trimmed.length <= max ? trimmed : `${trimmed.slice(0, max).trimEnd()}…`;
+}
+
+function bulletList(items: string[], cap: number, itemMax: number): string {
+  const cleaned = items.map((i) => i.trim()).filter(Boolean);
+  if (cleaned.length === 0) return "_none_";
+  const shown = cleaned.slice(0, cap).map((i) => `- ${truncate(i, itemMax)}`);
+  if (cleaned.length > cap) shown.push(`- …and ${cleaned.length - cap} more`);
+  return shown.join("\n");
+}
+
+/**
+ * Field-aware plan summary. Surfaces the signals that matter for generalization
+ * (summary, assumptions, risks, the areas touched by steps, test plan) instead of
+ * a blindly truncated JSON blob. Falls back to truncated JSON if the payload does
+ * not match the expected schema.
+ */
+function summarizePlan(payload: unknown): string {
+  const parsed = PlanSchema.safeParse(payload);
+  if (!parsed.success) return truncate(JSON.stringify(payload), 1500);
+  const plan = parsed.data;
+  const steps =
+    plan.steps.length > 0
+      ? plan.steps
+          .slice(0, 12)
+          .map(
+            (s, i) =>
+              `${i + 1}. ${truncate(s.title, 120)}${s.description ? ` — ${truncate(s.description, 200)}` : ""}`,
+          )
+          .join("\n") +
+        (plan.steps.length > 12 ? `\n…and ${plan.steps.length - 12} more steps` : "")
+      : "_none_";
+  return [
+    `**Summary**: ${truncate(plan.summary, 600)}`,
+    `**Confidence**: ${plan.confidence.toFixed(2)}`,
+    `**Assumptions**:\n${bulletList(plan.assumptions, 8, 200)}`,
+    `**Risks**:\n${bulletList(plan.risks, 8, 200)}`,
+    `**Steps**:\n${steps}`,
+    `**Test Plan**: ${truncate(plan.testPlan, 400)}`,
+  ].join("\n\n");
+}
+
+/**
+ * Field-aware execution summary. `notes` (discovered gotchas) and `filesChanged`
+ * (which subsystem was touched) are the richest generalization signals, so they
+ * get generous caps. Failing checks include their details; passing ones stay terse.
+ */
+function summarizeExecution(payload: unknown): string {
+  const parsed = ExecutionReportSchema.safeParse(payload);
+  if (!parsed.success) return truncate(JSON.stringify(payload), 1500);
+  const report = parsed.data;
+  const checkLine = (name: string, c: { status: string; details: string }) =>
+    `- ${name}: ${c.status}${c.status !== "pass" && c.details ? ` — ${truncate(c.details, 200)}` : ""}`;
+  const files =
+    report.filesChanged.length > 0
+      ? report.filesChanged
+          .slice(0, 40)
+          .map((f) => `- ${f}`)
+          .join("\n") +
+        (report.filesChanged.length > 40 ? `\n- …and ${report.filesChanged.length - 40} more` : "")
+      : "_none_";
+  return [
+    `**Summary**: ${truncate(report.summary, 600)}`,
+    `**Score**: ${report.score.toFixed(2)} — ${truncate(report.scoreRationale, 400)}`,
+    `**Files Changed** (${report.filesChanged.length}):\n${files}`,
+    `**Checks**:\n${[
+      checkLine("lint", report.checks.lint),
+      checkLine("typecheck", report.checks.typecheck),
+      checkLine("tests", report.checks.tests),
+    ].join("\n")}`,
+    `**Notes**:\n${bulletList(report.notes, 15, 240)}`,
+  ].join("\n\n");
+}
+
+/**
+ * Field-aware remediation summary. Resolution items (what a reviewer flagged, what
+ * was changed, and why) are a prime source of repo-specific footguns, so each item
+ * keeps its action + rationale.
+ */
+function summarizeRemediation(payload: unknown): string {
+  const parsed = RemediationSchema.safeParse(payload);
+  if (!parsed.success) return `## Remediation Summary\n${truncate(JSON.stringify(payload), 1000)}`;
+  const rem = parsed.data;
+  const resolutions =
+    rem.resolution.length > 0
+      ? rem.resolution
+          .slice(0, 15)
+          .map(
+            (r) =>
+              `- [${r.status}] ${r.findingId}: ${truncate(r.action, 200)}${r.rationale ? `\n  *why*: ${truncate(r.rationale, 200)}` : ""}`,
+          )
+          .join("\n") +
+        (rem.resolution.length > 15 ? `\n- …and ${rem.resolution.length - 15} more` : "")
+      : "_none_";
+  const er = rem.executionReport;
+  return [
+    "## Remediation Summary",
+    `**Ready for human review**: ${rem.readyForHumanReview}`,
+    `**Final score**: ${er.score.toFixed(2)} — ${truncate(er.scoreRationale, 300)}`,
+    `**Resolutions**:\n${resolutions}`,
+  ].join("\n\n");
+}
 
 export class DistillationAgent {
   constructor(
@@ -92,15 +200,15 @@ export class DistillationAgent {
     const userTemplate = loadPromptTemplate("distillation.user.md");
 
     const planSummary = planArtifact
-      ? JSON.stringify(planArtifact.payloadJson).slice(0, 1000)
+      ? summarizePlan(planArtifact.payloadJson)
       : "No plan artifact available";
 
     const executionOutcome = executionArtifact
-      ? JSON.stringify(executionArtifact.payloadJson).slice(0, 1000)
+      ? summarizeExecution(executionArtifact.payloadJson)
       : "No execution report available";
 
     const remediationSummary = remediationArtifact
-      ? `## Remediation Summary\n${JSON.stringify(remediationArtifact.payloadJson).slice(0, 500)}`
+      ? summarizeRemediation(remediationArtifact.payloadJson)
       : "";
 
     const existingSkillsSummaryText =
@@ -180,7 +288,10 @@ export class DistillationAgent {
     const taskCategory = decision.taskCategory?.trim();
     const skillMarkdown = decision.skillMarkdown?.trim();
     if (!taskCategory || !skillMarkdown) {
-      this.logger.warn({ runId }, "Distillation missing taskCategory or skillMarkdown, skipping persist");
+      this.logger.warn(
+        { runId },
+        "Distillation missing taskCategory or skillMarkdown, skipping persist",
+      );
       await this.eventRepo.create({
         runId,
         eventType: SKILL_DISTILLATION_EVENT,
@@ -196,8 +307,7 @@ export class DistillationAgent {
 
     const name = normalizeSkillName(decision.name, taskCategory);
     const description =
-      decision.description?.trim() ||
-      `Use when working on ${taskCategory} in ${run.repo}.`;
+      decision.description?.trim() || `Use when working on ${taskCategory} in ${run.repo}.`;
 
     const skillPayload = {
       name,
