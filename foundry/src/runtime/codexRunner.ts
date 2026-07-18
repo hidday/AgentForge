@@ -12,6 +12,7 @@ export class CodexRunner {
     private readonly processRunner: ProcessRunner,
     private readonly command: string,
     private readonly baseArgs: string[],
+    private readonly model: string,
     private readonly logger: Logger,
   ) {}
 
@@ -20,11 +21,12 @@ export class CodexRunner {
     stage: Stage,
     schema: ZodType<T, any, any>,
   ): Promise<AgentOutput<T>> {
-    const args = this.buildArgs();
+    const model = input.model ?? this.model;
+    const args = this.buildArgs(model);
     const stdinData = this.buildStdinPayload(input);
 
     this.logger.info(
-      { stage, cwd: input.workingDirectory, command: this.command },
+      { stage, cwd: input.workingDirectory, command: this.command, model },
       "Invoking Codex CLI",
     );
 
@@ -63,10 +65,17 @@ export class CodexRunner {
     };
   }
 
-  private buildArgs(): string[] {
+  private buildArgs(model: string): string[] {
     // Prompt is passed via stdin, not as a positional CLI argument, to
     // avoid shell-length limits and leaking content through ps output.
-    return [...this.baseArgs];
+    // Insert --model after the subcommand (typically "exec") when present.
+    const args = [...this.baseArgs];
+    const modelFlags = ["--model", model];
+
+    if (args[0] === "exec") {
+      return [args[0], ...modelFlags, ...args.slice(1)];
+    }
+    return [...modelFlags, ...args];
   }
 
   private buildStdinPayload(input: AgentInput): string {

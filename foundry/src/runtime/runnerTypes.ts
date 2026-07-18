@@ -15,6 +15,8 @@ export interface AgentInput {
   env?: Record<string, string>;
   timeoutMs: number;
   runId?: string;
+  /** Per-call model override; falls back to the runner's default when unset. */
+  model?: string;
 }
 
 export interface AgentOutput<T = unknown> {

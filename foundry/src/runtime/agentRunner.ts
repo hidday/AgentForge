@@ -6,6 +6,8 @@ import type { CursorRunner } from "./cursorRunner.js";
 import type { AgentInput, AgentOutput } from "./runnerTypes.js";
 import type { Stage } from "../schemas/cliProtocol.js";
 import type { AgentRuntime } from "../domain/types.js";
+import { env } from "../config/env.js";
+import { resolveAgentModel } from "../config/agentModels.js";
 
 export class AgentRunner {
   constructor(
@@ -23,15 +25,18 @@ export class AgentRunner {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     schema: ZodType<T, any, any>,
   ): Promise<AgentOutput<T>> {
-    this.logger.info({ runtime, stage }, "Routing agent execution");
+    const model = input.model ?? resolveAgentModel(stage, env);
+    const routedInput: AgentInput = { ...input, model };
+
+    this.logger.info({ runtime, stage, model }, "Routing agent execution");
 
     switch (runtime) {
       case "claude-code":
-        return this.claudeCodeRunner.run(input, stage, schema);
+        return this.claudeCodeRunner.run(routedInput, stage, schema);
       case "codex":
-        return this.codexRunner.run(input, stage, schema);
+        return this.codexRunner.run(routedInput, stage, schema);
       case "cursor":
-        return this.cursorRunner.run(input, stage, schema);
+        return this.cursorRunner.run(routedInput, stage, schema);
       default: {
         const _exhaustive: never = runtime;
         throw new Error(`Unknown runtime: ${String(_exhaustive)}`);

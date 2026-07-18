@@ -65,13 +65,14 @@ async function simulate(): Promise<void> {
       processRunner,
       "claude",
       parseBaseArgs("--print --output-format json"),
-      "claude-opus-4-8",
+      "claude-fable-5",
       logger,
     );
     const codexRunner = new CodexRunner(
       processRunner,
       "codex",
       parseBaseArgs("--approval-mode full-auto -q"),
+      "gpt-5.6-sol",
       logger,
     );
     const cursorRunner = new CursorRunner(

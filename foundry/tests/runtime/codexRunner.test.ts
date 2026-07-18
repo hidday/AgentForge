@@ -30,7 +30,13 @@ describe("CodexRunner.run() error reporting", () => {
       timedOut: false,
     });
     const logger = makeMockLogger();
-    const runner = new CodexRunner(processRunner as never, "codex", [], logger as never);
+    const runner = new CodexRunner(
+      processRunner as never,
+      "codex",
+      ["exec", "-"],
+      "gpt-5.6-sol",
+      logger as never,
+    );
 
     await expect(
       runner.run(
@@ -39,6 +45,12 @@ describe("CodexRunner.run() error reporting", () => {
         echoSchema,
       ),
     ).rejects.toThrow();
+
+    expect(processRunner.execute).toHaveBeenCalledWith(
+      expect.objectContaining({
+        args: ["exec", "--model", "gpt-5.6-sol", "-"],
+      }),
+    );
 
     expect(logger.error).toHaveBeenCalledTimes(1);
     const [logFields, logMessage] = logger.error.mock.calls[0]!;
@@ -63,12 +75,24 @@ END_STRUCTURED_OUTPUT`;
       timedOut: false,
     });
     const logger = makeMockLogger();
-    const runner = new CodexRunner(processRunner as never, "codex", [], logger as never);
+    const runner = new CodexRunner(
+      processRunner as never,
+      "codex",
+      ["exec", "-"],
+      "gpt-5.6-sol",
+      logger as never,
+    );
 
     const out = await runner.run(
-      { prompt: "x", workingDirectory: "/tmp", timeoutMs: 1000 },
+      { prompt: "x", workingDirectory: "/tmp", timeoutMs: 1000, model: "gpt-5.6-terra" },
       "planner",
       echoSchema,
+    );
+
+    expect(processRunner.execute).toHaveBeenCalledWith(
+      expect.objectContaining({
+        args: ["exec", "--model", "gpt-5.6-terra", "-"],
+      }),
     );
 
     expect(out.parsed.payload.value).toBe("ok");

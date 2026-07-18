@@ -9,9 +9,14 @@ const EnvSchema = z.object({
   AGENT_RUNTIME_MODE: z.enum(["mock", "real"]).default("mock"),
   CLAUDE_CODE_COMMAND: z.string().default("claude"),
   CLAUDE_CODE_ARGS_BASE: z.string().default("--print --output-format json"),
-  CLAUDE_CODE_MODEL: z.string().default("claude-opus-4-8"),
+  // Lead roles: planner, plan-reviser, executor, remediation, chat
+  CLAUDE_CODE_MODEL: z.string().default("claude-fable-5"),
+  // Minor research roles: answer-researcher, distillation
+  CLAUDE_CODE_MODEL_RESEARCH: z.string().default("claude-opus-4-8"),
   CODEX_COMMAND: z.string().default("codex"),
   CODEX_ARGS_BASE: z.string().default("exec -"),
+  // Review roles: plan-reviewer, reviewer (Codex CLI --model)
+  CODEX_MODEL: z.string().default("gpt-5.6-sol"),
   CURSOR_COMMAND: z.string().default("agent"),
   CURSOR_ARGS_BASE: z.string().default("--print --output-format json --force --trust"),
   CURSOR_MODEL: z.string().default("claude-4.7-opus"),

@@ -21,11 +21,12 @@ export class ClaudeCodeRunner {
     stage: Stage,
     schema: ZodType<T, any, any>,
   ): Promise<AgentOutput<T>> {
-    const args = this.buildArgs(input);
+    const model = input.model ?? this.model;
+    const args = this.buildArgs(input, model);
     const stdinData = this.buildStdinPayload(input);
 
     this.logger.info(
-      { stage, cwd: input.workingDirectory, command: this.command, model: this.model },
+      { stage, cwd: input.workingDirectory, command: this.command, model },
       "Invoking Claude Code CLI",
     );
 
@@ -85,14 +86,15 @@ export class ClaudeCodeRunner {
    * by filtering the flag out of the resolved arg list before spawning.
    */
   async chatRun(input: AgentInput, stage: string): Promise<{ text: string; durationMs: number }> {
+    const model = input.model ?? this.model;
     // Build base args then strip --dangerously-skip-permissions (req 8)
-    const rawArgs = this.buildArgs(input);
+    const rawArgs = this.buildArgs(input, model);
     const args = rawArgs.filter((arg) => arg !== "--dangerously-skip-permissions");
 
     const stdinData = this.buildStdinPayload(input);
 
     this.logger.info(
-      { stage, cwd: input.workingDirectory, command: this.command, model: this.model, chatReadOnly: true },
+      { stage, cwd: input.workingDirectory, command: this.command, model, chatReadOnly: true },
       "Invoking Claude Code CLI (chat/read-only mode)",
     );
 
@@ -131,10 +133,10 @@ export class ClaudeCodeRunner {
     return { text, durationMs: result.durationMs };
   }
 
-  private buildArgs(input: AgentInput): string[] {
+  private buildArgs(input: AgentInput, model: string): string[] {
     const args = [...this.baseArgs];
 
-    args.push("--model", this.model);
+    args.push("--model", model);
 
     if (input.systemPrompt) {
       args.push("--system-prompt", input.systemPrompt);

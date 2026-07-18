@@ -69,6 +69,7 @@ function buildServices() {
     processRunner,
     env.CODEX_COMMAND,
     parseBaseArgs(env.CODEX_ARGS_BASE),
+    env.CODEX_MODEL,
     logger,
   );
   const cursorRunner = new CursorRunner(
