@@ -16,6 +16,7 @@ import type { SkillDocument } from "../domain/types.js";
 import { mapAgentSkillToDocument } from "../orchestrator/agentSkillRepository.js";
 import { buildChatSystemPrompt } from "../chat/chatContextBuilder.js";
 import { env } from "../config/env.js";
+import { existsSync } from "node:fs";
 
 const VALID_HUMAN_REQUEST_REASONS: HumanRequestReason[] = [
   "plan_ambiguous",
@@ -110,6 +111,21 @@ export function registerApiRoutes(
     const artifacts = await artifactRepo.findByRunId(run.id);
     const systemPrompt = buildChatSystemPrompt(run, artifacts);
 
+    // The run's worktree may have been cleaned up (e.g. run is Done/Failed).
+    // Fall back to the main repo directory so the chat subprocess has a valid cwd.
+    let chatCwd = run.workingDirectory;
+    if (!existsSync(chatCwd)) {
+      const worktreesIdx = chatCwd.indexOf("/.worktrees/");
+      if (worktreesIdx !== -1) {
+        chatCwd = chatCwd.slice(0, worktreesIdx);
+      }
+      if (!existsSync(chatCwd)) {
+        return reply.code(422).send({
+          error: "Working directory not found — the repository may have been removed",
+        });
+      }
+    }
+
     let replyText: string;
     let durationMs: number;
     try {
@@ -117,7 +133,7 @@ export function registerApiRoutes(
         {
           prompt: message,
           systemPrompt,
-          workingDirectory: run.workingDirectory,
+          workingDirectory: chatCwd,
           timeoutMs: env.CHAT_TIMEOUT_MS,
           runId: run.id,
         },
