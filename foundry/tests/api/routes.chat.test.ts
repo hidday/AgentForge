@@ -1,7 +1,14 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import Fastify from "fastify";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { registerApiRoutes } from "../../src/api/routes.js";
 import { RunState } from "../../src/domain/runState.js";
+
+// The chat route verifies the run's workingDirectory exists on disk before
+// spawning the runner, so the fixture must point at a real directory.
+const workspaceDir = mkdtempSync(join(tmpdir(), "routes-chat-test-"));
 
 function makeRun() {
   return {
@@ -21,7 +28,7 @@ function makeRun() {
     executorRuntime: null,
     reviewerRuntime: null,
     remediationRuntime: null,
-    workingDirectory: "/tmp/workspace",
+    workingDirectory: workspaceDir,
     latestArtifactVersion: 3,
     createdAt: new Date(),
     updatedAt: new Date(),

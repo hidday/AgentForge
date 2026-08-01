@@ -10,6 +10,9 @@ node_modules/
 # Build outputs
 dist/
 
+# Test coverage reports
+coverage/
+
 # Tool-generated / runtime state
 .superset/
 .claude/worktrees/

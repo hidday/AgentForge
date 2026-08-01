@@ -10,6 +10,10 @@ jobs:
   foundry:
     name: foundry (typecheck, lint, test)
     runs-on: ubuntu-latest
+    env:
+      # Dummy value: prisma.config.ts and src/config/env.ts require DATABASE_URL
+      # to be set, but tests use mocks and never connect to a database.
+      DATABASE_URL: postgresql://ci:ci@localhost:5432/ci
     defaults:
       run:
         working-directory: foundry
@@ -23,9 +27,8 @@ jobs:
           node-version: "22"
 
       - name: Set up pnpm
+        # version intentionally omitted — resolved from "packageManager" in the root package.json
         uses: pnpm/action-setup@v4
-        with:
-          version: 9
 
       - name: Get pnpm store directory
         id: pnpm-cache

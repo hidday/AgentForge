@@ -9,6 +9,14 @@ export default defineConfig({
     environment: "jsdom",
     include: ["src/**/*.test.tsx", "src/**/*.test.ts"],
     setupFiles: [],
+    coverage: {
+      provider: "v8",
+      include: ["src/**/*.{ts,tsx}"],
+      // main.tsx only mounts the React root; vite-env.d.ts is a type shim.
+      exclude: ["src/main.tsx", "src/vite-env.d.ts", "src/**/*.test.*"],
+      reporter: ["text", "json-summary", "html"],
+      reportsDirectory: "coverage",
+    },
   },
   resolve: {
     alias: {
