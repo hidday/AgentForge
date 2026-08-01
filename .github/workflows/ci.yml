@@ -10,6 +10,10 @@ jobs:
   foundry:
     name: foundry (typecheck, lint, test)
     runs-on: ubuntu-latest
+    env:
+      # Dummy value: prisma.config.ts and src/config/env.ts require DATABASE_URL
+      # to be set, but tests use mocks and never connect to a database.
+      DATABASE_URL: postgresql://ci:ci@localhost:5432/ci
     defaults:
       run:
         working-directory: foundry

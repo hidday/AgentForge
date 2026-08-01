@@ -12,6 +12,10 @@ jobs:
   analyze:
     name: Analyze (typescript)
     runs-on: ubuntu-latest
+    env:
+      # Dummy value: prisma.config.ts requires DATABASE_URL during postinstall
+      # (prisma generate); no database is contacted.
+      DATABASE_URL: postgresql://ci:ci@localhost:5432/ci
     permissions:
       actions: read
       contents: read
