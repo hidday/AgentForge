@@ -23,9 +23,8 @@ jobs:
           node-version: "22"
 
       - name: Set up pnpm
+        # version intentionally omitted — resolved from "packageManager" in the root package.json
         uses: pnpm/action-setup@v4
-        with:
-          version: 9
 
       - name: Get pnpm store directory
         id: pnpm-cache
