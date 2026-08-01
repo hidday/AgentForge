@@ -307,9 +307,11 @@ export class DistillationAgent {
 
     const name = normalizeSkillName(decision.name, taskCategory);
     const trimmedDescription = decision.description?.trim();
-    const description = trimmedDescription?.length
-      ? trimmedDescription
-      : `Use when working on ${taskCategory} in ${run.repo}.`;
+    // Whitespace-only descriptions fall back too, so ?? alone is not equivalent
+    const description =
+      trimmedDescription && trimmedDescription.length > 0
+        ? trimmedDescription
+        : `Use when working on ${taskCategory} in ${run.repo}.`;
 
     const skillPayload = {
       name,

@@ -653,10 +653,10 @@ export class OrchestratorService {
       const events = await this.eventRepo.findByRunId(runId);
       const lastStarted = [...events]
         .reverse()
-        .find((e) => (e.eventType as RunEvent) === RunEvent.EXECUTION_STARTED);
+        .find((e) => e.eventType === (RunEvent.EXECUTION_STARTED as string));
       const lastFinished = [...events]
         .reverse()
-        .find((e) => (e.eventType as RunEvent) === RunEvent.EXECUTION_FINISHED);
+        .find((e) => e.eventType === (RunEvent.EXECUTION_FINISHED as string));
 
       const reportAfterLastStart =
         !!lastStarted && existingReport.createdAt > lastStarted.createdAt;
@@ -673,15 +673,10 @@ export class OrchestratorService {
           "Recovered stranded execution: ExecutionReport exists but EXECUTION_FINISHED was never recorded. Skipping executor and transitioning to AIReview.",
         );
 
-        await this.transitionAndRecord(
-          run,
-          RunEvent.EXECUTION_FINISHED,
-          "executor-agent",
-          {
-            recovered: true,
-            reportCreatedAt: existingReport.createdAt.toISOString(),
-          },
-        );
+        await this.transitionAndRecord(run, RunEvent.EXECUTION_FINISHED, "executor-agent", {
+          recovered: true,
+          reportCreatedAt: existingReport.createdAt.toISOString(),
+        });
 
         run = await this.runReview(runId);
         return run;
