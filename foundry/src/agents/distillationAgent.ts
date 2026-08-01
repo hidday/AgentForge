@@ -306,8 +306,10 @@ export class DistillationAgent {
     }
 
     const name = normalizeSkillName(decision.name, taskCategory);
-    const description =
-      decision.description?.trim() || `Use when working on ${taskCategory} in ${run.repo}.`;
+    const trimmedDescription = decision.description?.trim();
+    const description = trimmedDescription?.length
+      ? trimmedDescription
+      : `Use when working on ${taskCategory} in ${run.repo}.`;
 
     const skillPayload = {
       name,

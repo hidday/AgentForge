@@ -1,7 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { tmpdir } from "node:os";
 import Fastify from "fastify";
 import { registerApiRoutes } from "../../src/api/routes.js";
 import { RunState } from "../../src/domain/runState.js";
+
+// The chat route rejects runs whose workingDirectory does not exist on disk,
+// so the fixture must point at a real directory.
+const EXISTING_WORKING_DIRECTORY = tmpdir();
 
 function makeRun() {
   return {
@@ -21,7 +26,7 @@ function makeRun() {
     executorRuntime: null,
     reviewerRuntime: null,
     remediationRuntime: null,
-    workingDirectory: "/tmp/workspace",
+    workingDirectory: EXISTING_WORKING_DIRECTORY,
     latestArtifactVersion: 3,
     createdAt: new Date(),
     updatedAt: new Date(),
