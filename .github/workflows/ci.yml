@@ -10,6 +10,10 @@ jobs:
   foundry:
     name: foundry (typecheck, lint, test)
     runs-on: ubuntu-latest
+    env:
+      # prisma.config.ts resolves DATABASE_URL at load time; `prisma generate`
+      # (postinstall) needs the variable to exist but never connects to it.
+      DATABASE_URL: postgresql://ci:ci@localhost:5432/agentforge
     defaults:
       run:
         working-directory: foundry

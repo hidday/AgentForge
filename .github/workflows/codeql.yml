@@ -16,6 +16,10 @@ jobs:
       actions: read
       contents: read
       security-events: write
+    env:
+      # prisma.config.ts resolves DATABASE_URL at load time; `prisma generate`
+      # (postinstall) needs the variable to exist but never connects to it.
+      DATABASE_URL: postgresql://ci:ci@localhost:5432/agentforge
 
     steps:
       - uses: actions/checkout@v4
