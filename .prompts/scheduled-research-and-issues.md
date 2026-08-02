@@ -1,7 +1,7 @@
 # Scheduled Task: Continuous AI Agent Innovation Research & AgentForge Enhancement Pipeline
 
-> **Schedule**: Every 2-3 days
-> **Goal**: Keep AgentForge perpetually evolving by surfacing bleeding-edge AI agent innovations and converting the best ones into actionable Linear issues.
+> **Schedule**: Weekly (reduced from every 2-3 days after the 2026-08-01 backlog cleanup — the previous cadence + quota produced ~170 issues, of which ~93% were duplicates of a handful of themes)
+> **Goal**: Keep AgentForge evolving by surfacing genuinely new, feasible enhancements — while keeping the open backlog small enough that a daily implementation agent can actually drain it. **Creating zero issues is a successful run.** The default outcome of a run is "nothing new worth adding"; an issue is the exception, not the deliverable.
 
 ## Task Overview
 
@@ -10,11 +10,12 @@ You are operating within the **AgentForge** project — a TypeScript/Fastify-bas
 This is a **recurring scheduled task**. Each run you must:
 
 1. Load the research log to see what was already reviewed (avoid duplication)
-2. Search for **new, bleeding-edge** innovations you haven't covered yet
-3. Evaluate findings against AgentForge's architecture
-4. Select the top 3 novel enhancements
-5. Create structured Linear issues for each
-6. Update the research log with everything you reviewed this run
+2. **Check the open Linear backlog and the actual codebase** (Phase 0.5) — this gates everything else
+3. Search for new innovations you haven't covered yet
+4. Evaluate findings against AgentForge's architecture and current backlog
+5. Select **at most 1** enhancement (zero is fine and expected on most runs)
+6. Create a structured Linear issue only if it passes every gate in Phase 3
+7. Update the research log with everything you reviewed this run
 
 ---
 
@@ -54,11 +55,40 @@ If the file does not exist, create it. If it exists, read all entries and build 
 
 ---
 
-## Phase 1: Research — Bleeding-Edge Innovations
+## Phase 0.5: Backlog & Codebase Reality Check (MANDATORY — this phase caused the 2026 backlog explosion when it didn't exist)
 
-### 1.1 Primary Focus: Frontier & "Hipster" Research (70% of effort)
+The research log dedupes by **source** (paper/repo URL). That is not enough: the same *capability theme* (e.g. "retry with backoff", "episodic memory", "cost telemetry") arrives from a new source every week and previously produced 20+ near-identical issues per theme. Dedup must happen at the **theme/capability level against the open backlog and the shipped code**, not just at the source level.
 
-This is your **main research vector**. Search for what the cutting-edge AI researchers and builders are releasing RIGHT NOW. Do NOT just look at established frameworks with 10k+ stars.
+### 0.5.1 Backlog pressure valve (hard rule)
+
+Call `list_issues` on the Linear MCP server filtered to the AgentForge project, states Todo + Backlog + In Progress.
+
+- If **≥ 10 open issues** exist → **create NO new issues this run.** Do the research, update the log, and stop. The pipeline is already full; adding more only dilutes the daily implementation agent's focus.
+- If < 10, you may create at most 1 issue (subject to the remaining gates).
+
+### 0.5.2 Theme-level duplication gate (hard rule)
+
+For every candidate enhancement, before scoring it:
+
+1. Search the open issues (`list_issues` with `query`) for the candidate's capability keywords (e.g. "retry", "memory", "telemetry", "routing", "dispatch", "checkpoint").
+2. If ANY open issue covers the same capability — even partially, even from a different research source — **do not create a new issue.** If the new source materially strengthens the existing issue, add a short comment on the existing issue instead (link + one paragraph on what it adds).
+3. Also search recently canceled issues (`includeArchived`, canceled states). If the same theme was canceled in a triage as "premature" or "over-engineered", it needs *evidence the situation changed* (e.g. the prerequisite it lacked has now shipped) — a new paper on the same idea is NOT such evidence.
+
+### 0.5.3 Codebase reality check (hard rule)
+
+Do NOT trust the "Key Limitations" list in Phase 2 or your memory of the architecture — the codebase evolves between runs and stale limitation lists previously generated issues for already-shipped features (model routing, skill memory, SSE streaming were all proposed repeatedly after they shipped). Before proposing anything:
+
+1. `git log --oneline -30` — scan recent commits for the capability area.
+2. Grep/read the relevant module (e.g. `foundry/src/config/agentModels.ts`, `foundry/src/agents/distillationAgent.ts`, `foundry/src/api/runEventEmitter.ts`) to confirm the gap still exists.
+3. If the capability exists (even partially), either skip the candidate or scope the issue strictly to the *verified missing part*, naming the existing code it builds on.
+
+---
+
+## Phase 1: Research — Innovations Worth Adopting
+
+### 1.1 Primary Focus: Frontier Research (70% of effort)
+
+Search for what cutting-edge AI researchers and builders are releasing. But calibrate: **a paper is a signal, not a mandate.** The bar for an issue is "AgentForge measurably needs this now and can ship it in 1-2 agent runs", not "this is the newest idea in the field". Prefer proven, boring patterns that close a verified gap over speculative architectures — the 2026 backlog audit canceled ~50 issues whose only justification was a fresh arXiv ID.
 
 **Search strategies** (use web search for all of these):
 
@@ -144,18 +174,20 @@ Failure states: `AIBlocked`, `HumanClarificationNeeded`, `Failed`. `RESET_TO_TOD
 
 `policyEngine.ts` enforces stage gates: plan version matching before execution, PR + execution report before review, green checks before ready state, allowed/protected path constraints for the executor.
 
-### Key Limitations (Enhancement Opportunities)
+### Key Limitations (VERIFY BEFORE USE — see Phase 0.5.3)
 
-1. **No dynamic model routing** — Agent-to-model mapping is hardcoded per stage
-2. **No parallel agent execution** — Everything runs sequentially, one agent at a time
-3. **No plan repair** — If implementation fails partway, the run blocks or resets to Todo
-4. **No agent performance tracking** — No historical data on agent success rates, duration, or cost per stage/task type
-5. **No graceful degradation** — If an agent process times out or crashes, the run enters `AIBlocked` with no automatic retry or fallback
-6. **No test-time compute scaling** — Same timeout and resource allocation regardless of task complexity
-7. **Single review cycle** — Plan review gets one revision cycle; code review allows remediation loops but no escalation to different/stronger models
-8. **No agent memory across runs** — Each run starts from scratch; agents don't learn from prior successes/failures on similar tasks
-9. **No streaming/incremental output** — Agents produce output only at the end; no visibility into intermediate progress
-10. **No speculative execution** — Cannot try multiple approaches in parallel and pick the best
+⚠️ This list goes stale between runs. It is a starting hypothesis only; every entry MUST be re-verified against the code before being cited in an issue. Status as of 2026-08-01:
+
+1. ~~No dynamic model routing~~ — **SHIPPED**: role-tier routing exists in `foundry/src/config/agentModels.ts` (lead/research/review tiers, env-configurable). Complexity-based dynamic routing was evaluated and deliberately rejected as premature.
+2. **No parallel agent execution** — still true, deliberately deferred (sequential determinism is a design choice for now)
+3. **No plan repair / partial retry** — tracked by open issue HID-186; do not create more issues on this theme
+4. **No token/cost telemetry** — tracked by open issue HID-163; do not create more issues on this theme
+5. **No automatic retry on subprocess failure** — tracked by open issue HID-167; do not create more issues on this theme
+6. ~~No test-time compute scaling / token budgets~~ — deliberately deferred until HID-163 provides measurement data. Do not propose budget/timeout optimizers before telemetry exists.
+7. **Single reviewer per review stage** — cross-family review exists (Codex reviews Claude's work); multi-model panels were evaluated and rejected as a cost multiplier. Adversarial plan critique is tracked by HID-93.
+8. ~~No agent memory across runs~~ — **SHIPPED**: skill distillation + planner injection (`distillationAgent.ts`, `agentSkillRepository.ts`). Run-outcome episodic memory is tracked by HID-188. Known small gap: executor prompts don't receive skills yet.
+9. ~~No streaming/incremental output~~ — **SHIPPED**: SSE streaming via `runEventEmitter.ts` + `useSSE.ts` with throttled process output.
+10. **No speculative execution** — deliberately rejected (premature; sequential pipeline works)
 
 ### Tech Stack
 
@@ -163,7 +195,7 @@ Node.js 22+, TypeScript (strict), Fastify 5, PostgreSQL + Prisma 7, Zod, pino, `
 
 ---
 
-## Phase 3: Evaluate & Select Top 3 Enhancements
+## Phase 3: Evaluate & Select AT MOST ONE Enhancement
 
 ### Evaluation Criteria
 
@@ -171,22 +203,20 @@ Score each candidate enhancement on these dimensions (1-5 scale):
 
 | Criterion | Weight | Description |
 |-----------|--------|-------------|
-| **Impact** | 30% | How much does this improve orchestration quality, reliability, or cost? |
-| **Feasibility** | 25% | Can this be implemented within the existing architecture without a rewrite? |
-| **Alignment** | 20% | Does this fit AgentForge's design principles (explicit state machine, CLI agents, artifact-first, DI)? |
-| **Novelty** | 15% | Does this bring a genuinely new capability vs. incremental improvement? |
-| **Evidence** | 10% | Is there production evidence or benchmarks supporting this approach? |
+| **Impact** | 35% | How much does this improve orchestration quality, reliability, or cost — for the gaps that actually exist today? |
+| **Feasibility** | 30% | Can this be implemented in 1-2 agent runs within the existing architecture, without new infrastructure (no new DBs, no new state machine rewrite)? |
+| **Alignment** | 20% | Does this fit AgentForge's design principles (explicit state machine, CLI agents, artifact-first, DI) AND its current roadmap priorities? |
+| **Evidence** | 10% | Is there production evidence supporting this approach? A single benchmark in one paper is weak evidence. |
+| **Novelty** | 5% | Genuinely new capability vs. incremental. Novelty is a tiebreaker, never a justification. |
 
 ### Selection Rules
 
-- Select exactly **3 enhancements**
-- They must be **complementary** (not overlapping in scope)
-- Each must be **implementable as a distinct feature** (not a vague "improve everything")
-- Prefer enhancements that leverage AgentForge's existing strengths (state machine, artifact model, multi-repo support)
-- At least one enhancement should address **reliability/fault tolerance**
-- At least one should address **performance/cost optimization**
-- **Strongly prefer bleeding-edge innovations** over incremental improvements to existing patterns
-- **Do NOT propose enhancements that were already created as Linear issues** (check the research log)
+- Select **at most 1 enhancement per run — and only if it scores ≥ 4.0 weighted**. If nothing clears the bar, create nothing and say so in the summary. This is the expected outcome for most runs.
+- It must pass ALL Phase 0.5 gates: backlog < 10 open issues, no theme overlap with open or triage-canceled issues, gap verified in the current code.
+- It must be **implementable in 1-2 agent runs** (roughly: one Prisma migration max, a handful of files, no new external services).
+- Prefer enhancements that leverage AgentForge's existing strengths (state machine, artifact model, skill memory, SSE) and reference the actual code they build on.
+- **Prefer boring, proven patterns that close verified gaps** over bleeding-edge architectures. An unconventional idea needs *stronger* evidence, not weaker.
+- Red flags that should disqualify a candidate (these patterns dominated the 2026 noise purge): RL training loops, speculative/parallel execution, prompt self-evolution, formal verification layers, "knapsack"/"water-filling" budget optimizers, provenance graphs, event-sourcing rewrites — unless a prerequisite explicitly changed.
 
 ### Document Your Reasoning
 
@@ -274,9 +304,9 @@ Apply appropriate labels:
 - **Scope labels**: Match the `(<scope>)` from the title
 - Do NOT set `ai:*` labels — the orchestrator manages those automatically
 
-### Creating Each Issue
+### Creating the Issue
 
-For each of the 3 enhancements, call the `save_issue` tool on your configured Linear MCP server (see Pre-Requisites) with:
+If (and only if) a candidate passed every gate, call the `save_issue` tool on your configured Linear MCP server (see Pre-Requisites) with:
 
 ```json
 {
@@ -379,8 +409,8 @@ For the most interesting 3-5 discoveries this run:
 - Why it's interesting for agent orchestration broadly
 - Specific relevance to AgentForge
 
-### Issues Created
-For each of the 3 issues:
+### Issue Created (if any)
+State explicitly whether an issue was created this run. "No issue created — backlog full / nothing cleared the bar" is a first-class, successful outcome. If one was created:
 1. **Linear Issue ID & URL**
 2. **Title**
 3. **Inspiration source** (researcher, repo, paper)
@@ -404,8 +434,9 @@ Note any emerging trends or sources worth watching that weren't mature enough fo
 - **Be specific in Technical Hints** — reference actual file paths in the AgentForge codebase (e.g., `foundry/src/orchestrator/stateMachine.ts`, `foundry/src/runtime/AgentRunner.ts`).
 - **Keep scope realistic** — each issue should be implementable in 1-2 sprints, not a multi-month rewrite.
 - **Use web search liberally** — your training data may not reflect papers and repos from this week.
-- **Prioritize novelty** — an unconventional idea from a 50-star repo by a sharp researcher is more valuable than a well-known pattern from a 10k-star framework.
-- **Always update the research log** — even if you find nothing worth creating issues for, log what you reviewed so the next run skips it.
+- **Prioritize feasibility and verified need over novelty** — a boring pattern that closes a confirmed gap in the current codebase beats an exciting idea from this week's arXiv. Novelty without a verified gap is noise.
+- **Always update the research log** — even if you find nothing worth creating issues for, log what you reviewed so the next run skips it. A run that creates zero issues but logs 10 reviewed sources is a good run.
+- **Respect the backlog cap** — the 10-open-issue pressure valve (Phase 0.5.1) is a hard rule, not a suggestion.
 
 ---
 
