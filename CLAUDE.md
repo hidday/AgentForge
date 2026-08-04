@@ -2,12 +2,39 @@
 
 Guidance for AI agents working in this repository.
 
+**What this project is:** AgentForge is an orchestration framework that delivers high-quality code through a semi-rigorous methodology — heavy investment in the plan phase, explicit review cycles, and multiple specialized agent personas driven by a deterministic state machine. Work on this repo the way the product itself works: plan before implementing, keep diffs small and reviewable, and only move to the next step with high confidence in the current one.
+
+> **Scope note — orchestrated stage agents:** if you are running as a stage agent inside an AgentForge run (planner / plan reviewer / executor / reviewer / remediation — you were launched with a stage system prompt, and for implementation you hold an approved plan), **your stage prompt and the approved plan govern your workflow and take precedence over this file.** The testing policy, design invariants, and gotchas below apply to everyone.
+
 ## Project layout
 
 Monorepo with two packages:
 
 - `foundry/` — Node backend orchestrator (TypeScript, Fastify, Prisma). Package manager: **pnpm**. Tests in `foundry/tests/`.
 - `ui/` — React + Vite frontend. Package manager: **npm**. Tests colocated in `ui/src/`.
+
+## Architecture in 30 seconds
+
+A Linear issue flows through: `Planning → PlanReview → (PlanRevision) → AwaitingPlanApproval (human) → Implementing → AIReview → (AddressingReview loop) → ReadyForHumanReview → Done`, with `AIBlocked` / `HumanClarificationNeeded` / `Failed` as side states. Full details in `foundry/README.md`.
+
+| Where | What |
+|---|---|
+| `foundry/src/orchestrator/stateMachine.ts` | The single source of truth for states and transitions |
+| `foundry/src/orchestrator/policyEngine.ts` | All stage gates (plan-version match, allowed paths, diff limits) |
+| `foundry/src/orchestrator/orchestratorService.ts` | Central coordinator wiring stages, agents, and Linear |
+| `foundry/src/prompts/*.md` | Agent personas (planner, reviewers, executor, remediation…) — prompt files ARE behavior |
+| `foundry/src/domain/types.ts` | `AGENT_STAGES` mapping, artifact types |
+| `foundry/src/config/agentModels.ts` | Role-tier model routing (lead / research / review) |
+| `foundry/src/runtime/` | CLI subprocess execution (Claude Code, Codex) and output parsing |
+
+## Design invariants (do not violate)
+
+- **The state machine stays explicit and deterministic.** Every transition lives in the `stateMachine.ts` table. Never add implicit transitions, side-channel state changes, or transitions triggered outside `transitionAndRecord`.
+- **Gates live in the policy engine.** Preconditions for running or advancing a stage belong in `policyEngine.ts`, not scattered as ad-hoc checks in the orchestrator or runners.
+- **Artifact-first.** Every stage's output is persisted as a typed artifact before the state advances. New stage outputs mean a new `ArtifactType`, not loose JSON on the run row.
+- **Agents are CLI subprocesses** communicating via the `BEGIN_STRUCTURED_OUTPUT` / `END_STRUCTURED_OUTPUT` protocol with Zod-validated schemas. Don't switch a stage to direct API calls or loosen a schema to make parsing pass.
+- **Each persona is one prompt pair** (`*.system.md` + `*.user.md`). Changing a prompt changes production behavior — treat prompt edits with the same rigor as code, and keep persona boundaries clean (a reviewer reviews; it doesn't fix).
+- **New knobs go through `foundry/src/config/env.ts`** with Zod validation and a safe default that preserves current behavior. New risky features default **off**.
 
 ## Testing policy (required)
 
@@ -40,3 +67,9 @@ The configured coverage reports (v8 provider, settings in each package's `vitest
 
 In `foundry/`, also run `pnpm typecheck` and `pnpm lint` — CI enforces both.
 In `ui/`, also run `npm run lint` and `npm run build`.
+
+## Gotchas
+
+- **Skill files exist in triplicate** (`.claude/skills/`, `.agents/skills/`, `.cursor/skills/`). Never edit one copy directly — edit the source and run `node scripts/sync-skill-copies.mjs` so all copies stay identical.
+- **`ai:*` Linear labels are orchestrator-managed.** Never set or remove them manually (in code, skills, or when touching Linear).
+- **`prisma.config.ts` resolves `DATABASE_URL` at load time**, so `pnpm install` in `foundry/` fails without it — export a dummy value (see the test commands above).
