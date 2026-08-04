@@ -4,7 +4,7 @@ Guidance for AI agents working in this repository.
 
 **What this project is:** AgentForge is an orchestration framework that delivers high-quality code through a semi-rigorous methodology — heavy investment in the plan phase, explicit review cycles, and multiple specialized agent personas driven by a deterministic state machine. Work on this repo the way the product itself works: plan before implementing, keep diffs small and reviewable, and only move to the next step with high confidence in the current one.
 
-> **Scope note — orchestrated stage agents:** if you are running as a stage agent inside an AgentForge run (planner / plan reviewer / executor / reviewer / remediation — you were launched with a stage system prompt, and for implementation you hold an approved plan), **your stage prompt and the approved plan govern your workflow and take precedence over this file.** Skip the "How to work here (interactive sessions)" section entirely — it addresses humans and interactive agents contributing to this repo directly, and following it would duplicate work your pipeline already did (e.g. re-planning an already-approved plan, or restructuring your changes across PRs). The testing policy, design invariants, and gotchas below apply to everyone.
+> **Scope note — orchestrated stage agents:** if you are running as a stage agent inside an AgentForge run (planner / plan reviewer / executor / reviewer / remediation — you were launched with a stage system prompt, and for implementation you hold an approved plan), **your stage prompt and the approved plan govern your workflow and take precedence over this file.** The testing policy, design invariants, and gotchas below apply to everyone.
 
 ## Project layout
 
@@ -35,14 +35,6 @@ A Linear issue flows through: `Planning → PlanReview → (PlanRevision) → Aw
 - **Agents are CLI subprocesses** communicating via the `BEGIN_STRUCTURED_OUTPUT` / `END_STRUCTURED_OUTPUT` protocol with Zod-validated schemas. Don't switch a stage to direct API calls or loosen a schema to make parsing pass.
 - **Each persona is one prompt pair** (`*.system.md` + `*.user.md`). Changing a prompt changes production behavior — treat prompt edits with the same rigor as code, and keep persona boundaries clean (a reviewer reviews; it doesn't fix).
 - **New knobs go through `foundry/src/config/env.ts`** with Zod validation and a safe default that preserves current behavior. New risky features default **off**.
-
-## How to work here (interactive sessions)
-
-*Skip this section if you are an orchestrated stage agent — see the scope note at the top.*
-
-- For anything non-trivial, write out a short plan (steps, files touched, risks) before editing — this repo's whole thesis is that plan quality determines implementation quality.
-- Keep changes narrowly scoped and reviewable; one concern per PR. The orchestrator enforces `maxFilesChanged` / `maxDiffLines` on its own runs — hold manual changes to the same spirit.
-- State machine or schema changes require updating the transition/enum tests in the same change, plus a Prisma migration for schema changes (additive and nullable unless there's a strong reason).
 
 ## Testing policy (required)
 
