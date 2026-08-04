@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# Installed into .git/hooks by scripts/setup-pm2.sh.
+# After every `git pull` / merge, re-sync dependencies and reload the
+# pm2-managed services so the running version matches the new checkout.
+set -uo pipefail
+
+ROOT="$(git rev-parse --show-toplevel)"
+if [ ! -x "$ROOT/scripts/redeploy.sh" ]; then
+  echo "[post-merge] scripts/redeploy.sh not found in $ROOT — skipping redeploy."
+  exit 0
+fi
+
+echo "[post-merge] redeploying AgentForge services..."
+"$ROOT/scripts/redeploy.sh" || echo "[post-merge] redeploy failed — run scripts/redeploy.sh manually to see details." >&2
+exit 0
