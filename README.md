@@ -122,6 +122,21 @@ npm run dev        # boots Fastify on :3100 and Vite on :5173 with shared loggin
 
 Open <http://localhost:5173> for the dashboard. The default `AGENT_RUNTIME_MODE=mock` ships canned outputs for all six agent stages, so you can drive a full Linear-issue -> PR loop without installing any AI CLI. Flip to `AGENT_RUNTIME_MODE=real` once you have `claude` and `codex` working.
 
+### Persistent local serving (pm2)
+
+For an always-on local deployment instead of a foreground `npm run dev`:
+
+```bash
+scripts/setup-pm2.sh
+```
+
+This installs pm2 (under a Node >= 22.12 toolchain, auto-detected via nvm), starts two watch-mode apps — `forge-foundry` (tsx watch, :3100) and `forge-ui` (Vite, :5173) — from [ecosystem.config.cjs](ecosystem.config.cjs), saves the process list, and installs a git `post-merge` hook. From then on:
+
+- **Source changes** (including those arriving via `git pull`) reload automatically: tsx restarts the backend, Vite hot-reloads the UI.
+- **Dependency / Prisma changes** are handled by the post-merge hook, which runs [scripts/redeploy.sh](scripts/redeploy.sh) (installs deps, regenerates the Prisma client, `pm2 startOrReload`). It can also be run manually at any time.
+- **Crashes** are auto-restarted by pm2 (`pm2 ls`, `pm2 logs forge-foundry` to inspect).
+- **Reboots**: run `pm2 startup` once and execute the sudo command it prints, then `pm2 save`. Keep the Postgres container on `--restart unless-stopped` so the database comes back too.
+
 ## Screenshots
 
 > _Screenshots and a short demo GIF will live here. Until they're recorded, run the quickstart above and visit `/runs` for the dashboard or open any run for the artifact viewer + run-scoped chat._
