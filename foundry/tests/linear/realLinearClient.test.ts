@@ -188,6 +188,21 @@ describe("RealLinearClient", () => {
 
       expect(results).toEqual([]);
     });
+
+    it("carries through present project/team/cycle names and treats a null labels connection as no labels", async () => {
+      const issue = makeFakeIssue({
+        id: "issue-1",
+        labels: () => Promise.resolve(null),
+      });
+      injectSdk(client, { issues: () => Promise.resolve({ nodes: [issue] }) });
+
+      const [result] = await client.searchIssues({ state: "Todo" });
+
+      expect(result.labels).toEqual([]);
+      expect(result.project).toBe("Project X");
+      expect(result.team).toBe("PRY");
+      expect(result.cycle).toBe("Cycle 1");
+    });
   });
 
   describe("postComment", () => {
@@ -230,6 +245,21 @@ describe("RealLinearClient", () => {
       expect(updateIssue).not.toHaveBeenCalled();
       expect(logger.warn).toHaveBeenCalledWith(
         { issueId: "issue-1", stateName: "Nonexistent State", teamId: "team-1" },
+        "Could not find workflow state by name",
+      );
+    });
+
+    it("warns and does nothing when the team has no workflow states at all (null states connection)", async () => {
+      const issue = makeFakeIssue({ id: "issue-1" });
+      const updateIssue = vi.fn();
+      const team = vi.fn().mockResolvedValue({ states: () => Promise.resolve(null) });
+      injectSdk(client, { issue: () => Promise.resolve(issue), team, updateIssue });
+
+      await client.updateIssueState("issue-1", "Done");
+
+      expect(updateIssue).not.toHaveBeenCalled();
+      expect(logger.warn).toHaveBeenCalledWith(
+        { issueId: "issue-1", stateName: "Done", teamId: "team-1" },
         "Could not find workflow state by name",
       );
     });
@@ -421,6 +451,44 @@ describe("RealLinearClient", () => {
       await client.removeLabel("issue-1", "urgent");
 
       expect(updateIssue).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("getRelatedContext (nullish coalescing edge cases)", () => {
+    it("treats a null inverseRelations result as having no blockers", async () => {
+      const focus = makeFakeIssue({
+        id: "focus-id",
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        inverseRelations: (() => Promise.resolve(null)) as any,
+      });
+      injectSdk(client, { issue: () => Promise.resolve(focus) });
+
+      const ctx = await client.getRelatedContext("focus-id");
+
+      expect(ctx.blockers).toEqual([]);
+    });
+
+    it("defaults labels to [] and state to 'Unknown' for a related issue with null labels/state", async () => {
+      const parent = makeFakeIssue({
+        id: "parent-id",
+        identifier: "PRY-100",
+        labels: () => Promise.resolve(null),
+        state: Promise.resolve(null),
+      });
+      const focus = makeFakeIssue({ id: "focus-id" });
+      const focusWithParent = {
+        ...focus,
+        parent: Promise.resolve(parent),
+        inverseRelations: () => Promise.resolve({ nodes: [] }),
+      };
+      injectSdk(client, {
+        issue: (id: string) => Promise.resolve(id === "focus-id" ? focusWithParent : parent),
+      });
+
+      const ctx = await client.getRelatedContext("focus-id");
+
+      expect(ctx.parent?.labels).toEqual([]);
+      expect(ctx.parent?.state).toBe("Unknown");
     });
   });
 

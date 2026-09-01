@@ -345,6 +345,7 @@ describe("NotificationService", () => {
           context: longContext,
           openQuestions: [
             { id: "q1", question: "Which env?", requiredForExecution: true },
+            { id: "q2", question: "Which region?", requiredForExecution: false },
           ],
         }),
       );
@@ -352,10 +353,24 @@ describe("NotificationService", () => {
       const body = JSON.parse(fetchMock.mock.calls[0][1].body);
       expect(body.html).toContain("0.77");
       expect(body.html).toContain("<strong>[required]</strong> Which env?");
+      expect(body.html).toContain("<li>Which region?</li>");
       expect(body.html).toContain("…"); // truncate(2000) applied to context
       expect(body.text).toContain("Plan confidence: 0.77");
       expect(body.text).toContain("- [required] Which env?");
+      expect(body.text).toContain("- Which region?");
       expect(body.text).toContain("Context:");
+    });
+
+    it("stringifies a non-Error email rejection", async () => {
+      fetchMock.mockRejectedValue({ reason: "weird email failure" });
+      const svc = new NotificationService(
+        { emailFrom: "a@b.com", emailTo: "dev@b.com", resendApiKey: "key" },
+        makeLogger() as unknown as Logger,
+      );
+
+      const result = await svc.sendHumanRequest(makePayload());
+      expect(result.email.ok).toBe(false);
+      expect(result.email.error).toBe("[object Object]");
     });
 
     it("omits the linear-issue link from both html and text email bodies when linearIssue.url is absent", async () => {
