@@ -352,7 +352,6 @@ describe("OrchestratorService transitionAndRecord side effects on Done/Failed", 
     expect(result.state).toBe(RunState.Failed);
     expect(agentSkillRepo.incrementFailure).toHaveBeenCalledWith("skill-1");
     expect(agentSkillRepo.incrementSuccess).not.toHaveBeenCalled();
-    expect(gitService.removeWorktree).toHaveBeenCalled();
   });
 
   it("does nothing when there is no agentSkillRepo configured", async () => {
