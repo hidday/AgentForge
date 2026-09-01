@@ -130,6 +130,36 @@ describe("useActiveProcesses", () => {
     unmount();
   });
 
+  it("does not apply a stale getProcessOutput result if cancelled between the two awaits", async () => {
+    const proc = makeProcess({ id: "proc-1" });
+    mockApi.getActiveProcesses.mockResolvedValue({ processes: [proc] });
+
+    let resolveOutput!: (v: { processId: string; output: string }) => void;
+    mockApi.getProcessOutput.mockReturnValue(
+      new Promise((res) => {
+        resolveOutput = res;
+      }),
+    );
+
+    const { result, unmount } = renderHook(() => useActiveProcesses("run-1"));
+
+    // Wait until getActiveProcesses has resolved and getProcessOutput has been invoked.
+    await waitFor(() => expect(mockApi.getProcessOutput).toHaveBeenCalledWith("proc-1"));
+    expect(result.current.processes).toHaveLength(1);
+
+    // Unmount triggers the effect cleanup, setting cancelled = true before the
+    // pending getProcessOutput promise resolves.
+    unmount();
+
+    await act(async () => {
+      resolveOutput({ processId: "proc-1", output: "late output" });
+      await Promise.resolve();
+    });
+
+    // Output must remain unset since the cancelled flag guarded the state update.
+    expect(result.current.output).toBe("");
+  });
+
   describe("SSE handling", () => {
     it("ignores events for a different runId", async () => {
       mockApi.getActiveProcesses.mockResolvedValue({ processes: [] });

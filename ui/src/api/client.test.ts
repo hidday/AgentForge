@@ -138,6 +138,13 @@ describe("api client", () => {
       expect(JSON.parse(opts.body)).toEqual({ note: "note text" });
     });
 
+    it("reReviewPlan(runId) omits note when not provided", async () => {
+      fetchMock.mockResolvedValue(jsonResponse({ ok: true, runId: "run-1" }));
+      await api.reReviewPlan("run-1");
+      const [, opts] = fetchMock.mock.calls[0]!;
+      expect(JSON.parse(opts.body)).toEqual({ note: undefined });
+    });
+
     it("revisePlan(runId, note) posts to actions/revise-plan", async () => {
       fetchMock.mockResolvedValue(jsonResponse({ ok: true, runId: "run-1" }));
       await api.revisePlan("run-1");
