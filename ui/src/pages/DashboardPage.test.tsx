@@ -131,6 +131,21 @@ describe("DashboardPage", () => {
     expect(statValues.length).toBe(4); // active, waiting, blocked, done each = 1
   });
 
+  it("counts a run with an unrecognized state under the idle fallback category without crashing", () => {
+    mockUseRuns.mockReturnValue({
+      runs: [makeRun({ id: "r1", state: "SomeBrandNewState" })],
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+    render(<DashboardPage />);
+
+    // Total still reflects the run even though its state maps to no known category.
+    expect(screen.getByTestId("runs-count").textContent).toBe("1");
+    // None of the named category stat cards (Active/Awaiting/Blocked/Done) count it.
+    expect(screen.queryAllByText("1", { selector: ".text-state-active" }).length).toBe(0);
+  });
+
   it("filters the runs table when a filter button is clicked", async () => {
     mockUseRuns.mockReturnValue({
       runs: [

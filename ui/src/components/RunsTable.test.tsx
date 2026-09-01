@@ -108,6 +108,17 @@ describe("RunsTable", () => {
     expect(screen.queryByTitle("Open in Linear")).toBeNull();
   });
 
+  it("stops propagation when the external Linear link is clicked, so it does not navigate the row link", async () => {
+    renderTable([makeRun({ linearIssueUrl: "https://linear.app/team/issue/ENG-1" })]);
+    const link = screen.getByTitle("Open in Linear");
+    const rowClickSpy = vi.fn();
+    link.closest("tr")?.addEventListener("click", rowClickSpy);
+
+    await userEvent.click(link);
+
+    expect(rowClickSpy).not.toHaveBeenCalled();
+  });
+
   it("shows Approve/Reject Plan buttons for AwaitingPlanApproval and calls the API + onAction", async () => {
     mockApi.approvePlan.mockResolvedValue({ ok: true, state: "Implementing" });
     const onAction = vi.fn();
