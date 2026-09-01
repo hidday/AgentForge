@@ -41,16 +41,16 @@ describe("AgentOutputPanel", () => {
   });
 
   it("toggles collapsed state when the header is clicked", async () => {
-    render(<AgentOutputPanel processes={[]} output="line of output" />);
+    render(<AgentOutputPanel processes={[makeProcess()]} output="" />);
 
-    // Expanded by default: "Waiting for output..." or parsed content visible
-    expect(screen.getByText(/waiting for output/i)).toBeDefined();
+    // Expanded by default: the "waiting for output" placeholder is visible
+    expect(screen.getByText("Waiting for output...")).toBeDefined();
 
-    await userEvent.click(screen.getByText("Agent Output (completed)"));
-    expect(screen.queryByText(/waiting for output/i)).toBeNull();
+    await userEvent.click(screen.getByText("claude-code"));
+    expect(screen.queryByText("Waiting for output...")).toBeNull();
 
-    await userEvent.click(screen.getByText("Agent Output (completed)"));
-    expect(screen.getByText(/waiting for output/i)).toBeDefined();
+    await userEvent.click(screen.getByText("claude-code"));
+    expect(screen.getByText("Waiting for output...")).toBeDefined();
   });
 
   it("shows a placeholder message when there is no output yet in parsed view", () => {

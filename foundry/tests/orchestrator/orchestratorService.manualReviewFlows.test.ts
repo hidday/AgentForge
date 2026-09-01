@@ -4,7 +4,6 @@ import { RunState } from "../../src/domain/runState.js";
 import { RunEvent } from "../../src/domain/runEvent.js";
 import type { Run, Artifact, RunEventRecord } from "../../src/domain/types.js";
 import type { Plan } from "../../src/schemas/plan.js";
-import type { PlanReview } from "../../src/schemas/planReview.js";
 
 function makeRun(overrides: Partial<Run> = {}): Run {
   return {
@@ -38,10 +37,8 @@ function makePlan(overrides: Partial<Plan> = {}): Plan {
     summary: "Test plan",
     requirementsTraceability: "",
     assumptions: [],
-    openQuestions: [
-      { id: "q1", question: "Optional question?", requiredForExecution: false },
-    ],
-    risks: ["Some risk"],
+    openQuestions: [],
+    risks: [],
     steps: [{ id: "s1", title: "Step 1", description: "Do something" }],
     testPlan: "Run tests",
     confidence: 0.9,
@@ -218,17 +215,15 @@ function buildDeps(store: TestStore) {
       logger,
       dashboardEmitter,
     },
-    runRepo,
-    artifactRepo,
-    linearClient,
     planReviewerAgent,
     planReviserAgent,
+    linearClient,
     logger,
   };
 }
 
-describe("OrchestratorService.approvePlan", () => {
-  it("sets approvedPlanVersion, transitions to Implementing, and posts a plain approval comment when no note is given", async () => {
+describe("OrchestratorService.runManualReReview", () => {
+  it("approved verdict: transitions to AwaitingPlanApproval via PLAN_REVIEW_APPROVED", async () => {
     const plan = makePlan({ planVersion: 2 });
     const store: TestStore = {
       runState: RunState.AwaitingPlanApproval,
@@ -237,19 +232,24 @@ describe("OrchestratorService.approvePlan", () => {
       events: [],
     };
     const built = buildDeps(store);
+    built.planReviewerAgent.run.mockResolvedValue({
+      reviewId: "pr-1",
+      summary: "All good",
+      overallVerdict: "approved",
+      findings: [],
+    });
+
     const svc = new OrchestratorService(built.deps as never);
+    const result = await svc.runManualReReview("run-1");
 
-    const result = await svc.approvePlan("run-1");
-
-    expect(store.run.approvedPlanVersion).toBe(2);
-    expect(result.state).toBe(RunState.Implementing);
-    expect(store.events.map((e) => e.eventType)).toContain(RunEvent.PLAN_APPROVED);
-
-    const comment = built.linearClient.postComment.mock.calls[0];
-    expect(comment[1]).toBe("Plan v2 approved. Starting implementation...");
+    expect(store.events.map((e) => e.eventType)).toEqual([
+      RunEvent.RE_REVIEW_REQUESTED,
+      RunEvent.PLAN_REVIEW_APPROVED,
+    ]);
+    expect(result.state).toBe(RunState.AwaitingPlanApproval);
   });
 
-  it("includes the operator note in the approval comment and event payload when provided", async () => {
+  it("changes_requested verdict: still returns to AwaitingPlanApproval (does not auto-chain into PlanRevision)", async () => {
     const plan = makePlan({ planVersion: 2 });
     const store: TestStore = {
       runState: RunState.AwaitingPlanApproval,
@@ -258,18 +258,117 @@ describe("OrchestratorService.approvePlan", () => {
       events: [],
     };
     const built = buildDeps(store);
+    built.planReviewerAgent.run.mockResolvedValue({
+      reviewId: "pr-1",
+      summary: "Needs work",
+      overallVerdict: "changes_requested",
+      findings: [
+        { id: "f1", severity: "important", type: "gap", title: "Gap", details: "Missing step" },
+      ],
+    });
+
     const svc = new OrchestratorService(built.deps as never);
+    const result = await svc.runManualReReview("run-1");
 
-    await svc.approvePlan("run-1", { note: "Please prioritize security" });
+    expect(store.events.map((e) => e.eventType)).toEqual([
+      RunEvent.RE_REVIEW_REQUESTED,
+      RunEvent.PLAN_REVIEW_APPROVED,
+    ]);
+    expect(result.state).toBe(RunState.AwaitingPlanApproval);
+  });
 
-    const comment = built.linearClient.postComment.mock.calls[0];
-    expect(comment[1]).toContain("approved with operator note");
-    expect(comment[1]).toContain("Please prioritize security");
+  it("passes opts.note through to the plan reviewer agent and the RE_REVIEW_REQUESTED event payload", async () => {
+    const plan = makePlan({ planVersion: 2 });
+    const store: TestStore = {
+      runState: RunState.AwaitingPlanApproval,
+      run: makeRun({ state: RunState.AwaitingPlanApproval, planVersion: 2 }),
+      artifacts: [asArtifact({ type: "Plan", version: 2, payloadJson: plan })],
+      events: [],
+    };
+    const built = buildDeps(store);
+    built.planReviewerAgent.run.mockResolvedValue({
+      reviewId: "pr-1",
+      summary: "ok",
+      overallVerdict: "approved",
+      findings: [],
+    });
 
-    const approvalEvent = store.events.find((e) => e.eventType === (RunEvent.PLAN_APPROVED as string));
-    expect((approvalEvent!.payloadJson as { note?: string }).note).toBe(
-      "Please prioritize security",
+    const svc = new OrchestratorService(built.deps as never);
+    await svc.runManualReReview("run-1", { note: "Double check auth" });
+
+    const call = built.planReviewerAgent.run.mock.calls[0];
+    expect(call[3]).toEqual({ operatorNote: "Double check auth" });
+
+    const reReviewEvent = store.events.find(
+      (e) => e.eventType === (RunEvent.RE_REVIEW_REQUESTED as string),
     );
+    expect((reReviewEvent!.payloadJson as { note?: string }).note).toBe("Double check auth");
+  });
+});
+
+describe("OrchestratorService.runManualPlanRevision", () => {
+  it("approved verdict: transitions to AwaitingPlanApproval without invoking the plan reviser", async () => {
+    const plan = makePlan({ planVersion: 2 });
+    const store: TestStore = {
+      runState: RunState.AwaitingPlanApproval,
+      run: makeRun({ state: RunState.AwaitingPlanApproval, planVersion: 2 }),
+      artifacts: [asArtifact({ type: "Plan", version: 2, payloadJson: plan })],
+      events: [],
+    };
+    const built = buildDeps(store);
+    built.planReviewerAgent.run.mockResolvedValue({
+      reviewId: "pr-1",
+      summary: "All good",
+      overallVerdict: "approved",
+      findings: [],
+    });
+
+    const svc = new OrchestratorService(built.deps as never);
+    const result = await svc.runManualPlanRevision("run-1");
+
+    expect(built.planReviserAgent.run).not.toHaveBeenCalled();
+    expect(store.events.map((e) => e.eventType)).toEqual([
+      RunEvent.RE_REVIEW_REQUESTED,
+      RunEvent.PLAN_REVIEW_APPROVED,
+    ]);
+    expect(result.state).toBe(RunState.AwaitingPlanApproval);
+  });
+
+  it("changes_requested verdict: transitions through PlanRevision and delegates to runPlanRevision with the note", async () => {
+    const plan = makePlan({ planVersion: 2 });
+    const store: TestStore = {
+      runState: RunState.AwaitingPlanApproval,
+      run: makeRun({ state: RunState.AwaitingPlanApproval, planVersion: 2 }),
+      artifacts: [asArtifact({ type: "Plan", version: 2, payloadJson: plan })],
+      events: [],
+    };
+    const built = buildDeps(store);
+    built.planReviewerAgent.run.mockResolvedValue({
+      reviewId: "pr-1",
+      summary: "Needs work",
+      overallVerdict: "changes_requested",
+      findings: [
+        { id: "f1", severity: "important", type: "gap", title: "Gap", details: "Missing step" },
+      ],
+    });
+    built.planReviserAgent.run.mockResolvedValue({
+      revision: { dispositions: [{ findingId: "f1", status: "addressed", rationale: "Fixed" }] },
+      revisedPlan: makePlan({ planVersion: 3 }),
+    });
+
+    const svc = new OrchestratorService(built.deps as never);
+    const result = await svc.runManualPlanRevision("run-1", { note: "Tighten scope" });
+
+    expect(store.events.map((e) => e.eventType)).toEqual([
+      RunEvent.RE_REVIEW_REQUESTED,
+      RunEvent.PLAN_REVIEW_CHANGES_REQUESTED,
+      RunEvent.PLAN_REVISED,
+    ]);
+    expect(result.state).toBe(RunState.AwaitingPlanApproval);
+    expect(store.run.planVersion).toBe(3);
+
+    const revisionCall = built.planReviserAgent.run.mock.calls[0];
+    expect(revisionCall[4]).toEqual({ operatorNote: "Tighten scope" });
   });
 
   it("throws when no Plan artifact exists for the run", async () => {
@@ -282,109 +381,6 @@ describe("OrchestratorService.approvePlan", () => {
     const built = buildDeps(store);
     const svc = new OrchestratorService(built.deps as never);
 
-    await expect(svc.approvePlan("run-1")).rejects.toThrow(/No plan artifact found/);
-  });
-});
-
-describe("OrchestratorService.runPlanReview -> runPlanRevision (changes_requested chain)", () => {
-  it("posts the plan review comment, transitions through PlanRevision, revises the plan, and posts the revision comment", async () => {
-    const plan = makePlan({ planVersion: 2 });
-    const store: TestStore = {
-      runState: RunState.PlanReview,
-      run: makeRun({ state: RunState.PlanReview, planVersion: 2 }),
-      artifacts: [asArtifact({ type: "Plan", version: 2, payloadJson: plan })],
-      events: [],
-    };
-    const built = buildDeps(store);
-
-    const planReview: PlanReview = {
-      reviewId: "pr-1",
-      summary: "Needs a fix",
-      overallVerdict: "changes_requested",
-      findings: [
-        {
-          id: "pf1",
-          severity: "important",
-          type: "gap",
-          affectedStepId: "s1",
-          title: "Missing edge case",
-          details: "Step 1 doesn't handle nulls",
-        },
-      ],
-    };
-    built.planReviewerAgent.run.mockResolvedValue(planReview);
-
-    const revisedPlan = makePlan({ planVersion: 3 });
-    built.planReviserAgent.run.mockResolvedValue({
-      revision: {
-        dispositions: [
-          { findingId: "pf1", status: "addressed", rationale: "Added null check" },
-        ],
-      },
-      revisedPlan,
-    });
-
-    const svc = new OrchestratorService(built.deps as never);
-    const result = await svc.runPlanReview("run-1");
-
-    // formatPlanReviewComment output
-    const reviewComment = built.linearClient.postComment.mock.calls.find((c: unknown[]) =>
-      (c[1] as string).includes("AI Plan Review"),
-    );
-    expect(reviewComment).toBeDefined();
-    expect(reviewComment![1]).toContain("Changes Requested");
-    expect(reviewComment![1]).toContain("Missing edge case");
-    expect(reviewComment![1]).toContain("(step s1)");
-
-    // formatPlanRevisionComment + formatPlanComment (revised) output
-    const revisionComment = built.linearClient.postComment.mock.calls.find((c: unknown[]) =>
-      (c[1] as string).includes("Plan Revision Dispositions"),
-    );
-    expect(revisionComment).toBeDefined();
-    expect(revisionComment![1]).toContain("pf1");
-    expect(revisionComment![1]).toContain("Added null check");
-
-    expect(store.events.map((e) => e.eventType)).toEqual(
-      expect.arrayContaining([RunEvent.PLAN_REVIEW_CHANGES_REQUESTED, RunEvent.PLAN_REVISED]),
-    );
-    expect(result.state).toBe(RunState.AwaitingPlanApproval);
-    expect(store.run.planVersion).toBe(3);
-  });
-
-  it("passes opts.note through as an operatorNote to the plan reviser agent", async () => {
-    const plan = makePlan({ planVersion: 2 });
-    const store: TestStore = {
-      runState: RunState.PlanRevision,
-      run: makeRun({ state: RunState.PlanRevision, planVersion: 2 }),
-      artifacts: [asArtifact({ type: "Plan", version: 2, payloadJson: plan })],
-      events: [],
-    };
-    const built = buildDeps(store);
-    built.planReviserAgent.run.mockResolvedValue({
-      revision: { dispositions: [] },
-      revisedPlan: makePlan({ planVersion: 3 }),
-    });
-
-    const svc = new OrchestratorService(built.deps as never);
-    await svc.runPlanRevision("run-1", { note: "Be more conservative" });
-
-    expect(built.planReviserAgent.run).toHaveBeenCalledTimes(1);
-    const call = built.planReviserAgent.run.mock.calls[0];
-    expect(call[3]).toBe("run-1");
-    expect(call[4]).toEqual({ operatorNote: "Be more conservative" });
-  });
-
-  it("throws when no Plan artifact exists for the run", async () => {
-    const store: TestStore = {
-      runState: RunState.PlanReview,
-      run: makeRun({ state: RunState.PlanReview }),
-      artifacts: [],
-      events: [],
-    };
-    const built = buildDeps(store);
-    const svc = new OrchestratorService(built.deps as never);
-
-    await expect(svc.runPlanReview("run-1")).rejects.toThrow(/No plan artifact found/);
-    expect(built.planReviewerAgent.run).not.toHaveBeenCalled();
+    await expect(svc.runManualPlanRevision("run-1")).rejects.toThrow(/No plan artifact found/);
   });
 });

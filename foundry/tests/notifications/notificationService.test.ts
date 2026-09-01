@@ -358,6 +358,23 @@ describe("NotificationService", () => {
       expect(body.text).toContain("Context:");
     });
 
+    it("omits the linear-issue link from both html and text email bodies when linearIssue.url is absent", async () => {
+      fetchMock.mockResolvedValue(jsonResponse(true));
+      const svc = new NotificationService(
+        { emailFrom: "a@b.com", emailTo: "dev@b.com", resendApiKey: "key" },
+        makeLogger() as unknown as Logger,
+      );
+
+      await svc.sendHumanRequest(
+        makePayload({ linearIssue: { id: "lin-1", title: null, url: null } }),
+      );
+
+      const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+      expect(body.html).not.toContain("Open Linear issue");
+      expect(body.text).not.toContain("Linear:");
+      expect(body.html).toContain("(untitled)");
+    });
+
     it("marks email failed and logs a warning when Resend returns a non-ok response", async () => {
       fetchMock.mockResolvedValue({
         ok: false,
