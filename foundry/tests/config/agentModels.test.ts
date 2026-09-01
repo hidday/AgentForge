@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { resolveAgentModel, tierForStage } from "../../src/config/agentModels.js";
 import type { Env } from "../../src/config/env.js";
+import type { Stage } from "../../src/schemas/cliProtocol.js";
 
 const env = {
   CLAUDE_CODE_MODEL: "claude-fable-5",
@@ -30,5 +31,14 @@ describe("agentModels", () => {
     expect(tierForStage("reviewer")).toBe("review");
     expect(resolveAgentModel("plan-reviewer", env)).toBe("gpt-5.6-sol");
     expect(resolveAgentModel("reviewer", env)).toBe("gpt-5.6-sol");
+  });
+
+  it("throws for a tier that falls outside the known lead/research/review set", () => {
+    // STAGE_TIERS has no entry for an unrecognized stage, so tierForStage
+    // returns undefined and resolveAgentModel's switch falls through to its
+    // exhaustiveness-check default branch, which must throw rather than
+    // silently returning an unresolved model.
+    const bogusStage = "not-a-real-stage" as Stage;
+    expect(() => resolveAgentModel(bogusStage, env)).toThrow(/Unknown agent model tier/);
   });
 });
