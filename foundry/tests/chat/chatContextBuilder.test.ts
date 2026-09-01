@@ -247,4 +247,221 @@ describe("buildChatSystemPrompt", () => {
     expect(result).toContain("New summary");
     expect(result).not.toContain("Old summary");
   });
+
+  it("keeps the earlier artifact as latest when it appears after a lower-versioned one (findLatest reduce false branch)", () => {
+    const planV2 = makeArtifact({
+      type: "Plan",
+      version: 2,
+      payloadJson: { summary: "Higher version summary" },
+    });
+    const planV1 = makeArtifact({
+      type: "Plan",
+      version: 1,
+      payloadJson: { summary: "Lower version summary" },
+    });
+    // planV2 comes first in the array, so the reduce comparison for planV1
+    // (cur.version=1 > best.version=2) must be false and keep planV2 as best.
+    const result = buildChatSystemPrompt(makeRun(), [planV2, planV1]);
+    expect(result).toContain("Higher version summary");
+    expect(result).not.toContain("Lower version summary");
+  });
+
+  it("renders open questions for the plan, distinguishing string and object entries", () => {
+    const planArtifact = makeArtifact({
+      type: "Plan",
+      version: 1,
+      payloadJson: {
+        summary: "Plan with open questions",
+        steps: [],
+        openQuestions: ["Plain string question", { id: "q2", question: "Structured question" }],
+      },
+    });
+    const result = buildChatSystemPrompt(makeRun(), [planArtifact]);
+    expect(result).toContain("**Open Questions:**");
+    expect(result).toContain("Plain string question");
+    expect(result).toContain(JSON.stringify({ id: "q2", question: "Structured question" }));
+  });
+
+  it("JSON-stringifies non-string risk and assumption entries on the plan", () => {
+    const planArtifact = makeArtifact({
+      type: "Plan",
+      version: 1,
+      payloadJson: {
+        summary: "Plan with structured risks",
+        risks: [{ description: "Structured risk" }],
+        assumptions: [{ description: "Structured assumption" }],
+      },
+    });
+    const result = buildChatSystemPrompt(makeRun(), [planArtifact]);
+    expect(result).toContain(JSON.stringify({ description: "Structured risk" }));
+    expect(result).toContain(JSON.stringify({ description: "Structured assumption" }));
+  });
+
+  it("falls back to blank fields on plan steps missing id/title/description", () => {
+    const planArtifact = makeArtifact({
+      type: "Plan",
+      version: 1,
+      payloadJson: {
+        summary: "Plan with a sparse step",
+        steps: [{}],
+      },
+    });
+    const result = buildChatSystemPrompt(makeRun(), [planArtifact]);
+    expect(result).toContain("**Steps:**");
+    expect(result).toContain("  - **** : ");
+  });
+
+  it("uses '(none)' fallbacks when branchName and prNumber are null", () => {
+    const result = buildChatSystemPrompt(makeRun({ branchName: null, prNumber: null }), []);
+    expect(result).toContain("**Branch:** (none)");
+    expect(result).toContain("**PR Number:** (none)");
+  });
+
+  it("omits the Linear Issue section entirely when title, identifier, and description are all absent", () => {
+    const result = buildChatSystemPrompt(
+      makeRun({
+        linearIssueTitle: null,
+        linearIssueIdentifier: null,
+        linearIssueDescription: null,
+      }),
+      [],
+    );
+    expect(result).not.toContain("## Linear Issue");
+  });
+
+  it("does not render a sources line when researched-answer sources is an empty array", () => {
+    const artifact = makeArtifact({
+      type: "ResearchedAnswers",
+      version: 1,
+      payloadJson: {
+        summary: "Coverage for empty sources array.",
+        answers: [
+          {
+            questionId: "q1",
+            question: "Q?",
+            answer: "A.",
+            confidence: "low",
+            sources: [],
+          },
+        ],
+      },
+    });
+    const result = buildChatSystemPrompt(makeRun(), [artifact]);
+    expect(result).toContain("[q1] (low)");
+    expect(result).not.toContain("sources:");
+  });
+
+  it("renders plan review findings as structured markdown when a PlanReview artifact is present", () => {
+    const artifact = makeArtifact({
+      type: "PlanReview",
+      version: 1,
+      payloadJson: {
+        summary: "Plan reviewed, one gap found.",
+        findings: [
+          {
+            id: "pr1",
+            severity: "important",
+            title: "Missing rollback step",
+            details: "No rollback plan on migration failure.",
+          },
+        ],
+      },
+    });
+    const result = buildChatSystemPrompt(makeRun(), [artifact]);
+    expect(result).toContain("## Plan Review Findings");
+    expect(result).toContain("**Summary:** Plan reviewed, one gap found.");
+    expect(result).toContain(
+      "  - **[important] Missing rollback step** (pr1): No rollback plan on migration failure.",
+    );
+  });
+
+  it("omits the Plan Review Findings section when no PlanReview artifact is present", () => {
+    const result = buildChatSystemPrompt(makeRun(), []);
+    expect(result).not.toContain("## Plan Review Findings");
+  });
+
+  it("renders code review findings as structured markdown when a Review artifact is present", () => {
+    const artifact = makeArtifact({
+      type: "Review",
+      version: 1,
+      payloadJson: {
+        summary: "One blocker found.",
+        findings: [
+          {
+            id: "f1",
+            severity: "blocker",
+            title: "Null pointer risk",
+            details: "foo can be undefined.",
+          },
+        ],
+      },
+    });
+    const result = buildChatSystemPrompt(makeRun(), [artifact]);
+    expect(result).toContain("## Code Review Findings");
+    expect(result).toContain("**Summary:** One blocker found.");
+    expect(result).toContain("  - **[blocker] Null pointer risk** (f1): foo can be undefined.");
+  });
+
+  it("omits the Code Review Findings section when no Review artifact is present", () => {
+    const result = buildChatSystemPrompt(makeRun(), []);
+    expect(result).not.toContain("## Code Review Findings");
+  });
+
+  it("renders execution report checks without a details suffix when details are absent", () => {
+    const artifact = makeArtifact({
+      type: "ExecutionReport",
+      version: 1,
+      payloadJson: {
+        executionVersion: 1,
+        checks: {
+          lint: { status: "pass" },
+          typecheck: { status: "pass" },
+          tests: { status: "pass" },
+        },
+      },
+    });
+    const result = buildChatSystemPrompt(makeRun(), [artifact]);
+    expect(result).toContain("**Lint:** pass");
+    expect(result).not.toContain("**Lint:** pass —");
+  });
+
+  it("JSON-stringifies non-string filesChanged and notes entries on the execution report", () => {
+    const artifact = makeArtifact({
+      type: "ExecutionReport",
+      version: 1,
+      payloadJson: {
+        executionVersion: 1,
+        filesChanged: [{ path: "src/foo.ts" }],
+        notes: [{ note: "structured note" }],
+      },
+    });
+    const result = buildChatSystemPrompt(makeRun(), [artifact]);
+    expect(result).toContain(`\`${JSON.stringify({ path: "src/foo.ts" })}\``);
+    expect(result).toContain(JSON.stringify({ note: "structured note" }));
+  });
+
+  it("omits the PR Draft Created line when prDraftCreated is not a boolean", () => {
+    const artifact = makeArtifact({
+      type: "ExecutionReport",
+      version: 1,
+      payloadJson: {
+        executionVersion: 1,
+        summary: "No prDraftCreated field on this payload.",
+      },
+    });
+    const result = buildChatSystemPrompt(makeRun(), [artifact]);
+    expect(result).toContain("## Execution Report");
+    expect(result).not.toContain("PR Draft Created");
+  });
+
+  it("uses '?' fallbacks for a RejectionContext artifact missing planVersion/source/mode/feedback", () => {
+    const artifact = makeArtifact({
+      type: "RejectionContext",
+      version: 1,
+      payloadJson: {},
+    });
+    const result = buildChatSystemPrompt(makeRun(), [artifact]);
+    expect(result).toContain("## Rejection Context(s)");
+    expect(result).toContain("**Plan v?** (, ): ");
+  });
 });

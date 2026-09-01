@@ -138,7 +138,7 @@ describe("GitHubSyncService.postReviewFindings", () => {
       1,
       "org/repo",
       7,
-      expect.stringContaining("[IMPORTANT] Possible bug"),
+      expect.stringContaining("**[IMPORTANT]** Possible bug"),
       "src/foo.ts",
       10,
     );

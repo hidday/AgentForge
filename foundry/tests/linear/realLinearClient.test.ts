@@ -424,6 +424,40 @@ describe("RealLinearClient", () => {
     });
   });
 
+  describe("getRelatedContext (blocker hydration failure)", () => {
+    it("logs a warning and skips a blocker whose relation.issue rejects", async () => {
+      const goodBlocker = makeFakeIssue({ id: "blocker-good", identifier: "PRY-2" });
+      const focus = makeFakeIssue({
+        id: "focus-id",
+        team: Promise.resolve(null),
+        project: Promise.resolve(null),
+        cycle: Promise.resolve(null),
+      });
+      const hydrationError = new Error("issue fetch failed");
+      const inverseRelations = () =>
+        Promise.resolve({
+          nodes: [
+            { id: "rel-bad", type: "blocks", issue: Promise.reject(hydrationError) },
+            { id: "rel-good", type: "blocks", issue: Promise.resolve(goodBlocker) },
+          ],
+        });
+      const focusWithRelations = { ...focus, inverseRelations };
+      injectSdk(client, {
+        issue: (id: string) =>
+          Promise.resolve(id === "focus-id" ? focusWithRelations : goodBlocker),
+      });
+
+      const ctx = await client.getRelatedContext("focus-id");
+
+      expect(ctx.blockers).toHaveLength(1);
+      expect(ctx.blockers[0].id).toBe("blocker-good");
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.objectContaining({ relationId: "rel-bad", focusIssueId: "focus-id" }),
+        "Failed to hydrate blocker issue from relation",
+      );
+    });
+  });
+
   describe("listLabels", () => {
     it("returns label names and populates the label cache", async () => {
       const issue = makeFakeIssue({

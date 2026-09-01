@@ -152,6 +152,7 @@ describe("EventTimeline", () => {
     );
     const timeEl = container.querySelector("[title]");
     expect(timeEl).not.toBeNull();
-    expect(timeEl?.getAttribute("title")).toContain("2024");
+    // formatTimestamp uses toLocaleString with month/day/hour/minute/second (no year)
+    expect(timeEl?.getAttribute("title")).toMatch(/^Jan 1, /);
   });
 });

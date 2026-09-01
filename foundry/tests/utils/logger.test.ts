@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { logger } from "../../src/utils/logger.js";
 import { env } from "../../src/config/env.js";
 
@@ -28,5 +28,24 @@ describe("logger", () => {
     expect(() => logger.info("logger test info message")).not.toThrow();
     expect(() => logger.warn("logger test warn message")).not.toThrow();
     expect(() => logger.debug("logger test debug message")).not.toThrow();
+  });
+
+  it("omits the pino-pretty transport when NODE_ENV is 'production'", async () => {
+    const originalNodeEnv = process.env.NODE_ENV;
+    process.env.NODE_ENV = "production";
+    vi.resetModules();
+    try {
+      const fresh = await import("../../src/utils/logger.js");
+      expect(fresh.logger).toBeDefined();
+      expect(typeof fresh.logger.info).toBe("function");
+      expect(() => fresh.logger.info("production mode logger message")).not.toThrow();
+    } finally {
+      if (originalNodeEnv === undefined) {
+        delete process.env.NODE_ENV;
+      } else {
+        process.env.NODE_ENV = originalNodeEnv;
+      }
+      vi.resetModules();
+    }
   });
 });

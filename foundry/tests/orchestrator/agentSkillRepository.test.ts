@@ -318,9 +318,7 @@ describe("AgentSkillRepository", () => {
       const update = vi.fn().mockResolvedValue(updated);
       const tx = { agentSkill: { findUniqueOrThrow, update } };
       const $transaction = vi.fn().mockImplementation((fn: (tx: unknown) => unknown) => fn(tx));
-      const prisma = makePrisma({ $transaction }) as unknown as PrismaClient & {
-        $transaction: typeof $transaction;
-      };
+      const prisma = { $transaction } as unknown as PrismaClient;
       const repo = new AgentSkillRepository(prisma);
 
       const result = await repo.incrementSuccess("s1");
@@ -344,7 +342,7 @@ describe("AgentSkillRepository", () => {
       const findUniqueOrThrow = vi.fn().mockRejectedValue(notFoundErr);
       const tx = { agentSkill: { findUniqueOrThrow, update: vi.fn() } };
       const $transaction = vi.fn().mockImplementation((fn: (tx: unknown) => unknown) => fn(tx));
-      const prisma = makePrisma({ $transaction }) as unknown as PrismaClient;
+      const prisma = { $transaction } as unknown as PrismaClient;
       const repo = new AgentSkillRepository(prisma);
 
       await expect(repo.incrementSuccess("missing")).rejects.toThrow("No AgentSkill found");
@@ -359,7 +357,7 @@ describe("AgentSkillRepository", () => {
       const update = vi.fn().mockResolvedValue(updated);
       const tx = { agentSkill: { findUniqueOrThrow, update } };
       const $transaction = vi.fn().mockImplementation((fn: (tx: unknown) => unknown) => fn(tx));
-      const prisma = makePrisma({ $transaction }) as unknown as PrismaClient;
+      const prisma = { $transaction } as unknown as PrismaClient;
       const repo = new AgentSkillRepository(prisma);
 
       const result = await repo.incrementFailure("s1");
@@ -434,7 +432,7 @@ describe("AgentSkillRepository", () => {
       const create = vi.fn().mockResolvedValue(newSkillRow);
       const tx = { agentSkill: { findFirst, update, create } };
       const $transaction = vi.fn().mockImplementation((fn: (tx: unknown) => unknown) => fn(tx));
-      const prisma = makePrisma({ $transaction }) as unknown as PrismaClient;
+      const prisma = { $transaction } as unknown as PrismaClient;
       const repo = new AgentSkillRepository(prisma);
 
       const result = await repo.displaceAndCreate("org/repo", {
@@ -473,7 +471,7 @@ describe("AgentSkillRepository", () => {
       const create = vi.fn();
       const tx = { agentSkill: { findFirst, update, create } };
       const $transaction = vi.fn().mockImplementation((fn: (tx: unknown) => unknown) => fn(tx));
-      const prisma = makePrisma({ $transaction }) as unknown as PrismaClient;
+      const prisma = { $transaction } as unknown as PrismaClient;
       const repo = new AgentSkillRepository(prisma);
 
       await expect(
