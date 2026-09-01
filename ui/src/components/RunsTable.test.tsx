@@ -108,15 +108,26 @@ describe("RunsTable", () => {
     expect(screen.queryByTitle("Open in Linear")).toBeNull();
   });
 
-  it("stops propagation when the external Linear link is clicked, so it does not navigate the row link", async () => {
-    renderTable([makeRun({ linearIssueUrl: "https://linear.app/team/issue/ENG-1" })]);
-    const link = screen.getByTitle("Open in Linear");
-    const rowClickSpy = vi.fn();
-    link.closest("tr")?.addEventListener("click", rowClickSpy);
+  it("stops propagation when the external Linear link is clicked, so an ancestor click handler does not also fire", async () => {
+    // React's stopPropagation only stops the *synthetic* event system, so the
+    // ancestor handler under test must itself be a React handler (not a plain
+    // native addEventListener, which would still see the raw DOM bubble).
+    const ancestorClickSpy = vi.fn();
+    render(
+      <MemoryRouter>
+        <div onClick={ancestorClickSpy}>
+          <RunsTable runs={[makeRun({ linearIssueUrl: "https://linear.app/team/issue/ENG-1" })]} />
+        </div>
+      </MemoryRouter>,
+    );
 
-    await userEvent.click(link);
+    await userEvent.click(screen.getByTitle("Open in Linear"));
+    expect(ancestorClickSpy).not.toHaveBeenCalled();
 
-    expect(rowClickSpy).not.toHaveBeenCalled();
+    // Sanity check: the ancestor handler does fire for a normal click elsewhere
+    // in the row, proving the assertion above isn't vacuously true.
+    await userEvent.click(screen.getByText("acme/widgets"));
+    expect(ancestorClickSpy).toHaveBeenCalledOnce();
   });
 
   it("shows Approve/Reject Plan buttons for AwaitingPlanApproval and calls the API + onAction", async () => {

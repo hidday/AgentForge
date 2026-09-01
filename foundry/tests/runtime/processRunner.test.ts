@@ -545,4 +545,89 @@ describe("ProcessRunner — rehydrateOrphans", () => {
     expect(logger.warn).not.toHaveBeenCalled();
     expect(runner.getActiveProcesses()).toEqual([]);
   });
+
+  it("rehydrates a still-alive orphan, tails its log, and finalizes it once the polling interval detects it has died", async () => {
+    // `process.kill(pid, 0)` is used as a liveness probe both by the initial
+    // rehydrate check and by tailLogForOrphan's 5s poll. Spy on it so the
+    // orphan's "alive" and "died" transitions are deterministic — no real
+    // long-lived child process or real 5s wait required.
+    // Spy on it so the
+    // orphan's "alive" and "died" transitions are deterministic — no real
+    // long-lived child process or real 5s wait required.
+    const killSpy = vi.spyOn(process, "kill").mockImplementation(() => true as never);
+    vi.useFakeTimers();
+
+    const logger = makeMockLogger();
+    const emitter = makeMockEmitter();
+    const runner = new ProcessRunner("real", logger as never, emitter as never, spoolDir);
+
+    const logPath = join(spoolDir, "orphan-alive.log");
+    writeFileSync(logPath, "existing log content");
+
+    const manifestPath = join(spoolDir, "orphan-alive.json");
+    const manifest = {
+      id: "orphan-alive",
+      pid: 424242,
+      command: "some-long-running-command",
+      args: [],
+      runId: "run-orphan-alive",
+      stage: "executor",
+      runtime: "claude-code",
+      startedAt: new Date().toISOString(),
+      logFile: logPath,
+    };
+    writeFileSync(manifestPath, JSON.stringify(manifest));
+
+    try {
+      runner.rehydrateOrphans();
+
+      // Alive branch: rehydrated into activeProcesses, log tailing started,
+      // process:started re-emitted, no crash logged.
+      expect(runner.getActiveProcesses()).toHaveLength(1);
+      expect(runner.getActiveProcesses()[0]).toMatchObject({ id: "orphan-alive", pid: 424242 });
+      expect(logger.warn).not.toHaveBeenCalled();
+      expect(emitter.emitProcessStarted).toHaveBeenCalledWith(
+        "run-orphan-alive",
+        "orphan-alive",
+        "executor",
+        "claude-code",
+        "some-long-running-command",
+      );
+
+      // Now make the liveness probe throw (process died) and advance the
+      // fake clock past the 5s poll interval.
+      killSpy.mockImplementation(() => {
+        throw new Error("ESRCH");
+      });
+      vi.advanceTimersByTime(5_000);
+
+      expect(runner.getActiveProcesses()).toEqual([]);
+      expect(emitter.emitProcessCompleted).toHaveBeenCalledWith(
+        "run-orphan-alive",
+        "orphan-alive",
+        "executor",
+        "claude-code",
+        -1,
+        expect.any(Number),
+      );
+      expect(logger.info).toHaveBeenCalledWith(
+        expect.objectContaining({ processId: "orphan-alive", pid: 424242 }),
+        "Orphaned process has exited",
+      );
+
+      const finalManifest = JSON.parse(readFileSync(manifestPath, "utf-8"));
+      expect(finalManifest.completedAt).toBeDefined();
+      expect(finalManifest.exitCode).toBe(-1);
+
+      // Give the real event loop a tick so the fs.watch handle closed above
+      // fully tears down at the OS level before the spool dir is removed in
+      // afterEach — otherwise a pending inotify/kqueue event can surface as
+      // an unhandled watcher error once the directory disappears.
+      vi.useRealTimers();
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    } finally {
+      vi.useRealTimers();
+      killSpy.mockRestore();
+    }
+  });
 });

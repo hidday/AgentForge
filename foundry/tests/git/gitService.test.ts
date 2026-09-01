@@ -237,6 +237,16 @@ describe("GitService", () => {
       );
       expect(buildWorktreeDirName("abcdefgh", "")).toBe("run-abcdefgh");
     });
+
+    it("stops accumulating slug words once the next word would exceed the 30-char limit", () => {
+      // "short" (5 chars) fits; appending "-" + a 30-char word would push the
+      // combined slug to 36 chars, so the loop must stop after "short" and
+      // never include the second word.
+      const longSecondWord = "x".repeat(30);
+      const result = buildWorktreeDirName("abcdefgh", `eng-2-short-${longSecondWord}`);
+      expect(result).toBe("run-abcdefgh-eng-2-short");
+      expect(result).not.toContain(longSecondWord);
+    });
   });
 
   describe("resolveMainRepoPath", () => {

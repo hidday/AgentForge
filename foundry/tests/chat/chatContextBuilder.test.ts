@@ -464,4 +464,76 @@ describe("buildChatSystemPrompt", () => {
     expect(result).toContain("## Rejection Context(s)");
     expect(result).toContain("**Plan v?** (, ): ");
   });
+
+  it("falls back to blank fields for a human answer missing questionId/answer", () => {
+    const artifact = makeArtifact({
+      type: "HumanAnswers",
+      version: 1,
+      payloadJson: { answers: [{}] },
+    });
+    const result = buildChatSystemPrompt(makeRun(), [artifact]);
+    expect(result).toContain("## Human Answers");
+    expect(result).toContain("  - **[]:** ");
+  });
+
+  it("falls back to blank fields for a researched answer missing questionId/confidence/answer, and omits the summary line when summary is absent", () => {
+    const artifact = makeArtifact({
+      type: "ResearchedAnswers",
+      version: 1,
+      payloadJson: { answers: [{}] },
+    });
+    const result = buildChatSystemPrompt(makeRun(), [artifact]);
+    expect(result).toContain("## Researched Answers");
+    expect(result).toContain("  - **[] ():** ");
+    expect(result).not.toContain("**Summary:**");
+  });
+
+  it("falls back to blank fields for a plan-review finding missing severity/title/id/details", () => {
+    const artifact = makeArtifact({
+      type: "PlanReview",
+      version: 1,
+      payloadJson: { findings: [{}] },
+    });
+    const result = buildChatSystemPrompt(makeRun(), [artifact]);
+    expect(result).toContain("## Plan Review Findings");
+    expect(result).toContain("  - **[] ** (): ");
+  });
+
+  it("falls back to blank fields for a code-review finding missing severity/title/id/details", () => {
+    const artifact = makeArtifact({
+      type: "Review",
+      version: 1,
+      payloadJson: { findings: [{}] },
+    });
+    const result = buildChatSystemPrompt(makeRun(), [artifact]);
+    expect(result).toContain("## Code Review Findings");
+    expect(result).toContain("  - **[] ** (): ");
+  });
+
+  it("falls back to '?' for a check missing a status field", () => {
+    const artifact = makeArtifact({
+      type: "ExecutionReport",
+      version: 1,
+      payloadJson: {
+        executionVersion: 1,
+        checks: {
+          lint: {},
+          typecheck: { status: "pass" },
+          tests: { status: "pass" },
+        },
+      },
+    });
+    const result = buildChatSystemPrompt(makeRun(), [artifact]);
+    expect(result).toContain("**Lint:** ?");
+  });
+
+  it("falls back to the artifact's own version when executionVersion is absent on the payload", () => {
+    const artifact = makeArtifact({
+      type: "ExecutionReport",
+      version: 7,
+      payloadJson: { summary: "No executionVersion field on this payload." },
+    });
+    const result = buildChatSystemPrompt(makeRun(), [artifact]);
+    expect(result).toContain("## Execution Report (v7)");
+  });
 });

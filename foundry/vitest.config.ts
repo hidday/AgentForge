@@ -13,7 +13,10 @@ export default defineConfig({
       // src/generated/prisma/** is Prisma-generated client code (checked in
       // with an explicit "Do not edit directly" / @ts-nocheck header); it has
       // no hand-written logic to test.
-      exclude: ["src/server.ts", "src/generated/prisma/**"],
+      // src/runtime/runnerTypes.ts contains only `interface`/`import type`
+      // declarations, which TypeScript erases entirely at compile time —
+      // there are zero runtime statements to exercise.
+      exclude: ["src/server.ts", "src/generated/prisma/**", "src/runtime/runnerTypes.ts"],
       reporter: ["text", "json-summary", "html"],
       reportsDirectory: "coverage",
     },
