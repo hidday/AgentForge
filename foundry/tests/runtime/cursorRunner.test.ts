@@ -116,4 +116,66 @@ END_STRUCTURED_OUTPUT`;
     expect(out.parsed.payload.value).toBe("ok");
     expect(logger.error).not.toHaveBeenCalled();
   });
+
+  it("prepends the system prompt to the stdin payload when provided", async () => {
+    const processRunner = makeMockProcessRunner({
+      stdout: `BEGIN_STRUCTURED_OUTPUT\n{"success":true,"stage":"planner","payload":{"value":"ok"}}\nEND_STRUCTURED_OUTPUT`,
+      stderr: "",
+      exitCode: 0,
+      durationMs: 10,
+      timedOut: false,
+    });
+    const runner = new CursorRunner(
+      processRunner as never,
+      "cursor",
+      [],
+      "claude-4.6-sonnet",
+      makeMockLogger() as never,
+    );
+
+    await runner.run(
+      {
+        prompt: "the task",
+        systemPrompt: "You are a helpful agent.",
+        workingDirectory: "/tmp",
+        timeoutMs: 1000,
+      },
+      "planner",
+      echoSchema,
+    );
+
+    expect(processRunner.execute).toHaveBeenCalledWith(
+      expect.objectContaining({
+        stdinData: "You are a helpful agent.\n\n---\n\nthe task",
+      }),
+    );
+  });
+
+  it("truncates a long stderr snippet to its tail (>500 chars) in the error log", async () => {
+    const longStderr = "e".repeat(600) + "TAIL_MARKER";
+    const processRunner = makeMockProcessRunner({
+      stdout: "not structured output",
+      stderr: longStderr,
+      exitCode: 1,
+      durationMs: 50,
+      timedOut: false,
+    });
+    const logger = makeMockLogger();
+    const runner = new CursorRunner(
+      processRunner as never,
+      "cursor",
+      [],
+      "claude-4.6-sonnet",
+      logger as never,
+    );
+
+    await expect(
+      runner.run({ prompt: "x", workingDirectory: "/tmp", timeoutMs: 1000 }, "planner", echoSchema),
+    ).rejects.toThrow();
+
+    const [logFields] = logger.error.mock.calls[0]!;
+    expect((logFields.stderr as string).length).toBeLessThanOrEqual(501);
+    expect(logFields.stderr).toContain("TAIL_MARKER");
+    expect(logFields.stderr).not.toContain("e".repeat(600));
+  });
 });
