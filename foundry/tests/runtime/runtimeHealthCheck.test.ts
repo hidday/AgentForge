@@ -280,32 +280,56 @@ describe("RuntimeHealthCheck.runPreflight — auth check via successPattern (cla
 });
 
 describe("RuntimeHealthCheck.runPreflight — auth check via exitCodeOnly path", () => {
-  // cursor is never in requiredRuntimes for the real AGENT_STAGES, so we build a
-  // custom single-runtime config set to reach the exitCodeOnly branch directly.
-  it("passes when exit code is 0, and fails with exit-code detail when non-zero", async () => {
-    const cursorOnlyConfigs = {
-      "claude-code": baseConfigs["claude-code"],
-      codex: baseConfigs.codex,
-      cursor: baseConfigs.cursor,
-    };
+  // claude-code and codex are the two runtimes required by the real AGENT_STAGES;
+  // to exercise the exitCodeOnly branch of checkAuth we give claude-code's injected
+  // config that shape instead of its usual successPattern.
+  const exitCodeOnlyConfigs = {
+    ...baseConfigs,
+    "claude-code": {
+      command: "claude",
+      versionArgs: ["--version"],
+      probeArgs: ["status"],
+      exitCodeOnly: true,
+    },
+  };
 
-    const passExecute = vi.fn(async (opts: ProcessSpawnOptions) => {
+  it("passes auth when exit code is 0", async () => {
+    const execute = vi.fn(async (opts: ProcessSpawnOptions) => {
       if (isVersionCall(opts)) return okResult({ stdout: "v1\n" });
-      if (opts.command === "claude") return okResult({ stdout: '{"loggedIn": true}' });
-      if (opts.command === "codex") return okResult({ stdout: "PONG" });
-      return okResult({ exitCode: 0 });
+      if (opts.command === "claude") return okResult({ exitCode: 0 });
+      return okResult({ stdout: "PONG" });
     });
-    const passHealth = new RuntimeHealthCheck(
-      { execute: passExecute } as never,
-      cursorOnlyConfigs as never,
+    const health = new RuntimeHealthCheck(
+      { execute } as never,
+      exitCodeOnlyConfigs as never,
       makeMockLogger() as never,
     );
-    // Force cursor into the required set by monkey-patching getRequiredRuntimes result
-    // indirectly is not possible (private data), so exercise checkAuth's exitCodeOnly
-    // branch through the real required set (claude-code, codex) is insufficient;
-    // instead assert current passing preflight succeeds for the two real runtimes.
-    const passResult = await passHealth.runPreflight();
-    expect(passResult.ok).toBe(true);
+
+    const result = await health.runPreflight();
+    expect(result.ok).toBe(true);
+    const claudeResult = result.results.find((r) => r.runtime === "claude-code");
+    expect(claudeResult?.authCheck.ok).toBe(true);
+  });
+
+  it("fails auth with exit-code detail when exit code is non-zero", async () => {
+    const execute = vi.fn(async (opts: ProcessSpawnOptions) => {
+      if (isVersionCall(opts)) return okResult({ stdout: "v1\n" });
+      if (opts.command === "claude") {
+        return okResult({ exitCode: 3, stderr: "not logged in" });
+      }
+      return okResult({ stdout: "PONG" });
+    });
+    const health = new RuntimeHealthCheck(
+      { execute } as never,
+      exitCodeOnlyConfigs as never,
+      makeMockLogger() as never,
+    );
+
+    await expect(health.runPreflight()).rejects.toThrow(PreflightError);
+    const claudeResult = health.getLastResult()?.results.find((r) => r.runtime === "claude-code");
+    expect(claudeResult?.authCheck.ok).toBe(false);
+    expect(claudeResult?.authCheck.error).toContain("Exit code 3");
+    expect(claudeResult?.authCheck.error).toContain("not logged in");
   });
 });
 
