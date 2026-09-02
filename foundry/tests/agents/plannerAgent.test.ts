@@ -304,4 +304,180 @@ describe("PlannerAgent.run()", () => {
       expect(prompt).not.toContain("{{relatedContextSection}}");
     });
   });
+
+  describe("planReviewFindings injection", () => {
+    it("renders '## AI Plan Review Findings' section with findings list when provided", async () => {
+      const { agent, getPrompt } = buildPlannerAgent();
+      const bundle = makeTaskBundle();
+
+      await agent.run(bundle, "run-1", {
+        planReviewFindings: {
+          summary: "Plan has a gap in error handling",
+          findings: [
+            {
+              id: "f1",
+              severity: "high",
+              title: "No rollback strategy",
+              details: "The plan does not describe how to roll back on failure",
+            },
+          ],
+        },
+      });
+
+      const prompt = getPrompt();
+      expect(prompt).toContain("## AI Plan Review Findings (from previous plan)");
+      expect(prompt).toContain("Plan has a gap in error handling");
+      expect(prompt).toContain("**[high] No rollback strategy** (f1)");
+      expect(prompt).toContain("The plan does not describe how to roll back on failure");
+      expect(prompt).toContain("Incorporate these findings into the revised plan");
+    });
+
+    it("omits the plan review findings section when not provided", async () => {
+      const { agent, getPrompt } = buildPlannerAgent();
+      const bundle = makeTaskBundle();
+
+      await agent.run(bundle, "run-1");
+
+      const prompt = getPrompt();
+      expect(prompt).not.toContain("## AI Plan Review Findings");
+    });
+  });
+
+  describe("previousPlan injection", () => {
+    it("renders the previously-rejected plan with steps, risks, assumptions, and open questions", async () => {
+      const { agent, getPrompt } = buildPlannerAgent();
+      const bundle = makeTaskBundle();
+
+      await agent.run(bundle, "run-1", {
+        previousPlan: {
+          planVersion: 3,
+          summary: "Old plan summary",
+          requirementsTraceability: "",
+          assumptions: ["Assumes staging DB is available"],
+          openQuestions: [
+            { id: "q1", question: "Which env?", requiredForExecution: true },
+            { id: "q2", question: "Optional detail?", requiredForExecution: false },
+          ],
+          risks: ["Might break existing integration"],
+          steps: [{ id: "s1", title: "Do the thing", description: "Detailed step" }],
+          testPlan: "Run the full suite",
+          confidence: 0.75,
+        },
+      });
+
+      const prompt = getPrompt();
+      expect(prompt).toContain("## Previously Rejected Plan (v3)");
+      expect(prompt).toContain("**Summary:** Old plan summary");
+      expect(prompt).toContain("**Confidence:** 75%");
+      expect(prompt).toContain("1. **Do the thing** (s1): Detailed step");
+      expect(prompt).toContain("**Assumptions:**");
+      expect(prompt).toContain("Assumes staging DB is available");
+      expect(prompt).toContain("**Risks:**");
+      expect(prompt).toContain("Might break existing integration");
+      expect(prompt).toContain("**Open Questions:**");
+      expect(prompt).toContain("[q1] Which env? *(blocks execution)*");
+      expect(prompt).toContain("[q2] Optional detail?");
+      expect(prompt).not.toContain("[q2] Optional detail? *(blocks execution)*");
+      expect(prompt).toContain("**Test Plan:** Run the full suite");
+      expect(prompt).toContain("Use this as the starting point for the new plan");
+    });
+
+    it("omits risks/assumptions/open-questions sub-sections when those arrays are empty", async () => {
+      const { agent, getPrompt } = buildPlannerAgent();
+      const bundle = makeTaskBundle();
+
+      await agent.run(bundle, "run-1", {
+        previousPlan: {
+          planVersion: 1,
+          summary: "Minimal plan",
+          requirementsTraceability: "",
+          assumptions: [],
+          openQuestions: [],
+          risks: [],
+          steps: [{ id: "s1", title: "Only step", description: "desc" }],
+          testPlan: "none",
+          confidence: 0.5,
+        },
+      });
+
+      const prompt = getPrompt();
+      expect(prompt).toContain("## Previously Rejected Plan (v1)");
+      expect(prompt).not.toContain("**Risks:**");
+      expect(prompt).not.toContain("**Assumptions:**");
+      expect(prompt).not.toContain("**Open Questions:**");
+    });
+
+    it("omits the previously-rejected-plan section when previousPlan is not provided", async () => {
+      const { agent, getPrompt } = buildPlannerAgent();
+      const bundle = makeTaskBundle();
+
+      await agent.run(bundle, "run-1");
+
+      const prompt = getPrompt();
+      expect(prompt).not.toContain("## Previously Rejected Plan");
+    });
+  });
+
+  describe("priorSkills injection", () => {
+    it("renders a heading with name and taskCategory when skill.name is present", async () => {
+      const { agent, getPrompt } = buildPlannerAgent();
+      const bundle = makeTaskBundle();
+
+      await agent.run(bundle, "run-1", {
+        priorSkills: [
+          {
+            id: "skill-1",
+            repoSlug: "test-repo",
+            name: "auth-middleware",
+            description: "Use for JWT auth middleware.",
+            taskCategory: "auth middleware",
+            skillMarkdown: "Use RS256 tokens.",
+            utilityScore: 0.5,
+            lastUsedAt: new Date(),
+          },
+        ],
+      });
+
+      const prompt = getPrompt();
+      expect(prompt).toContain("## Prior Skills from Similar Tasks");
+      expect(prompt).toContain("### auth-middleware (auth middleware)");
+      expect(prompt).toContain("Use for JWT auth middleware.");
+      expect(prompt).toContain("Use RS256 tokens.");
+    });
+
+    it("falls back to taskCategory as the heading when skill.name is absent", async () => {
+      const { agent, getPrompt } = buildPlannerAgent();
+      const bundle = makeTaskBundle();
+
+      await agent.run(bundle, "run-1", {
+        priorSkills: [
+          {
+            id: "skill-1",
+            repoSlug: "test-repo",
+            name: null,
+            description: null,
+            taskCategory: "database migration",
+            skillMarkdown: "Run alembic migrations in order.",
+            utilityScore: 0.5,
+            lastUsedAt: new Date(),
+          },
+        ],
+      });
+
+      const prompt = getPrompt();
+      expect(prompt).toContain("### database migration\n\n");
+      expect(prompt).toContain("Run alembic migrations in order.");
+      expect(prompt).not.toContain("### database migration (");
+    });
+
+    it("omits the prior skills section when priorSkills is an empty array", async () => {
+      const { agent, getPrompt } = buildPlannerAgent();
+      const bundle = makeTaskBundle();
+
+      await agent.run(bundle, "run-1", { priorSkills: [] });
+
+      const prompt = getPrompt();
+      expect(prompt).not.toContain("## Prior Skills from Similar Tasks");
+    });
+  });
 });

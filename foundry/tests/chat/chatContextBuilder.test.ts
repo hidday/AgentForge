@@ -232,6 +232,90 @@ describe("buildChatSystemPrompt", () => {
     expect(result).not.toContain("x".repeat(4001));
   });
 
+  it("includes plan open questions when present", () => {
+    const planArtifact = makeArtifact({
+      type: "Plan",
+      version: 1,
+      payloadJson: {
+        summary: "Plan summary",
+        openQuestions: [
+          { id: "q1", question: "Should we use Postgres?", requiredForExecution: true },
+          "A plain string question",
+        ],
+      },
+    });
+    const result = buildChatSystemPrompt(makeRun(), [planArtifact]);
+    expect(result).toContain("**Open Questions:**");
+    expect(result).toContain("Should we use Postgres?");
+    expect(result).toContain("A plain string question");
+  });
+
+  it("includes plan review findings section when PlanReview artifact present", () => {
+    const artifact = makeArtifact({
+      type: "PlanReview",
+      version: 1,
+      payloadJson: {
+        summary: "Plan review summary text",
+        findings: [
+          { id: "f1", severity: "high", title: "Missing rollback plan", details: "No rollback step" },
+        ],
+      },
+    });
+    const result = buildChatSystemPrompt(makeRun(), [artifact]);
+    expect(result).toContain("## Plan Review Findings");
+    expect(result).toContain("Plan review summary text");
+    expect(result).toContain("Missing rollback plan");
+    expect(result).toContain("[high]");
+  });
+
+  it("omits plan review section when PlanReview payload has neither summary nor findings", () => {
+    const artifact = makeArtifact({
+      type: "PlanReview",
+      version: 1,
+      payloadJson: {},
+    });
+    const result = buildChatSystemPrompt(makeRun(), [artifact]);
+    expect(result).not.toContain("## Plan Review Findings");
+  });
+
+  it("omits Plan Review Findings section when no PlanReview artifact present", () => {
+    const result = buildChatSystemPrompt(makeRun(), []);
+    expect(result).not.toContain("## Plan Review Findings");
+  });
+
+  it("includes code review findings section when Review artifact present", () => {
+    const artifact = makeArtifact({
+      type: "Review",
+      version: 1,
+      payloadJson: {
+        summary: "Code review summary text",
+        findings: [
+          { id: "r1", severity: "medium", title: "Unused import", details: "Remove the unused import" },
+        ],
+      },
+    });
+    const result = buildChatSystemPrompt(makeRun(), [artifact]);
+    expect(result).toContain("## Code Review Findings");
+    expect(result).toContain("Code review summary text");
+    expect(result).toContain("Unused import");
+    expect(result).toContain("[medium]");
+  });
+
+  it("omits code review section when Review payload has neither summary nor findings", () => {
+    const artifact = makeArtifact({
+      type: "Review",
+      version: 1,
+      payloadJson: {},
+    });
+    const result = buildChatSystemPrompt(makeRun(), [artifact]);
+    expect(result).not.toContain("## Code Review Findings");
+  });
+
+  it("omits Code Review Findings section when no Review artifact present", () => {
+    const result = buildChatSystemPrompt(makeRun(), []);
+    expect(result).not.toContain("## Code Review Findings");
+  });
+
   it("uses the Plan artifact with the highest version when multiple exist", () => {
     const planV1 = makeArtifact({
       type: "Plan",
