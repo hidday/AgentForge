@@ -241,9 +241,13 @@ function buildDeps(store: TestStore, initialRun: Run) {
 describe("OrchestratorService.runReview", () => {
   it("changes_requested: posts findings to GitHub, comments on Linear, and delegates to runRemediation with the comment map", async () => {
     const executionReport = makeExecutionReport();
+    const plan = { planVersion: 1, summary: "s", steps: [] };
     const store: TestStore = {
       runState: RunState.AIReview,
-      artifacts: [asArtifact({ type: "ExecutionReport", version: 1, payloadJson: executionReport })],
+      artifacts: [
+        asArtifact({ type: "ExecutionReport", version: 1, payloadJson: executionReport }),
+        asArtifact({ type: "Plan", version: 1, payloadJson: plan }),
+      ],
       events: [],
     };
     const initialRun = makeRun({ state: RunState.AIReview, prNumber: 42 });
@@ -258,6 +262,13 @@ describe("OrchestratorService.runReview", () => {
 
     const result = await svc.runReview("run-1");
 
+    expect(reviewerAgent.run).toHaveBeenCalledWith(
+      plan,
+      executionReport,
+      "diff content",
+      expect.anything(),
+      "run-1",
+    );
     expect(githubSync.postReviewFindings).toHaveBeenCalledWith(
       "test-repo",
       42,
