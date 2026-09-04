@@ -441,18 +441,28 @@ describe("OrchestratorService maybeResearchAndReplan carries prior human answers
   });
 });
 
-describe("OrchestratorService.rejectPlan iterate mode carries forward PlanReview findings", () => {
-  it("includes planReviewFindings from the prior PlanReview artifact in the re-plan call", async () => {
+describe("OrchestratorService.rejectPlan iterate mode carries forward prior context", () => {
+  it("includes humanAnswers, researchedAnswers, and planReviewFindings from prior artifacts in the re-plan call", async () => {
     const plan = makePlan({ planVersion: 2 });
     const planReview = {
       summary: "found issues",
       findings: [{ id: "f1", severity: "important", title: "t", details: "d" }],
     };
+    const humanAnswers = [{ questionId: "q1", answer: "human said yes" }];
+    const researchedAnswers = [
+      { questionId: "q2", question: "Q2?", answer: "researched", confidence: "high" as const },
+    ];
     const store: TestStore = {
       runState: RunState.AwaitingPlanApproval,
       artifacts: [
         asArtifact({ type: "Plan", version: 2, payloadJson: plan }),
         asArtifact({ type: "PlanReview", version: 1, payloadJson: planReview }),
+        asArtifact({ type: "HumanAnswers", version: 1, payloadJson: { answers: humanAnswers } }),
+        asArtifact({
+          type: "ResearchedAnswers",
+          version: 1,
+          payloadJson: { summary: "s", answers: researchedAnswers, completedAt: new Date().toISOString() },
+        }),
       ],
       events: [],
     };
@@ -471,7 +481,11 @@ describe("OrchestratorService.rejectPlan iterate mode carries forward PlanReview
     expect(plannerAgent.run).toHaveBeenCalledWith(
       expect.anything(),
       "run-1",
-      expect.objectContaining({ planReviewFindings: planReview }),
+      expect.objectContaining({
+        planReviewFindings: planReview,
+        humanAnswers,
+        researchedAnswers,
+      }),
     );
   });
 });
