@@ -115,6 +115,44 @@ describe("useActiveProcesses", () => {
     expect(result.current.output).toBe("");
   });
 
+  it("falls back to empty strings / a generated timestamp for a process:started event missing optional fields", async () => {
+    mockApi.getActiveProcesses.mockResolvedValue({ processes: [] });
+    const { result } = renderHook(() => useActiveProcesses("r1"));
+    await waitFor(() => expect(mockApi.getActiveProcesses).toHaveBeenCalled());
+
+    act(() => {
+      sseCallback!({ type: "process:started", runId: "r1" });
+    });
+
+    expect(result.current.processes).toHaveLength(1);
+    const entry = result.current.processes[0]!;
+    expect(entry.id).toBe("");
+    expect(entry.command).toBe("");
+    expect(entry.stage).toBe("");
+    expect(entry.runtime).toBe("");
+    expect(typeof entry.startedAt).toBe("string");
+    expect(entry.startedAt.length).toBeGreaterThan(0);
+  });
+
+  it("bails out of applying the fetched process output when unmounted while the output request is in flight", async () => {
+    mockApi.getActiveProcesses.mockResolvedValue({ processes: [PROC] });
+    let resolveOutput!: (v: { processId: string; output: string }) => void;
+    mockApi.getProcessOutput.mockReturnValue(
+      new Promise((res) => {
+        resolveOutput = res;
+      }),
+    );
+
+    const { result, unmount } = renderHook(() => useActiveProcesses("r1"));
+    await waitFor(() => expect(mockApi.getProcessOutput).toHaveBeenCalledWith("p1"));
+
+    unmount();
+
+    expect(() => resolveOutput({ processId: "p1", output: "late output" })).not.toThrow();
+    // Output was never applied to state since the effect had been cancelled.
+    expect(result.current.output).toBe("");
+  });
+
   it("removes a process on a process:completed SSE event", async () => {
     mockApi.getActiveProcesses.mockResolvedValue({ processes: [PROC] });
     mockApi.getProcessOutput.mockResolvedValue({ processId: "p1", output: "" });
