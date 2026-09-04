@@ -25,9 +25,9 @@ describe("MockLinearClient.getIssue", () => {
     expect(result).not.toBe(issue);
   });
 
-  it("throws when the issue was never seeded", async () => {
+  it("throws synchronously when the issue was never seeded", () => {
     const client = new MockLinearClient();
-    await expect(client.getIssue("missing")).rejects.toThrow("Mock: Issue missing not found");
+    expect(() => client.getIssue("missing")).toThrow("Mock: Issue missing not found");
   });
 });
 

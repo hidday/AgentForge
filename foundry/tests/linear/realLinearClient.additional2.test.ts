@@ -138,6 +138,25 @@ describe("RealLinearClient.searchIssues - all-optional-fields-null branch", () =
   });
 });
 
+describe("RealLinearClient.searchIssues - description null and cycle defined branches", () => {
+  it("maps a null description to an empty string and a defined cycle to its name", async () => {
+    const issue = makeFakeIssue({
+      id: "i1",
+      description: null,
+      cycle: Promise.resolve({ name: "Cycle 7" }),
+    });
+    const { client } = makeClient({
+      issues: vi.fn().mockResolvedValue({ nodes: [issue] }),
+    });
+
+    const results = await client.searchIssues({ state: "Todo" });
+
+    expect(results).toHaveLength(1);
+    expect(results[0].description).toBe("");
+    expect(results[0].cycle).toBe("Cycle 7");
+  });
+});
+
 describe("RealLinearClient.updateIssueState - resolveStateId with null states()", () => {
   it("treats a null team.states() result as no matching state and warns", async () => {
     const issue = makeFakeIssue({ id: "i1", team: Promise.resolve({ id: "t1", key: "PRY" }) });

@@ -140,6 +140,30 @@ describe("buildChatSystemPrompt - Researched Answers summary fallback", () => {
   });
 });
 
+describe("buildChatSystemPrompt - Researched Answers per-entry field fallbacks", () => {
+  it("falls back to empty strings for questionId/confidence/answer when missing on an entry", () => {
+    const artifact = makeArtifact({
+      type: "ResearchedAnswers",
+      version: 1,
+      payloadJson: { summary: "S", answers: [{}] },
+    });
+    const result = buildChatSystemPrompt(makeRun(), [artifact]);
+    expect(result).toContain("  - **[] ():** ");
+  });
+});
+
+describe("buildChatSystemPrompt - Plan Review Findings per-entry field fallbacks", () => {
+  it("falls back to empty strings when a PlanReview finding's severity/title/id/details are missing", () => {
+    const artifact = makeArtifact({
+      type: "PlanReview",
+      version: 1,
+      payloadJson: { summary: "One gap.", findings: [{}] },
+    });
+    const result = buildChatSystemPrompt(makeRun(), [artifact]);
+    expect(result).toContain("  - **[] ** (): ");
+  });
+});
+
 describe("buildChatSystemPrompt - Execution Report field fallbacks", () => {
   it("falls back to '?' status and omits the em-dash detail when a check's status/details are missing", () => {
     const artifact = makeArtifact({
