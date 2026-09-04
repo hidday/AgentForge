@@ -200,7 +200,9 @@ describe("NotificationService.sendHumanRequest", () => {
   it("sends both Slack and email concurrently, succeeding independently", async () => {
     fetchMock.mockImplementation((url: string) =>
       Promise.resolve(
-        url.includes("slack.com") ? mockFetchResponse(true) : mockFetchResponse(false, 500),
+        new URL(url).hostname === "hooks.slack.com"
+          ? mockFetchResponse(true)
+          : mockFetchResponse(false, 500),
       ),
     );
     const service = new NotificationService(
