@@ -278,6 +278,9 @@ describe("OrchestratorService skill retrieval during planning (retrieveSkillsFor
     const store: TestStore = { runState: RunState.Todo, artifacts: [], events: [] };
     const initialRun = makeRun({ state: RunState.Todo, branchName: "ai/run-1" });
     const { deps, plannerAgent } = buildDeps(store, initialRun);
+    (deps as unknown as { planReviewerAgent: { run: ReturnType<typeof vi.fn> } }).planReviewerAgent.run.mockResolvedValue(
+      { overallVerdict: "approved", summary: "OK", findings: [] },
+    );
     const svc = new OrchestratorService(deps as never);
 
     plannerAgent.run.mockImplementation(async () => {
@@ -306,6 +309,9 @@ describe("OrchestratorService skill retrieval during planning (retrieveSkillsFor
       archiveIfLowUtility: vi.fn(),
     };
     const { deps, plannerAgent, eventRepo } = buildDeps(store, initialRun, { agentSkillRepo });
+    (deps as unknown as { planReviewerAgent: { run: ReturnType<typeof vi.fn> } }).planReviewerAgent.run.mockResolvedValue(
+      { overallVerdict: "approved", summary: "OK", findings: [] },
+    );
     const svc = new OrchestratorService(deps as never);
 
     plannerAgent.run.mockImplementation(async () => {
@@ -344,6 +350,9 @@ describe("OrchestratorService skill retrieval during planning (retrieveSkillsFor
       archiveIfLowUtility: vi.fn(),
     };
     const { deps, plannerAgent, eventRepo } = buildDeps(store, initialRun, { agentSkillRepo });
+    (deps as unknown as { planReviewerAgent: { run: ReturnType<typeof vi.fn> } }).planReviewerAgent.run.mockResolvedValue(
+      { overallVerdict: "approved", summary: "OK", findings: [] },
+    );
     const svc = new OrchestratorService(deps as never);
 
     plannerAgent.run.mockImplementation(async () => {

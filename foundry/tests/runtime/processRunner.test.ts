@@ -760,6 +760,45 @@ describe("ProcessRunner.rehydrateOrphans()", () => {
     expect(runner.getActiveProcesses()).toHaveLength(1);
   });
 
+  it("silently ignores a watch-callback read failure (e.g. the log file was removed mid-tail)", () => {
+    const fakeWatcher = { close: vi.fn() };
+    watchMock.mockReturnValue(fakeWatcher);
+
+    const logPath = join(spoolDir, "alive-5.log");
+    writeFileSync(logPath, "content\n");
+    writeFileSync(
+      join(spoolDir, "alive-5.json"),
+      JSON.stringify({
+        id: "alive-5",
+        pid: process.pid,
+        command: "claude",
+        args: [],
+        runId: "run-12",
+        stage: "executor",
+        runtime: "claude-code",
+        startedAt: new Date().toISOString(),
+        logFile: logPath,
+      }),
+    );
+    const runner = new ProcessRunner(
+      "real",
+      makeMockLogger() as never,
+      makeMockEmitter() as never,
+      spoolDir,
+    );
+
+    runner.rehydrateOrphans();
+    const watchCallback = watchMock.mock.calls[0]![1] as () => void;
+
+    // Remove the log file so the callback's readFileSync throws; the entry
+    // is still active, so this exercises the inner try/catch rather than
+    // the "entry gone" early return.
+    rmSync(logPath);
+
+    expect(() => watchCallback()).not.toThrow();
+    expect(runner.getProcessOutput("alive-5")).toBe("content\n");
+  });
+
   it("finalizes an orphan once the poll interval detects its process has died", async () => {
     vi.useFakeTimers();
     const fakeWatcher = { close: vi.fn() };
@@ -821,6 +860,69 @@ describe("ProcessRunner.rehydrateOrphans()", () => {
     const finalManifest = JSON.parse(readFileSync(manifestPath, "utf-8"));
     expect(finalManifest.exitCode).toBe(-1);
     expect(finalManifest.completedAt).toBeDefined();
+
+    killSpy.mockRestore();
+  });
+
+  it("still finalizes the orphan (deletes entry, emits completion) when its manifest file is missing", async () => {
+    vi.useFakeTimers();
+    const fakeWatcher = { close: vi.fn() };
+    watchMock.mockReturnValue(fakeWatcher);
+
+    const logPath = join(spoolDir, "alive-6.log");
+    writeFileSync(logPath, "content\n");
+    const manifestPath = join(spoolDir, "alive-6.json");
+    writeFileSync(
+      manifestPath,
+      JSON.stringify({
+        id: "alive-6",
+        pid: process.pid,
+        command: "claude",
+        args: [],
+        runId: "run-13",
+        stage: "executor",
+        runtime: "claude-code",
+        startedAt: new Date().toISOString(),
+        logFile: logPath,
+      }),
+    );
+    const logger = makeMockLogger();
+    const emitter = makeMockEmitter();
+    const runner = new ProcessRunner("real", logger as never, emitter as never, spoolDir);
+
+    runner.rehydrateOrphans();
+    expect(runner.getActiveProcesses()).toHaveLength(1);
+
+    // Remove the manifest before the death is detected, so finalizeOrphan's
+    // best-effort manifest update hits its catch branch.
+    rmSync(manifestPath);
+
+    const killSpy = vi.spyOn(process, "kill").mockImplementation(((
+      _pid: number,
+      signal?: string | number,
+    ) => {
+      if (signal === 0) {
+        throw Object.assign(new Error("ESRCH"), { code: "ESRCH" });
+      }
+      return true;
+    }) as typeof process.kill);
+
+    await vi.advanceTimersByTimeAsync(5_000);
+
+    expect(runner.getActiveProcesses()).toHaveLength(0);
+    expect(emitter.emitProcessCompleted).toHaveBeenCalledWith(
+      "run-13",
+      "alive-6",
+      "executor",
+      "claude-code",
+      -1,
+      expect.any(Number),
+    );
+    expect(logger.info).toHaveBeenCalledWith(
+      { processId: "alive-6", pid: process.pid },
+      "Orphaned process has exited",
+    );
+    expect(existsSync(manifestPath)).toBe(false);
 
     killSpy.mockRestore();
   });
