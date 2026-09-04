@@ -174,6 +174,22 @@ describe("AgentOutputPanel", () => {
     expect(screen.getByText("Hello from the agent")).toBeDefined();
   });
 
+  it("renders an 'error' block type (e.g. a stream parse failure) with the warning icon and red text", async () => {
+    vi.resetModules();
+    vi.doMock("@/lib/parseClaudeOutput.ts", () => ({
+      parseClaudeOutput: () => [
+        { type: "error", content: "Failed to parse agent stream" },
+      ],
+    }));
+    const { AgentOutputPanel: MockedAgentOutputPanel } = await import(
+      "./AgentOutputPanel.tsx"
+    );
+    render(<MockedAgentOutputPanel processes={[]} output="anything" />);
+    expect(screen.getByText("Failed to parse agent stream")).toBeDefined();
+    vi.doUnmock("@/lib/parseClaudeOutput.ts");
+    vi.resetModules();
+  });
+
   it("renders within a container distinguishing multiple simultaneous processes by using the first", () => {
     const proc1 = makeProcess({ id: "p1", runtime: "claude-code", stage: "planning" });
     const proc2 = makeProcess({ id: "p2", runtime: "codex", stage: "execution" });

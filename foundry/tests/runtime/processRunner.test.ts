@@ -24,7 +24,6 @@ vi.mock("node:fs", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:fs")>();
   return {
     ...actual,
-    default: actual,
     watch: (...args: unknown[]) => watchMock(...args),
   };
 });
@@ -97,8 +96,14 @@ beforeEach(() => {
   spoolDir = mkdtempSync(join(tmpdir(), "processrunner-test-"));
 });
 
-afterEach(() => {
+afterEach(async () => {
   vi.useRealTimers();
+  // createWriteStream() opens its file descriptor asynchronously. If the
+  // spool directory is removed before that open completes, the stream emits
+  // an unhandled 'error' (the source never attaches a listener for it) after
+  // the test has already finished. Give any pending opens a moment to
+  // settle before tearing down the directory.
+  await new Promise((resolve) => setTimeout(resolve, 100));
   rmSync(spoolDir, { recursive: true, force: true });
 });
 

@@ -449,6 +449,40 @@ describe("RealLinearClient.removeLabel", () => {
   });
 });
 
+describe("RealLinearClient.getRelatedContext error handling", () => {
+  it("logs a warning and drops a blocker whose relation fails to hydrate", async () => {
+    const failingRelIssue = Promise.reject(new Error("relation hydration failed"));
+    // Prevent an unhandled rejection warning for the promise itself; the
+    // client's try/catch is what actually consumes the rejection.
+    failingRelIssue.catch(() => undefined);
+
+    const focus = makeFakeIssue({
+      id: "focus-id",
+      // getRelatedContext also awaits `issue.parent`, which the shared
+      // FakeIssue fixture above doesn't define -- add it inline.
+    }) as FakeIssue & { parent: Promise<null>; inverseRelations: () => Promise<unknown> };
+    focus.parent = Promise.resolve(null);
+    focus.inverseRelations = () =>
+      Promise.resolve({
+        nodes: [{ id: "rel-1", type: "blocks", issue: failingRelIssue }],
+      });
+
+    const logger = makeLogger();
+    const client = new RealLinearClient("test-key", logger as never);
+    (client as unknown as { sdk: { issue: (id: string) => Promise<FakeIssue> } }).sdk = {
+      issue: (id: string) => (id === "focus-id" ? Promise.resolve(focus) : Promise.reject(new Error("not seeded"))),
+    };
+
+    const ctx = await client.getRelatedContext("focus-id");
+
+    expect(ctx.blockers).toEqual([]);
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.objectContaining({ relationId: "rel-1", focusIssueId: "focus-id" }),
+      "Failed to hydrate blocker issue from relation",
+    );
+  });
+});
+
 describe("RealLinearClient.listLabels", () => {
   it("returns label names and populates the label cache", async () => {
     const issue = makeFakeIssue({

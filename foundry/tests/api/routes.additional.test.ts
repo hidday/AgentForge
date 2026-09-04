@@ -885,3 +885,191 @@ describe("POST /api/runs/:id/chat (working directory fallback)", () => {
     expect(res.statusCode).toBe(422);
   });
 });
+
+describe("sanitizeNote whitespace-only handling", () => {
+  it("treats a whitespace-only note as no note provided", async () => {
+    const run = makeRun({ state: RunState.Implementing });
+    const { app, mockOrchestrator } = await buildApp();
+    mockOrchestrator.approvePlan.mockResolvedValue(run);
+    mockOrchestrator.runExecution.mockResolvedValue(undefined);
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/actions/approve-plan",
+      payload: { note: "   " },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(mockOrchestrator.approvePlan).toHaveBeenCalledWith("run-1", { note: undefined });
+  });
+});
+
+describe("error handling: non-Error rejections are coerced to strings", () => {
+  it("approve-plan surfaces a stringified non-Error rejection", async () => {
+    const { app, mockOrchestrator } = await buildApp();
+    mockOrchestrator.approvePlan.mockRejectedValue("plain string failure");
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/actions/approve-plan",
+      payload: {},
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toBe("plain string failure");
+  });
+
+  it("reject-plan surfaces a stringified non-Error rejection", async () => {
+    const { app, mockOrchestrator } = await buildApp();
+    mockOrchestrator.rejectPlan.mockRejectedValue({ oops: true });
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/actions/reject-plan",
+      payload: {},
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toBe("[object Object]");
+  });
+
+  it("approve-review surfaces a stringified non-Error rejection", async () => {
+    const { app, mockOrchestrator } = await buildApp();
+    mockOrchestrator.approveHumanReview.mockRejectedValue(42);
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/actions/approve-review",
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toBe("42");
+  });
+
+  it("pause surfaces a stringified non-Error rejection", async () => {
+    const run = makeRun();
+    const { app, mockRunRepo, mockOrchestrator } = await buildApp();
+    mockRunRepo.findById.mockResolvedValue(run);
+    mockOrchestrator.handleCommand.mockRejectedValue("pause failed");
+
+    const res = await app.inject({ method: "POST", url: "/api/runs/run-1/actions/pause" });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toBe("pause failed");
+  });
+
+  it("resume surfaces a stringified non-Error rejection", async () => {
+    const run = makeRun();
+    const { app, mockRunRepo, mockOrchestrator } = await buildApp();
+    mockRunRepo.findById.mockResolvedValue(run);
+    mockOrchestrator.handleCommand.mockRejectedValue("resume failed");
+
+    const res = await app.inject({ method: "POST", url: "/api/runs/run-1/actions/resume" });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toBe("resume failed");
+  });
+
+  it("re-review-plan surfaces a stringified non-Error synchronous throw", async () => {
+    const { app } = await buildApp({
+      orchestratorOverrides: {
+        runManualReReview: vi.fn(() => {
+          // eslint-disable-next-line @typescript-eslint/no-throw-literal
+          throw "sync failure";
+        }),
+      },
+    });
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/actions/re-review-plan",
+      payload: {},
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toBe("sync failure");
+  });
+
+  it("revise-plan surfaces a stringified non-Error synchronous throw", async () => {
+    const { app } = await buildApp({
+      orchestratorOverrides: {
+        runManualPlanRevision: vi.fn(() => {
+          // eslint-disable-next-line @typescript-eslint/no-throw-literal
+          throw "sync failure";
+        }),
+      },
+    });
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/actions/revise-plan",
+      payload: {},
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toBe("sync failure");
+  });
+
+  it("answer-questions surfaces a stringified non-Error rejection when it is neither PolicyError nor ValidationError", async () => {
+    const { app, mockOrchestrator } = await buildApp({
+      orchestratorOverrides: { answerQuestions: vi.fn() },
+    });
+    mockOrchestrator.answerQuestions.mockRejectedValue("weird failure");
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/actions/answer-questions",
+      payload: { answers: [{ questionId: "q1", answer: "yes" }] },
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toBe("weird failure");
+  });
+
+  it("chat surfaces a 500 when chatRun rejects with a non-Error value", async () => {
+    const chatRun = vi.fn().mockRejectedValue("subprocess died");
+    const { app, mockRunRepo } = await buildApp({
+      registerOptions: { claudeCodeRunner: { chatRun } },
+    });
+    mockRunRepo.findById.mockResolvedValue(makeRun({ workingDirectory: "/tmp" }));
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/chat",
+      payload: { message: "hi" },
+    });
+
+    expect(res.statusCode).toBe(500);
+    expect(res.json().error).toBe("Chat request failed");
+  });
+
+  it("linear/pending surfaces a stringified non-Error rejection", async () => {
+    const linearPollService = {
+      discoverPendingIssues: vi.fn().mockRejectedValue("pending failed"),
+      startRunsForIssues: vi.fn(),
+    };
+    const { app } = await buildApp({ linearPollService });
+
+    const res = await app.inject({ method: "GET", url: "/api/linear/pending" });
+
+    expect(res.statusCode).toBe(500);
+    expect(res.json().error).toBe("pending failed");
+  });
+
+  it("linear/ingest surfaces a stringified non-Error rejection", async () => {
+    const linearPollService = {
+      discoverPendingIssues: vi.fn(),
+      startRunsForIssues: vi.fn().mockRejectedValue("ingest failed"),
+    };
+    const { app } = await buildApp({ linearPollService });
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/linear/ingest",
+      payload: { issueIds: ["LIN-1"] },
+    });
+
+    expect(res.statusCode).toBe(500);
+    expect(res.json().error).toBe("ingest failed");
+  });
+});

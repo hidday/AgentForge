@@ -276,6 +276,32 @@ describe("RuntimeHealthCheck auth-check pattern matching (via runPreflight)", ()
     }
   });
 
+  it("falls back to stdout in the exitCodeOnly error message when stderr is empty", async () => {
+    const cursorLikeConfigs = {
+      "claude-code": configs.cursor,
+      codex: configs.cursor,
+      cursor: configs.cursor,
+    };
+    const processRunner = {
+      execute: vi.fn(async (opts: { args: string[] }) => {
+        if (opts.args.includes("--version")) return okResult({ stdout: "1.0.0" });
+        return okResult({ exitCode: 5, stderr: "", stdout: "denied: no session" });
+      }),
+    };
+    const check = new RuntimeHealthCheck(
+      processRunner as never,
+      cursorLikeConfigs as never,
+      makeMockLogger() as never,
+    );
+
+    const err = await check.runPreflight().catch((e) => e as PreflightError);
+    for (const r of err.result.results) {
+      expect(r.authCheck.ok).toBe(false);
+      expect(r.authCheck.error).toContain("Exit code 5");
+      expect(r.authCheck.error).toContain("denied: no session");
+    }
+  });
+
   it("passes an exitCodeOnly-style auth check on exit code 0", async () => {
     const cursorLikeConfigs = {
       "claude-code": configs.cursor,
@@ -385,6 +411,27 @@ describe("RuntimeHealthCheck auth-check pattern matching (via runPreflight)", ()
     for (const r of err.result.results) {
       expect(r.authCheck.ok).toBe(false);
       expect(r.authCheck.error).toBe("stdin write EPIPE");
+    }
+  });
+
+  it("catches a non-Error throw during the auth check and stringifies it", async () => {
+    const processRunner = {
+      execute: vi.fn(async (opts: { args: string[] }) => {
+        if (opts.args.includes("--version")) return okResult({ stdout: "1.0.0" });
+        // eslint-disable-next-line @typescript-eslint/only-throw-error
+        throw "raw auth failure";
+      }),
+    };
+    const check = new RuntimeHealthCheck(
+      processRunner as never,
+      configs,
+      makeMockLogger() as never,
+    );
+
+    const err = await check.runPreflight().catch((e) => e as PreflightError);
+    for (const r of err.result.results) {
+      expect(r.authCheck.ok).toBe(false);
+      expect(r.authCheck.error).toBe("raw auth failure");
     }
   });
 
