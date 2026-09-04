@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, fireEvent } from "@testing-library/react";
 import { MemoryRouter, Routes, Route } from "react-router-dom";
 import type { Run, Artifact, RunEventRecord } from "@/api/client.ts";
 
@@ -38,8 +38,17 @@ vi.mock("@/components/EventTimeline.tsx", () => ({
   ),
 }));
 vi.mock("@/components/ActionBar.tsx", () => ({
-  ActionBar: ({ hasOptionalQuestions }: { hasOptionalQuestions: boolean }) => (
-    <div data-testid="action-bar">{String(hasOptionalQuestions)}</div>
+  ActionBar: ({
+    hasOptionalQuestions,
+    onScrollToQuestions,
+  }: {
+    hasOptionalQuestions: boolean;
+    onScrollToQuestions: () => void;
+  }) => (
+    <div data-testid="action-bar">
+      {String(hasOptionalQuestions)}
+      <button onClick={onScrollToQuestions}>scroll-to-questions</button>
+    </div>
   ),
 }));
 vi.mock("@/components/OpenQuestionsPanel.tsx", () => ({
@@ -227,6 +236,35 @@ describe("RunDetailPage", () => {
     expect(screen.getByTestId("open-questions-panel").textContent).toBe("2");
   });
 
+  it("scrolls the questions panel into view when the action bar requests it", () => {
+    const run = makeRun({ state: "HumanClarificationNeeded" });
+    const planArtifact: Artifact = {
+      id: "a1",
+      runId: run.id,
+      type: "Plan",
+      version: 1,
+      payloadJson: {
+        openQuestions: [{ id: "q1", text: "Which env?", requiredForExecution: true }],
+      },
+      rawText: "",
+      createdAt: "2024-01-01T00:00:00Z",
+    };
+    mockUseRun.mockReturnValue({
+      data: { run, artifacts: [planArtifact], events: [] },
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+
+    const scrollIntoView = vi.fn();
+    Element.prototype.scrollIntoView = scrollIntoView;
+
+    renderAt();
+    fireEvent.click(screen.getByRole("button", { name: "scroll-to-questions" }));
+
+    expect(scrollIntoView).toHaveBeenCalledWith({ behavior: "smooth", block: "start" });
+  });
+
   it("shows only optional questions in AwaitingPlanApproval state, in the action bar flag too", () => {
     const run = makeRun({ state: "AwaitingPlanApproval" });
     const planArtifact: Artifact = {
@@ -252,7 +290,7 @@ describe("RunDetailPage", () => {
     renderAt();
 
     expect(screen.getByTestId("open-questions-panel").textContent).toBe("1");
-    expect(screen.getByTestId("action-bar").textContent).toBe("true");
+    expect(screen.getByTestId("action-bar").textContent).toContain("true");
   });
 
   it("does not render the open questions panel when there is no Plan artifact", () => {
@@ -265,7 +303,7 @@ describe("RunDetailPage", () => {
     });
     renderAt();
     expect(screen.queryByTestId("open-questions-panel")).toBeNull();
-    expect(screen.getByTestId("action-bar").textContent).toBe("false");
+    expect(screen.getByTestId("action-bar").textContent).toContain("false");
   });
 
   it("passes distilled skill data and loading/error state through to DistilledSkillPanel", () => {

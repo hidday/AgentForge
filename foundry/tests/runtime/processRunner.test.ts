@@ -9,7 +9,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { ProcessRunner } from "../../src/runtime/processRunner.js";
 import { AgentTimeoutError } from "../../src/utils/errors.js";
 import type { ProcessSpawnOptions, ProcessContext } from "../../src/runtime/runnerTypes.js";
@@ -115,6 +115,20 @@ describe("ProcessRunner constructor", () => {
     new ProcessRunner("mock", makeMockLogger() as never, undefined, target);
     expect(existsSync(target)).toBe(true);
   });
+
+  it("defaults the spool directory to .foundry/processes (resolved from cwd) when none is given", () => {
+    const defaultDir = resolve(".foundry/processes");
+    const preexisted = existsSync(defaultDir);
+    try {
+      // eslint-disable-next-line no-new
+      new ProcessRunner("mock", makeMockLogger() as never);
+      expect(existsSync(defaultDir)).toBe(true);
+    } finally {
+      if (!preexisted) {
+        rmSync(resolve(".foundry"), { recursive: true, force: true });
+      }
+    }
+  });
 });
 
 describe("ProcessRunner execute() — mock mode", () => {
@@ -203,6 +217,27 @@ describe("ProcessRunner execute() — real mode, basic spawn behavior", () => {
 
     child.emit("close", 0);
     await promise;
+  });
+
+  it("does nothing extra in cleanupProcess if the active-process entry was already removed before 'close' fires", async () => {
+    const child = makeFakeChild();
+    spawnMock.mockReturnValue(child);
+    const emitter = makeMockEmitter();
+    const runner = new ProcessRunner("real", makeMockLogger() as never, emitter as never, spoolDir);
+
+    const promise = runner.execute(
+      baseOptions({
+        context: { runId: "run-x", stage: "executor", runtime: "claude-code" },
+      }),
+    );
+    const [{ id }] = runner.getActiveProcesses();
+    (runner as unknown as { activeProcesses: Map<string, unknown> }).activeProcesses.delete(id);
+
+    child.emit("close", 0);
+    const result = await promise;
+
+    expect(result.exitCode).toBe(0);
+    expect(emitter.emitProcessCompleted).not.toHaveBeenCalled();
   });
 
   it("resolves (does not reject) with the non-zero exit code from the child", async () => {
@@ -611,6 +646,42 @@ describe("ProcessRunner.rehydrateOrphans()", () => {
     expect(updated.completedAt).toBeDefined();
   });
 
+  it("stringifies a non-Error thrown while processing a manifest (e.g. from a throwing emitter)", () => {
+    const logPath = join(spoolDir, "throwy-1.log");
+    writeFileSync(logPath, "content\n");
+    writeFileSync(
+      join(spoolDir, "throwy-1.json"),
+      JSON.stringify({
+        id: "throwy-1",
+        pid: process.pid,
+        command: "claude",
+        args: [],
+        runId: "run-1",
+        stage: "executor",
+        runtime: "claude-code",
+        startedAt: new Date().toISOString(),
+        logFile: logPath,
+      }),
+    );
+    const logger = makeMockLogger();
+    const emitter = {
+      emitProcessStarted: vi.fn(() => {
+        // eslint-disable-next-line @typescript-eslint/only-throw-error
+        throw "non-error failure from emitter";
+      }),
+      emitProcessOutput: vi.fn(),
+      emitProcessCompleted: vi.fn(),
+    };
+    const runner = new ProcessRunner("real", logger as never, emitter as never, spoolDir);
+
+    expect(() => runner.rehydrateOrphans()).not.toThrow();
+
+    expect(logger.warn).toHaveBeenCalledWith(
+      { file: "throwy-1.json", error: "non-error failure from emitter" },
+      "Failed to process manifest",
+    );
+  });
+
   it("rehydrates a live orphan: registers it as active, emits process:started, and watches its log", () => {
     const fakeWatcher = { close: vi.fn() };
     watchMock.mockReturnValue(fakeWatcher);
@@ -923,6 +994,63 @@ describe("ProcessRunner.rehydrateOrphans()", () => {
       "Orphaned process has exited",
     );
     expect(existsSync(manifestPath)).toBe(false);
+
+    killSpy.mockRestore();
+  });
+
+  it("does nothing extra in finalizeOrphan when the entry was already removed before the poll fires", async () => {
+    vi.useFakeTimers();
+    const fakeWatcher = { close: vi.fn() };
+    watchMock.mockReturnValue(fakeWatcher);
+
+    const logPath = join(spoolDir, "alive-7.log");
+    writeFileSync(logPath, "content\n");
+    writeFileSync(
+      join(spoolDir, "alive-7.json"),
+      JSON.stringify({
+        id: "alive-7",
+        pid: process.pid,
+        command: "claude",
+        args: [],
+        runId: "run-14",
+        stage: "executor",
+        runtime: "claude-code",
+        startedAt: new Date().toISOString(),
+        logFile: logPath,
+      }),
+    );
+    const logger = makeMockLogger();
+    const emitter = makeMockEmitter();
+    const runner = new ProcessRunner("real", logger as never, emitter as never, spoolDir);
+
+    runner.rehydrateOrphans();
+    expect(runner.getActiveProcesses()).toHaveLength(1);
+
+    // Remove the entry directly, so when the poll interval's process.kill
+    // check fails it finds `activeProcesses.get(processId)` already gone
+    // (covering the `?? 0` pid fallback and finalizeOrphan's early return).
+    (runner as unknown as { activeProcesses: Map<string, unknown> }).activeProcesses.delete(
+      "alive-7",
+    );
+
+    const killSpy = vi.spyOn(process, "kill").mockImplementation(((
+      _pid: number,
+      signal?: string | number,
+    ) => {
+      if (signal === 0) {
+        throw Object.assign(new Error("ESRCH"), { code: "ESRCH" });
+      }
+      return true;
+    }) as typeof process.kill);
+
+    await vi.advanceTimersByTimeAsync(5_000);
+
+    expect(fakeWatcher.close).toHaveBeenCalledTimes(1);
+    expect(emitter.emitProcessCompleted).not.toHaveBeenCalled();
+    expect(logger.info).not.toHaveBeenCalledWith(
+      expect.objectContaining({ processId: "alive-7" }),
+      "Orphaned process has exited",
+    );
 
     killSpy.mockRestore();
   });

@@ -1056,6 +1056,78 @@ describe("error handling: non-Error rejections are coerced to strings", () => {
     expect(res.json().error).toBe("pending failed");
   });
 
+  it("approve-plan's background runExecution failure is logged with a stringified non-Error rejection", async () => {
+    const run = makeRun({ state: RunState.Implementing });
+    const { app, mockOrchestrator } = await buildApp();
+    mockOrchestrator.approvePlan.mockResolvedValue(run);
+    mockOrchestrator.runExecution.mockRejectedValue("execution blew up");
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/actions/approve-plan",
+      payload: {},
+    });
+
+    expect(res.statusCode).toBe(200);
+    await new Promise((resolve) => setImmediate(resolve));
+  });
+
+  it("re-review-plan's background failure is logged with a stringified non-Error rejection", async () => {
+    const { app, mockOrchestrator } = await buildApp();
+    mockOrchestrator.runManualReReview.mockRejectedValue("re-review blew up");
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/actions/re-review-plan",
+      payload: {},
+    });
+
+    expect(res.statusCode).toBe(200);
+    await new Promise((resolve) => setImmediate(resolve));
+  });
+
+  it("revise-plan's background failure is logged with a stringified non-Error rejection", async () => {
+    const { app, mockOrchestrator } = await buildApp();
+    mockOrchestrator.runManualPlanRevision.mockRejectedValue("revision blew up");
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/actions/revise-plan",
+      payload: {},
+    });
+
+    expect(res.statusCode).toBe(200);
+    await new Promise((resolve) => setImmediate(resolve));
+  });
+
+  it("retry's background failure is logged with a stringified non-Error rejection", async () => {
+    const run = makeRun({ state: RunState.Todo });
+    const { app, mockRunRepo, mockOrchestrator } = await buildApp();
+    mockRunRepo.findById.mockResolvedValue(run);
+    mockOrchestrator.retryRun.mockRejectedValue("retry blew up");
+
+    const res = await app.inject({ method: "POST", url: "/api/runs/run-1/actions/retry" });
+
+    expect(res.statusCode).toBe(200);
+    await new Promise((resolve) => setImmediate(resolve));
+  });
+
+  it("answer-questions surfaces a generic Error's message (not Policy/Validation) via the final fallback", async () => {
+    const { app, mockOrchestrator } = await buildApp({
+      orchestratorOverrides: { answerQuestions: vi.fn() },
+    });
+    mockOrchestrator.answerQuestions.mockRejectedValue(new Error("totally generic failure"));
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/actions/answer-questions",
+      payload: { answers: [{ questionId: "q1", answer: "yes" }] },
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toBe("totally generic failure");
+  });
+
   it("linear/ingest surfaces a stringified non-Error rejection", async () => {
     const linearPollService = {
       discoverPendingIssues: vi.fn(),

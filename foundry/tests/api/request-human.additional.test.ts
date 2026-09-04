@@ -142,6 +142,27 @@ describe("POST /api/runs/:id/actions/request-human (additional coverage)", () =>
     expect(mockEventRepo.create).toHaveBeenCalledTimes(1);
   });
 
+  it("skips non-HUMAN_REQUESTED events entirely when scanning for a debounce match", async () => {
+    const recentTs = new Date(Date.now() - 60 * 60 * 1000);
+    const { app, sendHumanRequest } = await buildApp({
+      existingEvents: [
+        { eventType: "PLAN_CREATED", createdAt: recentTs, payloadJson: { reason: "other" } },
+        { eventType: "EXECUTION_FINISHED", createdAt: recentTs, payloadJson: {} },
+      ],
+      registerOptions: {},
+    });
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/actions/request-human",
+      payload: { reason: "other", summary: "No matching event type" },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json().debounced).toBe(false);
+    expect(sendHumanRequest).toHaveBeenCalledTimes(1);
+  });
+
   it("omits linearIssue.identifier when the run has no linearIssueIdentifier", async () => {
     const { app, sendHumanRequest } = await buildApp({
       findByIdResult: makeRun({ linearIssueIdentifier: null }),
