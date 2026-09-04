@@ -116,15 +116,30 @@ describe("api client", () => {
     });
   });
 
-  it("reReviewPlan POSTs to the re-review-plan action", async () => {
-    (fetch as ReturnType<typeof vi.fn>).mockResolvedValue(jsonResponse({ ok: true, runId: "r1" }));
+  describe("reReviewPlan", () => {
+    it("POSTs the note when provided", async () => {
+      (fetch as ReturnType<typeof vi.fn>).mockResolvedValue(
+        jsonResponse({ ok: true, runId: "r1" }),
+      );
 
-    await api.reReviewPlan("r1", "note");
+      await api.reReviewPlan("r1", "note");
 
-    expect(fetch).toHaveBeenCalledWith(
-      "/api/runs/r1/actions/re-review-plan",
-      expect.objectContaining({ method: "POST" }),
-    );
+      const [url, init] = (fetch as ReturnType<typeof vi.fn>).mock.calls[0];
+      expect(url).toBe("/api/runs/r1/actions/re-review-plan");
+      expect(init.method).toBe("POST");
+      expect(JSON.parse(init.body)).toEqual({ note: "note" });
+    });
+
+    it("sends note: undefined when no note is provided", async () => {
+      (fetch as ReturnType<typeof vi.fn>).mockResolvedValue(
+        jsonResponse({ ok: true, runId: "r1" }),
+      );
+
+      await api.reReviewPlan("r1");
+
+      const [, init] = (fetch as ReturnType<typeof vi.fn>).mock.calls[0];
+      expect(JSON.parse(init.body)).toEqual({});
+    });
   });
 
   it("revisePlan POSTs to the revise-plan action", async () => {
