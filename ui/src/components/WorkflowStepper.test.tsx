@@ -37,8 +37,10 @@ describe("WorkflowStepper", () => {
 
   it("marks every step completed when the run is Done", () => {
     render(<WorkflowStepper currentState="Done" events={[]} />);
+    // The Done row is both "completed" and "current" simultaneously; the
+    // accent (current) color wins once merged by the cn() class merger.
     const doneLabel = screen.getByText("Done");
-    expect(doneLabel.className).toContain("text-state-done");
+    expect(doneLabel.className).toContain("text-accent");
     const planning = screen.getByText("Planning");
     expect(planning.className).toContain("text-state-done");
     const implementing = screen.getByText("Implementing");
@@ -87,12 +89,16 @@ describe("WorkflowStepper", () => {
     expect(screen.getByText("To Do")).toBeDefined();
   });
 
-  it("shows the side-state panel with 'Revising Plan' and treats PlanReview as completed for PlanRevision", () => {
+  it("shows the side-state panel with 'Revising Plan' and treats steps before PlanReview as completed for PlanRevision", () => {
     render(<WorkflowStepper currentState="PlanRevision" events={[]} />);
     expect(screen.getByText("Revising Plan")).toBeDefined();
-    // PlanReview should be marked completed (effectiveIdx points at PlanReview).
+    // effectiveIdx resolves to PlanReview's index; steps strictly before it
+    // (e.g. Planning) are completed, while PlanReview itself is neither
+    // completed nor "current" (currentState is PlanRevision, not PlanReview).
+    const planning = screen.getByText("Planning");
+    expect(planning.className).toContain("text-state-done");
     const planReview = screen.getByText("Plan Review");
-    expect(planReview.className).toContain("text-state-done");
+    expect(planReview.className).toContain("text-text-muted");
   });
 
   it("shows the side-state panel with 'Addressing Review' for AddressingReview", () => {

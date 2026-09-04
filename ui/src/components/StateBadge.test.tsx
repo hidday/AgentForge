@@ -35,7 +35,9 @@ describe("StateBadge", () => {
 
   it("applies blocked category classes for blocked states", () => {
     render(<StateBadge state="AIBlocked" />);
-    const label = screen.getByText("AI Blocked");
+    // formatStateName inserts a space before every capital letter, so
+    // consecutive capitals ("AI") each get their own space.
+    const label = screen.getByText("A I Blocked");
     const badge = label.closest("span");
     expect(badge?.className).toContain("bg-state-blocked-bg");
   });

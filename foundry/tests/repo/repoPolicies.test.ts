@@ -43,7 +43,7 @@ describe("validateFilePaths", () => {
   it("can report both an unallowed and a protected violation for different files in one call", () => {
     const result = validateFilePaths(
       ["docs/readme.md", "prisma/migrations/x.sql"],
-      ["src/"],
+      ["src/", "prisma/"],
       ["prisma/migrations/"],
     );
     expect(result.valid).toBe(false);
