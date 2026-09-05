@@ -304,4 +304,162 @@ describe("PlannerAgent.run()", () => {
       expect(prompt).not.toContain("{{relatedContextSection}}");
     });
   });
+
+  describe("planReviewFindings injection", () => {
+    it("renders '## AI Plan Review Findings' section when planReviewFindings is provided", async () => {
+      const { agent, getPrompt } = buildPlannerAgent();
+      const bundle = makeTaskBundle();
+
+      await agent.run(bundle, "run-1", {
+        planReviewFindings: {
+          summary: "Missing error handling step.",
+          findings: [
+            {
+              id: "pf1",
+              severity: "important",
+              title: "No malformed-JSON handling",
+              details: "Add a step for it.",
+            },
+          ],
+        },
+      });
+
+      const prompt = getPrompt();
+      expect(prompt).toContain("## AI Plan Review Findings (from previous plan)");
+      expect(prompt).toContain("Missing error handling step.");
+      expect(prompt).toContain("[important] No malformed-JSON handling");
+      expect(prompt).toContain("(pf1): Add a step for it.");
+      expect(prompt).toContain("Incorporate these findings into the revised plan");
+    });
+
+    it("omits the plan review findings section when not provided", async () => {
+      const { agent, getPrompt } = buildPlannerAgent();
+      await agent.run(makeTaskBundle(), "run-1");
+      const prompt = getPrompt();
+      expect(prompt).not.toContain("## AI Plan Review Findings");
+    });
+  });
+
+  describe("previousPlan injection", () => {
+    it("renders the previously rejected plan with steps, risks, assumptions, and open questions", async () => {
+      const { agent, getPrompt } = buildPlannerAgent();
+      const bundle = makeTaskBundle();
+
+      await agent.run(bundle, "run-1", {
+        previousPlan: {
+          planVersion: 3,
+          summary: "Old plan summary",
+          requirementsTraceability: "trace",
+          assumptions: ["Assumption A"],
+          openQuestions: [
+            { id: "q1", question: "Blocking question?", requiredForExecution: true },
+          ],
+          risks: ["Risk A"],
+          steps: [{ id: "s1", title: "Old Step", description: "Old description" }],
+          testPlan: "Old test plan",
+          confidence: 0.75,
+        },
+      });
+
+      const prompt = getPrompt();
+      expect(prompt).toContain("## Previously Rejected Plan (v3)");
+      expect(prompt).toContain("**Confidence:** 75%");
+      expect(prompt).toContain("1. **Old Step** (s1): Old description");
+      expect(prompt).toContain("**Risks:**\n- Risk A");
+      expect(prompt).toContain("**Assumptions:**\n- Assumption A");
+      expect(prompt).toContain("[q1] Blocking question? *(blocks execution)*");
+      expect(prompt).toContain("**Test Plan:** Old test plan");
+      expect(prompt).toContain("Use this as the starting point for the new plan.");
+    });
+
+    it("omits risks/assumptions/openQuestions sub-sections when they are empty", async () => {
+      const { agent, getPrompt } = buildPlannerAgent();
+      const bundle = makeTaskBundle();
+
+      await agent.run(bundle, "run-1", {
+        previousPlan: {
+          planVersion: 2,
+          summary: "Minimal previous plan",
+          requirementsTraceability: "trace",
+          assumptions: [],
+          openQuestions: [],
+          risks: [],
+          steps: [{ id: "s1", title: "Only Step", description: "desc" }],
+          testPlan: "Test plan",
+          confidence: 0.5,
+        },
+      });
+
+      const prompt = getPrompt();
+      expect(prompt).toContain("## Previously Rejected Plan (v2)");
+      expect(prompt).not.toContain("**Risks:**");
+      expect(prompt).not.toContain("**Assumptions:**");
+      expect(prompt).not.toContain("**Open Questions:**");
+    });
+
+    it("omits the previous plan section when not provided", async () => {
+      const { agent, getPrompt } = buildPlannerAgent();
+      await agent.run(makeTaskBundle(), "run-1");
+      const prompt = getPrompt();
+      expect(prompt).not.toContain("Previously Rejected Plan");
+    });
+  });
+
+  describe("priorSkills injection", () => {
+    it("renders prior skills with name, taskCategory, description, and markdown", async () => {
+      const { agent, getPrompt } = buildPlannerAgent();
+      const bundle = makeTaskBundle();
+
+      await agent.run(bundle, "run-1", {
+        priorSkills: [
+          {
+            id: "skill-1",
+            repoSlug: "test-repo",
+            name: "add-validation",
+            taskCategory: "validation",
+            description: "Use when adding request validation.",
+            skillMarkdown: "# Add validation\nUse Zod.",
+            active: true,
+            createdAt: new Date(),
+            updatedAt: new Date(),
+          } as never,
+        ],
+      });
+
+      const prompt = getPrompt();
+      expect(prompt).toContain("## Prior Skills from Similar Tasks");
+      expect(prompt).toContain("### add-validation (validation)");
+      expect(prompt).toContain("Use when adding request validation.");
+      expect(prompt).toContain("# Add validation\nUse Zod.");
+    });
+
+    it("falls back to taskCategory as the heading when a skill has no name", async () => {
+      const { agent, getPrompt } = buildPlannerAgent();
+      const bundle = makeTaskBundle();
+
+      await agent.run(bundle, "run-1", {
+        priorSkills: [
+          {
+            id: "skill-2",
+            repoSlug: "test-repo",
+            taskCategory: "logging",
+            skillMarkdown: "# Logging skill",
+            active: true,
+            createdAt: new Date(),
+            updatedAt: new Date(),
+          } as never,
+        ],
+      });
+
+      const prompt = getPrompt();
+      expect(prompt).toContain("### logging\n\n# Logging skill");
+    });
+
+    it("omits the prior skills section when none are provided", async () => {
+      const { agent, getPrompt } = buildPlannerAgent();
+      await agent.run(makeTaskBundle(), "run-1");
+      const prompt = getPrompt();
+      expect(prompt).not.toContain("## Prior Skills from Similar Tasks");
+    });
+  });
 });

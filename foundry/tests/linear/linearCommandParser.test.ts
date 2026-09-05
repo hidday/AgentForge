@@ -64,5 +64,25 @@ describe("parseLinearCommand", () => {
       const result = parseLinearCommand("/unknown-command");
       expect(result).toEqual({ type: "unknown", raw: "/unknown-command" });
     });
+
+    it("returns null for an empty string", () => {
+      const result = parseLinearCommand("");
+      expect(result).toBeNull();
+    });
+
+    it("returns null for a whitespace-only string", () => {
+      const result = parseLinearCommand("   \n  \t  ");
+      expect(result).toBeNull();
+    });
+
+    it("parses a command on the first line even with trailing blank lines", () => {
+      const result = parseLinearCommand("/run-ai\n\n\n");
+      expect(result).toEqual({ type: "run-ai" });
+    });
+
+    it("does not match a command prefix that is only a substring of the first word", () => {
+      const result = parseLinearCommand("/run-ai-extra");
+      expect(result).toEqual({ type: "unknown", raw: "/run-ai-extra" });
+    });
   });
 });

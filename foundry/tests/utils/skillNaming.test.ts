@@ -21,4 +21,19 @@ describe("skillNaming", () => {
       "dev-env-pause-resume",
     );
   });
+
+  it("normalizeSkillName falls back to slugifying when name is undefined", () => {
+    expect(normalizeSkillName(undefined, "add request validation")).toBe(
+      "add-request-validation",
+    );
+  });
+
+  it("normalizeSkillName falls back to slugifying when name is blank", () => {
+    expect(normalizeSkillName("   ", "add request validation")).toBe("add-request-validation");
+  });
+
+  it("slugifySkillName returns 'distilled-skill' when the input has no valid characters", () => {
+    expect(slugifySkillName("!!!")).toBe("distilled-skill");
+    expect(slugifySkillName("")).toBe("distilled-skill");
+  });
 });
