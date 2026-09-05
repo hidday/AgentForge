@@ -232,6 +232,82 @@ describe("buildChatSystemPrompt", () => {
     expect(result).not.toContain("x".repeat(4001));
   });
 
+  it("includes plan review findings when a PlanReview artifact is present", () => {
+    const artifact = makeArtifact({
+      type: "PlanReview",
+      version: 1,
+      payloadJson: {
+        summary: "Plan needs one more step.",
+        findings: [
+          {
+            id: "pf1",
+            severity: "important",
+            title: "Missing error handling",
+            details: "Add a step for malformed input.",
+          },
+        ],
+      },
+    });
+    const result = buildChatSystemPrompt(makeRun(), [artifact]);
+    expect(result).toContain("## Plan Review Findings");
+    expect(result).toContain("Plan needs one more step.");
+    expect(result).toContain("[important] Missing error handling");
+    expect(result).toContain("(pf1): Add a step for malformed input.");
+  });
+
+  it("omits the Plan Review Findings section when no PlanReview artifact exists", () => {
+    const result = buildChatSystemPrompt(makeRun(), []);
+    expect(result).not.toContain("## Plan Review Findings");
+  });
+
+  it("omits the Plan Review Findings section when the PlanReview artifact has no summary or findings", () => {
+    const artifact = makeArtifact({
+      type: "PlanReview",
+      version: 1,
+      payloadJson: {},
+    });
+    const result = buildChatSystemPrompt(makeRun(), [artifact]);
+    expect(result).not.toContain("## Plan Review Findings");
+  });
+
+  it("includes code review findings when a Review artifact is present", () => {
+    const artifact = makeArtifact({
+      type: "Review",
+      version: 1,
+      payloadJson: {
+        summary: "One bug found.",
+        findings: [
+          {
+            id: "f1",
+            severity: "blocker",
+            title: "Null pointer",
+            details: "Will crash on empty input.",
+          },
+        ],
+      },
+    });
+    const result = buildChatSystemPrompt(makeRun(), [artifact]);
+    expect(result).toContain("## Code Review Findings");
+    expect(result).toContain("One bug found.");
+    expect(result).toContain("[blocker] Null pointer");
+    expect(result).toContain("(f1): Will crash on empty input.");
+  });
+
+  it("omits the Code Review Findings section when no Review artifact exists", () => {
+    const result = buildChatSystemPrompt(makeRun(), []);
+    expect(result).not.toContain("## Code Review Findings");
+  });
+
+  it("omits the Code Review Findings section when the Review artifact has no summary or findings", () => {
+    const artifact = makeArtifact({
+      type: "Review",
+      version: 1,
+      payloadJson: {},
+    });
+    const result = buildChatSystemPrompt(makeRun(), [artifact]);
+    expect(result).not.toContain("## Code Review Findings");
+  });
+
   it("uses the Plan artifact with the highest version when multiple exist", () => {
     const planV1 = makeArtifact({
       type: "Plan",

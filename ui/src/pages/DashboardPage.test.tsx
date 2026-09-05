@@ -111,6 +111,20 @@ describe("DashboardPage", () => {
     expect(screen.getByText("3")).toBeDefined();
   });
 
+  it("counts a run in an unrecognized state as idle rather than crashing", () => {
+    useRunsMock.mockReturnValue({
+      runs: [makeRun({ id: "r1", state: "SomeBrandNewState" })],
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+    renderPage();
+    // Total stat should still reflect the one run even though its state
+    // isn't in STATE_CATEGORY_MAP.
+    expect(screen.getByText("1")).toBeDefined();
+    expect(screen.getByText("Fix the bug")).toBeDefined();
+  });
+
   it("filters runs by category when a filter button is clicked", async () => {
     const user = userEvent.setup();
     useRunsMock.mockReturnValue({

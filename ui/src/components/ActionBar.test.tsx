@@ -224,6 +224,9 @@ describe("ActionBar", () => {
 
     await userEvent.click(screen.getByRole("button", { name: /^reject plan$/i }));
     await userEvent.click(screen.getByText("Start fresh"));
+    // Switch back to "iterate" mode explicitly to exercise that click handler too.
+    await userEvent.click(screen.getByText("Revise plan"));
+    await userEvent.click(screen.getByText("Start fresh"));
     await userEvent.click(lastRejectConfirmButton());
 
     await waitFor(() => {

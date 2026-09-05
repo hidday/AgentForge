@@ -94,6 +94,14 @@ describe("LinearSyncDialog", () => {
 
     expect(screen.getByRole("button", { name: /starting/i })).toBeDefined();
 
+    // These SSE events should all be ignored by the guard clauses in
+    // handleSSE: a non "run:created" type, a "run:created" with no
+    // issueId, and a "run:created" for an issue we aren't waiting on.
+    fireSSE({ type: "run:state-changed", runId: "run-a" });
+    fireSSE({ type: "run:created", runId: "run-x" });
+    fireSSE({ type: "run:created", runId: "run-z", issueId: "not-pending-id" });
+    expect(onClose).not.toHaveBeenCalled();
+
     fireSSE({ type: "run:created", runId: "run-a", issueId: issueA.id });
     fireSSE({ type: "run:created", runId: "run-b", issueId: issueB.id });
 
@@ -144,6 +152,45 @@ describe("LinearSyncDialog", () => {
     });
     expect(onIngestComplete).toHaveBeenCalledWith({ started: 1, skipped: 1 });
     expect(onIngested).toHaveBeenCalledOnce();
+  });
+
+  it("does not call onIngested when every selected issue was skipped (none started)", async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    const onIngested = vi.fn();
+    mockApi.ingestIssues.mockResolvedValue({
+      ok: true,
+      started: [],
+      skipped: [issueA.id, issueB.id],
+    });
+
+    render(
+      <LinearSyncDialog open={true} onClose={vi.fn()} onIngested={onIngested} />,
+    );
+    await waitFor(() => expect(screen.getByText(issueA.title)).toBeDefined());
+
+    await user.click(screen.getByRole("button", { name: /start 2 runs/i }));
+    await act(async () => {
+      vi.advanceTimersByTime(700);
+    });
+
+    await waitFor(() => expect(screen.queryByText(issueA.title)).toBeNull());
+    expect(onIngested).not.toHaveBeenCalled();
+  });
+
+  it("falls back to a generic message when ingestIssues rejects with a non-Error value", async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    mockApi.ingestIssues.mockRejectedValue("network exploded");
+
+    render(
+      <LinearSyncDialog open={true} onClose={vi.fn()} onIngested={vi.fn()} />,
+    );
+    await waitFor(() => expect(screen.getByText(issueA.title)).toBeDefined());
+
+    await user.click(screen.getByRole("button", { name: /start 2 runs/i }));
+
+    await waitFor(() =>
+      expect(screen.getByText(/Failed to ingest issues/i)).toBeDefined(),
+    );
   });
 
   it("stays open and surfaces the error when ingestIssues rejects", async () => {
@@ -293,6 +340,11 @@ describe("LinearSyncDialog", () => {
     expect(
       screen.getByRole("button", { name: /start 0 run\b/i }),
     ).toHaveProperty("disabled", true);
+
+    // Re-checking the individual issue directly (not via select-all) exercises
+    // the "add to selection" branch of toggleOne.
+    await user.click(issueACheckbox);
+    expect(screen.getByRole("button", { name: /start 1 run\b/i })).toBeDefined();
   });
 
   it("does not call ingestIssues when Start is clicked with nothing selected", async () => {
@@ -355,5 +407,87 @@ describe("LinearSyncDialog", () => {
 
     await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
     expect(onIngested).toHaveBeenCalledOnce();
+  });
+
+  it("resets cleanly (no stale auto-close) when closed and reopened before the min-loader timer fires", async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    const onClose = vi.fn();
+    mockApi.ingestIssues.mockResolvedValue({ ok: true, started: [issueA.id], skipped: [] });
+
+    const { rerender } = render(
+      <LinearSyncDialog open={true} onClose={onClose} onIngested={vi.fn()} />,
+    );
+    await waitFor(() => expect(screen.getByText(issueA.title)).toBeDefined());
+
+    await user.click(screen.getByRole("button", { name: /start 2 runs/i }));
+    // Let the ingestIssues promise settle. Since almost no real time has
+    // elapsed, maybeAutoClose schedules a MIN_LOADER_MS-delayed retry
+    // instead of closing immediately, leaving a pending timer behind.
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    rerender(<LinearSyncDialog open={false} onClose={onClose} onIngested={vi.fn()} />);
+    rerender(<LinearSyncDialog open={true} onClose={onClose} onIngested={vi.fn()} />);
+
+    // The stale timer from the previous cycle must not fire and close the
+    // freshly reopened dialog, and the reopened dialog should show a fresh
+    // issue list rather than being stuck mid-ingest.
+    await act(async () => {
+      vi.advanceTimersByTime(1000);
+    });
+    expect(onClose).not.toHaveBeenCalled();
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /start 2 runs/i })).toBeDefined(),
+    );
+  });
+
+  it("calls onIngestComplete a second time with authoritative counts when ingestIssues resolves after SSE already closed the dialog", async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    const onClose = vi.fn();
+    const onIngested = vi.fn();
+    const onIngestComplete = vi.fn();
+    let resolveIngest!: (v: { ok: boolean; started: string[]; skipped: string[] }) => void;
+    mockApi.ingestIssues.mockReturnValue(
+      new Promise((resolve) => {
+        resolveIngest = resolve;
+      }),
+    );
+
+    render(
+      <LinearSyncDialog
+        open={true}
+        onClose={onClose}
+        onIngested={onIngested}
+        onIngestComplete={onIngestComplete}
+      />,
+    );
+    await waitFor(() => expect(screen.getByText(issueA.title)).toBeDefined());
+
+    await user.click(screen.getByRole("button", { name: /start 2 runs/i }));
+
+    fireSSE({ type: "run:created", runId: "run-a", issueId: issueA.id });
+    fireSSE({ type: "run:created", runId: "run-b", issueId: issueB.id });
+
+    await act(async () => {
+      vi.advanceTimersByTime(700);
+    });
+
+    await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
+    // Optimistic, SSE-synthesized summary (the HTTP response hasn't landed yet).
+    expect(onIngestComplete).toHaveBeenCalledWith({ started: 2, skipped: 0 });
+
+    onIngestComplete.mockClear();
+    await act(async () => {
+      resolveIngest({ ok: true, started: [issueA.id], skipped: [issueB.id] });
+    });
+
+    // The authoritative started/skipped counts arrive as a second call.
+    await waitFor(() =>
+      expect(onIngestComplete).toHaveBeenCalledWith({ started: 1, skipped: 1 }),
+    );
+    expect(onIngested).toHaveBeenCalledOnce();
+    expect(onClose).toHaveBeenCalledOnce();
   });
 });

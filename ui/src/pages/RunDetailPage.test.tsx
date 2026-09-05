@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import type { Run, Artifact, RunEventRecord } from "@/api/client.ts";
 
@@ -229,6 +230,42 @@ describe("RunDetailPage", () => {
     const panel = within(screen.getByRole("region", { name: "Open Questions" }));
     expect(panel.queryByText("Required?")).toBeNull();
     expect(panel.getByText("Optional?")).toBeDefined();
+  });
+
+  it("scrolls to the open questions panel when the ActionBar's Answer Questions button is clicked", async () => {
+    // jsdom doesn't implement scrollIntoView; stub it so the page's
+    // scrollToQuestions handler can call it without throwing.
+    Element.prototype.scrollIntoView = vi.fn();
+    const user = userEvent.setup();
+    const planArtifact: Artifact = {
+      id: "a1",
+      runId: "run-1",
+      type: "Plan",
+      version: 1,
+      payloadJson: {
+        openQuestions: [
+          { id: "q1", question: "Required?", requiredForExecution: true },
+        ],
+      },
+      rawText: "",
+      createdAt: "2024-01-01T00:00:00Z",
+    };
+    useRunMock.mockReturnValue({
+      data: {
+        run: makeRun({ state: "HumanClarificationNeeded" }),
+        artifacts: [planArtifact],
+        events: [],
+      },
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+    renderPage();
+
+    await user.click(screen.getByRole("button", { name: /answer questions/i }));
+    expect(Element.prototype.scrollIntoView).toHaveBeenCalledWith(
+      expect.objectContaining({ behavior: "smooth", block: "start" }),
+    );
   });
 
   it("renders with no plan artifact and no open questions panel at all", () => {

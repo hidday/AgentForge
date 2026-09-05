@@ -168,4 +168,16 @@ describe("RunsTable", () => {
     const links = screen.getAllByRole("link");
     expect(links.some((l) => l.getAttribute("href") === "/runs/run-1")).toBe(true);
   });
+
+  it("stops the Linear link click from bubbling up to the row", async () => {
+    const user = userEvent.setup();
+    const docClickSpy = vi.fn();
+    document.addEventListener("click", docClickSpy);
+    renderTable([makeRun()]);
+
+    await user.click(screen.getByTitle("Open in Linear"));
+    expect(docClickSpy).not.toHaveBeenCalled();
+
+    document.removeEventListener("click", docClickSpy);
+  });
 });
