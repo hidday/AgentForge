@@ -176,6 +176,23 @@ describe("POST /api/runs/:id/actions/re-review-plan", () => {
     expect(res.statusCode).toBe(200);
     await new Promise((r) => setTimeout(r, 10));
   });
+
+  it("returns 400 when triggering the re-review throws synchronously", async () => {
+    const { app, mockOrchestrator } = await buildApp({
+      runManualReReview: vi.fn(() => {
+        throw new Error("cannot start re-review");
+      }),
+    });
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/actions/re-review-plan",
+      payload: { note: "please check" },
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toEqual({ error: "cannot start re-review" });
+  });
 });
 
 describe("POST /api/runs/:id/actions/revise-plan", () => {

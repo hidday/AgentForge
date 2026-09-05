@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import Fastify from "fastify";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { registerApiRoutes } from "../../src/api/routes.js";
@@ -288,6 +288,60 @@ describe("POST /api/runs/:id/chat", () => {
 
     expect(res.statusCode).toBe(500);
     expect(mockArtifactRepo.create).not.toHaveBeenCalled();
+  });
+
+  it("returns 422 when workingDirectory is missing and is not a worktree path", async () => {
+    const run = makeRun();
+    run.workingDirectory = join(workspaceDir, "does-not-exist");
+    const { app, mockRunRepo, mockClaudeCodeRunner } = await buildApp();
+    mockRunRepo.findById.mockResolvedValue(run);
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/chat",
+      payload: { message: "Hello?" },
+    });
+
+    expect(res.statusCode).toBe(422);
+    expect(res.json()).toEqual({
+      error: "Working directory not found — the repository may have been removed",
+    });
+    expect(mockClaudeCodeRunner!.chatRun).not.toHaveBeenCalled();
+  });
+
+  it("falls back to the base repo directory when a worktree path has been cleaned up", async () => {
+    const run = makeRun();
+    run.workingDirectory = join(workspaceDir, ".worktrees", "run-1");
+    const { app, mockRunRepo, mockClaudeCodeRunner } = await buildApp();
+    mockRunRepo.findById.mockResolvedValue(run);
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/chat",
+      payload: { message: "Hello?" },
+    });
+
+    expect(res.statusCode).toBe(200);
+    const [input] = mockClaudeCodeRunner!.chatRun.mock.calls[0] as [{ workingDirectory: string }];
+    expect(input.workingDirectory).toBe(workspaceDir);
+  });
+
+  it("returns 422 when both the worktree path and its base repo directory are missing", async () => {
+    const orphanedRoot = mkdtempSync(join(tmpdir(), "routes-chat-orphan-"));
+    rmSync(orphanedRoot, { recursive: true, force: true });
+    const run = makeRun();
+    run.workingDirectory = join(orphanedRoot, ".worktrees", "run-1");
+    const { app, mockRunRepo, mockClaudeCodeRunner } = await buildApp();
+    mockRunRepo.findById.mockResolvedValue(run);
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/chat",
+      payload: { message: "Hello?" },
+    });
+
+    expect(res.statusCode).toBe(422);
+    expect(mockClaudeCodeRunner!.chatRun).not.toHaveBeenCalled();
   });
 
   it("chatRun receives input that does NOT include --dangerously-skip-permissions", async () => {

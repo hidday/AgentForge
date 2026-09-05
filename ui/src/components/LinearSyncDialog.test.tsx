@@ -122,6 +122,54 @@ describe("LinearSyncDialog", () => {
     });
   });
 
+  it("does not schedule a second min-loader timer when a redundant SSE event arrives while one is already pending", async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    const onClose = vi.fn();
+    const onIngestComplete = vi.fn();
+
+    // ingestIssues never resolves — auto-close must come purely from SSE.
+    mockApi.ingestIssues.mockReturnValue(new Promise(() => {}));
+
+    render(
+      <LinearSyncDialog
+        open={true}
+        onClose={onClose}
+        onIngested={vi.fn()}
+        onIngestComplete={onIngestComplete}
+      />,
+    );
+
+    await waitFor(() => expect(screen.getByText(issueA.title)).toBeDefined());
+
+    // Select only issue A so a single SSE event marks every pending id as seen.
+    const issueBCheckbox = screen.getByRole("checkbox", { name: new RegExp(issueB.title) });
+    await user.click(issueBCheckbox);
+
+    const startBtn = screen.getByRole("button", { name: /start 1 run\b/i });
+    await user.click(startBtn);
+
+    // First event: allSeen becomes true, elapsed < MIN_LOADER_MS, so this
+    // schedules the delayed close timer (hits the "not yet scheduled" path).
+    fireSSE({ type: "run:created", runId: "run-a", issueId: issueA.id });
+    // Second, redundant event for the same issue: allSeen is still true and
+    // a timer is already pending, so this must hit the "already scheduled"
+    // early-return instead of scheduling a duplicate timer.
+    fireSSE({ type: "run:created", runId: "run-a", issueId: issueA.id });
+
+    expect(onClose).not.toHaveBeenCalled();
+
+    await act(async () => {
+      vi.advanceTimersByTime(700);
+    });
+
+    // Exactly one close, not one per SSE event.
+    await waitFor(() => {
+      expect(onClose).toHaveBeenCalledOnce();
+      expect(onIngestComplete).toHaveBeenCalledOnce();
+      expect(onIngestComplete).toHaveBeenCalledWith({ started: 1, skipped: 0 });
+    });
+  });
+
   it("auto-closes when ingestIssues resolves first (SSE never fires)", async () => {
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     const onClose = vi.fn();

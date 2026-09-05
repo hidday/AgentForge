@@ -372,6 +372,31 @@ describe("PlannerAgent.run()", () => {
       expect(prompt).toContain("Use this as the starting point for the new plan.");
     });
 
+    it("renders a non-blocking open question without the '(blocks execution)' suffix", async () => {
+      const { agent, getPrompt } = buildPlannerAgent();
+      const bundle = makeTaskBundle();
+
+      await agent.run(bundle, "run-1", {
+        previousPlan: {
+          planVersion: 4,
+          summary: "Plan with a non-blocking question",
+          requirementsTraceability: "trace",
+          assumptions: [],
+          openQuestions: [
+            { id: "q2", question: "Nice-to-have clarification?", requiredForExecution: false },
+          ],
+          risks: [],
+          steps: [{ id: "s1", title: "Step", description: "desc" }],
+          testPlan: "Test plan",
+          confidence: 0.6,
+        },
+      });
+
+      const prompt = getPrompt();
+      expect(prompt).toContain("[q2] Nice-to-have clarification?");
+      expect(prompt).not.toContain("Nice-to-have clarification? *(blocks execution)*");
+    });
+
     it("omits risks/assumptions/openQuestions sub-sections when they are empty", async () => {
       const { agent, getPrompt } = buildPlannerAgent();
       const bundle = makeTaskBundle();

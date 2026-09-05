@@ -1,5 +1,17 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+
+// Node's ESM namespace object for built-ins is frozen, so individual exports
+// (like statSync) can't be spied on directly. Route statSync through a
+// hoisted, overridable mock so a single test can simulate a defensive branch
+// (workingDirectory itself failing an isDirectory() check) that is otherwise
+// unreachable via real filesystem operations.
+const { statSyncMock } = vi.hoisted(() => ({ statSyncMock: vi.fn() }));
+vi.mock("node:fs", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs")>();
+  statSyncMock.mockImplementation(actual.statSync);
+  return { ...actual, statSync: statSyncMock };
+});
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
@@ -215,6 +227,32 @@ describe("RepoRegistry", () => {
       expect(() => registry.validateWorkingDirectory(repoDir)).toThrow(
         /Working directory has invalid \.git entry/,
       );
+    });
+
+    it("throws when the working directory itself is not a directory", () => {
+      // On a real filesystem, existsSync(join(workingDirectory, ".git")) can
+      // only succeed if workingDirectory is traversable as a directory, so
+      // this final defensive check is otherwise unreachable through normal
+      // inputs. Stub statSync for this one path to exercise it directly.
+      const registry = buildRegistry();
+      const repoDir = join(dir, "stat-mismatch-repo");
+      mkdirSync(join(repoDir, ".git"), { recursive: true });
+
+      const realImpl = statSyncMock.getMockImplementation();
+      statSyncMock.mockImplementation((path: unknown, options?: unknown) => {
+        if (path === repoDir) {
+          return { isDirectory: () => false, isFile: () => false };
+        }
+        return realImpl?.(path as never, options as never);
+      });
+
+      try {
+        expect(() => registry.validateWorkingDirectory(repoDir)).toThrow(
+          /Working directory path is not a directory/,
+        );
+      } finally {
+        statSyncMock.mockImplementation(realImpl);
+      }
     });
   });
 });
