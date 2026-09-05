@@ -8,6 +8,10 @@ vi.mock("node:child_process", () => ({
   spawn: vi.fn(),
 }));
 
+vi.mock("../../src/utils/ids.js", () => ({
+  generateId: vi.fn(() => "gen-id"),
+}));
+
 vi.mock("node:fs", () => ({
   mkdirSync: vi.fn(),
   createWriteStream: vi.fn(),
@@ -583,6 +587,23 @@ describe("ProcessRunner.rehydrateOrphans", () => {
     );
   });
 
+  it("stringifies a non-Error thrown value when a manifest fails to process", () => {
+    readdirSyncMock.mockReturnValue(["weird.json"]);
+    readFileSyncMock.mockImplementation(() => {
+      // eslint-disable-next-line @typescript-eslint/no-throw-literal
+      throw "not-an-error-object";
+    });
+    const logger = makeLogger();
+    const runner = new ProcessRunner("real", logger as never);
+
+    runner.rehydrateOrphans();
+
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.objectContaining({ file: "weird.json", error: "not-an-error-object" }),
+      "Failed to process manifest",
+    );
+  });
+
   it("marks a manifest as crashed when its pid is no longer alive", () => {
     readdirSyncMock.mockReturnValue(["orphan.json"]);
     readFileSyncMock.mockReturnValue(
@@ -872,7 +893,7 @@ describe("ProcessRunner.rehydrateOrphans", () => {
     runner.rehydrateOrphans();
     alive = false;
 
-    await expect(vi.advanceTimersByTimeAsync(5000)).resolves.toBeUndefined();
+    await vi.advanceTimersByTimeAsync(5000);
 
     expect(runner.getActiveProcesses()).toHaveLength(0);
     expect(emitter.emitProcessCompleted).toHaveBeenCalledWith(
@@ -883,6 +904,68 @@ describe("ProcessRunner.rehydrateOrphans", () => {
       -1,
       expect.any(Number),
     );
+
+    killSpy.mockRestore();
+  });
+
+  it("falls back to pid 0 and no-ops finalizeOrphan when the tracked entry vanished before the poll fired", async () => {
+    vi.useFakeTimers();
+    readdirSyncMock.mockReturnValue(["race.json"]);
+    readFileSyncMock.mockImplementation((path: string) => {
+      if (String(path).endsWith("race.json")) {
+        return JSON.stringify({
+          // Deliberately reuses the generateId() mock's fixed id so a
+          // brand-new tracked process (below) collides with this orphan's
+          // map entry, simulating the entry disappearing mid-poll.
+          id: "gen-id",
+          pid: 570,
+          command: "claude",
+          stage: "executor",
+          runId: "run-race",
+          runtime: "claude-code",
+          startedAt: new Date().toISOString(),
+        });
+      }
+      throw new Error("no log");
+    });
+    let killCalls = 0;
+    const killSpy = vi.spyOn(process, "kill").mockImplementation(() => {
+      killCalls += 1;
+      if (killCalls === 1) return true; // rehydrate's initial alive check
+      throw new Error("ESRCH"); // every subsequent poll tick: "dead"
+    });
+    watchMock.mockImplementation(() => ({ close: vi.fn() }));
+    const emitter = makeEmitter();
+    const runner = new ProcessRunner("real", makeLogger() as never, emitter as never);
+
+    runner.rehydrateOrphans();
+    expect(runner.getActiveProcesses()).toHaveLength(1);
+
+    // A normal tracked process reuses the same generated id and completes,
+    // deleting the shared map entry out from under the orphan's poll.
+    const child = new FakeChildProcess();
+    spawnMock.mockReturnValue(child);
+    const promise = runner.execute({
+      command: "claude",
+      args: [],
+      cwd: "/tmp",
+      timeoutMs: 5000,
+      context: { runId: "run-other", stage: "executor", runtime: "claude-code" },
+    });
+    child.emit("close", 0);
+    await promise;
+    expect(runner.getActiveProcesses()).toHaveLength(0);
+    emitter.emitProcessCompleted.mockClear();
+
+    // The orphan's poll interval now fires with its entry already gone:
+    // `activeProcesses.get(processId)?.pid ?? 0` takes the `?? 0` branch,
+    // and finalizeOrphan's `if (!entry) return;` guard fires too.
+    await vi.advanceTimersByTimeAsync(5000);
+
+    expect(killSpy).toHaveBeenCalledWith(0, 0);
+    // finalizeOrphan returned early, so no duplicate completion event fired
+    // for the already-cleaned-up "gen-id" entry.
+    expect(emitter.emitProcessCompleted).not.toHaveBeenCalled();
 
     killSpy.mockRestore();
   });
