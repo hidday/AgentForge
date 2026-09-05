@@ -181,6 +181,41 @@ describe("GitService", () => {
 
       await svc.removeWorktree(repoPath, result.worktreePath);
     });
+
+    it("removes a pre-existing worktree directory at the deterministic path before recreating", async () => {
+      const runId = "aaaaaaaa-3456-7890-abcd-ef1234567890";
+      const branchName = "hidday/pry-200-preexisting-dir";
+      const dirName = buildWorktreeDirName(runId.slice(0, 8), branchName);
+      const worktreePath = join(repoPath, ".worktrees", dirName);
+
+      // Simulate a leftover worktree directory at the exact deterministic path,
+      // checked out on an unrelated branch.
+      await svc.createWorktree(repoPath, worktreePath, "unrelated-leftover", "main");
+      expect(existsSync(worktreePath)).toBe(true);
+
+      const result = await svc.setupRunWorktree(repoPath, runId, "main", branchName);
+
+      expect(result.worktreePath).toBe(worktreePath);
+      expect(await svc.currentBranch(result.worktreePath)).toBe(branchName);
+
+      await svc.removeWorktree(repoPath, result.worktreePath);
+    });
+
+    it("warns but still proceeds when origin/<branch> already exists", async () => {
+      const branchName = "hidday/pry-201-remote-exists";
+      // Push the branch to origin ahead of time so remoteBranchExists() is true.
+      git(["branch", branchName, "main"], repoPath);
+      git(["push", "origin", branchName], repoPath);
+      git(["branch", "-D", branchName], repoPath);
+
+      const runId = "bbbbbbbb-3456-7890-abcd-ef1234567890";
+      const result = await svc.setupRunWorktree(repoPath, runId, "main", branchName);
+
+      expect(await svc.currentBranch(result.worktreePath)).toBe(branchName);
+      expect(await svc.remoteBranchExists(repoPath, branchName)).toBe(true);
+
+      await svc.removeWorktree(repoPath, result.worktreePath);
+    });
   });
 
   describe("findWorktreeForBranch", () => {
@@ -237,6 +272,15 @@ describe("GitService", () => {
       );
       expect(buildWorktreeDirName("abcdefgh", "")).toBe("run-abcdefgh");
     });
+
+    it("drops the slug entirely when the very first word already exceeds the length cap", () => {
+      // "averylongslugwordthatexceedsthirtychars" is 40 chars on its own, so
+      // shortenSlug's first candidate already overflows maxLen and breaks
+      // before ever assigning `result`.
+      expect(
+        buildWorktreeDirName("abcdefgh", "hidday/pry-42-averylongslugwordthatexceedsthirtychars"),
+      ).toBe("run-abcdefgh-pry-42");
+    });
   });
 
   describe("resolveMainRepoPath", () => {
@@ -249,9 +293,96 @@ describe("GitService", () => {
     });
   });
 
+  describe("push / commitAndPush", () => {
+    let bareDir: string;
+
+    beforeEach(() => {
+      bareDir = mkdtempSync(join(tmpdir(), "gitservice-bare-"));
+      git(["clone", "--bare", repoPath, bareDir], tmpdir());
+      git(["remote", "add", "origin", bareDir], repoPath);
+    });
+
+    afterEach(() => {
+      rmSync(bareDir, { recursive: true, force: true });
+    });
+
+    it("push pushes the current branch to origin", async () => {
+      git(["checkout", "-b", "push-branch"], repoPath);
+      await svc.push(repoPath, "push-branch");
+
+      const remoteBranches = git(["ls-remote", "--heads", bareDir], tmpdir());
+      expect(remoteBranches).toContain("push-branch");
+    });
+
+    it("push throws GitError when the push fails", async () => {
+      await expect(svc.push(repoPath, "no-such-branch")).rejects.toThrow(GitError);
+    });
+
+    it("commitAndPush asserts the branch, commits, and pushes in one call", async () => {
+      git(["checkout", "-b", "combo-branch"], repoPath);
+      writeFileSync(join(repoPath, "combo.txt"), "content");
+
+      await svc.commitAndPush(repoPath, "combo-branch", "combo commit");
+
+      const log = git(["log", "--oneline"], repoPath);
+      expect(log).toContain("combo commit");
+      const remoteBranches = git(["ls-remote", "--heads", bareDir], tmpdir());
+      expect(remoteBranches).toContain("combo-branch");
+    });
+
+    it("commitAndPush throws BranchMismatchError without pushing when on the wrong branch", async () => {
+      git(["checkout", "-b", "wrong-branch"], repoPath);
+      await expect(
+        svc.commitAndPush(repoPath, "expected-branch", "should not push"),
+      ).rejects.toThrow(BranchMismatchError);
+
+      const remoteBranches = git(["ls-remote", "--heads", bareDir], tmpdir());
+      expect(remoteBranches).not.toContain("expected-branch");
+    });
+  });
+
   describe("error handling", () => {
     it("throws GitError for invalid repo path", async () => {
       await expect(svc.currentBranch("/nonexistent")).rejects.toThrow(GitError);
+    });
+
+    it("fetch throws GitError when the remote is unreachable", async () => {
+      await expect(svc.fetch(repoPath)).rejects.toThrow(GitError);
+    });
+
+    it("createWorktree throws GitError for an invalid start point", async () => {
+      const wtPath = join(repoPath, ".worktrees", "bad-start-point");
+      await expect(
+        svc.createWorktree(repoPath, wtPath, "some-branch", "no-such-ref"),
+      ).rejects.toThrow(GitError);
+    });
+
+    it("pruneWorktrees swallows errors from an invalid repo path", async () => {
+      await expect(svc.pruneWorktrees("/nonexistent")).resolves.toBeUndefined();
+    });
+
+    it("findWorktreeForBranch throws GitError for an invalid repo path", async () => {
+      await expect(svc.findWorktreeForBranch("/nonexistent", "main")).rejects.toThrow(GitError);
+    });
+
+    it("removeWorktree swallows errors for a worktree that doesn't exist", async () => {
+      await expect(
+        svc.removeWorktree(repoPath, join(repoPath, ".worktrees", "never-created")),
+      ).resolves.toBeUndefined();
+    });
+
+    it("hasChanges throws GitError for an invalid repo path", async () => {
+      await expect(svc.hasChanges("/nonexistent")).rejects.toThrow(GitError);
+    });
+
+    it("commitAll throws GitError when the underlying commit command fails", async () => {
+      // A failing pre-commit hook forces `git commit` to exit non-zero even
+      // though there are staged changes.
+      const hookPath = join(repoPath, ".git", "hooks", "pre-commit");
+      writeFileSync(hookPath, "#!/bin/sh\nexit 1\n", { mode: 0o755 });
+      writeFileSync(join(repoPath, "conflict.txt"), "content");
+
+      await expect(svc.commitAll(repoPath, "should fail")).rejects.toThrow(GitError);
     });
   });
 });
