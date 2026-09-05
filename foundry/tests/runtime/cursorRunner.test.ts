@@ -220,4 +220,62 @@ describe("CursorRunner — stdin payload and args", () => {
     expect(logFields.stderr).toContain("[STDERR_TAIL]");
     expect(logFields.stderr.length).toBeLessThanOrEqual(501);
   });
+
+  it("passes a process context through to execute() when input.runId is set", async () => {
+    const processRunner = makeMockProcessRunner({
+      stdout: JSON.stringify({
+        type: "result",
+        result:
+          'BEGIN_STRUCTURED_OUTPUT\n{"success":true,"stage":"planner","payload":{"value":"ok"}}\nEND_STRUCTURED_OUTPUT',
+      }),
+      stderr: "",
+      exitCode: 0,
+      durationMs: 10,
+      timedOut: false,
+    });
+    const runner = new CursorRunner(
+      processRunner as never,
+      "cursor",
+      [],
+      "claude-4.6-sonnet",
+      makeMockLogger() as never,
+    );
+
+    await runner.run(
+      { prompt: "x", workingDirectory: "/tmp", timeoutMs: 1000, runId: "run-cursor-1" },
+      "planner",
+      echoSchema,
+    );
+
+    const { context } = processRunner.execute.mock.calls[0]![0] as {
+      context: { runId: string; stage: string; runtime: string };
+    };
+    expect(context).toEqual({ runId: "run-cursor-1", stage: "planner", runtime: "cursor" });
+  });
+
+  it("omits the process context when input.runId is unset", async () => {
+    const processRunner = makeMockProcessRunner({
+      stdout: JSON.stringify({
+        type: "result",
+        result:
+          'BEGIN_STRUCTURED_OUTPUT\n{"success":true,"stage":"planner","payload":{"value":"ok"}}\nEND_STRUCTURED_OUTPUT',
+      }),
+      stderr: "",
+      exitCode: 0,
+      durationMs: 10,
+      timedOut: false,
+    });
+    const runner = new CursorRunner(
+      processRunner as never,
+      "cursor",
+      [],
+      "claude-4.6-sonnet",
+      makeMockLogger() as never,
+    );
+
+    await runner.run({ prompt: "x", workingDirectory: "/tmp", timeoutMs: 1000 }, "planner", echoSchema);
+
+    const { context } = processRunner.execute.mock.calls[0]![0] as { context: unknown };
+    expect(context).toBeUndefined();
+  });
 });

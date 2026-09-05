@@ -913,6 +913,66 @@ describe("DistillationAgent", () => {
         "Distillation LLM call failed or parse error",
       );
     });
+
+    it("renders '_none_' for a Plan with no steps and a Remediation with no resolutions", async () => {
+      const { deps, getPrompt } = buildDepsWithCapture();
+      deps.artifactRepo.findLatestByType.mockImplementation((_runId: string, type: string) => {
+        if (type === "ExecutionReport") {
+          return Promise.resolve({
+            id: "exec-1",
+            runId: "run-1",
+            type: "ExecutionReport",
+            version: 1,
+            payloadJson: {
+              executionVersion: 1,
+              summary: "Implemented.",
+              filesChanged: [],
+              checks: {
+                lint: { status: "pass", details: "ok" },
+                typecheck: { status: "pass", details: "ok" },
+                tests: { status: "pass", details: "ok" },
+              },
+              notes: [],
+              prDraftCreated: true,
+              score: 0.8,
+              scoreRationale: "Good",
+            },
+            rawText: "",
+            createdAt: new Date(),
+          });
+        }
+        if (type === "Plan") {
+          return Promise.resolve({
+            id: "plan-1",
+            runId: "run-1",
+            type: "Plan",
+            version: 1,
+            payloadJson: validPlanPayload({ steps: [] }),
+            rawText: "",
+            createdAt: new Date(),
+          });
+        }
+        if (type === "Remediation") {
+          return Promise.resolve({
+            id: "rem-1",
+            runId: "run-1",
+            type: "Remediation",
+            version: 1,
+            payloadJson: validRemediationPayload({ resolution: [] }),
+            rawText: "",
+            createdAt: new Date(),
+          });
+        }
+        return Promise.resolve(null);
+      });
+
+      const agent = buildAgent(deps);
+      await agent.run("run-1", makeRun());
+
+      const prompt = getPrompt();
+      expect(prompt).toContain("**Steps**:\n_none_");
+      expect(prompt).toContain("**Resolutions**:\n_none_");
+    });
   });
 
   describe("(k) Missing-field and description-fallback guards when shouldPersist=true", () => {

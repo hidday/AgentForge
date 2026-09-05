@@ -296,6 +296,33 @@ describe("ClaudeCodeRunner.chatRun() — arg filtering and error surfacing", () 
     expect(args.filter((a) => a === "--dangerously-skip-permissions")).toHaveLength(0);
   });
 
+  it("passes a process context through to execute() when chatRun's input.runId is set", async () => {
+    const processRunner = makeMockProcessRunner({
+      stdout: successEnvelope,
+      stderr: "",
+      exitCode: 0,
+      durationMs: 5,
+      timedOut: false,
+    });
+    const runner = new ClaudeCodeRunner(
+      processRunner as never,
+      "claude",
+      [],
+      "claude-opus-4-8",
+      makeMockLogger() as never,
+    );
+
+    await runner.chatRun(
+      { prompt: "Hi", workingDirectory: "/tmp", timeoutMs: 1000, runId: "chat-run-1" },
+      "chat",
+    );
+
+    const { context } = processRunner.execute.mock.calls[0]![0] as {
+      context: { runId: string; stage: string; runtime: string };
+    };
+    expect(context).toEqual({ runId: "chat-run-1", stage: "chat", runtime: "claude-code" });
+  });
+
   it("returns { text, durationMs } on success", async () => {
     const processRunner = makeMockProcessRunner({
       stdout: successEnvelope,
@@ -463,13 +490,18 @@ describe("ClaudeCodeRunner — arg building and NDJSON envelope unwrapping", () 
     expect(logger.error).not.toHaveBeenCalled();
   });
 
-  it("skips blank lines and non-JSON lines while scanning NDJSON for the result line", async () => {
+  it("skips blank lines, non-JSON lines, and result-typed lines without a string result", async () => {
+    // The scan walks lines from the end backward, so the trailing line (with
+    // type "result" but a non-string `result`) must be skipped over before
+    // reaching the earlier, genuinely valid result line.
     const ndjson = [
       "",
       "   ",
       "not-json-at-all {{{",
       JSON.stringify({ type: "assistant", message: "irrelevant" }),
       JSON.stringify({ type: "result", is_error: true, result: "API Error: overloaded" }),
+      // type is "result" but `result` is not a string: must be skipped too.
+      JSON.stringify({ type: "result", result: 42 }),
     ].join("\n");
 
     const processRunner = makeMockProcessRunner({
@@ -496,6 +528,56 @@ describe("ClaudeCodeRunner — arg building and NDJSON envelope unwrapping", () 
     expect(logMessage).toBe("Claude Code CLI reported upstream API error");
     expect(logFields).toMatchObject({ upstreamApiError: true });
     expect(logFields.outputSnippet).toContain("API Error: overloaded");
+  });
+
+  it("passes a process context (runId/stage/runtime) through to execute() when input.runId is set", async () => {
+    const processRunner = makeMockProcessRunner({
+      stdout: JSON.stringify({ type: "result", result: validStructuredOutput }),
+      stderr: "",
+      exitCode: 0,
+      durationMs: 10,
+      timedOut: false,
+    });
+    const runner = new ClaudeCodeRunner(
+      processRunner as never,
+      "claude",
+      [],
+      "claude-opus-4-8",
+      makeMockLogger() as never,
+    );
+
+    await runner.run(
+      { prompt: "x", workingDirectory: "/tmp", timeoutMs: 1000, runId: "run-123" },
+      "planner",
+      echoSchema,
+    );
+
+    const { context } = processRunner.execute.mock.calls[0]![0] as {
+      context: { runId: string; stage: string; runtime: string };
+    };
+    expect(context).toEqual({ runId: "run-123", stage: "planner", runtime: "claude-code" });
+  });
+
+  it("omits the process context when input.runId is unset", async () => {
+    const processRunner = makeMockProcessRunner({
+      stdout: JSON.stringify({ type: "result", result: validStructuredOutput }),
+      stderr: "",
+      exitCode: 0,
+      durationMs: 10,
+      timedOut: false,
+    });
+    const runner = new ClaudeCodeRunner(
+      processRunner as never,
+      "claude",
+      [],
+      "claude-opus-4-8",
+      makeMockLogger() as never,
+    );
+
+    await runner.run({ prompt: "x", workingDirectory: "/tmp", timeoutMs: 1000 }, "planner", echoSchema);
+
+    const { context } = processRunner.execute.mock.calls[0]![0] as { context: unknown };
+    expect(context).toBeUndefined();
   });
 
   it("falls back to the raw output when neither single-JSON nor NDJSON result line is found", async () => {

@@ -59,6 +59,11 @@ function fireSSE(event: DashboardEvent) {
 }
 
 describe("LinearSyncDialog", () => {
+  // Several tests here drive real setTimeout-based delays (MIN_LOADER_MS)
+  // through fake timers with shouldAdvanceTime; under heavy concurrent
+  // test-runner load that can be slower than the default timeout.
+  vi.setConfig({ testTimeout: 20000 });
+
   beforeEach(() => {
     vi.clearAllMocks();
     sseCallback = null;
@@ -152,6 +157,33 @@ describe("LinearSyncDialog", () => {
     });
     expect(onIngestComplete).toHaveBeenCalledWith({ started: 1, skipped: 1 });
     expect(onIngested).toHaveBeenCalledOnce();
+  });
+
+  it("clears a pending min-loader timer on unmount without throwing", async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    mockApi.ingestIssues.mockResolvedValue({ ok: true, started: [issueA.id], skipped: [] });
+
+    const { unmount } = render(
+      <LinearSyncDialog open={true} onClose={vi.fn()} onIngested={vi.fn()} />,
+    );
+    await waitFor(() => expect(screen.getByText(issueA.title)).toBeDefined());
+
+    await user.click(screen.getByRole("button", { name: /start 2 runs/i }));
+    // Let the ingestIssues promise settle; since barely any real time has
+    // elapsed, this schedules a MIN_LOADER_MS-delayed timer rather than
+    // closing immediately, leaving a pending timer behind at unmount time.
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(() => unmount()).not.toThrow();
+
+    // Advancing timers post-unmount must not throw either (no dangling
+    // setState calls on an unmounted component).
+    await act(async () => {
+      vi.advanceTimersByTime(1000);
+    });
   });
 
   it("does not call onIngested when every selected issue was skipped (none started)", async () => {
