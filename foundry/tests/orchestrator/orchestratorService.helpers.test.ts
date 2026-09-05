@@ -220,6 +220,7 @@ function buildDeps(overrides: Record<string, unknown> = {}) {
     eventRepo,
     linearClient,
     githubClient,
+    gitService,
     plannerAgent,
     logger,
   };
@@ -523,5 +524,120 @@ describe("OrchestratorService.updateSkillMetrics (via transitionAndRecord reachi
     );
     // archiveIfLowUtility is only called for the skill whose update succeeded.
     expect(agentSkillRepo.archiveIfLowUtility).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("OrchestratorService dependency accessors", () => {
+  it("expose the underlying repositories and Linear client passed in at construction", () => {
+    const { deps, runRepo, artifactRepo, eventRepo } = buildDeps();
+    const agentSkillRepo = { findTopKByRelevance: vi.fn() };
+    const svc = new OrchestratorService({ ...deps, agentSkillRepo } as never);
+
+    expect(svc.getRunRepo()).toBe(runRepo);
+    expect(svc.getArtifactRepo()).toBe(artifactRepo);
+    expect(svc.getEventRepo()).toBe(eventRepo);
+    expect(svc.getAgentSkillRepo()).toBe(agentSkillRepo);
+    expect(svc.getLinearClient()).toBe(deps.linearClient);
+  });
+
+  it("getAgentSkillRepo returns undefined when no skill repo was configured", () => {
+    const { deps } = buildDeps();
+    const svc = new OrchestratorService(deps as never);
+    expect(svc.getAgentSkillRepo()).toBeUndefined();
+  });
+});
+
+describe("OrchestratorService.approvePlan", () => {
+  it("throws when no Plan artifact exists for the run", async () => {
+    const { deps, runRepo, artifactRepo } = buildDeps();
+    runRepo.findById.mockResolvedValue(makeRun({ state: RunState.AwaitingPlanApproval }));
+    artifactRepo.findLatestByType.mockResolvedValue(null);
+    const svc = new OrchestratorService(deps as never);
+
+    await expect(svc.approvePlan("run-1")).rejects.toThrow(
+      "No plan artifact found for run run-1",
+    );
+  });
+
+  it("approves the plan, transitions to Implementing, and posts a plain comment without an operator note", async () => {
+    const { deps, runRepo, artifactRepo, linearClient } = buildDeps();
+    const plan = makePlan({ planVersion: 3 });
+    runRepo.findById.mockResolvedValue(makeRun({ state: RunState.AwaitingPlanApproval }));
+    artifactRepo.findLatestByType.mockResolvedValue({ payloadJson: plan });
+    runRepo.update.mockResolvedValue(
+      makeRun({ state: RunState.AwaitingPlanApproval, approvedPlanVersion: 3 }),
+    );
+    runRepo.updateState.mockResolvedValue(makeRun({ state: RunState.Implementing }));
+    const svc = new OrchestratorService(deps as never);
+
+    const result = await svc.approvePlan("run-1");
+
+    expect(result.state).toBe(RunState.Implementing);
+    expect(runRepo.update).toHaveBeenCalledWith("run-1", { approvedPlanVersion: 3 });
+    expect(linearClient.postComment).toHaveBeenCalledWith(
+      "LIN-1",
+      "Plan v3 approved. Starting implementation...",
+    );
+  });
+
+  it("includes the operator note in the approval comment and the recorded event payload", async () => {
+    const { deps, runRepo, artifactRepo, eventRepo, linearClient } = buildDeps();
+    const plan = makePlan({ planVersion: 5 });
+    runRepo.findById.mockResolvedValue(makeRun({ state: RunState.AwaitingPlanApproval }));
+    artifactRepo.findLatestByType.mockResolvedValue({ payloadJson: plan });
+    runRepo.update.mockResolvedValue(
+      makeRun({ state: RunState.AwaitingPlanApproval, approvedPlanVersion: 5 }),
+    );
+    runRepo.updateState.mockResolvedValue(makeRun({ state: RunState.Implementing }));
+    const svc = new OrchestratorService(deps as never);
+
+    await svc.approvePlan("run-1", { note: "Looks good, ship it" });
+
+    expect(linearClient.postComment).toHaveBeenCalledWith(
+      "LIN-1",
+      "Plan v5 approved with operator note. Starting implementation...\n\n> Looks good, ship it",
+    );
+    expect(eventRepo.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventType: RunEvent.PLAN_APPROVED,
+        payloadJson: expect.objectContaining({ note: "Looks good, ship it" }),
+      }),
+    );
+  });
+});
+
+describe("OrchestratorService worktree cleanup on terminal transitions", () => {
+  it("removes the worktree when the run's working directory differs from the resolved main repo path", async () => {
+    const { deps, runRepo, gitService } = buildDeps();
+    (gitService as { resolveMainRepoPath: ReturnType<typeof vi.fn> }).resolveMainRepoPath =
+      vi.fn().mockReturnValue("/repos/myrepo");
+    const run = makeRun({
+      state: RunState.ReadyForHumanReview,
+      workingDirectory: "/repos/myrepo/.worktrees/run-abc",
+    });
+    runRepo.findById.mockResolvedValue(run);
+    runRepo.updateState.mockResolvedValue(
+      makeRun({ state: RunState.Done, workingDirectory: "/repos/myrepo/.worktrees/run-abc" }),
+    );
+    const svc = new OrchestratorService(deps as never);
+
+    await svc.approveHumanReview("run-1");
+
+    expect(gitService.removeWorktree).toHaveBeenCalledWith(
+      "/repos/myrepo",
+      "/repos/myrepo/.worktrees/run-abc",
+    );
+  });
+
+  it("skips worktree removal when the working directory already IS the main repo path", async () => {
+    const { deps, runRepo, gitService } = buildDeps();
+    const run = makeRun({ state: RunState.ReadyForHumanReview, workingDirectory: "/tmp" });
+    runRepo.findById.mockResolvedValue(run);
+    runRepo.updateState.mockResolvedValue(makeRun({ state: RunState.Done, workingDirectory: "/tmp" }));
+    const svc = new OrchestratorService(deps as never);
+
+    await svc.approveHumanReview("run-1");
+
+    expect(gitService.removeWorktree).not.toHaveBeenCalled();
   });
 });

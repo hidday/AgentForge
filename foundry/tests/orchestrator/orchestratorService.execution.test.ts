@@ -269,6 +269,67 @@ describe("OrchestratorService.runExecution", () => {
     expect(result).toBeDefined();
   });
 
+  it("formats the execution report comment with skipped checks, a collapsed file list, and notes", async () => {
+    const { deps, runRepo, artifactRepo, executorAgent, reviewerAgent, linearClient } = buildDeps();
+    const svc = new OrchestratorService(deps as never);
+
+    const plan = makePlan();
+    const manyFiles = Array.from({ length: 9 }, (_, i) => `src/file${i}.ts`);
+    const report = makeExecutionReport({
+      filesChanged: manyFiles,
+      checks: {
+        lint: { status: "pass", details: "ok" },
+        typecheck: { status: "skip", details: "not run" },
+        tests: { status: "pass", details: "ok" },
+      },
+      notes: ["Left a TODO for follow-up work"],
+    });
+
+    runRepo.findById
+      .mockResolvedValueOnce(makeRun({ state: RunState.Implementing })) // requireRun in runExecution
+      .mockResolvedValueOnce(makeRun({ state: RunState.AIReview, prNumber: 7 })) // requireRun in runReview
+      .mockResolvedValueOnce(makeRun({ state: RunState.ReadyForHumanReview, prNumber: 7 })); // requireRun in markReady
+    artifactRepo.findLatestByType.mockImplementation((_id: string, type: string) => {
+      if (type === "Plan") return Promise.resolve(makeArtifact({ type: "Plan", payloadJson: plan }));
+      if (type === "ExecutionReport") {
+        return Promise.resolve(makeArtifact({ type: "ExecutionReport", payloadJson: report }));
+      }
+      if (type === "Review") {
+        return Promise.resolve(
+          makeArtifact({
+            type: "Review",
+            payloadJson: { reviewId: "rev-1", summary: "Fine", overallVerdict: "approved", findings: [] },
+          }),
+        );
+      }
+      return Promise.resolve(null);
+    });
+    executorAgent.run.mockResolvedValue({ report, prNumber: 7 });
+    reviewerAgent.run.mockResolvedValue({
+      reviewId: "rev-1",
+      summary: "Fine",
+      overallVerdict: "approved",
+      findings: [],
+    });
+    runRepo.update
+      .mockResolvedValueOnce(makeRun({ state: RunState.Implementing, prNumber: 7 }))
+      .mockResolvedValueOnce(makeRun({ state: RunState.AIReview, prNumber: 7, reviewerRuntime: "codex" }));
+    runRepo.updateState
+      .mockResolvedValueOnce(makeRun({ state: RunState.AIReview, prNumber: 7 }))
+      .mockResolvedValueOnce(makeRun({ state: RunState.ReadyForHumanReview, prNumber: 7 }));
+
+    await svc.runExecution("run-1");
+
+    const [, comment] = linearClient.postComment.mock.calls[0] as [string, string];
+    expect(comment).toContain(":white_check_mark: **Lint**");
+    expect(comment).toContain(":heavy_minus_sign: **Typecheck**");
+    expect(comment).toContain(":white_check_mark: **Tests**");
+    expect(comment).toContain("<details>");
+    expect(comment).toContain("Files changed (9)");
+    expect(comment).toContain("### Notes");
+    expect(comment).toContain("- Left a TODO for follow-up work");
+  });
+
   it("throws PolicyViolationError from assertCanExecute when the run is not Implementing", async () => {
     const { deps, runRepo, artifactRepo } = buildDeps();
     const svc = new OrchestratorService(deps as never);
