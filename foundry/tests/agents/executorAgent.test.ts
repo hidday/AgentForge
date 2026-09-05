@@ -195,6 +195,22 @@ describe("ExecutorAgent.run()", () => {
     expect(githubClient.createDraftPR).not.toHaveBeenCalled();
   });
 
+  it("logs isRetry: true when only existingPR is set (no existingBranch)", async () => {
+    const { agent, githubClient, logger } = buildAgent();
+
+    const result = await agent.run(makePlan(), makeTaskBundle(), "run-1", {
+      existingBranch: null,
+      existingPR: 777,
+    });
+
+    expect(result.prNumber).toBe(777);
+    expect(githubClient.createDraftPR).not.toHaveBeenCalled();
+    const startLog = logger.info.mock.calls.find(
+      (c: unknown[]) => c[1] === "Starting executor agent",
+    );
+    expect((startLog?.[0] as Record<string, unknown> | undefined)?.isRetry).toBe(true);
+  });
+
   it("renders the Operator Note section when an operatorNote is provided", async () => {
     const { agent, getUserPrompt } = buildAgent();
 

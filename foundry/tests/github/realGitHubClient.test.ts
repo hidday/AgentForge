@@ -46,9 +46,10 @@ function buildClient(): { client: RealGitHubClient; octokit: FakeOctokit; logger
 describe("RealGitHubClient", () => {
   let client: RealGitHubClient;
   let octokit: FakeOctokit;
+  let logger: ReturnType<typeof makeLogger>;
 
   beforeEach(() => {
-    ({ client, octokit } = buildClient());
+    ({ client, octokit, logger } = buildClient());
   });
 
   describe("repo format validation", () => {
@@ -72,6 +73,13 @@ describe("RealGitHubClient", () => {
         /cannot access repo "owner\/repo".*Not Found/,
       );
     });
+
+    it("stringifies a non-Error rejection when wrapping the failure", async () => {
+      octokit.repos.get.mockRejectedValue("rate limit exceeded");
+      await expect(client.verifyRepoAccess("owner/repo")).rejects.toThrow(
+        /cannot access repo "owner\/repo".*rate limit exceeded/,
+      );
+    });
   });
 
   describe("getDefaultBranch", () => {
@@ -84,6 +92,13 @@ describe("RealGitHubClient", () => {
       octokit.repos.get.mockRejectedValue(new Error("boom"));
       await expect(client.getDefaultBranch("owner/repo")).rejects.toThrow(
         'GitHub getDefaultBranch failed for "owner/repo": boom',
+      );
+    });
+
+    it("stringifies a non-Error rejection when wrapping the failure", async () => {
+      octokit.repos.get.mockRejectedValue(503);
+      await expect(client.getDefaultBranch("owner/repo")).rejects.toThrow(
+        'GitHub getDefaultBranch failed for "owner/repo": 503',
       );
     });
   });
@@ -194,6 +209,17 @@ describe("RealGitHubClient", () => {
       await expect(
         client.createDraftPR("owner/repo", "head", "main", "Title", "Body"),
       ).rejects.toThrow('GitHub createDraftPR failed for "owner/repo"');
+    });
+
+    it("treats a non-Error 422 rejection as a duplicate-head lookup, not field validation", async () => {
+      const nonErrorRejection = { status: 422, toString: () => "duplicate head ref" };
+      octokit.pulls.create.mockRejectedValue(nonErrorRejection);
+      octokit.pulls.list.mockResolvedValue({ data: [{ number: 61 }] });
+
+      const result = await client.createDraftPR("owner/repo", "head", "main", "Title", "Body");
+
+      expect(result).toBe(61);
+      expect(octokit.pulls.list).toHaveBeenCalled();
     });
   });
 
@@ -393,6 +419,17 @@ describe("RealGitHubClient", () => {
         client.replyToReviewComment("owner/repo", 3, 99, "thanks"),
       ).resolves.toBeUndefined();
     });
+
+    it("swallows a non-Error rejection and logs its stringified form", async () => {
+      octokit.pulls.createReplyForReviewComment.mockRejectedValue("comment deleted");
+      await expect(
+        client.replyToReviewComment("owner/repo", 3, 99, "thanks"),
+      ).resolves.toBeUndefined();
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.objectContaining({ error: "comment deleted" }),
+        expect.any(String),
+      );
+    });
   });
 
   describe("submitPRReview", () => {
@@ -439,6 +476,14 @@ describe("RealGitHubClient", () => {
 
       await expect(
         client.submitPRReview("owner/repo", 3, "Just a note", "COMMENT"),
+      ).rejects.toThrow('GitHub submitPRReview failed for "owner/repo"');
+    });
+
+    it("stringifies a non-Error rejection when wrapping the failure", async () => {
+      octokit.pulls.createReview.mockRejectedValue({ toString: () => "service unavailable" });
+
+      await expect(
+        client.submitPRReview("owner/repo", 3, "Needs work", "REQUEST_CHANGES"),
       ).rejects.toThrow('GitHub submitPRReview failed for "owner/repo"');
     });
   });

@@ -86,6 +86,21 @@ describe("buildChatSystemPrompt", () => {
     expect(result).toContain("Plan summary");
   });
 
+  it("includes plan open questions, rendering string and non-string entries", () => {
+    const planArtifact = makeArtifact({
+      type: "Plan",
+      version: 1,
+      payloadJson: {
+        summary: "Plan summary",
+        openQuestions: ["Which env should we target?", { id: "q2", question: "Auth method?" }],
+      },
+    });
+    const result = buildChatSystemPrompt(makeRun(), [planArtifact]);
+    expect(result).toContain("**Open Questions:**");
+    expect(result).toContain("Which env should we target?");
+    expect(result).toContain(JSON.stringify({ id: "q2", question: "Auth method?" }));
+  });
+
   it("includes human answers section when HumanAnswers artifact present", () => {
     const artifact = makeArtifact({
       type: "HumanAnswers",

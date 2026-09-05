@@ -167,6 +167,31 @@ describe("GET /api/runs/:id/summary", () => {
     expect(body.executionReport.version).toBe(9);
   });
 
+  it("falls back to String() for a risk object that fails JSON.stringify", async () => {
+    const run = makeRun();
+    const { app, mockRunRepo, mockArtifactRepo } = await buildApp();
+    mockRunRepo.findById.mockResolvedValue(run);
+
+    const circular: Record<string, unknown> = { note: "circular" };
+    circular.self = circular;
+
+    mockArtifactRepo.findLatestByType.mockImplementation((_runId: string, type: string) => {
+      if (type === "Plan") {
+        return Promise.resolve({
+          version: 1,
+          payloadJson: { summary: "has a bad risk", risks: [circular] },
+        });
+      }
+      return Promise.resolve(null);
+    });
+
+    const res = await app.inject({ method: "GET", url: "/api/runs/run-1/summary" });
+
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as { plan: { risks: string[] } };
+    expect(body.plan.risks).toEqual(["[object Object]"]);
+  });
+
   it("returns empty risks/steps arrays when plan payload omits them", async () => {
     const run = makeRun();
     const { app, mockRunRepo, mockArtifactRepo } = await buildApp();

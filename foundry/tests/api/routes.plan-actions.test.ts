@@ -214,6 +214,23 @@ describe("POST /api/runs/:id/actions/revise-plan", () => {
     expect(res.statusCode).toBe(200);
     await new Promise((r) => setTimeout(r, 10));
   });
+
+  it("returns 400 when triggering the revision throws synchronously", async () => {
+    const { app, mockOrchestrator } = await buildApp({
+      runManualPlanRevision: vi.fn(() => {
+        throw new Error("cannot start revision");
+      }),
+    });
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/actions/revise-plan",
+      payload: { note: "tweak" },
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toEqual({ error: "cannot start revision" });
+  });
 });
 
 describe("POST /api/runs/:id/actions/approve-review", () => {
