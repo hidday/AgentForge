@@ -164,21 +164,37 @@ describe("api client", () => {
       );
     });
 
-    it("reReviewPlan", async () => {
+    it("reReviewPlan with a note", async () => {
       fetchMock.mockResolvedValue(jsonResponse({ ok: true, runId: "run-1" }));
       await api.reReviewPlan("run-1", "note");
-      expect(fetchMock).toHaveBeenCalledWith(
-        "/api/runs/run-1/actions/re-review-plan",
-        expect.objectContaining({ method: "POST" }),
-      );
+      const [url, options] = fetchMock.mock.calls[0]!;
+      expect(url).toBe("/api/runs/run-1/actions/re-review-plan");
+      expect((options as RequestInit).method).toBe("POST");
+      expect((options as RequestInit).body).toBe(JSON.stringify({ note: "note" }));
     });
 
-    it("revisePlan", async () => {
+    it("reReviewPlan without a note sends note: undefined", async () => {
+      fetchMock.mockResolvedValue(jsonResponse({ ok: true, runId: "run-1" }));
+      await api.reReviewPlan("run-1");
+      const [, options] = fetchMock.mock.calls[0]!;
+      expect((options as RequestInit).body).toBe(JSON.stringify({ note: undefined }));
+    });
+
+    it("revisePlan without a note sends note: undefined", async () => {
       fetchMock.mockResolvedValue(jsonResponse({ ok: true, runId: "run-1" }));
       await api.revisePlan("run-1");
-      expect(fetchMock).toHaveBeenCalledWith(
-        "/api/runs/run-1/actions/revise-plan",
-        expect.objectContaining({ method: "POST" }),
+      const [url, options] = fetchMock.mock.calls[0]!;
+      expect(url).toBe("/api/runs/run-1/actions/revise-plan");
+      expect((options as RequestInit).method).toBe("POST");
+      expect((options as RequestInit).body).toBe(JSON.stringify({ note: undefined }));
+    });
+
+    it("revisePlan with a note", async () => {
+      fetchMock.mockResolvedValue(jsonResponse({ ok: true, runId: "run-1" }));
+      await api.revisePlan("run-1", "please adjust");
+      const [, options] = fetchMock.mock.calls[0]!;
+      expect((options as RequestInit).body).toBe(
+        JSON.stringify({ note: "please adjust" }),
       );
     });
 
