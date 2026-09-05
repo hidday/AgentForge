@@ -99,3 +99,145 @@ END_STRUCTURED_OUTPUT`;
     expect(logger.error).not.toHaveBeenCalled();
   });
 });
+
+describe("CodexRunner — arg building and stdin payload", () => {
+  it("prepends --model flags when baseArgs does not start with the 'exec' subcommand", async () => {
+    const stdout = `BEGIN_STRUCTURED_OUTPUT\n{"success":true,"stage":"planner","payload":{"value":"ok"}}\nEND_STRUCTURED_OUTPUT`;
+    const processRunner = makeMockProcessRunner({
+      stdout,
+      stderr: "",
+      exitCode: 0,
+      durationMs: 10,
+      timedOut: false,
+    });
+    const logger = makeMockLogger();
+    const runner = new CodexRunner(
+      processRunner as never,
+      "codex",
+      ["--full-auto"],
+      "gpt-5.6-sol",
+      logger as never,
+    );
+
+    await runner.run({ prompt: "x", workingDirectory: "/tmp", timeoutMs: 1000 }, "planner", echoSchema);
+
+    expect(processRunner.execute).toHaveBeenCalledWith(
+      expect.objectContaining({
+        args: ["--model", "gpt-5.6-sol", "--full-auto"],
+      }),
+    );
+  });
+
+  it("prepends the system prompt to stdin, separated by a divider, when systemPrompt is set", async () => {
+    const stdout = `BEGIN_STRUCTURED_OUTPUT\n{"success":true,"stage":"planner","payload":{"value":"ok"}}\nEND_STRUCTURED_OUTPUT`;
+    const processRunner = makeMockProcessRunner({
+      stdout,
+      stderr: "",
+      exitCode: 0,
+      durationMs: 10,
+      timedOut: false,
+    });
+    const logger = makeMockLogger();
+    const runner = new CodexRunner(
+      processRunner as never,
+      "codex",
+      ["exec", "-"],
+      "gpt-5.6-sol",
+      logger as never,
+    );
+
+    await runner.run(
+      {
+        prompt: "Do the task.",
+        systemPrompt: "You are Codex, a careful executor.",
+        workingDirectory: "/tmp",
+        timeoutMs: 1000,
+      },
+      "planner",
+      echoSchema,
+    );
+
+    const { stdinData } = processRunner.execute.mock.calls[0]![0] as { stdinData: string };
+    expect(stdinData).toBe("You are Codex, a careful executor.\n\n---\n\nDo the task.");
+  });
+
+  it("uses the raw prompt as stdin when systemPrompt is unset", async () => {
+    const stdout = `BEGIN_STRUCTURED_OUTPUT\n{"success":true,"stage":"planner","payload":{"value":"ok"}}\nEND_STRUCTURED_OUTPUT`;
+    const processRunner = makeMockProcessRunner({
+      stdout,
+      stderr: "",
+      exitCode: 0,
+      durationMs: 10,
+      timedOut: false,
+    });
+    const logger = makeMockLogger();
+    const runner = new CodexRunner(
+      processRunner as never,
+      "codex",
+      ["exec", "-"],
+      "gpt-5.6-sol",
+      logger as never,
+    );
+
+    await runner.run(
+      { prompt: "Do the task.", workingDirectory: "/tmp", timeoutMs: 1000 },
+      "planner",
+      echoSchema,
+    );
+
+    const { stdinData } = processRunner.execute.mock.calls[0]![0] as { stdinData: string };
+    expect(stdinData).toBe("Do the task.");
+  });
+
+  it("passes a process context through to execute() when input.runId is set", async () => {
+    const stdout = `BEGIN_STRUCTURED_OUTPUT\n{"success":true,"stage":"planner","payload":{"value":"ok"}}\nEND_STRUCTURED_OUTPUT`;
+    const processRunner = makeMockProcessRunner({
+      stdout,
+      stderr: "",
+      exitCode: 0,
+      durationMs: 10,
+      timedOut: false,
+    });
+    const runner = new CodexRunner(
+      processRunner as never,
+      "codex",
+      ["exec", "-"],
+      "gpt-5.6-sol",
+      makeMockLogger() as never,
+    );
+
+    await runner.run(
+      { prompt: "x", workingDirectory: "/tmp", timeoutMs: 1000, runId: "run-codex-1" },
+      "planner",
+      echoSchema,
+    );
+
+    const { context } = processRunner.execute.mock.calls[0]![0] as {
+      context: { runId: string; stage: string; runtime: string };
+    };
+    expect(context).toEqual({ runId: "run-codex-1", stage: "planner", runtime: "codex" });
+  });
+
+  it("omits the process context when input.runId is unset", async () => {
+    const stdout = `BEGIN_STRUCTURED_OUTPUT\n{"success":true,"stage":"planner","payload":{"value":"ok"}}\nEND_STRUCTURED_OUTPUT`;
+    const processRunner = makeMockProcessRunner({
+      stdout,
+      stderr: "",
+      exitCode: 0,
+      durationMs: 10,
+      timedOut: false,
+    });
+    const runner = new CodexRunner(
+      processRunner as never,
+      "codex",
+      ["exec", "-"],
+      "gpt-5.6-sol",
+      makeMockLogger() as never,
+    );
+
+    await runner.run({ prompt: "x", workingDirectory: "/tmp", timeoutMs: 1000 }, "planner", echoSchema);
+
+    const { context } = processRunner.execute.mock.calls[0]![0] as { context: unknown };
+    expect(context).toBeUndefined();
+  });
+});

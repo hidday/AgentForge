@@ -198,6 +198,85 @@ describe("ChatPanel", () => {
     expect(screen.queryByText("Hello")).toBeNull();
   });
 
+  it("falls back to an empty content string when the artifact payload has no content field", () => {
+    const artifacts: Artifact[] = [
+      { ...makeArtifact("user", "unused", "a1", "2024-01-01T00:00:01Z"), payloadJson: { role: "user" } },
+    ];
+    const { container } = render(<ChatPanel runId={RUN_ID} artifacts={artifacts} />);
+
+    // The message bubble renders but with empty text content.
+    const bubble = container.querySelector(".whitespace-pre-wrap");
+    expect(bubble).not.toBeNull();
+    expect(bubble!.textContent).toBe("");
+  });
+
+  it("calls scrollIntoView when it is available on the anchor element", async () => {
+    const scrollIntoView = vi.fn();
+    // jsdom does not implement scrollIntoView by default.
+    (HTMLDivElement.prototype as unknown as { scrollIntoView: typeof scrollIntoView }).scrollIntoView =
+      scrollIntoView;
+
+    render(<ChatPanel runId={RUN_ID} artifacts={[]} />);
+
+    expect(scrollIntoView).toHaveBeenCalledWith({ behavior: "smooth" });
+
+    delete (HTMLDivElement.prototype as { scrollIntoView?: unknown }).scrollIntoView;
+  });
+
+  it("ignores a redundant form submit while a request is already in flight", async () => {
+    let resolveRequest!: (v: { reply: string; durationMs: number }) => void;
+    mockApi.sendChatMessage.mockReturnValue(
+      new Promise<{ reply: string; durationMs: number }>((res) => {
+        resolveRequest = res;
+      }),
+    );
+
+    const { container } = render(<ChatPanel runId={RUN_ID} artifacts={[]} />);
+    const input = screen.getByPlaceholderText(/ask the agent/i);
+    await userEvent.type(input, "Question");
+    await userEvent.click(screen.getByRole("button", { name: /send/i }));
+
+    expect(mockApi.sendChatMessage).toHaveBeenCalledTimes(1);
+
+    // Directly dispatch a submit on the <form>, bypassing the disabled submit
+    // button, to exercise the `isLoading` guard in handleSubmit.
+    const form = container.querySelector("form")!;
+    await act(async () => {
+      form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    });
+
+    expect(mockApi.sendChatMessage).toHaveBeenCalledTimes(1);
+
+    act(() => {
+      resolveRequest({ reply: "Done", durationMs: 100 });
+    });
+    await waitFor(() => expect(screen.queryByText(/agent is thinking/i)).toBeNull());
+  });
+
+  it("ignores a form submit when the input is empty (whitespace-only)", async () => {
+    const { container } = render(<ChatPanel runId={RUN_ID} artifacts={[]} />);
+    const form = container.querySelector("form")!;
+
+    await act(async () => {
+      form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    });
+
+    expect(mockApi.sendChatMessage).not.toHaveBeenCalled();
+  });
+
+  it("shows a generic error message when the send request rejects with a non-Error value", async () => {
+    mockApi.sendChatMessage.mockRejectedValue("boom");
+
+    render(<ChatPanel runId={RUN_ID} artifacts={[]} />);
+    const input = screen.getByPlaceholderText(/ask the agent/i);
+    await userEvent.type(input, "Failing question");
+    await userEvent.click(screen.getByRole("button", { name: /send/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/Chat request failed/i)).toBeDefined();
+    });
+  });
+
   it("shows inline error message and does not add any message to the list on API error", async () => {
     mockApi.sendChatMessage.mockRejectedValue(new Error("Server error"));
 
@@ -212,6 +291,30 @@ describe("ChatPanel", () => {
 
     // No message should have been added to the list
     expect(screen.queryByText("Failing question")).toBeNull();
+  });
+
+  it("collapses and re-expands the message list when the header is clicked", async () => {
+    const artifacts: Artifact[] = [
+      makeArtifact("user", "Existing user message", "a1", "2024-01-01T00:00:01Z"),
+    ];
+    render(<ChatPanel runId={RUN_ID} artifacts={artifacts} />);
+
+    // Open by default: message and input are visible.
+    expect(screen.getByText("Existing user message")).toBeDefined();
+    expect(screen.getByPlaceholderText(/ask the agent/i)).toBeDefined();
+
+    const header = screen.getByRole("button", { name: /chat with agent/i });
+    await userEvent.click(header);
+
+    // Collapsed: body content is gone.
+    expect(screen.queryByText("Existing user message")).toBeNull();
+    expect(screen.queryByPlaceholderText(/ask the agent/i)).toBeNull();
+
+    await userEvent.click(header);
+
+    // Re-expanded: body content is back.
+    expect(screen.getByText("Existing user message")).toBeDefined();
+    expect(screen.getByPlaceholderText(/ask the agent/i)).toBeDefined();
   });
 
   it("message list does not change from artifact-derived count when only local state changes", async () => {

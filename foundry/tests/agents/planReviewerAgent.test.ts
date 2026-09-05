@@ -147,3 +147,29 @@ describe("PlanReviewerAgent.run() relatedContext rendering", () => {
     expect(prompt).not.toContain("{{relatedContextSection}}");
   });
 });
+
+describe("PlanReviewerAgent.run() operator note", () => {
+  it("renders the Operator Note section when an operatorNote is provided", async () => {
+    const { agent, getPrompt } = buildPlanReviewerAgent();
+    const bundle = makeTaskBundle();
+
+    await agent.run(makePlan(), bundle, "run-1", {
+      operatorNote: "Focus the review on the auth changes.",
+    });
+
+    const prompt = getPrompt();
+    expect(prompt).toContain("## Operator Note");
+    expect(prompt).toContain("Focus the review on the auth changes.");
+    expect(prompt).toContain("Weight it heavily");
+  });
+
+  it("omits the Operator Note section when no operatorNote is provided", async () => {
+    const { agent, getPrompt } = buildPlanReviewerAgent();
+    const bundle = makeTaskBundle();
+
+    await agent.run(makePlan(), bundle, "run-1");
+
+    const prompt = getPrompt();
+    expect(prompt).not.toContain("## Operator Note");
+  });
+});

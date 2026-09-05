@@ -127,6 +127,36 @@ describe("POST /api/runs/:id/actions/reject-plan", () => {
     expect(mockOrchestrator.rejectPlan).toHaveBeenCalledWith("run-1", undefined, "api", "iterate");
   });
 
+  it("returns 200 and passes mode='fresh' through when explicitly provided", async () => {
+    const run = makeRun();
+    const { app, mockOrchestrator } = await buildApp();
+    mockOrchestrator.rejectPlan.mockResolvedValue(run);
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/actions/reject-plan",
+      payload: { context: "start over", mode: "fresh" },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(mockOrchestrator.rejectPlan).toHaveBeenCalledWith("run-1", "start over", "api", "fresh");
+  });
+
+  it("returns 400 when mode is not one of the valid values", async () => {
+    const { app, mockOrchestrator } = await buildApp();
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/actions/reject-plan",
+      payload: { mode: "bogus" },
+    });
+
+    expect(response.statusCode).toBe(400);
+    const body = JSON.parse(response.body) as { error: string };
+    expect(body.error).toContain("mode must be one of");
+    expect(mockOrchestrator.rejectPlan).not.toHaveBeenCalled();
+  });
+
   it("returns 400 when context is not a string", async () => {
     const { app } = await buildApp();
 

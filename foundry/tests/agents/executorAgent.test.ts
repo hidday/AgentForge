@@ -195,6 +195,44 @@ describe("ExecutorAgent.run()", () => {
     expect(githubClient.createDraftPR).not.toHaveBeenCalled();
   });
 
+  it("logs isRetry: true when only existingPR is set (no existingBranch)", async () => {
+    const { agent, githubClient, logger } = buildAgent();
+
+    const result = await agent.run(makePlan(), makeTaskBundle(), "run-1", {
+      existingBranch: null,
+      existingPR: 777,
+    });
+
+    expect(result.prNumber).toBe(777);
+    expect(githubClient.createDraftPR).not.toHaveBeenCalled();
+    const startLog = logger.info.mock.calls.find(
+      (c: unknown[]) => c[1] === "Starting executor agent",
+    );
+    expect((startLog?.[0] as Record<string, unknown> | undefined)?.isRetry).toBe(true);
+  });
+
+  it("renders the Operator Note section when an operatorNote is provided", async () => {
+    const { agent, getUserPrompt } = buildAgent();
+
+    await agent.run(makePlan(), makeTaskBundle(), "run-1", undefined, {
+      operatorNote: "Please also update the README.",
+    });
+
+    const prompt = getUserPrompt();
+    expect(prompt).toContain("## Operator Note");
+    expect(prompt).toContain("Please also update the README.");
+    expect(prompt).toContain("high-priority clarification");
+  });
+
+  it("omits the Operator Note section when no operatorNote is provided", async () => {
+    const { agent, getUserPrompt } = buildAgent();
+
+    await agent.run(makePlan(), makeTaskBundle(), "run-1");
+
+    const prompt = getUserPrompt();
+    expect(prompt).not.toContain("## Operator Note");
+  });
+
   it("logs the score and executionVersion in the completion event", async () => {
     const { agent, logger } = buildAgent({ score: 0.42 });
 

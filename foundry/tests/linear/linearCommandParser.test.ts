@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { parseLinearCommand } from "../../src/linear/linearCommandParser.js";
 
 describe("parseLinearCommand", () => {
@@ -63,6 +63,40 @@ describe("parseLinearCommand", () => {
     it("returns unknown for unknown slash command", () => {
       const result = parseLinearCommand("/unknown-command");
       expect(result).toEqual({ type: "unknown", raw: "/unknown-command" });
+    });
+
+    it("returns null for an empty string", () => {
+      const result = parseLinearCommand("");
+      expect(result).toBeNull();
+    });
+
+    it("returns null for a whitespace-only string", () => {
+      const result = parseLinearCommand("   \n  \t  ");
+      expect(result).toBeNull();
+    });
+
+    it("parses a command on the first line even with trailing blank lines", () => {
+      const result = parseLinearCommand("/run-ai\n\n\n");
+      expect(result).toEqual({ type: "run-ai" });
+    });
+
+    it("does not match a command prefix that is only a substring of the first word", () => {
+      const result = parseLinearCommand("/run-ai-extra");
+      expect(result).toEqual({ type: "unknown", raw: "/run-ai-extra" });
+    });
+
+    it("falls back to an empty first line when split() yields no elements", () => {
+      // String.prototype.split always returns at least one element for a string
+      // input, so the `?? ""` fallback on `trimmed.split("\n")[0]?.trim()` is
+      // unreachable through normal inputs. Force the defensive branch by
+      // stubbing split() to return an empty array for this one call.
+      const splitSpy = vi.spyOn(String.prototype, "split").mockReturnValueOnce([] as never);
+      try {
+        const result = parseLinearCommand("/ai-plan");
+        expect(result).toBeNull();
+      } finally {
+        splitSpy.mockRestore();
+      }
     });
   });
 });

@@ -53,10 +53,12 @@ function makeLogger() {
 describe("RealLinearClient.getRelatedContext", () => {
   let client: RealLinearClient;
   let issuesById: Map<string, FakeIssue>;
+  let logger: ReturnType<typeof makeLogger>;
 
   beforeEach(() => {
     issuesById = new Map();
-    client = new RealLinearClient("test-key", makeLogger() as never);
+    logger = makeLogger();
+    client = new RealLinearClient("test-key", logger as never);
     // Inject a fake SDK that resolves issues from the local map.
     (client as unknown as { sdk: { issue: (id: string) => Promise<FakeIssue> } }).sdk = {
       issue: (id: string) => {
@@ -207,6 +209,37 @@ describe("RealLinearClient.getRelatedContext", () => {
 
     expect(ctx.blockers).toHaveLength(1);
     expect(ctx.blockers[0].id).toBe("blocker-id");
+  });
+
+  it("skips a blocker relation whose issue fails to hydrate and logs a warning", async () => {
+    const goodBlocker = makeFakeIssue({ id: "blocker-id", identifier: "PRY-101" });
+    const focus = makeFakeIssue({
+      id: "focus-id",
+      parent: Promise.resolve(null),
+      inverseRelations: () =>
+        Promise.resolve({
+          nodes: [
+            {
+              id: "rel-broken",
+              type: "blocks",
+              issue: Promise.reject(new Error("issue deleted")),
+            },
+            { id: "rel-ok", type: "blocks", issue: Promise.resolve(goodBlocker) },
+          ],
+        }),
+    });
+
+    issuesById.set("focus-id", focus);
+    issuesById.set("blocker-id", goodBlocker);
+
+    const ctx = await client.getRelatedContext("focus-id");
+
+    expect(ctx.blockers).toHaveLength(1);
+    expect(ctx.blockers[0].id).toBe("blocker-id");
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.objectContaining({ relationId: "rel-broken", focusIssueId: "focus-id" }),
+      "Failed to hydrate blocker issue from relation",
+    );
   });
 
   it("treats null description as empty string", async () => {

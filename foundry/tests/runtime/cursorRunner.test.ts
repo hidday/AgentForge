@@ -117,3 +117,165 @@ END_STRUCTURED_OUTPUT`;
     expect(logger.error).not.toHaveBeenCalled();
   });
 });
+
+describe("CursorRunner — stdin payload and args", () => {
+  it("prepends the system prompt to stdin, separated by a divider, when systemPrompt is set", async () => {
+    const processRunner = makeMockProcessRunner({
+      stdout: JSON.stringify({
+        type: "result",
+        result: "BEGIN_STRUCTURED_OUTPUT\n{\"success\":true,\"stage\":\"planner\",\"payload\":{\"value\":\"ok\"}}\nEND_STRUCTURED_OUTPUT",
+      }),
+      stderr: "",
+      exitCode: 0,
+      durationMs: 10,
+      timedOut: false,
+    });
+    const logger = makeMockLogger();
+    const runner = new CursorRunner(
+      processRunner as never,
+      "cursor",
+      [],
+      "claude-4.6-sonnet",
+      logger as never,
+    );
+
+    await runner.run(
+      {
+        prompt: "Implement the feature.",
+        systemPrompt: "You are Cursor, an autonomous engineer.",
+        workingDirectory: "/tmp",
+        timeoutMs: 1000,
+      },
+      "planner",
+      echoSchema,
+    );
+
+    const { stdinData, args } = processRunner.execute.mock.calls[0]![0] as {
+      stdinData: string;
+      args: string[];
+    };
+    expect(stdinData).toBe(
+      "You are Cursor, an autonomous engineer.\n\n---\n\nImplement the feature.",
+    );
+    expect(args).toEqual(["--model", "claude-4.6-sonnet", "--workspace", "/tmp"]);
+  });
+
+  it("uses the raw prompt as stdin when systemPrompt is unset", async () => {
+    const processRunner = makeMockProcessRunner({
+      stdout: JSON.stringify({ type: "result", result: "ok" }),
+      stderr: "",
+      exitCode: 0,
+      durationMs: 10,
+      timedOut: false,
+    });
+    const logger = makeMockLogger();
+    const runner = new CursorRunner(
+      processRunner as never,
+      "cursor",
+      [],
+      "claude-4.6-sonnet",
+      logger as never,
+    );
+
+    await expect(
+      runner.run(
+        { prompt: "Just do it.", workingDirectory: "/tmp", timeoutMs: 1000 },
+        "planner",
+        echoSchema,
+      ),
+    ).rejects.toThrow();
+
+    const { stdinData } = processRunner.execute.mock.calls[0]![0] as { stdinData: string };
+    expect(stdinData).toBe("Just do it.");
+  });
+
+  it("truncates a long stderr/outputSnippet tail with an ellipsis prefix", async () => {
+    const longResult = "R".repeat(900) + "[RESULT_TAIL]";
+    const longStderr = "E".repeat(700) + "[STDERR_TAIL]";
+    const processRunner = makeMockProcessRunner({
+      stdout: JSON.stringify({ type: "result", result: longResult }),
+      stderr: longStderr,
+      exitCode: 1,
+      durationMs: 10,
+      timedOut: false,
+    });
+    const logger = makeMockLogger();
+    const runner = new CursorRunner(
+      processRunner as never,
+      "cursor",
+      [],
+      "claude-4.6-sonnet",
+      logger as never,
+    );
+
+    await expect(
+      runner.run({ prompt: "x", workingDirectory: "/tmp", timeoutMs: 1000 }, "planner", echoSchema),
+    ).rejects.toThrow();
+
+    const [logFields] = logger.error.mock.calls[0]!;
+    expect(logFields.outputSnippet.startsWith("…")).toBe(true);
+    expect(logFields.outputSnippet).toContain("[RESULT_TAIL]");
+    expect(logFields.outputSnippet.length).toBeLessThanOrEqual(501);
+    expect(logFields.stderr.startsWith("…")).toBe(true);
+    expect(logFields.stderr).toContain("[STDERR_TAIL]");
+    expect(logFields.stderr.length).toBeLessThanOrEqual(501);
+  });
+
+  it("passes a process context through to execute() when input.runId is set", async () => {
+    const processRunner = makeMockProcessRunner({
+      stdout: JSON.stringify({
+        type: "result",
+        result:
+          'BEGIN_STRUCTURED_OUTPUT\n{"success":true,"stage":"planner","payload":{"value":"ok"}}\nEND_STRUCTURED_OUTPUT',
+      }),
+      stderr: "",
+      exitCode: 0,
+      durationMs: 10,
+      timedOut: false,
+    });
+    const runner = new CursorRunner(
+      processRunner as never,
+      "cursor",
+      [],
+      "claude-4.6-sonnet",
+      makeMockLogger() as never,
+    );
+
+    await runner.run(
+      { prompt: "x", workingDirectory: "/tmp", timeoutMs: 1000, runId: "run-cursor-1" },
+      "planner",
+      echoSchema,
+    );
+
+    const { context } = processRunner.execute.mock.calls[0]![0] as {
+      context: { runId: string; stage: string; runtime: string };
+    };
+    expect(context).toEqual({ runId: "run-cursor-1", stage: "planner", runtime: "cursor" });
+  });
+
+  it("omits the process context when input.runId is unset", async () => {
+    const processRunner = makeMockProcessRunner({
+      stdout: JSON.stringify({
+        type: "result",
+        result:
+          'BEGIN_STRUCTURED_OUTPUT\n{"success":true,"stage":"planner","payload":{"value":"ok"}}\nEND_STRUCTURED_OUTPUT',
+      }),
+      stderr: "",
+      exitCode: 0,
+      durationMs: 10,
+      timedOut: false,
+    });
+    const runner = new CursorRunner(
+      processRunner as never,
+      "cursor",
+      [],
+      "claude-4.6-sonnet",
+      makeMockLogger() as never,
+    );
+
+    await runner.run({ prompt: "x", workingDirectory: "/tmp", timeoutMs: 1000 }, "planner", echoSchema);
+
+    const { context } = processRunner.execute.mock.calls[0]![0] as { context: unknown };
+    expect(context).toBeUndefined();
+  });
+});
