@@ -120,6 +120,31 @@ describe("useActiveProcesses", () => {
     // setState-after-unmount from running.
   });
 
+  it("does not apply a late getProcessOutput result after unmount", async () => {
+    const proc = makeProcess();
+    mockApi.getActiveProcesses.mockResolvedValue({ processes: [proc] });
+
+    let resolveOutput!: (v: { processId: string; output: string }) => void;
+    mockApi.getProcessOutput.mockReturnValue(
+      new Promise((res) => {
+        resolveOutput = res;
+      }),
+    );
+
+    const { result, unmount } = renderHook(() => useActiveProcesses("run-1"));
+    await waitFor(() => expect(mockApi.getProcessOutput).toHaveBeenCalled());
+
+    unmount();
+
+    await act(async () => {
+      resolveOutput({ processId: proc.id, output: "late output" });
+      await Promise.resolve();
+    });
+
+    // The cancelled flag must stop the second setOutput from firing.
+    expect(result.current.output).toBe("");
+  });
+
   it("ignores SSE events for a different runId", async () => {
     mockApi.getActiveProcesses.mockResolvedValue({ processes: [] });
     const { result } = renderHook(() => useActiveProcesses("run-1"));
