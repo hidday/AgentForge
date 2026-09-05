@@ -771,6 +771,148 @@ describe("DistillationAgent", () => {
 
       await expect(agent.run("run-1", run)).resolves.toBeUndefined();
     });
+
+    it("truncates an overlong plan summary and omits the step description separator when a step has none", async () => {
+      const { deps, getPrompt } = buildDepsWithCapture();
+      const longSummary = "x".repeat(700);
+      deps.artifactRepo.findLatestByType.mockImplementation((_runId: string, type: string) => {
+        if (type === "ExecutionReport") {
+          return Promise.resolve({
+            id: "exec-1",
+            runId: "run-1",
+            type: "ExecutionReport",
+            version: 1,
+            payloadJson: {
+              executionVersion: 1,
+              summary: "Implemented.",
+              filesChanged: [],
+              checks: {
+                lint: { status: "pass", details: "ok" },
+                typecheck: { status: "pass", details: "ok" },
+                tests: { status: "pass", details: "ok" },
+              },
+              notes: [],
+              prDraftCreated: true,
+              score: 0.8,
+              scoreRationale: "Good",
+            },
+            rawText: "",
+            createdAt: new Date(),
+          });
+        }
+        if (type === "Plan") {
+          return Promise.resolve({
+            id: "plan-1",
+            runId: "run-1",
+            type: "Plan",
+            version: 1,
+            payloadJson: validPlanPayload({
+              summary: longSummary,
+              steps: [{ id: "s1", title: "Only step", description: "" }],
+            }),
+            rawText: "",
+            createdAt: new Date(),
+          });
+        }
+        return Promise.resolve(null);
+      });
+
+      const agent = buildAgent(deps);
+      await agent.run("run-1", makeRun());
+
+      const prompt = getPrompt();
+      expect(prompt).toContain("…");
+      expect(prompt).not.toContain(longSummary);
+      expect(prompt).toContain("1. Only step");
+      expect(prompt).not.toContain("Only step —");
+    });
+
+    it("falls back to truncated JSON when the ExecutionReport artifact payload doesn't match the schema", async () => {
+      const { deps, getPrompt } = buildDepsWithCapture();
+      deps.artifactRepo.findLatestByType.mockImplementation((_runId: string, type: string) => {
+        if (type === "ExecutionReport") {
+          return Promise.resolve({
+            id: "exec-1",
+            runId: "run-1",
+            type: "ExecutionReport",
+            version: 1,
+            payloadJson: { notAnExecutionReport: true },
+            rawText: "",
+            createdAt: new Date(),
+          });
+        }
+        return Promise.resolve(null);
+      });
+
+      const agent = buildAgent(deps);
+      await agent.run("run-1", makeRun());
+
+      const prompt = getPrompt();
+      expect(prompt).toContain('"notAnExecutionReport":true');
+    });
+
+    it("includes a truthy rationale and omits the 'more' suffix for a Remediation within the resolutions cap", async () => {
+      const { deps, getPrompt } = buildDepsWithCapture();
+      deps.artifactRepo.findLatestByType.mockImplementation((_runId: string, type: string) => {
+        if (type === "ExecutionReport") {
+          return Promise.resolve({
+            id: "exec-1",
+            runId: "run-1",
+            type: "ExecutionReport",
+            version: 1,
+            payloadJson: {
+              executionVersion: 2,
+              summary: "Post-remediation",
+              filesChanged: [],
+              checks: {
+                lint: { status: "pass", details: "ok" },
+                typecheck: { status: "pass", details: "ok" },
+                tests: { status: "pass", details: "ok" },
+              },
+              notes: [],
+              prDraftCreated: true,
+              score: 0.9,
+              scoreRationale: "Solid",
+            },
+            rawText: "",
+            createdAt: new Date(),
+          });
+        }
+        if (type === "Remediation") {
+          return Promise.resolve({
+            id: "rem-1",
+            runId: "run-1",
+            type: "Remediation",
+            version: 1,
+            payloadJson: validRemediationPayload(),
+            rawText: "",
+            createdAt: new Date(),
+          });
+        }
+        return Promise.resolve(null);
+      });
+
+      const agent = buildAgent(deps);
+      await agent.run("run-1", makeRun());
+
+      const prompt = getPrompt();
+      expect(prompt).toContain("*why*: Real bug");
+      expect(prompt).not.toContain("…and");
+    });
+
+    it("stringifies a non-Error rejection reason when the LLM call fails", async () => {
+      const deps = buildDeps();
+      deps.agentSkillRepo.findActiveByRepo.mockResolvedValue([]);
+      deps.agentRunner.run.mockRejectedValue("plain string failure");
+
+      const agent = buildAgent(deps);
+      await agent.run("run-1", makeRun());
+
+      expect(deps.logger.warn).toHaveBeenCalledWith(
+        expect.objectContaining({ error: "plain string failure" }),
+        "Distillation LLM call failed or parse error",
+      );
+    });
   });
 
   describe("(k) Missing-field and description-fallback guards when shouldPersist=true", () => {

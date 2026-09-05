@@ -156,7 +156,9 @@ describe("LinearSyncDialog", () => {
 
   it("does not call onIngested when every selected issue was skipped (none started)", async () => {
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    const onClose = vi.fn();
     const onIngested = vi.fn();
+    const onIngestComplete = vi.fn();
     mockApi.ingestIssues.mockResolvedValue({
       ok: true,
       started: [],
@@ -164,7 +166,12 @@ describe("LinearSyncDialog", () => {
     });
 
     render(
-      <LinearSyncDialog open={true} onClose={vi.fn()} onIngested={onIngested} />,
+      <LinearSyncDialog
+        open={true}
+        onClose={onClose}
+        onIngested={onIngested}
+        onIngestComplete={onIngestComplete}
+      />,
     );
     await waitFor(() => expect(screen.getByText(issueA.title)).toBeDefined());
 
@@ -173,7 +180,8 @@ describe("LinearSyncDialog", () => {
       vi.advanceTimersByTime(700);
     });
 
-    await waitFor(() => expect(screen.queryByText(issueA.title)).toBeNull());
+    await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
+    expect(onIngestComplete).toHaveBeenCalledWith({ started: 0, skipped: 2 });
     expect(onIngested).not.toHaveBeenCalled();
   });
 
