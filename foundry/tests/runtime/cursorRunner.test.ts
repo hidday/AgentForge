@@ -178,4 +178,56 @@ END_STRUCTURED_OUTPUT`;
     expect(logFields.stderr).toContain("TAIL_MARKER");
     expect(logFields.stderr).not.toContain("e".repeat(600));
   });
+
+  it("includes a runId/stage/runtime execution context when input.runId is set", async () => {
+    const processRunner = makeMockProcessRunner({
+      stdout: `BEGIN_STRUCTURED_OUTPUT\n{"success":true,"stage":"planner","payload":{"value":"ok"}}\nEND_STRUCTURED_OUTPUT`,
+      stderr: "",
+      exitCode: 0,
+      durationMs: 10,
+      timedOut: false,
+    });
+    const runner = new CursorRunner(
+      processRunner as never,
+      "cursor",
+      [],
+      "claude-4.6-sonnet",
+      makeMockLogger() as never,
+    );
+
+    await runner.run(
+      { prompt: "x", workingDirectory: "/tmp", timeoutMs: 1000, runId: "run-42" },
+      "planner",
+      echoSchema,
+    );
+
+    expect(processRunner.execute).toHaveBeenCalledWith(
+      expect.objectContaining({
+        context: { runId: "run-42", stage: "planner", runtime: "cursor" },
+      }),
+    );
+  });
+
+  it("omits the execution context when input.runId is not set", async () => {
+    const processRunner = makeMockProcessRunner({
+      stdout: `BEGIN_STRUCTURED_OUTPUT\n{"success":true,"stage":"planner","payload":{"value":"ok"}}\nEND_STRUCTURED_OUTPUT`,
+      stderr: "",
+      exitCode: 0,
+      durationMs: 10,
+      timedOut: false,
+    });
+    const runner = new CursorRunner(
+      processRunner as never,
+      "cursor",
+      [],
+      "claude-4.6-sonnet",
+      makeMockLogger() as never,
+    );
+
+    await runner.run({ prompt: "x", workingDirectory: "/tmp", timeoutMs: 1000 }, "planner", echoSchema);
+
+    expect(processRunner.execute).toHaveBeenCalledWith(
+      expect.objectContaining({ context: undefined }),
+    );
+  });
 });

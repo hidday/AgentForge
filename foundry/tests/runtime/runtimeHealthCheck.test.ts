@@ -206,6 +206,29 @@ describe("RuntimeHealthCheck.runPreflight — binary check failures", () => {
     expect(claudeResult?.binaryCheck.ok).toBe(false);
     expect(claudeResult?.binaryCheck.error).toBe("ENOENT: spawn claude");
   });
+
+  it("stringifies a non-Error value thrown by execute() as the binaryCheck error", async () => {
+    const execute = vi.fn(async (opts: ProcessSpawnOptions) => {
+      if (isVersionCall(opts) && opts.command === "claude") {
+        throw "spawn EACCES";
+      }
+      if (isVersionCall(opts)) {
+        return okResult({ stdout: "codex v1\n" });
+      }
+      return okResult({ stdout: "PONG" });
+    });
+    const processRunner = { execute };
+    const health = new RuntimeHealthCheck(
+      processRunner as never,
+      baseConfigs as never,
+      makeMockLogger() as never,
+    );
+
+    await expect(health.runPreflight()).rejects.toThrow(PreflightError);
+    const claudeResult = health.getLastResult()?.results.find((r) => r.runtime === "claude-code");
+    expect(claudeResult?.binaryCheck.ok).toBe(false);
+    expect(claudeResult?.binaryCheck.error).toBe("spawn EACCES");
+  });
 });
 
 describe("RuntimeHealthCheck.runPreflight — auth check via successPattern (claude-code)", () => {
@@ -276,6 +299,29 @@ describe("RuntimeHealthCheck.runPreflight — auth check via successPattern (cla
     const claudeResult = health.getLastResult()?.results.find((r) => r.runtime === "claude-code");
     expect(claudeResult?.authCheck.ok).toBe(false);
     expect(claudeResult?.authCheck.error).toBe("socket hang up");
+  });
+
+  it("stringifies a non-Error value thrown from the auth probe", async () => {
+    const execute = vi.fn(async (opts: ProcessSpawnOptions) => {
+      if (isVersionCall(opts)) {
+        return okResult({ stdout: "v1\n" });
+      }
+      if (opts.command === "claude") {
+        throw { code: "ECONNRESET" };
+      }
+      return okResult({ stdout: "PONG" });
+    });
+    const processRunner = { execute };
+    const health = new RuntimeHealthCheck(
+      processRunner as never,
+      baseConfigs as never,
+      makeMockLogger() as never,
+    );
+
+    await expect(health.runPreflight()).rejects.toThrow(PreflightError);
+    const claudeResult = health.getLastResult()?.results.find((r) => r.runtime === "claude-code");
+    expect(claudeResult?.authCheck.ok).toBe(false);
+    expect(claudeResult?.authCheck.error).toBe("[object Object]");
   });
 });
 
