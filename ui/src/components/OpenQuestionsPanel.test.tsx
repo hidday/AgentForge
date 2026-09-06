@@ -232,6 +232,51 @@ describe("OpenQuestionsPanel", () => {
     });
   });
 
+  it("shows a generic error message when a non-Error value is thrown on submission", async () => {
+    mockApi.answerQuestions.mockRejectedValue("network down");
+
+    render(
+      <OpenQuestionsPanel
+        questions={[requiredQuestion]}
+        runId="run-1"
+      />,
+    );
+
+    const textarea = screen.getAllByRole("textbox")[0] as HTMLTextAreaElement;
+    await userEvent.type(textarea, "My answer");
+
+    const submitBtn = screen.getByRole("button", { name: /submit answers/i });
+    await userEvent.click(submitBtn);
+
+    await waitFor(() => {
+      const alert = screen.getByRole("alert");
+      expect(alert.textContent).toContain("Failed to submit answers");
+    });
+  });
+
+  it("omits unanswered optional questions from the submitted payload", async () => {
+    mockApi.answerQuestions.mockResolvedValue({ ok: true, run: {} });
+
+    render(
+      <OpenQuestionsPanel
+        questions={[requiredQuestion, optionalQuestion]}
+        runId="run-1"
+      />,
+    );
+
+    const textareas = screen.getAllByRole("textbox") as HTMLTextAreaElement[];
+    await userEvent.type(textareas[0], "Prod target");
+
+    const submitBtn = screen.getByRole("button", { name: /submit answers/i });
+    await userEvent.click(submitBtn);
+
+    await waitFor(() => {
+      expect(mockApi.answerQuestions).toHaveBeenCalledWith("run-1", [
+        { questionId: "q1", answer: "Prod target" },
+      ]);
+    });
+  });
+
   it("renders in readOnly mode without submit button", () => {
     render(
       <OpenQuestionsPanel

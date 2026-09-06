@@ -251,4 +251,33 @@ describe("ChatPanel", () => {
       expect(screen.queryByText("New question")).toBeNull();
     });
   });
+
+  it("collapses and re-expands the panel when the header is clicked", async () => {
+    render(<ChatPanel runId={RUN_ID} artifacts={[]} />);
+
+    expect(screen.getByPlaceholderText(/ask the agent/i)).toBeDefined();
+
+    await userEvent.click(screen.getByRole("button", { name: /chat with agent/i }));
+    expect(screen.queryByPlaceholderText(/ask the agent/i)).toBeNull();
+
+    await userEvent.click(screen.getByRole("button", { name: /chat with agent/i }));
+    expect(screen.getByPlaceholderText(/ask the agent/i)).toBeDefined();
+  });
+
+  it("auto-scrolls to the bottom when the message count changes", () => {
+    const scrollIntoViewMock = vi.fn();
+    Element.prototype.scrollIntoView = scrollIntoViewMock;
+
+    const { rerender } = render(<ChatPanel runId={RUN_ID} artifacts={[]} />);
+    scrollIntoViewMock.mockClear();
+
+    rerender(
+      <ChatPanel
+        runId={RUN_ID}
+        artifacts={[makeArtifact("user", "Hi", "a1", "2026-01-01T00:00:00Z")]}
+      />,
+    );
+
+    expect(scrollIntoViewMock).toHaveBeenCalledWith({ behavior: "smooth" });
+  });
 });

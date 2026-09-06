@@ -208,4 +208,24 @@ describe("ExecutorAgent.run()", () => {
     expect(payload?.score).toBe(0.42);
     expect(payload?.executionVersion).toBe(1);
   });
+
+  it("injects the operator note section into the user prompt when provided", async () => {
+    const { agent, getUserPrompt } = buildAgent();
+
+    await agent.run(makePlan(), makeTaskBundle(), "run-1", undefined, {
+      operatorNote: "Please double-check the error handling.",
+    });
+
+    const userPrompt = getUserPrompt();
+    expect(userPrompt).toContain("## Operator Note");
+    expect(userPrompt).toContain("Please double-check the error handling.");
+  });
+
+  it("omits the operator note section when no note is provided", async () => {
+    const { agent, getUserPrompt } = buildAgent();
+
+    await agent.run(makePlan(), makeTaskBundle(), "run-1");
+
+    expect(getUserPrompt()).not.toContain("## Operator Note");
+  });
 });
