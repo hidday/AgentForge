@@ -525,6 +525,32 @@ describe("GET /api/runs/:id/summary", () => {
     expect(body.executionReport.score).toBe(0.9);
   });
 
+  it("returns an empty steps array when the plan payload's steps is not an array", async () => {
+    const { app, artifactRepo } = buildApp();
+    artifactRepo.findLatestByType.mockImplementation((_id: string, type: string) => {
+      if (type === "Plan") {
+        return Promise.resolve({
+          version: 1,
+          payloadJson: {
+            summary: "No steps array",
+            confidence: 0.5,
+            openQuestions: [],
+            steps: undefined,
+            risks: [],
+            testPlan: "n/a",
+          },
+        });
+      }
+      return Promise.resolve(null);
+    });
+
+    const response = await app.inject({ method: "GET", url: "/api/runs/run-1/summary" });
+    const body = JSON.parse(response.body);
+
+    expect(body.plan.steps).toEqual([]);
+    expect(body.plan.stepCount).toBe(0);
+  });
+
   it("falls back executionVersion to the artifact version when payload lacks it", async () => {
     const { app, artifactRepo } = buildApp();
     artifactRepo.findLatestByType.mockImplementation((_id: string, type: string) => {

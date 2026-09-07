@@ -208,4 +208,33 @@ describe("ExecutorAgent.run()", () => {
     expect(payload?.score).toBe(0.42);
     expect(payload?.executionVersion).toBe(1);
   });
+
+  it("injects an Operator Note section into the user prompt when options.operatorNote is provided", async () => {
+    const { agent, getUserPrompt, logger } = buildAgent();
+
+    await agent.run(makePlan(), makeTaskBundle(), "run-1", undefined, {
+      operatorNote: "Watch out for the legacy auth flow",
+    });
+
+    const userPrompt = getUserPrompt();
+    expect(userPrompt).toContain("## Operator Note");
+    expect(userPrompt).toContain("Watch out for the legacy auth flow");
+
+    const startLog = logger.info.mock.calls.find(
+      (c: unknown[]) => c[1] === "Starting executor agent",
+    );
+    expect((startLog?.[0] as Record<string, unknown>).hasOperatorNote).toBe(true);
+  });
+
+  it("omits the Operator Note section when no operator note is given", async () => {
+    const { agent, getUserPrompt, logger } = buildAgent();
+
+    await agent.run(makePlan(), makeTaskBundle(), "run-1");
+
+    expect(getUserPrompt()).not.toContain("## Operator Note");
+    const startLog = logger.info.mock.calls.find(
+      (c: unknown[]) => c[1] === "Starting executor agent",
+    );
+    expect((startLog?.[0] as Record<string, unknown>).hasOperatorNote).toBe(false);
+  });
 });

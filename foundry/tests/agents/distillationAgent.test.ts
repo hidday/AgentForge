@@ -488,4 +488,217 @@ describe("DistillationAgent", () => {
       }
     });
   });
+
+  describe("(j) plan/execution/remediation summarization with real artifacts", () => {
+    function withPlanExecutionRemediation(
+      deps: ReturnType<typeof buildDeps>,
+      overrides: { plan?: unknown; remediation?: unknown } = {},
+    ) {
+      const executionArtifact = {
+        id: "artifact-exec",
+        runId: "run-1",
+        type: "ExecutionReport" as const,
+        version: 1,
+        payloadJson: {
+          executionVersion: 1,
+          summary: "Implemented the feature across many files.",
+          filesChanged: Array.from({ length: 45 }, (_, i) => `src/file${String(i)}.ts`),
+          checks: {
+            lint: { status: "fail", details: "3 lint errors found" },
+            typecheck: { status: "pass", details: "ok" },
+            tests: { status: "pass", details: "ok" },
+          },
+          notes: ["Discovered a footgun with the ORM", "Second note"],
+          prDraftCreated: true,
+          score: 0.6,
+          scoreRationale: "Some checks failed",
+        },
+        rawText: "{}",
+        createdAt: new Date(),
+      };
+
+      const planArtifact = {
+        id: "artifact-plan",
+        runId: "run-1",
+        type: "Plan" as const,
+        version: 1,
+        payloadJson:
+          overrides.plan ??
+          {
+            planVersion: 1,
+            summary: "A plan with many steps",
+            assumptions: ["Assumption A", "Assumption B"],
+            openQuestions: [],
+            risks: ["Risk A", "Risk B"],
+            steps: Array.from({ length: 15 }, (_, i) => ({
+              id: `s${String(i)}`,
+              title: `Step ${String(i)}`,
+              description: `Description ${String(i)}`,
+            })),
+            testPlan: "Run the full suite",
+            confidence: 0.7,
+          },
+        rawText: "{}",
+        createdAt: new Date(),
+      };
+
+      const remediationArtifact = {
+        id: "artifact-rem",
+        runId: "run-1",
+        type: "Remediation" as const,
+        version: 1,
+        payloadJson:
+          overrides.remediation ??
+          {
+            reviewId: "rev-1",
+            resolution: Array.from({ length: 18 }, (_, i) => ({
+              findingId: `f${String(i)}`,
+              status: "accepted" as const,
+              action: `Fixed ${String(i)}`,
+              rationale: `Because ${String(i)}`,
+            })),
+            readyForHumanReview: true,
+            executionReport: executionArtifact.payloadJson,
+          },
+        rawText: "{}",
+        createdAt: new Date(),
+      };
+
+      deps.artifactRepo.findLatestByType.mockImplementation((_runId: string, type: string) => {
+        if (type === "ExecutionReport") return Promise.resolve(executionArtifact);
+        if (type === "Plan") return Promise.resolve(planArtifact);
+        if (type === "Remediation") return Promise.resolve(remediationArtifact);
+        return Promise.resolve(null);
+      });
+
+      return { executionArtifact, planArtifact, remediationArtifact };
+    }
+
+    it("summarizes a plan with >12 steps, files >40, failing checks, and remediation with >15 resolutions in the prompt", async () => {
+      const deps = buildDeps();
+      deps.agentSkillRepo.findActiveByRepo.mockResolvedValue([]);
+      withPlanExecutionRemediation(deps);
+      deps.agentRunner.run.mockResolvedValue(
+        makeDistillationOutput({ shouldPersist: false, reason: "just checking summarization" }),
+      );
+
+      const agent = buildAgent(deps);
+      await agent.run("run-1", makeRun());
+
+      const call = deps.agentRunner.run.mock.calls[0] as [unknown, { prompt: string }, ...unknown[]];
+      const prompt = call[1].prompt;
+
+      expect(prompt).toContain("…and 3 more steps");
+      expect(prompt).toContain("…and 5 more");
+      expect(prompt).toContain("lint: fail — 3 lint errors found");
+      expect(prompt).toContain("## Remediation Summary");
+    });
+
+    it("falls back to truncated JSON when the Plan artifact payload fails schema validation", async () => {
+      const deps = buildDeps();
+      deps.agentSkillRepo.findActiveByRepo.mockResolvedValue([]);
+      withPlanExecutionRemediation(deps, { plan: { not: "a valid plan shape" } });
+      deps.agentRunner.run.mockResolvedValue(
+        makeDistillationOutput({ shouldPersist: false, reason: "n/a" }),
+      );
+
+      const agent = buildAgent(deps);
+      await agent.run("run-1", makeRun());
+
+      const call = deps.agentRunner.run.mock.calls[0] as [unknown, { prompt: string }, ...unknown[]];
+      expect(call[1].prompt).toContain('"not":"a valid plan shape"');
+    });
+
+    it("falls back to truncated JSON when the Remediation artifact payload fails schema validation", async () => {
+      const deps = buildDeps();
+      deps.agentSkillRepo.findActiveByRepo.mockResolvedValue([]);
+      withPlanExecutionRemediation(deps, { remediation: { bogus: true } });
+      deps.agentRunner.run.mockResolvedValue(
+        makeDistillationOutput({ shouldPersist: false, reason: "n/a" }),
+      );
+
+      const agent = buildAgent(deps);
+      await agent.run("run-1", makeRun());
+
+      const call = deps.agentRunner.run.mock.calls[0] as [unknown, { prompt: string }, ...unknown[]];
+      expect(call[1].prompt).toContain("## Remediation Summary");
+      expect(call[1].prompt).toContain('"bogus":true');
+    });
+  });
+
+  describe("(k) missing required skill fields after shouldPersist=true", () => {
+    it("emits shouldPersist=false with reason='missing_required_skill_fields' when taskCategory is blank", async () => {
+      const deps = buildDeps();
+      deps.agentSkillRepo.findActiveByRepo.mockResolvedValue([]);
+      deps.agentRunner.run.mockResolvedValue(
+        makeDistillationOutput({
+          shouldPersist: true,
+          reason: "insight",
+          taskCategory: "   ",
+          skillMarkdown: "some markdown",
+        }),
+      );
+
+      const agent = buildAgent(deps);
+      await agent.run("run-1", makeRun());
+
+      expect(deps.agentSkillRepo.create).not.toHaveBeenCalled();
+      expect(deps.agentSkillRepo.displaceAndCreate).not.toHaveBeenCalled();
+      expect(deps.eventRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          payloadJson: expect.objectContaining({
+            shouldPersist: false,
+            reason: "missing_required_skill_fields",
+          }),
+        }),
+      );
+    });
+
+    it("emits shouldPersist=false with reason='missing_required_skill_fields' when skillMarkdown is blank", async () => {
+      const deps = buildDeps();
+      deps.agentSkillRepo.findActiveByRepo.mockResolvedValue([]);
+      deps.agentRunner.run.mockResolvedValue(
+        makeDistillationOutput({
+          shouldPersist: true,
+          reason: "insight",
+          taskCategory: "auth",
+          skillMarkdown: "   ",
+        }),
+      );
+
+      const agent = buildAgent(deps);
+      await agent.run("run-1", makeRun());
+
+      expect(deps.agentSkillRepo.create).not.toHaveBeenCalled();
+      expect(deps.eventRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          payloadJson: expect.objectContaining({ reason: "missing_required_skill_fields" }),
+        }),
+      );
+    });
+
+    it("falls back to a generated description when the LLM's description is whitespace-only", async () => {
+      const deps = buildDeps();
+      deps.agentSkillRepo.findActiveByRepo.mockResolvedValue([]);
+      deps.agentSkillRepo.countActiveByRepo.mockResolvedValue(0);
+      deps.agentRunner.run.mockResolvedValue(
+        makeDistillationOutput({
+          shouldPersist: true,
+          reason: "insight",
+          taskCategory: "auth middleware",
+          skillMarkdown: "Use JWT",
+          description: "   ",
+        }),
+      );
+
+      const agent = buildAgent(deps);
+      await agent.run("run-1", makeRun({ repo: "acme-repo" }));
+
+      expect(deps.agentSkillRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          description: "Use when working on auth middleware in acme-repo.",
+        }),
+      );
+    });
+  });
 });

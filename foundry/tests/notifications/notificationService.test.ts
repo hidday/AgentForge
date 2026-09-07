@@ -138,7 +138,7 @@ describe("NotificationService.sendHumanRequest -- channel selection", () => {
     );
   });
 
-  it("falls back to a non-Error rejection message string", async () => {
+  it("falls back to a non-Error rejection message string for slack", async () => {
     const svc = new NotificationService(
       { emailFrom: "a@b.com", slackWebhookUrl: "https://hooks.slack.com/x" },
       makeLogger() as never,
@@ -149,6 +149,19 @@ describe("NotificationService.sendHumanRequest -- channel selection", () => {
 
     expect(result.slack.ok).toBe(false);
     expect(result.slack.error).toBe("network down");
+  });
+
+  it("falls back to a non-Error rejection message string for email", async () => {
+    const svc = new NotificationService(
+      { emailFrom: "a@b.com", emailTo: "team@b.com", resendApiKey: "re_123" },
+      makeLogger() as never,
+    );
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue("smtp gateway down"));
+
+    const result = await svc.sendHumanRequest(makePayload());
+
+    expect(result.email.ok).toBe(false);
+    expect(result.email.error).toBe("smtp gateway down");
   });
 
   it("tolerates response.text() itself failing when building the error message", async () => {
@@ -284,7 +297,10 @@ describe("NotificationService.sendHumanRequest -- Email payload content", () => 
         summary: "<script>alert(1)</script>",
         planConfidence: 0.75,
         context: "some context",
-        openQuestions: [{ id: "q1", question: "A & B?", requiredForExecution: true }],
+        openQuestions: [
+          { id: "q1", question: "A & B?", requiredForExecution: true },
+          { id: "q2", question: "Optional one?", requiredForExecution: false },
+        ],
       }),
     );
 
@@ -295,10 +311,14 @@ describe("NotificationService.sendHumanRequest -- Email payload content", () => 
     expect(body.html).toContain("0.75");
     expect(body.html).toContain("some context");
     expect(body.html).toContain("A &amp; B?");
+    expect(body.html).toContain("<strong>[required]</strong> A &amp; B?");
+    expect(body.html).toContain("<li>Optional one?</li>");
     expect(body.html).toContain("Open Linear issue");
     expect(body.text).toContain("Plan confidence: 0.75");
     expect(body.text).toContain("Context:");
     expect(body.text).toContain("Open questions:");
+    expect(body.text).toContain("- [required] A & B?");
+    expect(body.text).toContain("- Optional one?");
     expect(body.text).toContain("Linear: https://linear.app/x/ENG-42");
   });
 
