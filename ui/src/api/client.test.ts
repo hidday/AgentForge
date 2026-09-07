@@ -101,6 +101,20 @@ describe("api client", () => {
     );
   });
 
+  it("reReviewPlan sends note: undefined when no note is passed", async () => {
+    (fetch as ReturnType<typeof vi.fn>).mockResolvedValue(jsonResponse({ ok: true, runId: "run-1" }));
+    await api.reReviewPlan("run-1");
+    const [, init] = (fetch as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(JSON.parse(init.body)).toEqual({});
+  });
+
+  it("rejectPlan sends context: undefined when context is an empty string", async () => {
+    (fetch as ReturnType<typeof vi.fn>).mockResolvedValue(jsonResponse({ ok: true, state: "Todo" }));
+    await api.rejectPlan("run-1", "", "fresh");
+    const [, init] = (fetch as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(JSON.parse(init.body)).toEqual({ mode: "fresh" });
+  });
+
   it("revisePlan POSTs to the revise-plan action", async () => {
     (fetch as ReturnType<typeof vi.fn>).mockResolvedValue(jsonResponse({ ok: true, runId: "run-1" }));
     await api.revisePlan("run-1");
