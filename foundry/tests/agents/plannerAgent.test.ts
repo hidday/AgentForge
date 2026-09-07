@@ -304,4 +304,165 @@ describe("PlannerAgent.run()", () => {
       expect(prompt).not.toContain("{{relatedContextSection}}");
     });
   });
+
+  describe("planReviewFindings injection", () => {
+    it("renders the AI plan review findings section with summary and finding lines", async () => {
+      const { agent, getPrompt } = buildPlannerAgent();
+      const bundle = makeTaskBundle();
+
+      await agent.run(bundle, "run-1", {
+        planReviewFindings: {
+          summary: "Mostly solid, missing error handling",
+          findings: [
+            {
+              id: "pf1",
+              severity: "important",
+              title: "No error handling",
+              details: "The plan does not address malformed input.",
+            },
+          ],
+        },
+      });
+
+      const prompt = getPrompt();
+      expect(prompt).toContain("## AI Plan Review Findings (from previous plan)");
+      expect(prompt).toContain("**Review Summary:** Mostly solid, missing error handling");
+      expect(prompt).toContain("- **[important] No error handling** (pf1): The plan does not address malformed input.");
+      expect(prompt).toContain("Incorporate these findings into the revised plan");
+    });
+
+    it("omits the plan review findings section when not provided", async () => {
+      const { agent, getPrompt } = buildPlannerAgent();
+      const bundle = makeTaskBundle();
+
+      await agent.run(bundle, "run-1");
+
+      const prompt = getPrompt();
+      expect(prompt).not.toContain("## AI Plan Review Findings");
+    });
+  });
+
+  describe("previousPlan injection", () => {
+    it("renders the previously rejected plan with steps, risks, assumptions, and open questions", async () => {
+      const { agent, getPrompt } = buildPlannerAgent();
+      const bundle = makeTaskBundle();
+
+      await agent.run(bundle, "run-1", {
+        previousPlan: {
+          planVersion: 4,
+          summary: "Old approach",
+          requirementsTraceability: "",
+          assumptions: ["Uses Fastify"],
+          openQuestions: [
+            { id: "q1", question: "Strip or reject unknowns?", requiredForExecution: true },
+          ],
+          risks: ["May break existing clients"],
+          steps: [{ id: "s1", title: "Do X", description: "Implement X" }],
+          testPlan: "Run the suite",
+          confidence: 0.6,
+        },
+      });
+
+      const prompt = getPrompt();
+      expect(prompt).toContain("## Previously Rejected Plan (v4)");
+      expect(prompt).toContain("**Summary:** Old approach");
+      expect(prompt).toContain("**Confidence:** 60%");
+      expect(prompt).toContain("1. **Do X** (s1): Implement X");
+      expect(prompt).toContain("**Risks:**\n- May break existing clients");
+      expect(prompt).toContain("**Assumptions:**\n- Uses Fastify");
+      expect(prompt).toContain("*(blocks execution)*");
+      expect(prompt).toContain("**Test Plan:** Run the suite");
+    });
+
+    it("omits risks/assumptions/open-questions blocks when those arrays are empty", async () => {
+      const { agent, getPrompt } = buildPlannerAgent();
+      const bundle = makeTaskBundle();
+
+      await agent.run(bundle, "run-1", {
+        previousPlan: {
+          planVersion: 1,
+          summary: "Minimal plan",
+          requirementsTraceability: "",
+          assumptions: [],
+          openQuestions: [],
+          risks: [],
+          steps: [{ id: "s1", title: "Do X", description: "Implement X" }],
+          testPlan: "Run tests",
+          confidence: 0.5,
+        },
+      });
+
+      const prompt = getPrompt();
+      expect(prompt).toContain("## Previously Rejected Plan (v1)");
+      expect(prompt).not.toContain("**Risks:**");
+      expect(prompt).not.toContain("**Assumptions:**");
+      expect(prompt).not.toContain("**Open Questions:**");
+    });
+
+    it("omits the previous-plan section entirely when not provided", async () => {
+      const { agent, getPrompt } = buildPlannerAgent();
+      const bundle = makeTaskBundle();
+
+      await agent.run(bundle, "run-1");
+
+      const prompt = getPrompt();
+      expect(prompt).not.toContain("Previously Rejected Plan");
+    });
+  });
+
+  describe("priorSkills injection", () => {
+    it("renders each prior skill with a heading combining name and taskCategory, plus description and markdown", async () => {
+      const { agent, getPrompt } = buildPlannerAgent();
+      const bundle = makeTaskBundle();
+
+      await agent.run(bundle, "run-1", {
+        priorSkills: [
+          {
+            id: "skill-1",
+            taskCategory: "deployment",
+            snippet: "unused",
+            name: "Blue-green deploy",
+            description: "How to deploy safely",
+            skillMarkdown: "# Deploy\nSteps here",
+          } as never,
+        ],
+      });
+
+      const prompt = getPrompt();
+      expect(prompt).toContain("## Prior Skills from Similar Tasks");
+      expect(prompt).toContain("### Blue-green deploy (deployment)");
+      expect(prompt).toContain("How to deploy safely");
+      expect(prompt).toContain("# Deploy\nSteps here");
+    });
+
+    it("falls back to taskCategory alone as the heading when name is absent", async () => {
+      const { agent, getPrompt } = buildPlannerAgent();
+      const bundle = makeTaskBundle();
+
+      await agent.run(bundle, "run-1", {
+        priorSkills: [
+          {
+            id: "skill-1",
+            taskCategory: "testing",
+            snippet: "unused",
+            skillMarkdown: "# Testing tips",
+          } as never,
+        ],
+      });
+
+      const prompt = getPrompt();
+      expect(prompt).toContain("### testing\n");
+      expect(prompt).not.toContain("### testing (testing)");
+    });
+
+    it("omits the priorSkills section when the array is empty or absent", async () => {
+      const { agent, getPrompt } = buildPlannerAgent();
+      const bundle = makeTaskBundle();
+
+      await agent.run(bundle, "run-1", { priorSkills: [] });
+
+      const prompt = getPrompt();
+      expect(prompt).not.toContain("## Prior Skills from Similar Tasks");
+    });
+  });
 });

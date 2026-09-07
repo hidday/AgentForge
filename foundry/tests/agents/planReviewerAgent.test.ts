@@ -147,3 +147,27 @@ describe("PlanReviewerAgent.run() relatedContext rendering", () => {
     expect(prompt).not.toContain("{{relatedContextSection}}");
   });
 });
+
+describe("PlanReviewerAgent.run() operator note", () => {
+  it("injects an Operator Note section when options.operatorNote is provided", async () => {
+    const { agent, getPrompt } = buildPlanReviewerAgent();
+    const bundle = makeTaskBundle();
+
+    await agent.run(makePlan(), bundle, "run-1", {
+      operatorNote: "Look closely at the auth bypass risk",
+    });
+
+    const prompt = getPrompt();
+    expect(prompt).toContain("## Operator Note");
+    expect(prompt).toContain("Look closely at the auth bypass risk");
+  });
+
+  it("omits the Operator Note section when no operator note is given", async () => {
+    const { agent, getPrompt } = buildPlanReviewerAgent();
+    const bundle = makeTaskBundle();
+
+    await agent.run(makePlan(), bundle, "run-1");
+
+    expect(getPrompt()).not.toContain("## Operator Note");
+  });
+});

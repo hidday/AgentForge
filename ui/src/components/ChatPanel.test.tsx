@@ -198,6 +198,35 @@ describe("ChatPanel", () => {
     expect(screen.queryByText("Hello")).toBeNull();
   });
 
+  it("falls back to an empty string when an artifact's payload has no content field", () => {
+    const artifact: Artifact = {
+      id: "a1",
+      runId: RUN_ID,
+      type: "ChatMessage",
+      version: 1,
+      payloadJson: { role: "user" },
+      rawText: "",
+      createdAt: "2024-01-01T00:00:01Z",
+    };
+    render(<ChatPanel runId={RUN_ID} artifacts={[artifact]} />);
+    // No message text renders, but no crash either — the message bubble
+    // renders with empty content.
+    expect(screen.queryByText(/No messages yet/i)).toBeNull();
+  });
+
+  it("shows a generic error message when sendChatMessage rejects with a non-Error value", async () => {
+    mockApi.sendChatMessage.mockRejectedValue("network exploded");
+
+    render(<ChatPanel runId={RUN_ID} artifacts={[]} />);
+    const input = screen.getByPlaceholderText(/ask the agent/i);
+    await userEvent.type(input, "Failing question");
+    await userEvent.click(screen.getByRole("button", { name: /send/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText("Chat request failed")).toBeDefined();
+    });
+  });
+
   it("shows inline error message and does not add any message to the list on API error", async () => {
     mockApi.sendChatMessage.mockRejectedValue(new Error("Server error"));
 
@@ -212,6 +241,48 @@ describe("ChatPanel", () => {
 
     // No message should have been added to the list
     expect(screen.queryByText("Failing question")).toBeNull();
+  });
+
+  it("collapses the message list when the header is clicked, and expands again on a second click", async () => {
+    const artifacts: Artifact[] = [
+      makeArtifact("user", "Hello there", "a1", "2024-01-01T00:00:01Z"),
+    ];
+    render(<ChatPanel runId={RUN_ID} artifacts={artifacts} />);
+
+    // Open by default
+    expect(screen.getByText("Hello there")).toBeDefined();
+
+    const header = screen.getByRole("button", { name: /chat with agent/i });
+    await userEvent.click(header);
+    expect(screen.queryByText("Hello there")).toBeNull();
+
+    await userEvent.click(header);
+    expect(screen.getByText("Hello there")).toBeDefined();
+  });
+
+  it("shows the message count badge in the header once there are messages", () => {
+    const artifacts: Artifact[] = [
+      makeArtifact("user", "One", "a1", "2024-01-01T00:00:01Z"),
+      makeArtifact("assistant", "Two", "a2", "2024-01-01T00:00:02Z"),
+    ];
+    render(<ChatPanel runId={RUN_ID} artifacts={artifacts} />);
+    expect(screen.getByText("2")).toBeDefined();
+  });
+
+  it("scrolls to bottom via scrollIntoView when the anchor element supports it", async () => {
+    const scrollIntoViewMock = vi.fn();
+    // jsdom does not implement scrollIntoView by default.
+    HTMLDivElement.prototype.scrollIntoView = scrollIntoViewMock;
+
+    mockApi.sendChatMessage.mockResolvedValue({ reply: "ok", durationMs: 10 });
+    render(<ChatPanel runId={RUN_ID} artifacts={[]} />);
+
+    await waitFor(() => {
+      expect(scrollIntoViewMock).toHaveBeenCalledWith({ behavior: "smooth" });
+    });
+
+    // @ts-expect-error - cleanup the prototype patch
+    delete HTMLDivElement.prototype.scrollIntoView;
   });
 
   it("message list does not change from artifact-derived count when only local state changes", async () => {

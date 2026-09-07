@@ -65,6 +65,48 @@ describe("DistilledSkillPanel", () => {
     expect(screen.getByText(/name: dev-env-pause-resume-footguns/)).toBeDefined();
   });
 
+  it("shows a loading indicator when loading is true, regardless of decision", () => {
+    render(
+      <DistilledSkillPanel
+        distilledSkill={null}
+        distillationDecision={null}
+        loading={true}
+      />,
+    );
+    expect(screen.getByText(/loading distilled skill/i)).toBeDefined();
+  });
+
+  it("shows an error message when error is set, taking priority over loading state content", () => {
+    render(
+      <DistilledSkillPanel
+        distilledSkill={null}
+        distillationDecision={null}
+        error="Failed to load skill"
+      />,
+    );
+    expect(screen.getByText("Failed to load skill")).toBeDefined();
+  });
+
+  it("shows the displaced skill id when the decision names one", () => {
+    render(
+      <DistilledSkillPanel
+        distilledSkill={skill}
+        distillationDecision={{ ...decision, displacedSkillId: "abcdefgh12345" }}
+      />,
+    );
+    expect(screen.getByText(/Displaced skill: abcdefgh/)).toBeDefined();
+  });
+
+  it("falls back to taskCategory-based naming when no explicit name is present anywhere", () => {
+    render(
+      <DistilledSkillPanel
+        distilledSkill={null}
+        distillationDecision={{ ...decision, name: null, taskCategory: "some-category" }}
+      />,
+    );
+    expect(screen.getAllByText("some-category").length).toBeGreaterThan(0);
+  });
+
   it("shows a fallback message when persistence succeeded but content is missing", () => {
     render(
       <DistilledSkillPanel

@@ -31,4 +31,11 @@ describe("agentModels", () => {
     expect(resolveAgentModel("plan-reviewer", env)).toBe("gpt-5.6-sol");
     expect(resolveAgentModel("reviewer", env)).toBe("gpt-5.6-sol");
   });
+
+  it("throws for a stage with no configured tier (defensive exhaustiveness check)", () => {
+    // @ts-expect-error deliberately passing an unmapped stage to exercise the default branch
+    expect(() => resolveAgentModel("not-a-real-stage", env)).toThrow(
+      /Unknown agent model tier/,
+    );
+  });
 });

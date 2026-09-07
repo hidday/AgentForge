@@ -21,4 +21,17 @@ describe("skillNaming", () => {
       "dev-env-pause-resume",
     );
   });
+
+  it("slugifySkillName falls back to 'distilled-skill' when the input has no alphanumeric characters", () => {
+    expect(slugifySkillName("!!!")).toBe("distilled-skill");
+    expect(slugifySkillName("")).toBe("distilled-skill");
+  });
+
+  it("normalizeSkillName falls back through slugifySkillName when name is undefined", () => {
+    expect(normalizeSkillName(undefined, "Auth Middleware")).toBe("auth-middleware");
+  });
+
+  it("normalizeSkillName treats a whitespace-only name as absent", () => {
+    expect(normalizeSkillName("   ", "Auth Middleware")).toBe("auth-middleware");
+  });
 });
