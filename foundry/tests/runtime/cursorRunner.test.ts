@@ -117,3 +117,103 @@ END_STRUCTURED_OUTPUT`;
     expect(logger.error).not.toHaveBeenCalled();
   });
 });
+
+describe("CursorRunner stdin payload and error snippet truncation", () => {
+  const validBlock = `BEGIN_STRUCTURED_OUTPUT
+{"success":true,"stage":"planner","payload":{"value":"ok"}}
+END_STRUCTURED_OUTPUT`;
+
+  it("prepends the system prompt to stdin, separated by a divider, when provided", async () => {
+    const processRunner = makeMockProcessRunner({
+      stdout: validBlock,
+      stderr: "",
+      exitCode: 0,
+      durationMs: 50,
+      timedOut: false,
+    });
+    const logger = makeMockLogger();
+    const runner = new CursorRunner(
+      processRunner as never,
+      "cursor",
+      [],
+      "claude-4.6-sonnet",
+      logger as never,
+    );
+
+    await runner.run(
+      {
+        prompt: "Do the task",
+        systemPrompt: "You are a helpful assistant",
+        workingDirectory: "/tmp",
+        timeoutMs: 1000,
+      },
+      "planner",
+      echoSchema,
+    );
+
+    const call = processRunner.execute.mock.calls[0]![0] as { stdinData: string };
+    expect(call.stdinData).toBe("You are a helpful assistant\n\n---\n\nDo the task");
+  });
+
+  it("uses the raw prompt as stdin when no system prompt is provided", async () => {
+    const processRunner = makeMockProcessRunner({
+      stdout: validBlock,
+      stderr: "",
+      exitCode: 0,
+      durationMs: 50,
+      timedOut: false,
+    });
+    const logger = makeMockLogger();
+    const runner = new CursorRunner(
+      processRunner as never,
+      "cursor",
+      [],
+      "claude-4.6-sonnet",
+      logger as never,
+    );
+
+    await runner.run(
+      { prompt: "Do the task", workingDirectory: "/tmp", timeoutMs: 1000 },
+      "planner",
+      echoSchema,
+    );
+
+    const call = processRunner.execute.mock.calls[0]![0] as { stdinData: string };
+    expect(call.stdinData).toBe("Do the task");
+  });
+
+  it("truncates very long stderr and outputSnippet to a tail with an ellipsis prefix", async () => {
+    const longResult = "X".repeat(900) + "[TAIL_MARKER]";
+    const longStderr = "A".repeat(700) + "[STDERR_TAIL]";
+
+    const processRunner = makeMockProcessRunner({
+      stdout: longResult,
+      stderr: longStderr,
+      exitCode: 1,
+      durationMs: 100,
+      timedOut: false,
+    });
+    const logger = makeMockLogger();
+    const runner = new CursorRunner(
+      processRunner as never,
+      "cursor",
+      [],
+      "claude-4.6-sonnet",
+      logger as never,
+    );
+
+    await expect(
+      runner.run(
+        { prompt: "x", workingDirectory: "/tmp", timeoutMs: 1000 },
+        "planner",
+        echoSchema,
+      ),
+    ).rejects.toThrow();
+
+    const [logFields] = logger.error.mock.calls[0]!;
+    expect(logFields.outputSnippet.startsWith("…")).toBe(true);
+    expect(logFields.outputSnippet).toContain("[TAIL_MARKER]");
+    expect(logFields.stderr.startsWith("…")).toBe(true);
+    expect(logFields.stderr).toContain("[STDERR_TAIL]");
+  });
+});
