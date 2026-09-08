@@ -214,6 +214,45 @@ describe("ChatPanel", () => {
     expect(screen.queryByText("Failing question")).toBeNull();
   });
 
+  it("collapses and re-expands the panel when the header is clicked", async () => {
+    render(<ChatPanel runId={RUN_ID} artifacts={[]} />);
+
+    // Open by default: empty-state message and input are visible.
+    expect(screen.getByText(/No messages yet/i)).toBeDefined();
+    expect(screen.getByPlaceholderText(/ask the agent/i)).toBeDefined();
+
+    const header = screen.getByRole("button", { name: /chat with agent/i });
+    await userEvent.click(header);
+
+    // Collapsed: body content is no longer rendered.
+    expect(screen.queryByText(/No messages yet/i)).toBeNull();
+    expect(screen.queryByPlaceholderText(/ask the agent/i)).toBeNull();
+
+    await userEvent.click(header);
+
+    // Re-expanded: body content is back.
+    expect(screen.getByText(/No messages yet/i)).toBeDefined();
+    expect(screen.getByPlaceholderText(/ask the agent/i)).toBeDefined();
+  });
+
+  it("calls scrollIntoView on the bottom anchor when it is available (auto-scroll)", () => {
+    const scrollIntoViewMock = vi.fn();
+    // jsdom does not implement scrollIntoView by default; the component guards
+    // on `typeof ... === "function"` before calling it, so it must be defined
+    // as a function to exercise that branch.
+    Element.prototype.scrollIntoView = scrollIntoViewMock;
+
+    const artifacts: Artifact[] = [
+      makeArtifact("user", "Hello", "a1", "2024-01-01T00:00:01Z"),
+    ];
+    render(<ChatPanel runId={RUN_ID} artifacts={artifacts} />);
+
+    expect(scrollIntoViewMock).toHaveBeenCalledWith({ behavior: "smooth" });
+
+    // @ts-expect-error -- cleanup: remove the mock so it doesn't leak into other test files
+    delete Element.prototype.scrollIntoView;
+  });
+
   it("message list does not change from artifact-derived count when only local state changes", async () => {
     let resolveRequest!: (v: { reply: string; durationMs: number }) => void;
     mockApi.sendChatMessage.mockReturnValue(
