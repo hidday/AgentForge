@@ -183,6 +183,30 @@ describe("ExecutorAgent.run()", () => {
     expect(githubClient.createDraftPR).toHaveBeenCalledTimes(1);
   });
 
+  it("logs isRetry=true when only existingPR is set on the retry context", async () => {
+    const { agent, logger } = buildAgent();
+
+    await agent.run(makePlan(), makeTaskBundle(), "run-1", { existingPR: 777 });
+
+    const startLog = logger.info.mock.calls.find(
+      (c: unknown[]) => c[1] === "Starting executor agent",
+    );
+    const payload = startLog?.[0] as Record<string, unknown> | undefined;
+    expect(payload?.isRetry).toBe(true);
+  });
+
+  it("logs isRetry=false when a retry context is passed with no branch or PR set", async () => {
+    const { agent, logger } = buildAgent();
+
+    await agent.run(makePlan(), makeTaskBundle(), "run-1", {});
+
+    const startLog = logger.info.mock.calls.find(
+      (c: unknown[]) => c[1] === "Starting executor agent",
+    );
+    const payload = startLog?.[0] as Record<string, unknown> | undefined;
+    expect(payload?.isRetry).toBe(false);
+  });
+
   it("reuses an existing PR number on retry instead of creating a new draft", async () => {
     const { agent, githubClient } = buildAgent();
 

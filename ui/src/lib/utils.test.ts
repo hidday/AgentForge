@@ -3,7 +3,8 @@ import { cn, relativeTime, formatTimestamp } from "./utils";
 
 describe("cn", () => {
   it("merges class names, dropping falsy values", () => {
-    expect(cn("a", false && "b", undefined, "c")).toBe("a c");
+    const isB = false;
+    expect(cn("a", isB && "b", undefined, "c")).toBe("a c");
   });
 
   it("resolves conflicting tailwind classes via tailwind-merge (last wins)", () => {

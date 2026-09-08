@@ -222,6 +222,17 @@ describe("RealLinearClient", () => {
       expect(results).toEqual([]);
     });
 
+    it("treats a nullish labels connection on a result node as an empty label list", async () => {
+      const node = makeFakeIssue({
+        id: "issue-3",
+        labels: () => Promise.resolve(null as unknown as { nodes: never[] }),
+      });
+      sdk.issues = vi.fn().mockResolvedValue({ nodes: [node] });
+
+      const [result] = await client.searchIssues({ state: "Todo" });
+      expect(result.labels).toEqual([]);
+    });
+
     it("defaults null description and missing project/team/cycle in results", async () => {
       const node = makeFakeIssue({
         id: "issue-2",
@@ -237,6 +248,39 @@ describe("RealLinearClient", () => {
       expect(result.project).toBeUndefined();
       expect(result.team).toBeUndefined();
       expect(result.cycle).toBeUndefined();
+    });
+  });
+
+  describe("getRelatedContext edge cases", () => {
+    it("treats a nullish inverseRelations connection as no blockers", async () => {
+      const focus = {
+        ...makeFakeIssue({ id: "focus-id" }),
+        parent: Promise.resolve(null),
+        inverseRelations: () => Promise.resolve(null as unknown as { nodes: never[] }),
+      };
+      issuesById.set("focus-id", focus as unknown as FakeIssue);
+
+      const ctx = await client.getRelatedContext("focus-id");
+      expect(ctx.blockers).toEqual([]);
+    });
+
+    it("treats a nullish labels connection on a related issue as no labels, and a nullish state as Unknown", async () => {
+      const parent = makeFakeIssue({
+        id: "parent-id",
+        labels: () => Promise.resolve(null as unknown as { nodes: never[] }),
+        state: Promise.resolve(null),
+      });
+      const focus = {
+        ...makeFakeIssue({ id: "focus-id" }),
+        parent: Promise.resolve(parent),
+        inverseRelations: () => Promise.resolve({ nodes: [] }),
+      };
+      issuesById.set("focus-id", focus as unknown as FakeIssue);
+      issuesById.set("parent-id", parent);
+
+      const ctx = await client.getRelatedContext("focus-id");
+      expect(ctx.parent?.labels).toEqual([]);
+      expect(ctx.parent?.state).toBe("Unknown");
     });
   });
 
@@ -306,6 +350,18 @@ describe("RealLinearClient", () => {
       await client.updateIssueState("issue-1", "Done");
 
       expect(sdk.updateIssue).toHaveBeenCalledWith("issue-1", { stateId: "s-done" });
+    });
+
+    it("treats a nullish states connection as an empty state map (state not found)", async () => {
+      issuesById.set("issue-1", makeFakeIssue({ id: "issue-1" }));
+      sdk.team = vi.fn().mockResolvedValue({
+        states: () => Promise.resolve(null as unknown as { nodes: never[] }),
+      });
+
+      await client.updateIssueState("issue-1", "Done");
+
+      expect(logger.warn).toHaveBeenCalled();
+      expect(sdk.updateIssue).not.toHaveBeenCalled();
     });
 
     it("caches the resolved state map per team across calls", async () => {

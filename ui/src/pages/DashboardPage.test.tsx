@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, act } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { Run } from "@/api/client.ts";
@@ -140,6 +140,17 @@ describe("DashboardPage", () => {
     expect(statValue("Awaiting")).toBe("1");
     expect(statValue("Blocked")).toBe("1");
     expect(statValue("Done")).toBe("1");
+  });
+
+  it("counts a run with an unrecognized state under the idle bucket without crashing", () => {
+    const runs = [makeRun({ id: "r1", state: "SomeUnknownState" })];
+    useRunsMock.mockReturnValue({ runs, loading: false, error: null, refetch: vi.fn() });
+    render(<DashboardPage />);
+    // Total still reflects it even though it falls outside the five named categories.
+    const total = screen
+      .getAllByText("Total")
+      .find((node) => node.tagName === "DIV")!;
+    expect((total.previousSibling as HTMLElement).textContent).toBe("1");
   });
 
   it("filters the runs table by category when a filter button is clicked", async () => {

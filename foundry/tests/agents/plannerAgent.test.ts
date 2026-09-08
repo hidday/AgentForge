@@ -306,6 +306,46 @@ describe("PlannerAgent.run()", () => {
     });
   });
 
+  describe("planReviewFindings injection", () => {
+    it("renders '## AI Plan Review Findings' with summary and findings list", async () => {
+      const { agent, getPrompt } = buildPlannerAgent();
+      const bundle = makeTaskBundle();
+
+      await agent.run(bundle, "run-1", {
+        planReviewFindings: {
+          summary: "Mostly solid, one gap around error handling.",
+          findings: [
+            {
+              id: "pf1",
+              severity: "important",
+              title: "No error handling for malformed input",
+              details: "Add a dedicated step for this case.",
+            },
+          ],
+        },
+      });
+
+      const prompt = getPrompt();
+      expect(prompt).toContain("## AI Plan Review Findings (from previous plan)");
+      expect(prompt).toContain("**Review Summary:** Mostly solid, one gap around error handling.");
+      expect(prompt).toContain(
+        "- **[important] No error handling for malformed input** (pf1): Add a dedicated step for this case.",
+      );
+      expect(prompt).toContain("Incorporate these findings into the revised plan where appropriate.");
+    });
+
+    it("omits the plan review findings section when none are provided", async () => {
+      const { agent, getPrompt } = buildPlannerAgent();
+      const bundle = makeTaskBundle();
+
+      await agent.run(bundle, "run-1");
+
+      const prompt = getPrompt();
+      expect(prompt).not.toContain("## AI Plan Review Findings");
+      expect(prompt).not.toContain("{{planReviewSection}}");
+    });
+  });
+
   describe("previousPlan injection", () => {
     function makePreviousPlan(overrides: Partial<Plan> = {}): Plan {
       return {
