@@ -114,6 +114,26 @@ describe("RunsTable", () => {
     expect(screen.queryByTitle("Open in Linear")).toBeNull();
   });
 
+  it("stops propagation when the external Linear link is clicked, so an ancestor React click handler does not see it", async () => {
+    const user = userEvent.setup();
+    const run = makeRun({ linearIssueUrl: "https://linear.app/team/issue/ENG-1" });
+    const outerClickHandler = vi.fn();
+
+    render(
+      <MemoryRouter>
+        {/* eslint-disable-next-line jsx-a11y/no-static-element-interactions, jsx-a11y/click-events-have-key-events */}
+        <div onClick={outerClickHandler}>
+          <RunsTable runs={[run]} />
+        </div>
+      </MemoryRouter>,
+    );
+
+    const link = screen.getByTitle("Open in Linear");
+    await user.click(link);
+
+    expect(outerClickHandler).not.toHaveBeenCalled();
+  });
+
   it("shows Approve/Reject Plan buttons for AwaitingPlanApproval and calls api.approvePlan", async () => {
     const user = userEvent.setup();
     const onAction = vi.fn();

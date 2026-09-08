@@ -110,6 +110,15 @@ describe("api client", () => {
     });
   });
 
+  it("reReviewPlan: omits the note (undefined) when not provided", async () => {
+    (fetch as ReturnType<typeof vi.fn>).mockResolvedValue(jsonResponse({ ok: true, runId: "r1" }));
+    await api.reReviewPlan("r1");
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/runs/r1/actions/re-review-plan",
+      expect.objectContaining({ body: JSON.stringify({ note: undefined }) }),
+    );
+  });
+
   it("revisePlan: POSTs with optional note", async () => {
     (fetch as ReturnType<typeof vi.fn>).mockResolvedValue(jsonResponse({ ok: true, runId: "r1" }));
     await api.revisePlan("r1");

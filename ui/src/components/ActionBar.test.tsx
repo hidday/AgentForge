@@ -103,7 +103,7 @@ describe("ActionBar", () => {
       );
       await userEvent.click(screen.getByRole("button", { name: /approve plan/i }));
 
-      expect(screen.getByText("Approve Plan")).toBeDefined();
+      expect(screen.getByRole("heading", { name: "Approve Plan" })).toBeDefined();
       expect(
         screen.getByText(/This will approve the current plan/i),
       ).toBeDefined();
@@ -124,7 +124,7 @@ describe("ActionBar", () => {
         <ActionBar runId="run-1" state="AwaitingPlanApproval" onAction={vi.fn()} />,
       );
       await userEvent.click(screen.getByRole("button", { name: /approve plan/i }));
-      expect(screen.getByText("Approve Plan")).toBeDefined();
+      expect(screen.getByRole("heading", { name: "Approve Plan" })).toBeDefined();
 
       await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
 
@@ -138,7 +138,7 @@ describe("ActionBar", () => {
         <ActionBar runId="run-1" state="AwaitingPlanApproval" onAction={onAction} />,
       );
       await userEvent.click(screen.getByRole("button", { name: /re-review plan/i }));
-      expect(screen.getByText("Re-review Plan")).toBeDefined();
+      expect(screen.getByRole("heading", { name: "Re-review Plan" })).toBeDefined();
 
       await userEvent.click(screen.getByRole("button", { name: "Re-review" }));
 
@@ -154,7 +154,7 @@ describe("ActionBar", () => {
         <ActionBar runId="run-1" state="AwaitingPlanApproval" onAction={onAction} />,
       );
       await userEvent.click(screen.getByRole("button", { name: /revise plan/i }));
-      expect(screen.getByText("Revise Plan")).toBeDefined();
+      expect(screen.getByRole("heading", { name: "Revise Plan" })).toBeDefined();
 
       await userEvent.click(screen.getByRole("button", { name: "Revise" }));
 
@@ -175,16 +175,16 @@ describe("ActionBar", () => {
         screen.getByText(/This will reject the current plan/i),
       ).toBeDefined();
 
-      const iterateBtn = screen.getByRole("button", { name: /revise plan/i, exact: false });
-      // The mode toggle "Revise plan" button is distinct from the sidebar Revise Plan
-      // button — grab by exact text within the reject dialog's mode toggle.
+      // "Revise plan" (mode toggle, lowercase p) is present and defaults active
       const modeButtons = screen.getAllByText("Revise plan");
       expect(modeButtons.length).toBeGreaterThan(0);
 
       const textarea = screen.getByPlaceholderText(/describe what should change/i);
       await userEvent.type(textarea, "  please tighten step 3  ");
 
-      const rejectConfirmBtn = screen.getByRole("button", { name: "Reject Plan" });
+      // Two "Reject Plan" buttons exist now: the sidebar trigger and the
+      // dialog's confirm button (rendered last in the DOM).
+      const rejectConfirmBtn = screen.getAllByRole("button", { name: "Reject Plan" }).at(-1)!;
       await userEvent.click(rejectConfirmBtn);
 
       await waitFor(() => {
@@ -195,7 +195,6 @@ describe("ActionBar", () => {
         );
         expect(onAction).toHaveBeenCalledOnce();
       });
-      void iterateBtn;
     });
 
     it("switches reject mode to 'fresh' when Start fresh is clicked", async () => {
@@ -207,11 +206,31 @@ describe("ActionBar", () => {
       const startFreshBtn = screen.getByText("Start fresh").closest("button")!;
       await userEvent.click(startFreshBtn);
 
-      const rejectConfirmBtn = screen.getByRole("button", { name: "Reject Plan" });
+      const rejectConfirmBtn = screen.getAllByRole("button", { name: "Reject Plan" }).at(-1)!;
       await userEvent.click(rejectConfirmBtn);
 
       await waitFor(() => {
         expect(mockApi.rejectPlan).toHaveBeenCalledWith("run-1", undefined, "fresh");
+      });
+    });
+
+    it("switches reject mode back to 'iterate' when Revise plan is clicked after selecting fresh", async () => {
+      render(
+        <ActionBar runId="run-1" state="AwaitingPlanApproval" onAction={vi.fn()} />,
+      );
+      await userEvent.click(screen.getByRole("button", { name: /reject plan/i }));
+
+      const startFreshBtn = screen.getByText("Start fresh").closest("button")!;
+      await userEvent.click(startFreshBtn);
+
+      const reviseModeBtn = screen.getByText("Revise plan").closest("button")!;
+      await userEvent.click(reviseModeBtn);
+
+      const rejectConfirmBtn = screen.getAllByRole("button", { name: "Reject Plan" }).at(-1)!;
+      await userEvent.click(rejectConfirmBtn);
+
+      await waitFor(() => {
+        expect(mockApi.rejectPlan).toHaveBeenCalledWith("run-1", undefined, "iterate");
       });
     });
 
@@ -220,7 +239,8 @@ describe("ActionBar", () => {
         <ActionBar runId="run-1" state="AwaitingPlanApproval" onAction={vi.fn()} />,
       );
       await userEvent.click(screen.getByRole("button", { name: /reject plan/i }));
-      await userEvent.click(screen.getByRole("button", { name: "Reject Plan" }));
+      const rejectConfirmBtn = screen.getAllByRole("button", { name: "Reject Plan" }).at(-1)!;
+      await userEvent.click(rejectConfirmBtn);
 
       await waitFor(() => {
         expect(mockApi.rejectPlan).toHaveBeenCalledWith("run-1", undefined, "iterate");
@@ -271,7 +291,8 @@ describe("ActionBar", () => {
         <ActionBar runId="run-1" state="AwaitingPlanApproval" onAction={vi.fn()} />,
       );
       await userEvent.click(screen.getByRole("button", { name: /reject plan/i }));
-      await userEvent.click(screen.getByRole("button", { name: "Reject Plan" }));
+      const rejectConfirmBtn = screen.getAllByRole("button", { name: "Reject Plan" }).at(-1)!;
+      await userEvent.click(rejectConfirmBtn);
 
       expect(screen.getByText("Working...")).toBeDefined();
       const cancelBtn = screen.getByRole("button", { name: "Cancel" }) as HTMLButtonElement;
@@ -289,7 +310,8 @@ describe("ActionBar", () => {
         <ActionBar runId="run-1" state="AwaitingPlanApproval" onAction={vi.fn()} />,
       );
       await userEvent.click(screen.getByRole("button", { name: /reject plan/i }));
-      await userEvent.click(screen.getByRole("button", { name: "Reject Plan" }));
+      const rejectConfirmBtn = screen.getAllByRole("button", { name: "Reject Plan" }).at(-1)!;
+      await userEvent.click(rejectConfirmBtn);
 
       await waitFor(() => {
         expect(screen.queryByText(/This will reject the current plan/i)).toBeNull();
@@ -324,7 +346,9 @@ describe("ActionBar", () => {
         const onAction = vi.fn();
         render(<ActionBar runId="run-1" state={state} onAction={onAction} />);
         await userEvent.click(screen.getByRole("button", { name: /pause/i }));
-        await userEvent.click(screen.getByRole("button", { name: "Pause" }));
+        // Two "Pause" buttons now: sidebar trigger and dialog confirm (last in DOM)
+        const confirmBtn = screen.getAllByRole("button", { name: "Pause" }).at(-1)!;
+        await userEvent.click(confirmBtn);
 
         await waitFor(() => {
           expect(mockApi.pauseRun).toHaveBeenCalledWith("run-1");
@@ -341,7 +365,9 @@ describe("ActionBar", () => {
         const onAction = vi.fn();
         render(<ActionBar runId="run-1" state={state} onAction={onAction} />);
         await userEvent.click(screen.getByRole("button", { name: /^resume$/i }));
-        await userEvent.click(screen.getByRole("button", { name: "Resume" }));
+        // Two "Resume" buttons now: sidebar trigger and dialog confirm (last in DOM)
+        const confirmBtn = screen.getAllByRole("button", { name: "Resume" }).at(-1)!;
+        await userEvent.click(confirmBtn);
 
         await waitFor(() => {
           expect(mockApi.resumeRun).toHaveBeenCalledWith("run-1");

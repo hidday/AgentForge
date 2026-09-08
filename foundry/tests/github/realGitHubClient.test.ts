@@ -115,6 +115,14 @@ describe("RealGitHubClient", () => {
         /GitHub getDefaultBranch failed for "org\/repo".*network down/s,
       );
     });
+
+    it("stringifies a non-Error rejection when wrapping", async () => {
+      octokit.repos.get.mockRejectedValue("raw failure");
+
+      await expect(client.getDefaultBranch("org/repo")).rejects.toThrow(
+        /GitHub getDefaultBranch failed for "org\/repo".*raw failure/s,
+      );
+    });
   });
 
   describe("createBranch", () => {
@@ -194,6 +202,16 @@ describe("RealGitHubClient", () => {
       await expect(
         client.createDraftPR("org/repo", "head", "main", "", "Body"),
       ).rejects.toThrow(/GitHub createDraftPR failed/);
+    });
+
+    it("treats a non-Error 422 rejection as a duplicate-head lookup (not field validation)", async () => {
+      const nonErrorRejection = { status: 422 };
+      octokit.pulls.create.mockRejectedValue(nonErrorRejection);
+      octokit.pulls.list.mockResolvedValue({ data: [{ number: 9 }] });
+
+      const num = await client.createDraftPR("org/repo", "head", "main", "Title", "Body");
+
+      expect(num).toBe(9);
     });
 
     it("looks up and returns the existing open PR on a duplicate-head 422", async () => {
@@ -444,6 +462,17 @@ describe("RealGitHubClient", () => {
       ).resolves.toBeUndefined();
       expect(logger.warn).toHaveBeenCalled();
     });
+
+    it("stringifies a non-Error rejection in the warning log", async () => {
+      octokit.pulls.createReplyForReviewComment.mockRejectedValue("raw failure");
+
+      await client.replyToReviewComment("org/repo", 10, 500, "reply");
+
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.objectContaining({ error: "raw failure" }),
+        expect.any(String),
+      );
+    });
   });
 
   describe("submitPRReview", () => {
@@ -493,6 +522,14 @@ describe("RealGitHubClient", () => {
       await expect(
         client.submitPRReview("org/repo", 10, "lgtm", "APPROVE"),
       ).rejects.toThrow(/GitHub submitPRReview failed.*network error/s);
+    });
+
+    it("stringifies a non-Error rejection when checking for the own-PR message", async () => {
+      octokit.pulls.createReview.mockRejectedValue({ weird: "shape" });
+
+      await expect(
+        client.submitPRReview("org/repo", 10, "lgtm", "APPROVE"),
+      ).rejects.toThrow(/GitHub submitPRReview failed.*\[object Object\]/s);
     });
   });
 });

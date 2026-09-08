@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, act } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { AgentOutputPanel } from "./AgentOutputPanel.tsx";
 import type { ActiveProcess } from "@/api/client.ts";
@@ -68,8 +68,10 @@ describe("AgentOutputPanel", () => {
     );
     expect(screen.getByText(/^\d+s$/)).toBeDefined();
 
-    vi.setSystemTime(new Date(Date.now() + 65_000));
-    vi.advanceTimersByTime(65_000);
+    act(() => {
+      vi.setSystemTime(new Date(Date.now() + 65_000));
+      vi.advanceTimersByTime(65_000);
+    });
 
     expect(screen.getByText(/^\d+m \d+s$/)).toBeDefined();
   });

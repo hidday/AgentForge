@@ -24,16 +24,17 @@ describe("POST /webhooks/github", () => {
     expect(JSON.parse(response.body)).toEqual({ error: "Invalid webhook payload" });
   });
 
-  it("returns 400 for a completely malformed payload", async () => {
+  it("returns 400 when 'action' has the wrong type", async () => {
     const app = await buildApp();
 
     const response = await app.inject({
       method: "POST",
       url: "/webhooks/github",
-      payload: "not json shaped correctly",
+      payload: { action: 12345 },
     });
 
     expect(response.statusCode).toBe(400);
+    expect(JSON.parse(response.body)).toEqual({ error: "Invalid webhook payload" });
   });
 
   it("returns 200 ok for a minimal valid payload (action only)", async () => {
