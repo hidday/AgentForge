@@ -575,6 +575,53 @@ describe("DistillationAgent", () => {
       expect(promptArg).not.toContain("more steps");
       expect(promptArg).toContain("1. Step without description");
     });
+
+    it("renders '_none_' for the Steps section when the plan has zero steps", async () => {
+      const deps = buildDeps();
+      deps.agentSkillRepo.findActiveByRepo.mockResolvedValue([]);
+      const planPayload = {
+        planVersion: 1,
+        summary: "Trivial plan with no steps.",
+        assumptions: [],
+        openQuestions: [],
+        risks: [],
+        steps: [],
+        testPlan: "N/A",
+        confidence: 0.3,
+      };
+      deps.artifactRepo.findLatestByType.mockImplementation((_runId: string, type: string) => {
+        if (type === "ExecutionReport") {
+          return Promise.resolve({
+            payloadJson: {
+              executionVersion: 1,
+              summary: "ok",
+              filesChanged: [],
+              checks: {
+                lint: { status: "pass", details: "" },
+                typecheck: { status: "pass", details: "" },
+                tests: { status: "pass", details: "" },
+              },
+              notes: [],
+              prDraftCreated: false,
+              score: 0.5,
+              scoreRationale: "ok",
+            },
+          });
+        }
+        if (type === "Plan") return Promise.resolve({ version: 1, payloadJson: planPayload });
+        return Promise.resolve(null);
+      });
+      deps.agentRunner.run.mockResolvedValue(
+        makeDistillationOutput({ shouldPersist: false, reason: "n/a" }),
+      );
+
+      const agent = buildAgent(deps);
+      await agent.run("run-1", makeRun());
+
+      const promptArg = (deps.agentRunner.run.mock.calls[0] as [unknown, { prompt: string }])[1]
+        .prompt;
+      expect(promptArg).toContain("**Steps**:\n_none_");
+    });
   });
 
   describe("(k) Execution report summarization edge cases", () => {
@@ -670,6 +717,42 @@ describe("DistillationAgent", () => {
         .prompt;
       expect(promptArg).toContain("- lint: fail\n");
       expect(promptArg).not.toContain("- lint: fail —");
+    });
+
+    it("appends the truncated details suffix on a failing check with non-empty details", async () => {
+      const deps = buildDeps();
+      deps.agentSkillRepo.findActiveByRepo.mockResolvedValue([]);
+      deps.artifactRepo.findLatestByType.mockImplementation((_runId: string, type: string) => {
+        if (type === "ExecutionReport") {
+          return Promise.resolve({
+            payloadJson: {
+              executionVersion: 1,
+              summary: "ok",
+              filesChanged: [],
+              checks: {
+                lint: { status: "fail", details: "2 unused imports" },
+                typecheck: { status: "pass", details: "" },
+                tests: { status: "pass", details: "" },
+              },
+              notes: [],
+              prDraftCreated: false,
+              score: 0.4,
+              scoreRationale: "ok",
+            },
+          });
+        }
+        return Promise.resolve(null);
+      });
+      deps.agentRunner.run.mockResolvedValue(
+        makeDistillationOutput({ shouldPersist: false, reason: "n/a" }),
+      );
+
+      const agent = buildAgent(deps);
+      await agent.run("run-1", makeRun());
+
+      const promptArg = (deps.agentRunner.run.mock.calls[0] as [unknown, { prompt: string }])[1]
+        .prompt;
+      expect(promptArg).toContain("- lint: fail — 2 unused imports");
     });
   });
 
@@ -780,6 +863,35 @@ describe("DistillationAgent", () => {
       expect(promptArg).toContain("- [rejected] f1: no change needed");
       expect(promptArg).not.toContain("*why*");
       expect(promptArg).not.toContain("…and");
+    });
+
+    it("renders '_none_' for the Resolutions section when there are zero resolution items", async () => {
+      const deps = buildDeps();
+      deps.agentSkillRepo.findActiveByRepo.mockResolvedValue([]);
+      deps.artifactRepo.findLatestByType.mockImplementation((_runId: string, type: string) => {
+        if (type === "ExecutionReport") return Promise.resolve({ payloadJson: makeExecReport() });
+        if (type === "Remediation") {
+          return Promise.resolve({
+            payloadJson: {
+              reviewId: "rev-1",
+              readyForHumanReview: false,
+              resolution: [],
+              executionReport: makeExecReport(),
+            },
+          });
+        }
+        return Promise.resolve(null);
+      });
+      deps.agentRunner.run.mockResolvedValue(
+        makeDistillationOutput({ shouldPersist: false, reason: "n/a" }),
+      );
+
+      const agent = buildAgent(deps);
+      await agent.run("run-1", makeRun());
+
+      const promptArg = (deps.agentRunner.run.mock.calls[0] as [unknown, { prompt: string }])[1]
+        .prompt;
+      expect(promptArg).toContain("**Resolutions**:\n_none_");
     });
   });
 
