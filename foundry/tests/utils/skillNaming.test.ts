@@ -21,4 +21,13 @@ describe("skillNaming", () => {
       "dev-env-pause-resume",
     );
   });
+
+  it("slugifySkillName falls back to a default name when nothing slug-worthy remains", () => {
+    expect(slugifySkillName("!!!")).toBe("distilled-skill");
+    expect(slugifySkillName("")).toBe("distilled-skill");
+  });
+
+  it("normalizeSkillName falls back when name is undefined", () => {
+    expect(normalizeSkillName(undefined, "dev-env pause/resume")).toBe("dev-env-pause-resume");
+  });
 });
