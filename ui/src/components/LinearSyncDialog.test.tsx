@@ -542,7 +542,7 @@ describe("LinearSyncDialog", () => {
     await user.click(startBtn);
 
     // Wrong event type.
-    fireSSE({ type: "run:updated", runId: "run-a", issueId: issueA.id });
+    fireSSE({ type: "run:state-changed", runId: "run-a", issueId: issueA.id });
     // No issueId at all.
     fireSSE({ type: "run:created", runId: "run-x" });
     // issueId not among the pending ones.

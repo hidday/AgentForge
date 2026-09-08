@@ -295,6 +295,20 @@ describe("non-Error rejection fallback (String(err)) across action routes", () =
     expect(res.statusCode).toBe(400);
     expect(res.json()).toEqual({ error: String({ unexpected: "shape" }) });
   });
+
+  it("POST answer-questions: returns 400 with err.message when orchestrator rejects with a plain Error (neither PolicyError nor ValidationError)", async () => {
+    const { app, mockOrchestrator } = await buildApp();
+    mockOrchestrator.answerQuestions.mockRejectedValue(new Error("unexpected orchestrator failure"));
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/actions/answer-questions",
+      payload: { answers: [{ questionId: "q1", answer: "yes" }] },
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toEqual({ error: "unexpected orchestrator failure" });
+  });
 });
 
 describe("non-Error rejection fallback for Linear polling routes", () => {

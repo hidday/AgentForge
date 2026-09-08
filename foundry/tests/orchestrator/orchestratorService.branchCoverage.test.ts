@@ -305,7 +305,49 @@ describe("OrchestratorService -- skill retrieval and metrics (agentSkillRepo int
     expect(built.agentSkillRepo!.archiveIfLowUtility).toHaveBeenCalledTimes(2);
   });
 
-  it("increments failure metrics for injected skills when the run fails (Failed), and swallows per-skill errors", async () => {
+  it("increments failure metrics for injected skills when the run fails (Failed)", async () => {
+    const run = makeRun({ id: "run-1", state: RunState.HumanClarificationNeeded, planVersion: 1 });
+    const plan = makePlan({
+      openQuestions: [{ id: "q1", question: "Scope?", requiredForExecution: true }],
+    });
+    const built = buildDeps({
+      run,
+      withAgentSkillRepo: true,
+      artifacts: {
+        Plan: makeArtifact({ type: "Plan", payloadJson: plan }),
+        TaskBundle: makeArtifact({ type: "TaskBundle", payloadJson: {} }),
+      },
+    });
+    built.setPlannerPlan(
+      makePlan({
+        planVersion: 2,
+        openQuestions: [{ id: "q1", question: "Scope?", requiredForExecution: true }],
+      }),
+    );
+    built.eventRepo.findByRunId.mockResolvedValue([
+      { id: "e1", runId: "run-1", eventType: RunEvent.NEEDS_HUMAN_CLARIFICATION, source: "s", payloadJson: {}, createdAt: new Date() },
+      { id: "e2", runId: "run-1", eventType: RunEvent.NEEDS_HUMAN_CLARIFICATION, source: "s", payloadJson: {}, createdAt: new Date() },
+      { id: "e3", runId: "run-1", eventType: RunEvent.NEEDS_HUMAN_CLARIFICATION, source: "s", payloadJson: {}, createdAt: new Date() },
+      {
+        id: "e4",
+        runId: "run-1",
+        eventType: "SKILL_INJECTION",
+        source: "orchestrator",
+        payloadJson: { skillIds: ["skill-1"] },
+        createdAt: new Date(),
+      },
+    ]);
+
+    const svc = new OrchestratorService(built.deps as never);
+    const result = await svc.answerQuestions("run-1", [{ questionId: "q1", answer: "partial" }]);
+
+    expect(result.state).toBe(RunState.Failed);
+    expect(built.agentSkillRepo!.incrementFailure).toHaveBeenCalledWith("skill-1");
+    expect(built.agentSkillRepo!.incrementSuccess).not.toHaveBeenCalled();
+    expect(built.agentSkillRepo!.archiveIfLowUtility).toHaveBeenCalledWith({ id: "skill-1" });
+  });
+
+  it("swallows a per-skill metric-update error (Failed lane) and logs a warning instead of throwing", async () => {
     const run = makeRun({ id: "run-1", state: RunState.HumanClarificationNeeded, planVersion: 1 });
     const plan = makePlan({
       openQuestions: [{ id: "q1", question: "Scope?", requiredForExecution: true }],
