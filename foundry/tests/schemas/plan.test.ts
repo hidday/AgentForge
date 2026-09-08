@@ -55,11 +55,15 @@ describe("plan schema", () => {
     it("coerces flexible risk/assumption shapes to strings", () => {
       const result = PlanSchema.parse(
         baseInput({
-          assumptions: ["plain string", { description: "obj description" }],
+          assumptions: [
+            "plain string",
+            { description: "obj description" },
+            { assumption: "obj assumption" },
+          ],
           risks: [{ risk: "obj risk" }, { text: "obj text" }, { unrelated: true }],
         }),
       );
-      expect(result.assumptions).toEqual(["plain string", "obj description"]);
+      expect(result.assumptions).toEqual(["plain string", "obj description", "obj assumption"]);
       expect(result.risks).toEqual(["obj risk", "obj text", ""]);
     });
 
