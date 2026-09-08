@@ -450,6 +450,49 @@ describe("LinearSyncDialog", () => {
     expect(onClose).not.toHaveBeenCalled();
   });
 
+  it("skips scheduling a second delayed close when one is already pending", async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    const onClose = vi.fn();
+    const onIngestComplete = vi.fn();
+
+    mockApi.ingestIssues.mockReturnValue(new Promise(() => {}));
+
+    render(
+      <LinearSyncDialog
+        open={true}
+        onClose={onClose}
+        onIngested={vi.fn()}
+        onIngestComplete={onIngestComplete}
+      />,
+    );
+
+    await waitFor(() => expect(screen.getByText(issueA.title)).toBeDefined());
+
+    const startBtn = screen.getByRole("button", { name: /start 2 runs/i });
+    await user.click(startBtn);
+
+    // First two events observe every pending id and schedule the delayed
+    // close (elapsed still under MIN_LOADER_MS).
+    fireSSE({ type: "run:created", runId: "run-a", issueId: issueA.id });
+    fireSSE({ type: "run:created", runId: "run-b", issueId: issueB.id });
+    expect(onClose).not.toHaveBeenCalled();
+
+    // A duplicate event for an already-seen id, still inside the delay
+    // window, must not schedule a second timer or close early.
+    fireSSE({ type: "run:created", runId: "run-a-dup", issueId: issueA.id });
+    expect(onClose).not.toHaveBeenCalled();
+
+    await act(async () => {
+      vi.advanceTimersByTime(700);
+    });
+
+    await waitFor(() => {
+      expect(onClose).toHaveBeenCalledOnce();
+    });
+    // Only the single scheduled timer should have fired the close/summary.
+    expect(onIngestComplete).toHaveBeenCalledOnce();
+  });
+
   it("ignores a late SSE event that arrives after the dialog has already auto-closed", async () => {
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     const onClose = vi.fn();

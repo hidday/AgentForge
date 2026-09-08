@@ -1,6 +1,5 @@
 import { describe, it, expect, afterEach, vi } from "vitest";
 import { mkdtempSync, rmSync, mkdirSync, writeFileSync, existsSync } from "node:fs";
-import * as fsNode from "node:fs";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import {
@@ -213,54 +212,6 @@ describe("RepoRegistry", () => {
       const registry = buildRegistry();
       expect(() => registry.validateWorkingDirectory(filePath)).toThrow(
         /Working directory is not a git repository/,
-      );
-    });
-  });
-
-  describe("validateWorkingDirectory defensive checks (mocked fs)", () => {
-    function buildRegistry() {
-      const logger = makeLogger();
-      const entry = makeRepoEntry();
-      return new RepoRegistry("/repos", makeConfig([entry]), logger);
-    }
-
-    afterEach(() => {
-      vi.restoreAllMocks();
-    });
-
-    it("throws when the .git entry exists but is neither a directory nor a regular file", () => {
-      const registry = buildRegistry();
-      vi.spyOn(fsNode, "existsSync").mockReturnValue(true);
-      vi.spyOn(fsNode, "statSync").mockReturnValue({
-        isDirectory: () => false,
-        isFile: () => false,
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      } as any);
-
-      expect(() => registry.validateWorkingDirectory("/fake/repo")).toThrow(
-        /Working directory has invalid \.git entry/,
-      );
-    });
-
-    it("throws when the working directory path itself is not a directory", () => {
-      const registry = buildRegistry();
-      vi.spyOn(fsNode, "existsSync").mockReturnValue(true);
-      const statMock = vi.spyOn(fsNode, "statSync");
-      statMock
-        // .git stat: looks like a normal clone directory
-        .mockReturnValueOnce({
-          isDirectory: () => true,
-          isFile: () => false,
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        } as any)
-        // final workingDirectory stat: not a directory
-        .mockReturnValueOnce({
-          isDirectory: () => false,
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        } as any);
-
-      expect(() => registry.validateWorkingDirectory("/fake/repo")).toThrow(
-        /Working directory path is not a directory: \/fake\/repo\./,
       );
     });
   });

@@ -121,7 +121,6 @@ describe("RunsTable", () => {
 
     render(
       <MemoryRouter>
-        {/* eslint-disable-next-line jsx-a11y/no-static-element-interactions, jsx-a11y/click-events-have-key-events */}
         <div onClick={outerClickHandler}>
           <RunsTable runs={[run]} />
         </div>
