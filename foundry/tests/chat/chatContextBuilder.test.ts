@@ -247,4 +247,179 @@ describe("buildChatSystemPrompt", () => {
     expect(result).toContain("New summary");
     expect(result).not.toContain("Old summary");
   });
+
+  it("keeps the earlier artifact when a later one does not have a higher version (findLatest reduce 'else' branch)", () => {
+    const planV2 = makeArtifact({
+      type: "Plan",
+      version: 2,
+      payloadJson: { summary: "Higher version summary" },
+    });
+    const planV1 = makeArtifact({
+      type: "Plan",
+      version: 1,
+      payloadJson: { summary: "Lower version summary" },
+    });
+    // planV2 (higher) comes first; planV1 (lower) is scanned second and must not replace it.
+    const result = buildChatSystemPrompt(makeRun(), [planV2, planV1]);
+    expect(result).toContain("Higher version summary");
+    expect(result).not.toContain("Lower version summary");
+  });
+
+  it("falls back to '(none)' for branchName and prNumber when absent", () => {
+    const result = buildChatSystemPrompt(makeRun({ branchName: null, prNumber: null }), []);
+    expect(result).toContain("**Branch:** (none)");
+    expect(result).toContain("**PR Number:** (none)");
+  });
+
+  it("omits the Linear Issue section entirely when title, identifier, and description are all absent", () => {
+    const result = buildChatSystemPrompt(
+      makeRun({ linearIssueTitle: null, linearIssueIdentifier: null, linearIssueDescription: null }),
+      [],
+    );
+    expect(result).not.toContain("## Linear Issue");
+  });
+
+  it("includes the Linear Issue section when only the identifier is present", () => {
+    const result = buildChatSystemPrompt(
+      makeRun({ linearIssueTitle: null, linearIssueIdentifier: "ENG-7", linearIssueDescription: null }),
+      [],
+    );
+    expect(result).toContain("## Linear Issue");
+    expect(result).toContain("**Identifier:** ENG-7");
+    expect(result).not.toContain("**Title:**");
+  });
+
+  it("renders plan step fallback blanks and non-string risks/assumptions/open questions as JSON", () => {
+    const planArtifact = makeArtifact({
+      type: "Plan",
+      version: 1,
+      payloadJson: {
+        summary: "Plan summary",
+        steps: [{}],
+        risks: [{ code: "R1" }],
+        assumptions: [{ code: "A1" }],
+        openQuestions: ["Should we do X?", { code: "Q1" }],
+      },
+    });
+    const result = buildChatSystemPrompt(makeRun(), [planArtifact]);
+    // step with no id/title/description renders with blank fallbacks
+    expect(result).toContain("  - **** : ");
+    expect(result).toContain("**Risks:**");
+    expect(result).toContain(JSON.stringify({ code: "R1" }));
+    expect(result).toContain("**Assumptions:**");
+    expect(result).toContain(JSON.stringify({ code: "A1" }));
+    expect(result).toContain("**Open Questions:**");
+    expect(result).toContain("Should we do X?");
+    expect(result).toContain(JSON.stringify({ code: "Q1" }));
+  });
+
+  it("renders human answer fallback blanks when questionId/answer are absent", () => {
+    const artifact = makeArtifact({
+      type: "HumanAnswers",
+      version: 1,
+      payloadJson: { answers: [{}] },
+    });
+    const result = buildChatSystemPrompt(makeRun(), [artifact]);
+    expect(result).toContain("## Human Answers");
+    expect(result).toContain("**[]:**");
+  });
+
+  it("renders researched answer fallback blanks when questionId/confidence/answer are absent", () => {
+    const artifact = makeArtifact({
+      type: "ResearchedAnswers",
+      version: 1,
+      payloadJson: { answers: [{}] },
+    });
+    const result = buildChatSystemPrompt(makeRun(), [artifact]);
+    expect(result).toContain("## Researched Answers");
+    expect(result).toContain("**[] ():**");
+  });
+
+  it("includes Plan Review Findings section with severities, titles, and fallback blanks", () => {
+    const artifact = makeArtifact({
+      type: "PlanReview",
+      version: 3,
+      payloadJson: {
+        summary: "Review summary text",
+        findings: [
+          { id: "f1", severity: "high", title: "Missing validation", details: "No input checks" },
+          {},
+        ],
+      },
+    });
+    const result = buildChatSystemPrompt(makeRun(), [artifact]);
+    expect(result).toContain("## Plan Review Findings");
+    expect(result).toContain("Review summary text");
+    expect(result).toContain("**[high] Missing validation** (f1): No input checks");
+    expect(result).toContain("**[] ** ()");
+  });
+
+  it("omits Plan Review Findings section when summary and findings are both absent", () => {
+    const artifact = makeArtifact({
+      type: "PlanReview",
+      version: 1,
+      payloadJson: {},
+    });
+    const result = buildChatSystemPrompt(makeRun(), [artifact]);
+    expect(result).not.toContain("## Plan Review Findings");
+  });
+
+  it("renders execution report check fallback blanks and falls back to artifact.version when executionVersion is absent", () => {
+    const artifact = makeArtifact({
+      type: "ExecutionReport",
+      version: 4,
+      payloadJson: {
+        summary: "Done.",
+        filesChanged: [{ path: "src/x.ts" }],
+        checks: {
+          lint: {},
+          typecheck: { status: "pass" },
+          tests: { status: "fail", details: "boom" },
+        },
+        notes: [{ kind: "warning" }],
+      },
+    });
+    const result = buildChatSystemPrompt(makeRun(), [artifact]);
+    expect(result).toContain("## Execution Report (v4)");
+    expect(result).toContain("**Lint:** ?");
+    expect(result).toContain("**Typecheck:** pass");
+    expect(result).toContain("**Tests:** fail — boom");
+    expect(result).toContain(JSON.stringify({ path: "src/x.ts" }));
+    expect(result).toContain(JSON.stringify({ kind: "warning" }));
+  });
+
+  it("includes Code Review Findings section with severities, titles, and fallback blanks", () => {
+    const artifact = makeArtifact({
+      type: "Review",
+      version: 1,
+      payloadJson: {
+        summary: "Code review summary",
+        findings: [
+          { id: "cr1", severity: "medium", title: "Unused import", details: "Remove it" },
+          {},
+        ],
+      },
+    });
+    const result = buildChatSystemPrompt(makeRun(), [artifact]);
+    expect(result).toContain("## Code Review Findings");
+    expect(result).toContain("Code review summary");
+    expect(result).toContain("**[medium] Unused import** (cr1): Remove it");
+    expect(result).toContain("**[] ** ()");
+  });
+
+  it("omits Code Review Findings section when there is no Review artifact", () => {
+    const result = buildChatSystemPrompt(makeRun(), []);
+    expect(result).not.toContain("## Code Review Findings");
+  });
+
+  it("renders rejection context fallback blanks when planVersion/source/mode/feedback are absent", () => {
+    const artifact = makeArtifact({
+      type: "RejectionContext",
+      version: 1,
+      payloadJson: {},
+    });
+    const result = buildChatSystemPrompt(makeRun(), [artifact]);
+    expect(result).toContain("## Rejection Context(s)");
+    expect(result).toContain("**Plan v?** (, ):");
+  });
 });

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor, act } from "@testing-library/react";
+import { render, screen, waitFor, act, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { Artifact } from "@/api/client.ts";
 
@@ -251,6 +251,53 @@ describe("ChatPanel", () => {
 
     // @ts-expect-error -- cleanup: remove the mock so it doesn't leak into other test files
     delete Element.prototype.scrollIntoView;
+  });
+
+  it("does not call the API when the form is submitted with only whitespace input", async () => {
+    render(<ChatPanel runId={RUN_ID} artifacts={[]} />);
+    const input = screen.getByPlaceholderText(/ask the agent/i) as HTMLInputElement;
+
+    // Bypass the disabled Send button by submitting the form directly (e.g. as
+    // if triggered by Enter with a whitespace-only value) to exercise the
+    // `!trimmed` guard inside handleSubmit.
+    fireEvent.change(input, { target: { value: "   " } });
+    const form = input.closest("form")!;
+    fireEvent.submit(form);
+
+    // Guard should short-circuit before calling the API.
+    await new Promise((r) => setTimeout(r, 0));
+    expect(mockApi.sendChatMessage).not.toHaveBeenCalled();
+  });
+
+  it("shows a generic fallback error message when the rejection is not an Error instance", async () => {
+    mockApi.sendChatMessage.mockRejectedValue("network exploded");
+
+    render(<ChatPanel runId={RUN_ID} artifacts={[]} />);
+    const input = screen.getByPlaceholderText(/ask the agent/i);
+    await userEvent.type(input, "Failing question");
+    await userEvent.click(screen.getByRole("button", { name: /send/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/chat request failed/i)).toBeDefined();
+    });
+  });
+
+  it("renders an assistant message with empty content when the artifact payload has no content field", () => {
+    const artifacts: Artifact[] = [
+      {
+        id: "a1",
+        runId: RUN_ID,
+        type: "ChatMessage",
+        version: 1,
+        payloadJson: { role: "assistant" },
+        rawText: "",
+        createdAt: "2024-01-01T00:00:01Z",
+      },
+    ];
+    render(<ChatPanel runId={RUN_ID} artifacts={artifacts} />);
+
+    const markdownEl = screen.getByTestId("markdown-content");
+    expect(markdownEl.textContent).toBe("");
   });
 
   it("message list does not change from artifact-derived count when only local state changes", async () => {
