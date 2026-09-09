@@ -130,6 +130,16 @@ describe("RealLinearClient", () => {
       expect(logger.info).toHaveBeenCalled();
     });
 
+    it("includes the cycle name on a result row when the issue has a cycle", async () => {
+      const { client, sdk } = buildClient();
+      const issue = makeFakeIssue({ id: "issue-1", cycle: Promise.resolve({ name: "Sprint 5" }) });
+      sdk.issues.mockResolvedValue({ nodes: [issue] });
+
+      const [result] = await client.searchIssues({ state: "Todo" });
+
+      expect(result.cycle).toBe("Sprint 5");
+    });
+
     it("omits optional filter fields and defaults to an empty result set", async () => {
       const { client, sdk } = buildClient();
       sdk.issues.mockResolvedValue({ nodes: [] });

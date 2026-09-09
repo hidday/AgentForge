@@ -141,6 +141,66 @@ describe("ClaudeCodeRunner process context wiring", () => {
     const { context } = processRunner.execute.mock.calls[0]![0] as { context?: unknown };
     expect(context).toBeUndefined();
   });
+
+  it("run() builds a { runId, stage, runtime } context when input.runId is present", async () => {
+    const processRunner = makeMockProcessRunner({
+      stdout: JSON.stringify({
+        type: "result",
+        result: 'BEGIN_STRUCTURED_OUTPUT\n{"success":true,"stage":"planner","payload":{"value":"ok"}}\nEND_STRUCTURED_OUTPUT',
+      }),
+      stderr: "",
+      exitCode: 0,
+      durationMs: 10,
+      timedOut: false,
+    });
+    const logger = makeMockLogger();
+    const runner = new ClaudeCodeRunner(
+      processRunner as never,
+      "claude",
+      [],
+      "claude-opus-4-8",
+      logger as never,
+    );
+
+    await runner.run(
+      { prompt: "hi", workingDirectory: "/tmp", timeoutMs: 1000, runId: "run-42" },
+      "planner",
+      echoSchema,
+    );
+
+    const { context } = processRunner.execute.mock.calls[0]![0] as {
+      context?: { runId: string; stage: string; runtime: string };
+    };
+    expect(context).toEqual({ runId: "run-42", stage: "planner", runtime: "claude-code" });
+  });
+
+  it("chatRun() builds a { runId, stage, runtime } context when input.runId is present", async () => {
+    const processRunner = makeMockProcessRunner({
+      stdout: JSON.stringify({ type: "result", result: "ok", is_error: false }),
+      stderr: "",
+      exitCode: 0,
+      durationMs: 10,
+      timedOut: false,
+    });
+    const logger = makeMockLogger();
+    const runner = new ClaudeCodeRunner(
+      processRunner as never,
+      "claude",
+      [],
+      "claude-opus-4-8",
+      logger as never,
+    );
+
+    await runner.chatRun(
+      { prompt: "hi", workingDirectory: "/tmp", timeoutMs: 1000, runId: "run-43" },
+      "chat",
+    );
+
+    const { context } = processRunner.execute.mock.calls[0]![0] as {
+      context?: { runId: string; stage: string; runtime: string };
+    };
+    expect(context).toEqual({ runId: "run-43", stage: "chat", runtime: "claude-code" });
+  });
 });
 
 describe("ClaudeCodeRunner unwrapClaudeEnvelope() NDJSON fallback path", () => {

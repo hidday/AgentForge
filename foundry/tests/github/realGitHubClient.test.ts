@@ -206,6 +206,19 @@ describe("RealGitHubClient", () => {
       expect(logger.error).toHaveBeenCalled();
     });
 
+    it("treats a 422 rejection with no message as a non-field-validation duplicate-head case", async () => {
+      // A plain object (not an Error instance) carrying only a status code
+      // exercises the `err instanceof Error` false branch of the inner
+      // isFieldValidation check.
+      const { client, octokit } = buildClient();
+      octokit.pulls.create.mockRejectedValue({ status: 422 });
+      octokit.pulls.list.mockResolvedValue({ data: [{ number: 88 }] });
+
+      const num = await client.createDraftPR("acme/backend", "ai/lin-1", "main", "Title", "Body");
+
+      expect(num).toBe(88);
+    });
+
     it("looks up and returns an existing open PR on a 422 duplicate-head error", async () => {
       const { client, octokit } = buildClient();
       octokit.pulls.create.mockRejectedValue(httpError(422, "A pull request already exists"));
