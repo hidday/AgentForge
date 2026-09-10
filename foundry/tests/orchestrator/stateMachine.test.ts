@@ -41,3 +41,21 @@ describe("stateMachine - clarification transitions", () => {
     expect(validEvents).toContain(RunEvent.RESET_TO_TODO);
   });
 });
+
+describe("stateMachine - invalid transitions", () => {
+  it("throws StateTransitionError for a state with no registered outgoing transitions", () => {
+    expect(() => transition(RunState.Done, RunEvent.RESET_TO_TODO)).toThrow(
+      'No transition from state "Done" for event "RESET_TO_TODO"',
+    );
+  });
+
+  it("getValidEvents returns an empty array for a state with no registered transitions", () => {
+    expect(getValidEvents(RunState.Done)).toEqual([]);
+  });
+
+  it("throws StateTransitionError for a registered state given an event it doesn't accept", () => {
+    expect(() => transition(RunState.Todo, RunEvent.CLARIFICATION_EXHAUSTED)).toThrow(
+      'No transition from state "Todo" for event "CLARIFICATION_EXHAUSTED"',
+    );
+  });
+});

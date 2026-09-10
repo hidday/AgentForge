@@ -13,6 +13,11 @@ describe("skillNaming", () => {
     expect(isValidSkillName("Dev Env")).toBe(false);
   });
 
+  it("slugifySkillName falls back to 'distilled-skill' when the input has no alphanumeric characters", () => {
+    expect(slugifySkillName("!!!???")).toBe("distilled-skill");
+    expect(slugifySkillName("")).toBe("distilled-skill");
+  });
+
   it("normalizeSkillName keeps valid names and slugifies fallback", () => {
     expect(normalizeSkillName("dev-env-pause-resume-footguns", "ignored")).toBe(
       "dev-env-pause-resume-footguns",

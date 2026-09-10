@@ -75,4 +75,66 @@ describe("DistilledSkillPanel", () => {
 
     expect(screen.getByText(/content could not be loaded/i)).toBeDefined();
   });
+
+  it("shows a loading indicator", () => {
+    render(
+      <DistilledSkillPanel
+        distilledSkill={null}
+        distillationDecision={null}
+        loading
+      />,
+    );
+    expect(screen.getByText(/Loading distilled skill/)).toBeDefined();
+  });
+
+  it("shows an error message", () => {
+    render(
+      <DistilledSkillPanel
+        distilledSkill={null}
+        distillationDecision={null}
+        error="Failed to fetch skills"
+      />,
+    );
+    expect(screen.getByText("Failed to fetch skills")).toBeDefined();
+  });
+
+  it("falls back through the skill name chain to the decision's task category", () => {
+    render(
+      <DistilledSkillPanel
+        distilledSkill={null}
+        distillationDecision={{ ...decision, name: null, taskCategory: "fallback-category" }}
+      />,
+    );
+    expect(screen.getAllByText("fallback-category").length).toBeGreaterThan(0);
+  });
+
+  it("falls back to a default name when no name or category is available", () => {
+    render(
+      <DistilledSkillPanel
+        distilledSkill={null}
+        distillationDecision={{ ...decision, name: null, taskCategory: null }}
+      />,
+    );
+    expect(screen.getByText("distilled-skill")).toBeDefined();
+  });
+
+  it("shows no description or export preview when neither skill nor decision has one", () => {
+    render(
+      <DistilledSkillPanel
+        distilledSkill={null}
+        distillationDecision={{ ...decision, description: null }}
+      />,
+    );
+    expect(screen.queryByText(/SKILL.md export preview/i)).toBeNull();
+  });
+
+  it("shows the displaced skill id when a skill was displaced", () => {
+    render(
+      <DistilledSkillPanel
+        distilledSkill={skill}
+        distillationDecision={{ ...decision, displacedSkillId: "displaced-skill-12345678" }}
+      />,
+    );
+    expect(screen.getByText((_, el) => el?.textContent === "Displaced skill: displace")).toBeDefined();
+  });
 });

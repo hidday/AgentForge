@@ -195,6 +195,52 @@ describe("ExecutorAgent.run()", () => {
     expect(githubClient.createDraftPR).not.toHaveBeenCalled();
   });
 
+  it("treats a retry context with only an existingPR (no existingBranch) as a retry", async () => {
+    const { agent, logger } = buildAgent();
+
+    await agent.run(makePlan(), makeTaskBundle(), "run-1", { existingPR: 777 });
+
+    const startLog = logger.info.mock.calls.find(
+      (c: unknown[]) => c[1] === "Starting executor agent",
+    );
+    expect((startLog?.[0] as { isRetry?: boolean } | undefined)?.isRetry).toBe(true);
+  });
+
+  it("includes the operator note section in the rendered prompt when provided", async () => {
+    const { agent, getSystemPrompt, getUserPrompt, logger } = buildAgent();
+
+    await agent.run(makePlan(), makeTaskBundle(), "run-1", undefined, {
+      operatorNote: "Please double-check auth edge cases.",
+    });
+
+    const rendered = getSystemPrompt() + getUserPrompt();
+    expect(rendered).toContain("## Operator Note");
+    expect(rendered).toContain("Please double-check auth edge cases.");
+
+    const startLog = logger.info.mock.calls.find(
+      (c: unknown[]) => c[1] === "Starting executor agent",
+    );
+    expect((startLog?.[0] as { hasOperatorNote?: boolean } | undefined)?.hasOperatorNote).toBe(
+      true,
+    );
+  });
+
+  it("omits the operator note section and logs hasOperatorNote:false when no note is given", async () => {
+    const { agent, getSystemPrompt, getUserPrompt, logger } = buildAgent();
+
+    await agent.run(makePlan(), makeTaskBundle(), "run-1");
+
+    const rendered = getSystemPrompt() + getUserPrompt();
+    expect(rendered).not.toContain("## Operator Note");
+
+    const startLog = logger.info.mock.calls.find(
+      (c: unknown[]) => c[1] === "Starting executor agent",
+    );
+    expect((startLog?.[0] as { hasOperatorNote?: boolean } | undefined)?.hasOperatorNote).toBe(
+      false,
+    );
+  });
+
   it("logs the score and executionVersion in the completion event", async () => {
     const { agent, logger } = buildAgent({ score: 0.42 });
 
