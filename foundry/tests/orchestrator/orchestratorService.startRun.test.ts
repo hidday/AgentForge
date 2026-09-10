@@ -322,14 +322,20 @@ describe("OrchestratorService.startRun", () => {
       id: "run-1",
       state: RunState.Todo,
       linearIssueTitle: "Add OAuth support",
+      linearIssueDescription: "Users need to sign in with Google and GitHub.",
       workingDirectory: "/repos/test-repo",
     });
     runRepo.create.mockResolvedValue(createdRun);
     const afterWorktree = { ...createdRun, workingDirectory: "/tmp/worktree", branchName: "ai/run-1" };
     // transitionAndRecord replaces `run` with whatever updateState resolves to,
     // so the run passed into retrieveSkillsForPlanning is THIS object -- it must
-    // carry the same linearIssueTitle for the relevance query to see it.
-    const planningRun = makeRun({ id: "run-1", state: RunState.Planning, linearIssueTitle: "Add OAuth support" });
+    // carry the same linearIssueTitle/Description for the relevance query to see it.
+    const planningRun = makeRun({
+      id: "run-1",
+      state: RunState.Planning,
+      linearIssueTitle: "Add OAuth support",
+      linearIssueDescription: "Users need to sign in with Google and GitHub.",
+    });
     runRepo.update
       .mockResolvedValueOnce(afterWorktree)
       .mockResolvedValueOnce({ ...planningRun, planVersion: 1, plannerRuntime: "claude-code" });
@@ -350,6 +356,9 @@ describe("OrchestratorService.startRun", () => {
       "test-repo",
       expect.stringContaining("Add OAuth support"),
       expect.any(Number),
+    );
+    expect(agentSkillRepo.findTopKByRelevance.mock.calls[0][1]).toContain(
+      "Users need to sign in with Google and GitHub.",
     );
 
     expect(plannerAgent.run).toHaveBeenCalledWith(

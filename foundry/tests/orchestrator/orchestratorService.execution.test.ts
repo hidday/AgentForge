@@ -333,6 +333,36 @@ describe("OrchestratorService.runExecution", () => {
     expect(comment).toContain(":heavy_minus_sign: **Tests**");
   });
 
+  it("renders the failure icon for a 'fail' check status in the execution report comment", async () => {
+    const { deps, runRepo, artifactRepo, linearClient, executorAgent } = buildDeps();
+    const svc = new OrchestratorService(deps as never);
+
+    const run = makeRun({ id: "run-1", state: RunState.Implementing, planVersion: 1, approvedPlanVersion: 1 });
+    runRepo.findById.mockResolvedValue(run);
+    artifactRepo.findLatestByType.mockImplementation((_runId: string, type: string) =>
+      type === "Plan" ? Promise.resolve(makeArtifact({ type: "Plan", version: 1, payloadJson: makePlan() })) : Promise.resolve(null),
+    );
+
+    const report = makeExecutionReport({
+      checks: {
+        lint: { status: "fail", details: "2 lint errors" },
+        typecheck: { status: "pass", details: "ok" },
+        tests: { status: "pass", details: "ok" },
+      },
+    });
+    executorAgent.run.mockResolvedValue({ report, prNumber: 15 });
+    runRepo.update.mockResolvedValue({ ...run, prNumber: 15 });
+    runRepo.updateState.mockResolvedValue(makeRun({ id: "run-1", state: RunState.AIReview }));
+    vi.spyOn(svc, "runReview").mockResolvedValue(makeRun({ id: "run-1", state: RunState.ReadyForHumanReview }));
+
+    await svc.runExecution("run-1");
+
+    const comment = linearClient.postComment.mock.calls.find((c: unknown[]) =>
+      String(c[1]).includes("Execution Report"),
+    )![1] as string;
+    expect(comment).toContain(":x: **Lint**");
+  });
+
   it("omits the files-changed section entirely when the executor changed no files", async () => {
     const { deps, runRepo, artifactRepo, linearClient, executorAgent } = buildDeps();
     const svc = new OrchestratorService(deps as never);
