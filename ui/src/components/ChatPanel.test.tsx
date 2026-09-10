@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor, act } from "@testing-library/react";
+import { render, screen, waitFor, act, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { Artifact } from "@/api/client.ts";
 
@@ -250,5 +250,61 @@ describe("ChatPanel", () => {
       // "New question" should NOT appear
       expect(screen.queryByText("New question")).toBeNull();
     });
+  });
+
+  it("defaults content to an empty string when the artifact payload omits it", () => {
+    const artifacts: Artifact[] = [
+      {
+        id: "a1",
+        runId: RUN_ID,
+        type: "ChatMessage",
+        version: 1,
+        payloadJson: { role: "user" },
+        rawText: "",
+        createdAt: "2024-01-01T00:00:01Z",
+      },
+    ];
+    const { container } = render(<ChatPanel runId={RUN_ID} artifacts={artifacts} />);
+    // The message bubble renders but with empty content.
+    expect(container.querySelector(".whitespace-pre-wrap")?.textContent).toBe("");
+  });
+
+  it("scrolls the anchor into view when the browser supports scrollIntoView", () => {
+    const scrollIntoView = vi.fn();
+    Element.prototype.scrollIntoView = scrollIntoView;
+    render(<ChatPanel runId={RUN_ID} artifacts={[]} />);
+    expect(scrollIntoView).toHaveBeenCalledWith({ behavior: "smooth" });
+  });
+
+  it("ignores a submit with only whitespace input", () => {
+    render(<ChatPanel runId={RUN_ID} artifacts={[]} />);
+    const input = screen.getByPlaceholderText(/ask the agent/i) as HTMLInputElement;
+    fireEvent.change(input, { target: { value: "   " } });
+    const form = input.closest("form")!;
+    fireEvent.submit(form);
+    expect(mockApi.sendChatMessage).not.toHaveBeenCalled();
+  });
+
+  it("falls back to a generic error message for a non-Error rejection", async () => {
+    mockApi.sendChatMessage.mockRejectedValue("not an error object");
+    render(<ChatPanel runId={RUN_ID} artifacts={[]} />);
+    const input = screen.getByPlaceholderText(/ask the agent/i);
+    await userEvent.type(input, "Question");
+    await userEvent.click(screen.getByRole("button", { name: /send/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText("Chat request failed")).toBeDefined();
+    });
+  });
+
+  it("collapses and expands the panel on header click", () => {
+    render(<ChatPanel runId={RUN_ID} artifacts={[]} />);
+    expect(screen.getByPlaceholderText(/ask the agent/i)).toBeDefined();
+
+    fireEvent.click(screen.getByText("Chat with Agent"));
+    expect(screen.queryByPlaceholderText(/ask the agent/i)).toBeNull();
+
+    fireEvent.click(screen.getByText("Chat with Agent"));
+    expect(screen.getByPlaceholderText(/ask the agent/i)).toBeDefined();
   });
 });
