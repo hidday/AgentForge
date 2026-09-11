@@ -108,6 +108,30 @@ describe("ArtifactTabs", () => {
     expect(screen.getByText("Makes sense")).toBeDefined();
   });
 
+  it("renders 'dismissed' and unrecognized disposition statuses with their own styling", async () => {
+    const artifacts = [
+      makeArtifact({
+        id: "a1",
+        type: "PlanRevision",
+        payloadJson: {
+          dispositions: [
+            { findingId: "F3", status: "dismissed", rationale: "Not applicable" },
+            { findingId: "F4", status: "some_future_status", rationale: "Unrecognized" },
+          ],
+        },
+      }),
+    ];
+    render(<ArtifactTabs artifacts={artifacts} />);
+
+    await userEvent.click(screen.getByRole("button", { name: "Plan Revision" }));
+
+    expect(screen.getByText("F3")).toBeDefined();
+    expect(screen.getByText("dismissed")).toBeDefined();
+    expect(screen.getByText("F4")).toBeDefined();
+    expect(screen.getByText("some future status")).toBeDefined();
+
+  });
+
   it("renders the empty PlanRevision state when dispositions is empty", async () => {
     const artifacts = [
       makeArtifact({ id: "a1", type: "PlanRevision", payloadJson: {} }),

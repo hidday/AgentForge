@@ -13,7 +13,11 @@ export default defineConfig({
       // src/generated/** is Prisma-generated client code (not hand-written,
       // regenerated from the schema); it is exercised via mocks in tests,
       // never executed directly, so it is excluded from coverage.
-      exclude: ["src/server.ts", "src/generated/**"],
+      // src/runtime/runnerTypes.ts contains only `interface` declarations,
+      // which TypeScript erases entirely at compile time; there is no
+      // runtime code in the emitted JS for v8 to exercise or for a test to
+      // meaningfully cover.
+      exclude: ["src/server.ts", "src/generated/**", "src/runtime/runnerTypes.ts"],
       reporter: ["text", "json-summary", "html"],
       reportsDirectory: "coverage",
     },
