@@ -332,4 +332,170 @@ describe("POST /api/runs/:id/actions/request-human — remaining branches", () =
     // null linearIssueIdentifier is coalesced to undefined
     expect(payload.linearIssue.identifier).toBeUndefined();
   });
+
+  it("does not debounce when the only prior HUMAN_REQUESTED event has a different eventType", async () => {
+    const { app, mockEventRepo } = await buildApp({
+      events: [
+        {
+          eventType: "SOME_OTHER_EVENT",
+          createdAt: new Date(),
+          payloadJson: { reason: "other" },
+        },
+      ],
+      registerOptions: {
+        notificationService: {
+          isConfigured: () => true,
+          sendHumanRequest: vi.fn().mockResolvedValue({
+            slack: { attempted: true, ok: true },
+            email: { attempted: false, ok: false },
+          }),
+        },
+      },
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/actions/request-human",
+      payload: { reason: "other", summary: "Needs a human" },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({ debounced: false });
+    expect(mockEventRepo.create).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not debounce when the matching prior event is older than the debounce window", async () => {
+    const staleTimestamp = new Date(Date.now() - 7 * 60 * 60 * 1000); // 7h ago, default window is 6h
+    const { app } = await buildApp({
+      events: [
+        {
+          eventType: "HUMAN_REQUESTED",
+          createdAt: staleTimestamp,
+          payloadJson: { reason: "other" },
+        },
+      ],
+      registerOptions: {
+        notificationService: {
+          isConfigured: () => true,
+          sendHumanRequest: vi.fn().mockResolvedValue({
+            slack: { attempted: true, ok: true },
+            email: { attempted: false, ok: false },
+          }),
+        },
+      },
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/actions/request-human",
+      payload: { reason: "other", summary: "Needs a human" },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({ debounced: false });
+  });
+});
+
+describe("POST /api/runs/:id/chat — non-Error rejection from chatRun", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it("returns 500 with a generic message when chatRun rejects a non-Error value", async () => {
+    const workspaceDir = mkdtempSync(join(tmpdir(), "chat-nonerror-"));
+    const run = makeRun({ workingDirectory: workspaceDir });
+    const mockClaudeCodeRunner = { chatRun: vi.fn().mockRejectedValue("subprocess exploded") };
+    const { app } = await buildApp({
+      run,
+      registerOptions: { claudeCodeRunner: mockClaudeCodeRunner },
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/chat",
+      payload: { message: "hello" },
+    });
+
+    expect(response.statusCode).toBe(500);
+    expect(response.json()).toEqual({ error: "Chat request failed" });
+  });
+});
+
+describe("POST /api/runs/:id/actions/retry — non-Error rejection from the background trigger", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it("still returns 200 when the fire-and-forget retryRun rejects a non-Error value", async () => {
+    const run = makeRun({ state: RunState.Todo });
+    const { app, mockOrchestrator } = await buildApp({ run });
+    mockOrchestrator.retryRun.mockRejectedValue(42);
+
+    const response = await app.inject({ method: "POST", url: "/api/runs/run-1/actions/retry" });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({ ok: true, retrying: true });
+  });
+});
+
+describe("GET /api/runs/:id/summary — plan field edge cases", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  function makeArtifact(type: string, version: number, payloadJson: unknown) {
+    return {
+      id: `art-${type}`,
+      runId: "run-1",
+      type,
+      version,
+      payloadJson,
+      rawText: "",
+      createdAt: new Date(),
+    };
+  }
+
+  it("defaults openQuestions to [] and steps/stepCount to [] / 0 when the plan payload omits them", async () => {
+    const plan = makeArtifact("Plan", 1, { summary: "No extras here" });
+    const { app } = await buildApp({
+      orchestratorOverrides: {
+        getArtifactRepo: () => ({
+          findByRunId: vi.fn().mockResolvedValue([]),
+          findLatestByType: vi.fn().mockImplementation((_runId: string, type: string) =>
+            Promise.resolve(type === "Plan" ? plan : null),
+          ),
+        }),
+      },
+    });
+
+    const response = await app.inject({ method: "GET", url: "/api/runs/run-1/summary" });
+
+    expect(response.statusCode).toBe(200);
+    const body = response.json() as {
+      plan: { openQuestions: unknown[]; steps: unknown[]; stepCount: number };
+    };
+    expect(body.plan.openQuestions).toEqual([]);
+    expect(body.plan.steps).toEqual([]);
+    expect(body.plan.stepCount).toBe(0);
+  });
+
+  it("falls back to JSON.stringify(r) semantics but tolerates a risk value that cannot be stringified", async () => {
+    const circular: Record<string, unknown> = { description: undefined };
+    circular.self = circular; // make JSON.stringify throw
+
+    const plan = makeArtifact("Plan", 1, { summary: "Has a bad risk", risks: [circular] });
+    const { app } = await buildApp({
+      orchestratorOverrides: {
+        getArtifactRepo: () => ({
+          findByRunId: vi.fn().mockResolvedValue([]),
+          findLatestByType: vi.fn().mockImplementation((_runId: string, type: string) =>
+            Promise.resolve(type === "Plan" ? plan : null),
+          ),
+        }),
+      },
+    });
+
+    const response = await app.inject({ method: "GET", url: "/api/runs/run-1/summary" });
+
+    expect(response.statusCode).toBe(200);
+    const body = response.json() as { plan: { risks: string[]; riskCount: number } };
+    expect(body.plan.riskCount).toBe(1);
+    // JSON.stringify throws on the circular object, so the route falls back to String(r),
+    // which produces the generic "[object Object]" representation.
+    expect(body.plan.risks[0]).toBe("[object Object]");
+  });
 });

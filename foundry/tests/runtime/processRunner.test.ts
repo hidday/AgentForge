@@ -65,7 +65,7 @@ afterEach(async () => {
   // fs.createWriteStream opens/writes/closes asynchronously; give any
   // in-flight log writes from the test a moment to settle before the spool
   // directory is removed, to avoid spurious ENOENT races.
-  await new Promise((resolve) => setTimeout(resolve, 30));
+  await new Promise((resolve) => setTimeout(resolve, 100));
   rmSync(spoolDir, { recursive: true, force: true });
 });
 
