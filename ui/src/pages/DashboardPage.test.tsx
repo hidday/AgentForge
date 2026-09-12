@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, within, act } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import type { Run } from "@/api/client.ts";
@@ -84,6 +84,16 @@ function renderPage() {
   );
 }
 
+// Several stat labels ("Active", "Blocked", "Done") share their text with a
+// filter button, so getByText alone is ambiguous. Stat labels always render
+// as the second <div> child of a stat card; find that specific node.
+function statValue(label: string): string | null {
+  const matches = screen.getAllByText(label);
+  const statLabel = matches.find((el) => el.tagName === "DIV");
+  if (!statLabel) throw new Error(`no stat label div found for "${label}"`);
+  return (statLabel.previousSibling as HTMLElement | null)?.textContent ?? null;
+}
+
 describe("DashboardPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -133,7 +143,7 @@ describe("DashboardPage", () => {
 
     expect(screen.getByTestId("runs-count").textContent).toBe("0");
     // Stat bar should reflect zero across the board.
-    expect(screen.getByText("Total").previousSibling?.textContent).toBe("0");
+    expect(statValue("Total")).toBe("0");
   });
 
   it("computes per-category counts and renders all runs by default", () => {
@@ -154,11 +164,11 @@ describe("DashboardPage", () => {
     renderPage();
 
     expect(screen.getByTestId("runs-count").textContent).toBe("5");
-    expect(screen.getByText("Active").previousSibling?.textContent).toBe("1");
-    expect(screen.getByText("Awaiting").previousSibling?.textContent).toBe("1");
-    expect(screen.getByText("Blocked").previousSibling?.textContent).toBe("1");
-    expect(screen.getByText("Done").previousSibling?.textContent).toBe("1");
-    expect(screen.getByText("Total").previousSibling?.textContent).toBe("5");
+    expect(statValue("Active")).toBe("1");
+    expect(statValue("Awaiting")).toBe("1");
+    expect(statValue("Blocked")).toBe("1");
+    expect(statValue("Done")).toBe("1");
+    expect(statValue("Total")).toBe("5");
   });
 
   it("filters runs client-side when a filter button is clicked", async () => {
@@ -226,7 +236,7 @@ describe("DashboardPage", () => {
   });
 
   it("shows the ingest summary banner and auto-dismisses it after 5s", async () => {
-    vi.useFakeTimers();
+    vi.useFakeTimers({ shouldAdvanceTime: true });
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     mockUseRuns.mockReturnValue({
       runs: [],
@@ -243,7 +253,9 @@ describe("DashboardPage", () => {
     expect(within(banner).getByText(/started 3 runs/i)).toBeDefined();
     expect(within(banner).getByText(/skipped 1/i)).toBeDefined();
 
-    await vi.advanceTimersByTimeAsync(5000);
+    await act(async () => {
+      vi.advanceTimersByTime(5000);
+    });
 
     expect(screen.queryByRole("status")).toBeNull();
   });

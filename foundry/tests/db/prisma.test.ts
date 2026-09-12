@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const disconnectMock = vi.fn().mockResolvedValue(undefined);
 const PrismaClientMock = vi.fn().mockImplementation((config: unknown) => ({
@@ -29,9 +29,6 @@ beforeEach(() => {
   envMock = { DATABASE_URL: "postgresql://test:test@localhost:5432/test", LOG_LEVEL: "info" };
 });
 
-afterEach(() => {
-  vi.restoreAllMocks();
-});
 
 describe("getPrismaClient", () => {
   it("constructs a PrismaClient wired to a PrismaPg adapter using env.DATABASE_URL", async () => {
@@ -88,7 +85,6 @@ describe("disconnectPrisma", () => {
     const { getPrismaClient, disconnectPrisma } = await import("../../src/db/prisma.js");
 
     const first = getPrismaClient();
-    console.error("DEBUG first=", first, "hasDisconnect=", typeof (first as any).$disconnect);
     await disconnectPrisma();
 
     expect(disconnectMock).toHaveBeenCalledTimes(1);

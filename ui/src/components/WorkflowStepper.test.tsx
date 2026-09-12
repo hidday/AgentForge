@@ -120,6 +120,32 @@ describe("WorkflowStepper", () => {
     expect(row?.textContent).toContain("just now");
   });
 
+  it("keeps the timestamp of the first event that transitioned into a state", () => {
+    render(
+      <WorkflowStepper
+        currentState="Done"
+        events={[
+          makeEvent({
+            id: "first",
+            payloadJson: { to: "Planning" },
+            createdAt: "2024-01-01T00:00:00Z",
+          }),
+          makeEvent({
+            id: "second",
+            payloadJson: { to: "Planning" },
+            createdAt: new Date().toISOString(),
+          }),
+        ]}
+      />,
+    );
+    // Both events target "Planning"; only the first-seen timestamp is kept.
+    // If the second (recent) event's timestamp had overwritten it instead,
+    // this would render "just now" rather than a day count.
+    const label = screen.getByText("Planning");
+    const row = label.closest("div")?.parentElement;
+    expect(row?.textContent).toMatch(/d ago$/);
+  });
+
   it("does not show a timestamp for a step with no recorded transition event", () => {
     render(<WorkflowStepper currentState="Todo" events={[]} />);
     const label = screen.getByText("To Do");

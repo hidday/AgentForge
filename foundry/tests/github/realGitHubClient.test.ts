@@ -365,6 +365,16 @@ describe("RealGitHubClient", () => {
       });
     });
 
+    it("rethrows a non-422 error from the line-level attempt without falling back to file-level", async () => {
+      mockOctokit.pulls.get.mockResolvedValue({ data: { head: { sha: "sha1" } } });
+      mockOctokit.pulls.createReviewComment.mockRejectedValueOnce(httpError(500, "server error"));
+
+      await expect(
+        client.createPRReviewComment("owner/repo", 10, "issue here", "src/a.ts", 7),
+      ).rejects.toThrow(/GitHub createPRReviewComment failed/);
+      expect(mockOctokit.pulls.createReviewComment).toHaveBeenCalledTimes(1);
+    });
+
     it("returns 0 and logs a warning when the outer call ultimately 422s", async () => {
       mockOctokit.pulls.get.mockRejectedValue(httpError(422));
 

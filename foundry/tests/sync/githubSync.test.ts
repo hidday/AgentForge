@@ -246,13 +246,13 @@ describe("GitHubSyncService.postExecutionReportUpdate", () => {
     expect(body).not.toContain("### Notes");
   });
 
-  it("renders a neutral icon for a 'skipped' check status", async () => {
+  it("renders a neutral icon for a 'skip' check status", async () => {
     await svc.postExecutionReportUpdate(
       "owner/repo",
       42,
       makeReport({
         checks: {
-          lint: { status: "skipped", details: "n/a" },
+          lint: { status: "skip", details: "n/a" },
           typecheck: { status: "pass", details: "ok" },
           tests: { status: "pass", details: "ok" },
         },
@@ -282,7 +282,7 @@ describe("GitHubSyncService.postRemediationResolutions", () => {
       action: "Added a null check.",
       rationale: "Prevents a crash.",
       ...overrides,
-    } as ResolutionItem;
+    };
   }
 
   it("replies on the mapped GitHub comment for each resolved finding and posts a summary table", async () => {

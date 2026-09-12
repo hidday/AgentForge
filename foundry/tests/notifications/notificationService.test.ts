@@ -264,6 +264,34 @@ describe("NotificationService.sendHumanRequest", () => {
     expect(body.html).toContain("&lt;b&gt;&quot;quoted&quot; &amp; special&lt;/b&gt;");
   });
 
+  it("includes plan confidence, context, open questions, and the Linear link in the plain-text email body", async () => {
+    fetchMock.mockResolvedValue({ ok: true, text: () => Promise.resolve("") });
+    const svc = new NotificationService(
+      makeConfig({ emailTo: "a@x.com", resendApiKey: "key" }),
+      logger as never,
+    );
+
+    await svc.sendHumanRequest(
+      makePayload({
+        planConfidence: 0.55,
+        context: "some extra context",
+        openQuestions: [
+          { id: "q1", question: "Which provider?", requiredForExecution: true },
+          { id: "q2", question: "Which scopes?", requiredForExecution: false },
+        ],
+      }),
+    );
+
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body as string) as { text: string };
+    expect(body.text).toContain("Plan confidence: 0.55");
+    expect(body.text).toContain("Context:");
+    expect(body.text).toContain("some extra context");
+    expect(body.text).toContain("Open questions:");
+    expect(body.text).toContain("[required] Which provider?");
+    expect(body.text).toContain("- Which scopes?");
+    expect(body.text).toContain("Linear: https://linear.app/team/issue/PRY-42");
+  });
+
   it("falls back to '(untitled)' and the raw id when title/identifier are missing", async () => {
     fetchMock.mockResolvedValue({ ok: true, text: () => Promise.resolve("") });
     const svc = new NotificationService(

@@ -34,6 +34,34 @@ function makeFakeIssue(overrides: Record<string, unknown> = {}) {
   };
 }
 
+describe("RealLinearClient.getRelatedContext - blocker hydration failure", () => {
+  it("logs a warning and omits a blocker whose relation.issue rejects", async () => {
+    const logger = makeLogger();
+    const client = new RealLinearClient("test-key", logger as never);
+    const goodBlocker = makeFakeIssue({ id: "blocker-ok", identifier: "PRY-500" });
+    const focus = makeFakeIssue({
+      id: "focus-id",
+      inverseRelations: () =>
+        Promise.resolve({
+          nodes: [
+            { id: "rel-bad", type: "blocks", issue: Promise.reject(new Error("hydrate failed")) },
+            { id: "rel-good", type: "blocks", issue: Promise.resolve(goodBlocker) },
+          ],
+        }),
+    });
+    injectSdk(client, { issue: vi.fn().mockResolvedValue(focus) });
+
+    const ctx = await client.getRelatedContext("focus-id");
+
+    expect(ctx.blockers).toHaveLength(1);
+    expect(ctx.blockers[0].id).toBe("blocker-ok");
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.objectContaining({ relationId: "rel-bad", focusIssueId: "focus-id" }),
+      "Failed to hydrate blocker issue from relation",
+    );
+  });
+});
+
 describe("RealLinearClient", () => {
   let client: RealLinearClient;
   let logger: ReturnType<typeof makeLogger>;

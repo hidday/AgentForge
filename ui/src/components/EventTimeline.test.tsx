@@ -127,6 +127,14 @@ describe("EventTimeline", () => {
     expect(container.querySelectorAll("svg.text-state-blocked").length).toBe(3);
   });
 
+  it("falls back to a Zap icon for a completely unknown event type", () => {
+    const { container } = render(
+      <EventTimeline events={[makeEvent({ eventType: "SOME_UNKNOWN_EVENT" })]} />,
+    );
+    expect(screen.getByText("Some Unknown Event")).toBeDefined();
+    expect(container.querySelector("svg.lucide-zap")).not.toBeNull();
+  });
+
   it("falls back to the accent color for an unrecognized/neutral event type", () => {
     const { container } = render(
       <EventTimeline events={[makeEvent({ eventType: "RUN_REQUESTED" })]} />,

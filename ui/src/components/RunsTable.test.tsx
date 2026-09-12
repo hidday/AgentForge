@@ -111,6 +111,22 @@ describe("RunsTable", () => {
     expect(screen.queryByTitle("Open in Linear")).toBeNull();
   });
 
+  it("stops the external Linear link's click from bubbling up to ancestors", async () => {
+    const parentClick = vi.fn();
+    render(
+      <div onClick={parentClick}>
+        <MemoryRouter>
+          <RunsTable
+            runs={[makeRun({ linearIssueUrl: "https://linear.app/issue/1" })]}
+          />
+        </MemoryRouter>
+      </div>,
+    );
+
+    await userEvent.click(screen.getByTitle("Open in Linear"));
+    expect(parentClick).not.toHaveBeenCalled();
+  });
+
   it("shows the PR number when present, or an em dash placeholder when absent", () => {
     renderTable([
       makeRun({ id: "r1", prNumber: 123 }),
