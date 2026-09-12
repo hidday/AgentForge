@@ -49,6 +49,60 @@ describe("CodexRunner.buildArgs when baseArgs does not start with 'exec'", () =>
   });
 });
 
+describe("CodexRunner context propagation (runId branch)", () => {
+  it("passes a process context to the runner when input.runId is set", async () => {
+    const processRunner = makeMockProcessRunner({
+      stdout: validStdout,
+      stderr: "",
+      exitCode: 0,
+      durationMs: 10,
+      timedOut: false,
+    });
+    const logger = makeMockLogger();
+    const runner = new CodexRunner(
+      processRunner as never,
+      "codex",
+      ["exec", "-"],
+      "gpt-5.6-sol",
+      logger as never,
+    );
+
+    await runner.run(
+      { prompt: "x", workingDirectory: "/tmp", timeoutMs: 1000, runId: "run-abc" },
+      "planner",
+      echoSchema,
+    );
+
+    const { context } = processRunner.execute.mock.calls[0]![0] as {
+      context?: { runId: string; stage: string; runtime: string };
+    };
+    expect(context).toEqual({ runId: "run-abc", stage: "planner", runtime: "codex" });
+  });
+
+  it("omits the process context when input.runId is not set", async () => {
+    const processRunner = makeMockProcessRunner({
+      stdout: validStdout,
+      stderr: "",
+      exitCode: 0,
+      durationMs: 10,
+      timedOut: false,
+    });
+    const logger = makeMockLogger();
+    const runner = new CodexRunner(
+      processRunner as never,
+      "codex",
+      ["exec", "-"],
+      "gpt-5.6-sol",
+      logger as never,
+    );
+
+    await runner.run({ prompt: "x", workingDirectory: "/tmp", timeoutMs: 1000 }, "planner", echoSchema);
+
+    const { context } = processRunner.execute.mock.calls[0]![0] as { context?: unknown };
+    expect(context).toBeUndefined();
+  });
+});
+
 describe("CodexRunner.buildStdinPayload systemPrompt branch", () => {
   it("prepends the system prompt to stdin, separated by a '---' delimiter", async () => {
     const processRunner = makeMockProcessRunner({

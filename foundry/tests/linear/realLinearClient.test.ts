@@ -419,5 +419,55 @@ describe("RealLinearClient", () => {
 
       expect(await client.listLabels("issue-1")).toEqual([]);
     });
+
+    it("returns an empty array when the labels connection itself is nullish", async () => {
+      const fakeIssue = makeFakeIssue({
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        labels: () => Promise.resolve(undefined as any),
+      });
+      injectSdk(client, { issue: vi.fn().mockResolvedValue(fakeIssue) });
+
+      expect(await client.listLabels("issue-1")).toEqual([]);
+    });
+  });
+
+  describe("resolveStateId", () => {
+    it("treats a nullish states connection as having no states", async () => {
+      const team = { id: "team-1", states: vi.fn().mockResolvedValue(undefined) };
+      const fakeIssue = makeFakeIssue({ team: Promise.resolve(team) });
+      const updateIssue = vi.fn();
+      injectSdk(client, {
+        issue: vi.fn().mockResolvedValue(fakeIssue),
+        team: vi.fn().mockResolvedValue(team),
+        updateIssue,
+      });
+
+      await client.updateIssueState("issue-1", "Done");
+
+      expect(updateIssue).not.toHaveBeenCalled();
+      expect(logger.warn).toHaveBeenCalledWith(
+        { issueId: "issue-1", stateName: "Done", teamId: "team-1" },
+        "Could not find workflow state by name",
+      );
+    });
+  });
+
+  describe("resolveOrCreateLabel", () => {
+    it("creates a label without a teamId when the issue has no team", async () => {
+      const fakeIssue = makeFakeIssue({ labelIds: [], team: Promise.resolve(undefined) });
+      const createIssueLabel = vi.fn().mockResolvedValue({
+        issueLabel: Promise.resolve({ id: "label-new", name: "bug" }),
+      });
+      injectSdk(client, {
+        issue: vi.fn().mockResolvedValue(fakeIssue),
+        issueLabels: vi.fn().mockResolvedValue({ nodes: [] }),
+        createIssueLabel,
+        updateIssue: vi.fn().mockResolvedValue({}),
+      });
+
+      await client.addLabel("issue-1", "bug");
+
+      expect(createIssueLabel).toHaveBeenCalledWith({ name: "bug" });
+    });
   });
 });

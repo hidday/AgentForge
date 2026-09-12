@@ -142,6 +142,15 @@ describe("createMockProcessHandler", () => {
     expect(payload.stage).toBe("planner");
   });
 
+  it("defaults stdinData to an empty string when omitted entirely", async () => {
+    const handler = createMockProcessHandler();
+    const { stdinData: _stdinData, ...withoutStdin } = baseOptions({ command: "claude" });
+    const result = await handler(withoutStdin as ProcessSpawnOptions);
+    // No keyword matches on empty stdin -> falls through to the executor output.
+    const payload = extractPayload(result.stdout) as { stage: string };
+    expect(payload.stage).toBe("executor");
+  });
+
   it("matches claude/codex commands by exact name as well as by path suffix", async () => {
     const handler = createMockProcessHandler();
     const exactMatch = await handler(baseOptions({ command: "claude", stdinData: "planner" }));

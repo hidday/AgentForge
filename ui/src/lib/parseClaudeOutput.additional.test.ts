@@ -124,6 +124,14 @@ describe("parseClaudeOutput – formatToolInput edge cases", () => {
     expect(result[0]?.content).toBe("/tmp/example.ts");
   });
 
+  it("uses path when command and file_path are both absent", () => {
+    const line = JSON.stringify({
+      content: [{ type: "tool_use", name: "Glob", input: { path: "/tmp/dir" } }],
+    });
+    const result = parseClaudeOutput(line);
+    expect(result[0]?.content).toBe("/tmp/dir");
+  });
+
   it("returns short `content` input fields unmodified (no truncation)", () => {
     const line = JSON.stringify({
       content: [{ type: "tool_use", name: "Write", input: { content: "short" } }],

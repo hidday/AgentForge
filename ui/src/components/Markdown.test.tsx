@@ -19,6 +19,17 @@ describe("Markdown", () => {
     expect(h3.className).toContain("text-xs");
   });
 
+  it("renders h2 and h4 headings with their expected sizes", () => {
+    render(<Markdown>{"## Heading 2\n\n#### Heading 4"}</Markdown>);
+    const h2 = screen.getByText("Heading 2");
+    expect(h2.tagName).toBe("H2");
+    expect(h2.className).toContain("text-sm");
+
+    const h4 = screen.getByText("Heading 4");
+    expect(h4.tagName).toBe("H4");
+    expect(h4.className).toContain("text-xs");
+  });
+
   it("renders an unordered list with its items", () => {
     render(<Markdown>{"- one\n- two"}</Markdown>);
     const list = screen.getByText("one").closest("ul");

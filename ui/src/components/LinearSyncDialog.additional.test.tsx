@@ -163,6 +163,82 @@ describe("LinearSyncDialog – additional coverage", () => {
     expect((startBtn as HTMLButtonElement).disabled).toBe(true);
   });
 
+  it("re-checks a previously unchecked issue via toggleOne", async () => {
+    const user = userEvent.setup();
+    mockApi.fetchPendingIssues.mockResolvedValue({ issues: [issueA, issueB] });
+
+    render(<LinearSyncDialog open={true} onClose={vi.fn()} onIngested={vi.fn()} />);
+    await waitFor(() => screen.getByText(issueA.title));
+
+    const checkboxes = screen.getAllByRole("checkbox");
+    // Uncheck issue A, then re-check it (exercises the "add" branch of toggleOne).
+    await user.click(checkboxes[1]!);
+    expect(screen.getByRole("button", { name: /start 1 run\b/i })).toBeDefined();
+    await user.click(checkboxes[1]!);
+    expect(screen.getByRole("button", { name: /start 2 runs/i })).toBeDefined();
+  });
+
+  it("renders label chips for issues that have labels", async () => {
+    mockApi.fetchPendingIssues.mockResolvedValue({
+      issues: [{ ...issueA, labels: ["backend", "urgent-fix"] }],
+    });
+
+    render(<LinearSyncDialog open={true} onClose={vi.fn()} onIngested={vi.fn()} />);
+    await waitFor(() => screen.getByText(issueA.title));
+
+    expect(screen.getByText("backend")).toBeDefined();
+    expect(screen.getByText("urgent-fix")).toBeDefined();
+  });
+
+  it("fires a second, authoritative onIngestComplete after auto-closing via SSE once ingestIssues later resolves", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    const onClose = vi.fn();
+    const onIngested = vi.fn();
+    const onIngestComplete = vi.fn();
+    mockApi.fetchPendingIssues.mockResolvedValue({ issues: [issueA] });
+
+    let resolveIngest!: (v: { ok: boolean; started: string[]; skipped: string[] }) => void;
+    mockApi.ingestIssues.mockReturnValue(
+      new Promise((resolve) => {
+        resolveIngest = resolve;
+      }),
+    );
+
+    render(
+      <LinearSyncDialog
+        open={true}
+        onClose={onClose}
+        onIngested={onIngested}
+        onIngestComplete={onIngestComplete}
+      />,
+    );
+    await waitFor(() => screen.getByText(issueA.title));
+    await user.click(screen.getByRole("button", { name: /start 1 run/i }));
+
+    // SSE observes the run before the HTTP response lands, and the min-delay
+    // window has elapsed, so the dialog auto-closes optimistically.
+    fireSSE({ type: "run:created", runId: "run-a", issueId: issueA.id });
+    await act(async () => {
+      vi.advanceTimersByTime(700);
+    });
+    await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
+    expect(onIngestComplete).toHaveBeenCalledWith({ started: 1, skipped: 0 });
+
+    // The authoritative HTTP response now resolves after the close; it must
+    // still fire a final onIngestComplete with the real counts.
+    await act(async () => {
+      resolveIngest({ ok: true, started: [issueA.id], skipped: [] });
+      await Promise.resolve();
+    });
+
+    await waitFor(() => {
+      expect(onIngestComplete).toHaveBeenCalledTimes(2);
+    });
+    expect(onIngestComplete).toHaveBeenLastCalledWith({ started: 1, skipped: 0 });
+    expect(onIngested).toHaveBeenCalledOnce();
+  });
+
   it("falls back to the 'None' priority label for an unrecognized priority", async () => {
     mockApi.fetchPendingIssues.mockResolvedValue({
       issues: [{ ...issueA, priority: 99 }],

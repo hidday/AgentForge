@@ -292,6 +292,24 @@ describe("NotificationService.sendHumanRequest", () => {
     expect(body.text).toContain("Linear: https://linear.app/team/issue/PRY-42");
   });
 
+  it.each([
+    ["plan_low_confidence", "Plan needs review (low confidence)"],
+    ["impl_rejected", "Implementation needs review (rejected by agent)"],
+    ["impl_uncertain", "Implementation needs review (uncertain)"],
+    ["other", "Human intervention requested"],
+  ] as const)("renders the correct label text for reason '%s'", async (reason, expectedLabel) => {
+    fetchMock.mockResolvedValue({ ok: true, text: () => Promise.resolve("") });
+    const svc = new NotificationService(
+      makeConfig({ slackWebhookUrl: "https://hooks.slack.com/services/x" }),
+      logger as never,
+    );
+
+    await svc.sendHumanRequest(makePayload({ reason }));
+
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body as string) as { text: string };
+    expect(body.text).toContain(expectedLabel);
+  });
+
   it("falls back to '(untitled)' and the raw id when title/identifier are missing", async () => {
     fetchMock.mockResolvedValue({ ok: true, text: () => Promise.resolve("") });
     const svc = new NotificationService(

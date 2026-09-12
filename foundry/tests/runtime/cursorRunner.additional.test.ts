@@ -17,6 +17,52 @@ const echoSchema = z.object({
   payload: z.object({ value: z.string() }),
 });
 
+describe("CursorRunner context propagation (runId branch)", () => {
+  it("passes a process context to the runner when input.runId is set", async () => {
+    const processRunner = makeMockProcessRunner({
+      stdout: JSON.stringify({ type: "result", result: "ok" }),
+      stderr: "",
+      exitCode: 0,
+      durationMs: 10,
+      timedOut: false,
+    });
+    const logger = makeMockLogger();
+    const runner = new CursorRunner(processRunner as never, "cursor", [], "m", logger as never);
+
+    await runner
+      .run(
+        { prompt: "x", workingDirectory: "/tmp", timeoutMs: 1000, runId: "run-abc" },
+        "planner",
+        echoSchema,
+      )
+      .catch(() => {});
+
+    const { context } = processRunner.execute.mock.calls[0]![0] as {
+      context?: { runId: string; stage: string; runtime: string };
+    };
+    expect(context).toEqual({ runId: "run-abc", stage: "planner", runtime: "cursor" });
+  });
+
+  it("omits the process context when input.runId is not set", async () => {
+    const processRunner = makeMockProcessRunner({
+      stdout: JSON.stringify({ type: "result", result: "ok" }),
+      stderr: "",
+      exitCode: 0,
+      durationMs: 10,
+      timedOut: false,
+    });
+    const logger = makeMockLogger();
+    const runner = new CursorRunner(processRunner as never, "cursor", [], "m", logger as never);
+
+    await runner
+      .run({ prompt: "x", workingDirectory: "/tmp", timeoutMs: 1000 }, "planner", echoSchema)
+      .catch(() => {});
+
+    const { context } = processRunner.execute.mock.calls[0]![0] as { context?: unknown };
+    expect(context).toBeUndefined();
+  });
+});
+
 describe("CursorRunner.buildStdinPayload systemPrompt branch", () => {
   it("prepends the system prompt to stdin, separated by a '---' delimiter", async () => {
     const processRunner = makeMockProcessRunner({

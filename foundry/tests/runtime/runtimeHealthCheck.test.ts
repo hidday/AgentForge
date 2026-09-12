@@ -146,6 +146,31 @@ describe("RuntimeHealthCheck.runPreflight", () => {
     );
   });
 
+  it("includes an undefined binaryError but a defined authError for a runtime whose binary passes but auth fails", async () => {
+    const { rhc, logger } = makeHealthCheck(async (opts: unknown) => {
+      const { command, args } = opts as { command: string; args: string[] };
+      if (args[0] === "--version") return processResult({ stdout: "1.0.0" });
+      if (command === "claude") return processResult({ stdout: '{"loggedIn": false}' });
+      return processResult({ stdout: "PONG" });
+    });
+
+    await expect(rhc.runPreflight()).rejects.toThrow(PreflightError);
+
+    const result = rhc.getLastResult()!;
+    const claudeProbe = result.results.find((r) => r.runtime === "claude-code")!;
+    expect(claudeProbe.binaryCheck.ok).toBe(true);
+    expect(claudeProbe.authCheck.ok).toBe(false);
+
+    // logger.error's `failures` mapping: binaryError is undefined (binary passed)
+    // while authError carries the real auth failure message.
+    const [logFields] = logger.error.mock.calls[0]!;
+    const claudeFailure = logFields.failures.find(
+      (f: { runtime: string }) => f.runtime === "claude-code",
+    );
+    expect(claudeFailure.binaryError).toBeUndefined();
+    expect(claudeFailure.authError).toContain("expected pattern not found in output");
+  });
+
   it("attaches the full PreflightResult on the thrown PreflightError", async () => {
     const { rhc } = makeHealthCheck(async () => processResult({ exitCode: 1, stderr: "boom" }));
 
@@ -188,6 +213,16 @@ describe("RuntimeHealthCheck binary probe branches (checkBinary via runPreflight
     const probe = rhc.getLastResult()!.results.find((r) => r.runtime === "codex")!;
     expect(probe.binaryCheck.ok).toBe(false);
     expect(probe.binaryCheck.error).toBe("spawn ENOENT");
+  });
+
+  it("falls back to String(err) when the process runner throws a non-Error value", async () => {
+    const { rhc } = makeHealthCheck(async () => {
+      // eslint-disable-next-line no-throw-literal
+      throw "plain string failure";
+    });
+    await expect(rhc.runPreflight()).rejects.toThrow(PreflightError);
+    const probe = rhc.getLastResult()!.results.find((r) => r.runtime === "codex")!;
+    expect(probe.binaryCheck.error).toBe("plain string failure");
   });
 
   it("reports ok:true with the first line of stdout truncated to 100 chars as the version", async () => {
@@ -249,6 +284,17 @@ describe("RuntimeHealthCheck.checkAuth branches (invoked directly for precise co
     expect(authCheck.error).toBe("Exit code 5: not authenticated");
   });
 
+  it("falls back to stdout in the error message when exitCodeOnly fails with empty stderr", async () => {
+    const rhc = directHealthCheck(async () =>
+      processResult({ exitCode: 5, stdout: "stdout explanation", stderr: "" }),
+    );
+    const authCheck = (await (rhc as never as { checkAuth: (c: unknown) => Promise<never> })[
+      "checkAuth"
+    ](cursorConfig)) as { ok: boolean; error?: string };
+    expect(authCheck.ok).toBe(false);
+    expect(authCheck.error).toBe("Exit code 5: stdout explanation");
+  });
+
   it("passes for the default (pong) probe style when exit is 0 and output contains pong", async () => {
     const rhc = directHealthCheck(async () => processResult({ exitCode: 0, stdout: "PONG" }));
     const authCheck = (await (rhc as never as { checkAuth: (c: unknown) => Promise<never> })[
@@ -305,5 +351,17 @@ describe("RuntimeHealthCheck.checkAuth branches (invoked directly for precise co
     ](codexConfig)) as { ok: boolean; error?: string };
     expect(authCheck.ok).toBe(false);
     expect(authCheck.error).toBe("ECONNRESET");
+  });
+
+  it("falls back to String(err) when the process runner throws a non-Error value during the auth probe", async () => {
+    const rhc = directHealthCheck(async () => {
+      // eslint-disable-next-line no-throw-literal
+      throw 42;
+    });
+    const authCheck = (await (rhc as never as { checkAuth: (c: unknown) => Promise<never> })[
+      "checkAuth"
+    ](codexConfig)) as { ok: boolean; error?: string };
+    expect(authCheck.ok).toBe(false);
+    expect(authCheck.error).toBe("42");
   });
 });

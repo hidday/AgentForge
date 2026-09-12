@@ -80,6 +80,14 @@ describe("RealGitHubClient", () => {
         'Invalid repo format "no-slash", expected "owner/repo"',
       );
     });
+
+    it("stringifies a non-Error rejection value in the wrapped message", async () => {
+      mockOctokit.repos.get.mockRejectedValue("plain string failure");
+
+      await expect(client.verifyRepoAccess("owner/repo")).rejects.toThrow(
+        /Original: plain string failure/,
+      );
+    });
   });
 
   describe("getDefaultBranch", () => {
@@ -94,6 +102,14 @@ describe("RealGitHubClient", () => {
 
       await expect(client.getDefaultBranch("owner/repo")).rejects.toThrow(
         /GitHub getDefaultBranch failed for "owner\/repo".*rate limited/,
+      );
+    });
+
+    it("stringifies a non-Error rejection value via wrapError", async () => {
+      mockOctokit.repos.get.mockRejectedValue(404);
+
+      await expect(client.getDefaultBranch("owner/repo")).rejects.toThrow(
+        /GitHub getDefaultBranch failed for "owner\/repo": 404/,
       );
     });
   });
@@ -184,6 +200,16 @@ describe("RealGitHubClient", () => {
         base: "main",
         state: "open",
       });
+    });
+
+    it("treats a non-Error 422 rejection as not field-validation and looks up the existing PR", async () => {
+      const nonErrorRejection = { status: 422 };
+      mockOctokit.pulls.create.mockRejectedValue(nonErrorRejection);
+      mockOctokit.pulls.list.mockResolvedValue({ data: [{ number: 88 }] });
+
+      const result = await client.createDraftPR("owner/repo", "head", "main", "Title", "Body");
+
+      expect(result).toBe(88);
     });
 
     it("throws when a 422 is reported but no existing open PR is found", async () => {
@@ -419,6 +445,18 @@ describe("RealGitHubClient", () => {
         "Failed to reply to PR review comment, skipping",
       );
     });
+
+    it("stringifies a non-Error rejection in the warning log", async () => {
+      mockOctokit.pulls.createReplyForReviewComment.mockRejectedValue("gone-string");
+
+      await expect(
+        client.replyToReviewComment("owner/repo", 10, 555, "thanks"),
+      ).resolves.toBeUndefined();
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.objectContaining({ error: "gone-string" }),
+        "Failed to reply to PR review comment, skipping",
+      );
+    });
   });
 
   describe("submitPRReview", () => {
@@ -455,6 +493,15 @@ describe("RealGitHubClient", () => {
 
     it("rethrows other errors wrapped, without a fallback attempt", async () => {
       mockOctokit.pulls.createReview.mockRejectedValue(new Error("totally unrelated failure"));
+
+      await expect(
+        client.submitPRReview("owner/repo", 10, "needs work", "REQUEST_CHANGES"),
+      ).rejects.toThrow(/GitHub submitPRReview failed/);
+      expect(mockOctokit.pulls.createReview).toHaveBeenCalledTimes(1);
+    });
+
+    it("stringifies a non-Error rejection when checking for the 'own PR' message", async () => {
+      mockOctokit.pulls.createReview.mockRejectedValue({ weird: "shape" });
 
       await expect(
         client.submitPRReview("owner/repo", 10, "needs work", "REQUEST_CHANGES"),

@@ -9,7 +9,7 @@ import {
   mkdirSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { spawn } from "node:child_process";
 import { ProcessRunner } from "../../src/runtime/processRunner.js";
@@ -85,6 +85,20 @@ describe("ProcessRunner constructor", () => {
     const logger = makeLogger();
     new ProcessRunner("real", logger as never, undefined, nested);
     expect(existsSync(nested)).toBe(true);
+  });
+
+  it("defaults the spool directory to .foundry/processes under the cwd when none is given", () => {
+    const defaultDir = resolve(".foundry/processes");
+    const preexisting = existsSync(defaultDir);
+    const logger = makeLogger();
+    try {
+      new ProcessRunner("real", logger as never);
+      expect(existsSync(defaultDir)).toBe(true);
+    } finally {
+      if (!preexisting) {
+        rmSync(resolve(".foundry"), { recursive: true, force: true });
+      }
+    }
   });
 });
 
@@ -731,6 +745,138 @@ describe("ProcessRunner.rehydrateOrphans", () => {
     const finalManifest = JSON.parse(readFileSync(manifestPath, "utf-8"));
     expect(finalManifest.completedAt).toBeDefined();
     expect(finalManifest.exitCode).toBe(-1);
+
+    vi.useRealTimers();
+  });
+
+  it("logs 'Failed to process manifest' when the orphan's log file does not exist yet (fs.watch throws synchronously)", () => {
+    const logger = makeLogger();
+    const emitter = makeEmitter();
+    const runner = new ProcessRunner("real", logger as never, emitter as never, spoolDir);
+
+    const processId = "no-log-yet";
+    const manifestPath = join(spoolDir, `${processId}.json`);
+    // Deliberately do NOT create the .log file referenced by the manifest.
+    writeFileSync(
+      manifestPath,
+      JSON.stringify({
+        id: processId,
+        pid: process.pid, // genuinely alive
+        command: "claude",
+        args: [],
+        runId: "run-nolog",
+        stage: "executor",
+        runtime: "claude-code",
+        startedAt: new Date().toISOString(),
+        logFile: join(spoolDir, `${processId}.log`),
+      }),
+    );
+
+    expect(() => runner.rehydrateOrphans()).not.toThrow();
+
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.objectContaining({ file: `${processId}.json`, error: expect.any(String) }),
+      "Failed to process manifest",
+    );
+  });
+
+  it("tails new log content via the fs.watch callback and silently ignores read errors after the file disappears", async () => {
+    const logger = makeLogger();
+    const emitter = makeEmitter();
+    const runner = new ProcessRunner("real", logger as never, emitter as never, spoolDir);
+
+    const processId = "tailed-proc";
+    const logPath = join(spoolDir, `${processId}.log`);
+    const manifestPath = join(spoolDir, `${processId}.json`);
+    writeFileSync(logPath, "start\n");
+    writeFileSync(
+      manifestPath,
+      JSON.stringify({
+        id: processId,
+        pid: process.pid, // genuinely alive for the lifetime of this test
+        command: "claude",
+        args: [],
+        runId: "run-tail",
+        stage: "executor",
+        runtime: "claude-code",
+        startedAt: new Date().toISOString(),
+        logFile: logPath,
+      }),
+    );
+
+    runner.rehydrateOrphans();
+    expect(runner.getActiveProcesses()).toHaveLength(1);
+
+    writeFileSync(logPath, "start\nmore-data\n", { flag: "a" });
+
+    await vi.waitFor(
+      () => {
+        expect(runner.getProcessOutput(processId)).toContain("more-data");
+      },
+      { timeout: 3000, interval: 25 },
+    );
+
+    const bufferAfterAppend = runner.getProcessOutput(processId);
+
+    // Deleting the log file triggers another fs.watch event; the subsequent
+    // readFileSync inside the callback throws and is silently ignored,
+    // leaving the buffer unchanged rather than crashing the process.
+    rmSync(logPath);
+    await new Promise((r) => setTimeout(r, 200));
+    expect(runner.getProcessOutput(processId)).toBe(bufferAfterAppend);
+  });
+
+  it("silently ignores a manifest read/write failure inside finalizeOrphan", async () => {
+    vi.useFakeTimers();
+    const logger = makeLogger();
+    const emitter = makeEmitter();
+    const runner = new ProcessRunner("real", logger as never, emitter as never, spoolDir);
+
+    const processId = "finalize-missing-manifest";
+    const logPath = join(spoolDir, `${processId}.log`);
+    const manifestPath = join(spoolDir, `${processId}.json`);
+    writeFileSync(logPath, "log\n");
+    writeFileSync(
+      manifestPath,
+      JSON.stringify({
+        id: processId,
+        pid: 555555,
+        command: "claude",
+        args: [],
+        runId: "run-fin",
+        stage: "executor",
+        runtime: "claude-code",
+        startedAt: new Date().toISOString(),
+        logFile: logPath,
+      }),
+    );
+
+    let killCalls = 0;
+    vi.spyOn(process, "kill").mockImplementation(((pid: number) => {
+      killCalls += 1;
+      if (killCalls === 1) return true;
+      throw new Error("ESRCH");
+    }) as never);
+
+    runner.rehydrateOrphans();
+    expect(runner.getActiveProcesses()).toHaveLength(1);
+
+    // Remove the manifest file so finalizeOrphan's read/parse/write fails
+    // and is caught by its own best-effort try/catch.
+    rmSync(manifestPath);
+
+    await vi.advanceTimersByTimeAsync(5000);
+
+    expect(runner.getActiveProcesses()).toEqual([]);
+    expect(emitter.emitProcessCompleted).toHaveBeenCalledWith(
+      "run-fin",
+      processId,
+      "executor",
+      "claude-code",
+      -1,
+      expect.any(Number),
+    );
+    expect(existsSync(manifestPath)).toBe(false);
 
     vi.useRealTimers();
   });

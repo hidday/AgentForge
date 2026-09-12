@@ -76,6 +76,70 @@ describe("ClaudeCodeRunner.buildArgs systemPrompt branch", () => {
   });
 });
 
+describe("ClaudeCodeRunner context propagation (runId branch)", () => {
+  it("passes a process context to the runner when input.runId is set (run)", async () => {
+    const processRunner = makeMockProcessRunner({
+      stdout: JSON.stringify({ type: "result", result: validStructuredOutput }),
+      stderr: "",
+      exitCode: 0,
+      durationMs: 10,
+      timedOut: false,
+    });
+    const logger = makeMockLogger();
+    const runner = new ClaudeCodeRunner(processRunner as never, "claude", [], "m", logger as never);
+
+    await runner.run(
+      { prompt: "x", workingDirectory: "/tmp", timeoutMs: 1000, runId: "run-abc" },
+      "planner",
+      echoSchema,
+    );
+
+    const { context } = processRunner.execute.mock.calls[0]![0] as {
+      context?: { runId: string; stage: string; runtime: string };
+    };
+    expect(context).toEqual({ runId: "run-abc", stage: "planner", runtime: "claude-code" });
+  });
+
+  it("omits the process context when input.runId is not set (run)", async () => {
+    const processRunner = makeMockProcessRunner({
+      stdout: JSON.stringify({ type: "result", result: validStructuredOutput }),
+      stderr: "",
+      exitCode: 0,
+      durationMs: 10,
+      timedOut: false,
+    });
+    const logger = makeMockLogger();
+    const runner = new ClaudeCodeRunner(processRunner as never, "claude", [], "m", logger as never);
+
+    await runner.run({ prompt: "x", workingDirectory: "/tmp", timeoutMs: 1000 }, "planner", echoSchema);
+
+    const { context } = processRunner.execute.mock.calls[0]![0] as { context?: unknown };
+    expect(context).toBeUndefined();
+  });
+
+  it("passes a process context to the runner when input.runId is set (chatRun)", async () => {
+    const processRunner = makeMockProcessRunner({
+      stdout: JSON.stringify({ type: "result", result: "hi", is_error: false }),
+      stderr: "",
+      exitCode: 0,
+      durationMs: 10,
+      timedOut: false,
+    });
+    const logger = makeMockLogger();
+    const runner = new ClaudeCodeRunner(processRunner as never, "claude", [], "m", logger as never);
+
+    await runner.chatRun(
+      { prompt: "x", workingDirectory: "/tmp", timeoutMs: 1000, runId: "run-chat" },
+      "chat",
+    );
+
+    const { context } = processRunner.execute.mock.calls[0]![0] as {
+      context?: { runId: string; stage: string; runtime: string };
+    };
+    expect(context).toEqual({ runId: "run-chat", stage: "chat", runtime: "claude-code" });
+  });
+});
+
 describe("ClaudeCodeRunner.unwrapClaudeEnvelope NDJSON scanning", () => {
   it("scans backward past blank and invalid JSON lines to find the last matching result line", async () => {
     const raw = [

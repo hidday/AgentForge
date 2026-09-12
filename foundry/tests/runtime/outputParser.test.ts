@@ -78,6 +78,28 @@ describe("OutputParser.parseJson", () => {
     }
   });
 
+  it("falls back to String(err) when the underlying parser throws a non-Error value", () => {
+    const originalParse = JSON.parse;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (JSON as any).parse = () => {
+      // eslint-disable-next-line no-throw-literal
+      throw "not-an-error-instance";
+    };
+    try {
+      try {
+        parser.parseJson("{}");
+        throw new Error("expected throw");
+      } catch (err) {
+        expect(err).toBeInstanceOf(OutputParseError);
+        expect((err as OutputParseError).message).toBe(
+          "Failed to parse JSON: not-an-error-instance",
+        );
+      }
+    } finally {
+      JSON.parse = originalParse;
+    }
+  });
+
   it("truncates a very long malformed block to 500 chars in rawOutput", () => {
     const block = "{" + "x".repeat(900);
     try {
