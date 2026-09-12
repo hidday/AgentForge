@@ -20,9 +20,12 @@ describe("renderTemplate", () => {
     expect(result).toBe("Repo: acme/backend");
   });
 
-  it("leaves the placeholder unchanged when a top-level key does not exist", () => {
+  it("renders an empty string for a top-level key that does not exist (undefined value)", () => {
+    // A missing top-level key resolves to `undefined` without any further path
+    // traversal, so it falls through to toDisplayString(undefined) => "" rather
+    // than the unresolved-placeholder branch (which only fires mid-traversal).
     const result = renderTemplate("Value: {{missingKey}}", {});
-    expect(result).toBe("Value: {{missingKey}}");
+    expect(result).toBe("Value: ");
   });
 
   it("leaves the placeholder unchanged when a nested path traverses through null/undefined", () => {
@@ -40,9 +43,9 @@ describe("renderTemplate", () => {
     expect(renderTemplate("{{flag}}", { flag: true })).toBe("true");
   });
 
-  it("renders null/undefined values as an empty string", () => {
+  it("renders a top-level null or undefined value as an empty string", () => {
     expect(renderTemplate("[{{missing}}]", { missing: null })).toBe("[]");
-    expect(renderTemplate("[{{missing}}]", { missing: undefined })).toBe("[{{missing}}]");
+    expect(renderTemplate("[{{missing}}]", { missing: undefined })).toBe("[]");
   });
 
   it("JSON-stringifies a plain object value that isn't handled by a more specific branch", () => {

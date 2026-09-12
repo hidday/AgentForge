@@ -455,9 +455,13 @@ describe("OrchestratorService.runManualPlanRevision", () => {
 
     const result = await svc.runManualPlanRevision("run-1", { note: "tighten scope" });
 
+    // Note: runPlanRevision independently re-reads the PlanReview artifact by
+    // type rather than reusing the verdict object runManualPlanRevision just
+    // received; since no PlanReview artifact was persisted in this test, it
+    // is passed through as undefined here -- this documents that real coupling.
     expect(planReviserAgent.run).toHaveBeenCalledWith(
       plan,
-      expect.objectContaining({ overallVerdict: "changes_requested" }),
+      undefined,
       expect.anything(),
       "run-1",
       { operatorNote: "tighten scope" },

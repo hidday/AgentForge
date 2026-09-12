@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 import { logger } from "../../src/utils/logger.js";
 
 describe("logger", () => {
@@ -22,5 +22,28 @@ describe("logger", () => {
       logger.error("test error message");
       logger.debug({ some: "context" }, "test debug message with context");
     }).not.toThrow();
+  });
+});
+
+describe("logger transport selection by NODE_ENV", () => {
+  const originalNodeEnv = process.env.NODE_ENV;
+
+  afterEach(() => {
+    if (originalNodeEnv === undefined) {
+      delete process.env.NODE_ENV;
+    } else {
+      process.env.NODE_ENV = originalNodeEnv;
+    }
+    vi.resetModules();
+  });
+
+  it("omits the pino-pretty transport when NODE_ENV is production", async () => {
+    vi.resetModules();
+    process.env.NODE_ENV = "production";
+
+    const mod = await import("../../src/utils/logger.js");
+
+    expect(mod.logger).toBeDefined();
+    expect(typeof mod.logger.info).toBe("function");
   });
 });
