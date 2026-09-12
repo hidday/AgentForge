@@ -154,6 +154,16 @@ describe("api client", () => {
       });
       expect(result).toEqual({ ok: true, runId: "r1" });
     });
+
+    it("sends note: undefined when no note is provided", async () => {
+      fetchMock.mockResolvedValue(jsonResponse({ ok: true, runId: "r1" }));
+      await api.reReviewPlan("r1");
+      expect(fetchMock).toHaveBeenCalledWith("/api/runs/r1/actions/re-review-plan", {
+        headers: { "Content-Type": "application/json" },
+        method: "POST",
+        body: JSON.stringify({ note: undefined }),
+      });
+    });
   });
 
   describe("revisePlan", () => {

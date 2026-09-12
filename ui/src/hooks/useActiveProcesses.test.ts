@@ -107,6 +107,47 @@ describe("useActiveProcesses", () => {
     expect(result.current.processes).toEqual([]);
   });
 
+  it("does not apply process output after unmount even when the outer fetch already resolved", async () => {
+    mockApi.getActiveProcesses.mockResolvedValue({ processes: [makeProcess("p1")] });
+    let resolveOutput!: (v: { processId: string; output: string }) => void;
+    mockApi.getProcessOutput.mockReturnValue(
+      new Promise((res) => {
+        resolveOutput = res;
+      }),
+    );
+
+    const { result, unmount } = renderHook(() => useActiveProcesses("r1"));
+    await waitFor(() => expect(mockApi.getProcessOutput).toHaveBeenCalledWith("p1"));
+    unmount();
+
+    await act(async () => {
+      resolveOutput({ processId: "p1", output: "late output" });
+      await Promise.resolve();
+    });
+
+    // The cancelled guard after the getProcessOutput await must prevent this update.
+    expect(result.current.output).toBe("");
+  });
+
+  it("defaults optional process:started fields to empty string when the event omits them", async () => {
+    mockApi.getActiveProcesses.mockResolvedValue({ processes: [] });
+    const { result } = renderHook(() => useActiveProcesses("r1"));
+    await waitFor(() => expect(mockApi.getActiveProcesses).toHaveBeenCalled());
+
+    act(() => {
+      sseCallback!({ type: "process:started", runId: "r1" });
+    });
+
+    const [entry] = result.current.processes;
+    expect(entry).toBeDefined();
+    expect(entry!.id).toBe("");
+    expect(entry!.command).toBe("");
+    expect(entry!.stage).toBe("");
+    expect(entry!.runtime).toBe("");
+    expect(typeof entry!.startedAt).toBe("string");
+    expect(entry!.startedAt.length).toBeGreaterThan(0);
+  });
+
   describe("SSE handling", () => {
     it("adds a new process entry and resets output on process:started for this run", async () => {
       mockApi.getActiveProcesses.mockResolvedValue({ processes: [] });

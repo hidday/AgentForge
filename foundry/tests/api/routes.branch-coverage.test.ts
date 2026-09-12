@@ -5,7 +5,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { registerApiRoutes } from "../../src/api/routes.js";
 import { RunState } from "../../src/domain/runState.js";
-import { RunEvent } from "../../src/domain/runEvent.js";
 
 function makeRun(overrides: Record<string, unknown> = {}) {
   return {

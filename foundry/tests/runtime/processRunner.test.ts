@@ -59,9 +59,13 @@ beforeEach(() => {
   mockedSpawn.mockReset();
 });
 
-afterEach(() => {
+afterEach(async () => {
   vi.useRealTimers();
   vi.restoreAllMocks();
+  // fs.createWriteStream opens/writes/closes asynchronously; give any
+  // in-flight log writes from the test a moment to settle before the spool
+  // directory is removed, to avoid spurious ENOENT races.
+  await new Promise((resolve) => setTimeout(resolve, 30));
   rmSync(spoolDir, { recursive: true, force: true });
 });
 
@@ -381,7 +385,7 @@ describe("ProcessRunner process tracking -- context, manifests, and output buffe
   });
 
   it("does not register a process entry when the child has no pid, even with context set", async () => {
-    const child = makeFakeChild(undefined);
+    const child = makeFakeChild(0);
     mockedSpawn.mockReturnValue(child as never);
     const logger = makeLogger();
     const emitter = makeEmitter();
@@ -433,9 +437,12 @@ describe("ProcessRunner process tracking -- context, manifests, and output buffe
     await promise;
 
     // After completion the process is no longer active, but getProcessOutput
-    // falls back to reading the log file from disk.
+    // falls back to reading the log file from disk once the write stream
+    // (opened/flushed asynchronously) has settled.
     expect(runner.getActiveProcesses()).toEqual([]);
-    expect(runner.getProcessOutput(processId)).toContain("chunk-1");
+    await vi.waitFor(() => {
+      expect(runner.getProcessOutput(processId)).toContain("chunk-1");
+    });
   });
 
   it("returns null from getProcessOutput for an unknown process id", () => {
