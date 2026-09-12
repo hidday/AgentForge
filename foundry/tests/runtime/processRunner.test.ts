@@ -826,6 +826,46 @@ describe("ProcessRunner.rehydrateOrphans", () => {
     expect(runner.getProcessOutput(processId)).toBe(bufferAfterAppend);
   });
 
+  it("closes the watcher and returns early if the tracked entry has already been removed when a file event fires", async () => {
+    const logger = makeLogger();
+    const emitter = makeEmitter();
+    const runner = new ProcessRunner("real", logger as never, emitter as never, spoolDir);
+
+    const processId = "entry-removed-mid-flight";
+    const logPath = join(spoolDir, `${processId}.log`);
+    writeFileSync(logPath, "start\n");
+    writeFileSync(
+      join(spoolDir, `${processId}.json`),
+      JSON.stringify({
+        id: processId,
+        pid: process.pid,
+        command: "claude",
+        args: [],
+        runId: "run-removed",
+        stage: "executor",
+        runtime: "claude-code",
+        startedAt: new Date().toISOString(),
+        logFile: logPath,
+      }),
+    );
+
+    runner.rehydrateOrphans();
+    expect(runner.getActiveProcesses()).toHaveLength(1);
+
+    // Simulate the entry having already been cleaned up by another path
+    // (e.g. a race with normal completion) while the fs.watch watcher for
+    // it is still open.
+    (runner as unknown as { activeProcesses: Map<string, unknown> }).activeProcesses.delete(
+      processId,
+    );
+
+    // This must not throw even though the tracked entry is gone.
+    expect(() => writeFileSync(logPath, "more\n", { flag: "a" })).not.toThrow();
+    await new Promise((r) => setTimeout(r, 200));
+
+    expect(runner.getActiveProcesses()).toEqual([]);
+  });
+
   it("silently ignores a manifest read/write failure inside finalizeOrphan", async () => {
     vi.useFakeTimers();
     const logger = makeLogger();
