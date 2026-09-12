@@ -286,10 +286,17 @@ describe("OrchestratorService.runExecution -- crash-recovery idempotency", () =>
     );
 
     const { deps, executorAgent, eventRepo } = buildDeps(store);
+    (deps.reviewerAgent.run as ReturnType<typeof vi.fn>).mockResolvedValue({
+      reviewId: "rev-1",
+      overallVerdict: "approved",
+      summary: "ok",
+      findings: [],
+    });
     const svc = new OrchestratorService(deps as never);
 
-    // runReview will fail past this point (no Review artifact yet for markReady),
-    // which is fine -- we only assert the recovery behaviour itself here.
+    // runReview proceeds and reaches markReady, which fails because no Review
+    // artifact has been persisted yet -- fine, we only assert the recovery
+    // behaviour (skip-executor + recorded recovery event) here.
     await expect(svc.runExecution("run-1")).rejects.toBeInstanceOf(PolicyViolationError);
 
     expect(executorAgent.run).not.toHaveBeenCalled();
