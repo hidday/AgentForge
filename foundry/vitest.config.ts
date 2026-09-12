@@ -10,7 +10,14 @@ export default defineConfig({
       include: ["src/**/*.ts"],
       // server.ts is the process entrypoint (starts Fastify, binds ports);
       // it is exercised by running the app, not by unit tests.
-      exclude: ["src/server.ts"],
+      // src/generated/prisma/** is Prisma-generated client code, not
+      // hand-written source; it is validated by `prisma generate` and by
+      // the code that calls it, not by unit tests against the generated
+      // files themselves.
+      // runnerTypes.ts contains only type/interface declarations that
+      // compile away entirely (no runtime statements exist to execute or
+      // cover).
+      exclude: ["src/server.ts", "src/generated/prisma/**", "src/runtime/runnerTypes.ts"],
       reporter: ["text", "json-summary", "html"],
       reportsDirectory: "coverage",
     },
