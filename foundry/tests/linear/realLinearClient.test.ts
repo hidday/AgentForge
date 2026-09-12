@@ -34,7 +34,49 @@ function makeFakeIssue(overrides: Record<string, unknown> = {}) {
   };
 }
 
+describe("RealLinearClient.getRelatedContext - nullish label/state defaults", () => {
+  it("defaults a related issue's labels to [] and state to 'Unknown' when nullish", async () => {
+    const logger = makeLogger();
+    const client = new RealLinearClient("test-key", logger as never);
+    const parent = makeFakeIssue({
+      id: "parent-id",
+      identifier: "PRY-100",
+      labels: () => Promise.resolve(undefined),
+      state: Promise.resolve(null),
+    });
+    const focus = makeFakeIssue({
+      id: "focus-id",
+      parent: Promise.resolve(parent),
+      inverseRelations: () => Promise.resolve({ nodes: [] }),
+    });
+    injectSdk(client, {
+      issue: vi.fn((id: string) =>
+        Promise.resolve(id === "parent-id" ? parent : focus),
+      ),
+    });
+
+    const ctx = await client.getRelatedContext("focus-id");
+
+    expect(ctx.parent?.labels).toEqual([]);
+    expect(ctx.parent?.state).toBe("Unknown");
+  });
+});
+
 describe("RealLinearClient.getRelatedContext - blocker hydration failure", () => {
+  it("treats a nullish inverseRelations connection as having no blockers", async () => {
+    const logger = makeLogger();
+    const client = new RealLinearClient("test-key", logger as never);
+    const focus = makeFakeIssue({
+      id: "focus-id",
+      inverseRelations: () => Promise.resolve(undefined),
+    });
+    injectSdk(client, { issue: vi.fn().mockResolvedValue(focus) });
+
+    const ctx = await client.getRelatedContext("focus-id");
+
+    expect(ctx.blockers).toEqual([]);
+  });
+
   it("logs a warning and omits a blocker whose relation.issue rejects", async () => {
     const logger = makeLogger();
     const client = new RealLinearClient("test-key", logger as never);
@@ -106,6 +148,7 @@ describe("RealLinearClient", () => {
         project: Promise.resolve(null),
         cycle: Promise.resolve(null),
         team: Promise.resolve(null),
+        labels: () => Promise.resolve(undefined),
       });
       injectSdk(client, { issue: vi.fn().mockResolvedValue(fakeIssue) });
 
@@ -116,6 +159,7 @@ describe("RealLinearClient", () => {
       expect(result.project).toBeUndefined();
       expect(result.team).toBeUndefined();
       expect(result.cycle).toBeUndefined();
+      expect(result.labels).toEqual([]);
     });
   });
 
@@ -181,9 +225,10 @@ describe("RealLinearClient", () => {
       expect(results).toEqual([]);
     });
 
-    it("defaults labels/project/team/cycle to empty/undefined when nullish", async () => {
+    it("defaults labels/project/team/cycle/description to empty/undefined when nullish", async () => {
       const fakeIssue = makeFakeIssue({
         id: "issue-3",
+        description: null,
         labels: () => Promise.resolve(undefined),
         project: Promise.resolve(null),
         cycle: Promise.resolve(null),
@@ -197,6 +242,7 @@ describe("RealLinearClient", () => {
       expect(result.project).toBeUndefined();
       expect(result.team).toBeUndefined();
       expect(result.cycle).toBeUndefined();
+      expect(result.description).toBe("");
     });
   });
 

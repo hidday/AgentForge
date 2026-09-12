@@ -166,6 +166,34 @@ describe("NotificationService.sendHumanRequest", () => {
     expect(result.slack.error).toBe("ECONNREFUSED");
   });
 
+  it("stringifies a non-Error rejection value for the slack failure", async () => {
+    fetchMock.mockRejectedValue("network gone");
+    const svc = new NotificationService(
+      makeConfig({ slackWebhookUrl: "https://hooks.slack.com/services/x" }),
+      logger as never,
+    );
+
+    const result = await svc.sendHumanRequest(makePayload());
+
+    expect(result.slack.ok).toBe(false);
+    expect(result.slack.error).toBe("network gone");
+  });
+
+  it("truncates a long slack context with an ellipsis", async () => {
+    fetchMock.mockResolvedValue({ ok: true, text: () => Promise.resolve("") });
+    const svc = new NotificationService(
+      makeConfig({ slackWebhookUrl: "https://hooks.slack.com/services/x" }),
+      logger as never,
+    );
+
+    await svc.sendHumanRequest(makePayload({ context: "x".repeat(2000) }));
+
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body as string) as { blocks: unknown[] };
+    const blocksText = JSON.stringify(body.blocks);
+    expect(blocksText).toContain("…");
+    expect(blocksText).not.toContain("x".repeat(1600));
+  });
+
   it("sends an email via the Resend API with parsed comma-separated recipients", async () => {
     fetchMock.mockResolvedValue({ ok: true, text: () => Promise.resolve("") });
     const svc = new NotificationService(
@@ -198,6 +226,19 @@ describe("NotificationService.sendHumanRequest", () => {
     expect(body.subject).toContain("PRY-42");
     expect(body.html).toContain("Add OAuth support");
     expect(body.text).toContain("Add OAuth support");
+  });
+
+  it("stringifies a non-Error rejection value for the email failure", async () => {
+    fetchMock.mockRejectedValue("resend network gone");
+    const svc = new NotificationService(
+      makeConfig({ emailTo: "a@x.com", resendApiKey: "key" }),
+      logger as never,
+    );
+
+    const result = await svc.sendHumanRequest(makePayload());
+
+    expect(result.email.ok).toBe(false);
+    expect(result.email.error).toBe("resend network gone");
   });
 
   it("marks email failed and logs a warning when Resend returns a non-ok response", async () => {
@@ -327,6 +368,29 @@ describe("NotificationService.sendHumanRequest", () => {
 
     const body = JSON.parse(fetchMock.mock.calls[0][1].body as string) as { text: string };
     expect(body.text).toContain("raw-id-1");
+    expect(body.text).toContain("(untitled)");
+  });
+
+  it("falls back to '(untitled)' and the raw id in the email HTML and plain-text bodies too", async () => {
+    fetchMock.mockResolvedValue({ ok: true, text: () => Promise.resolve("") });
+    const svc = new NotificationService(
+      makeConfig({ emailTo: "a@x.com", resendApiKey: "key" }),
+      logger as never,
+    );
+
+    await svc.sendHumanRequest(
+      makePayload({
+        linearIssue: { id: "raw-id-2", title: null, url: null },
+      }),
+    );
+
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body as string) as {
+      html: string;
+      text: string;
+    };
+    expect(body.html).toContain("raw-id-2");
+    expect(body.html).toContain("(untitled)");
+    expect(body.text).toContain("raw-id-2");
     expect(body.text).toContain("(untitled)");
   });
 });
