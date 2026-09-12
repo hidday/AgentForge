@@ -191,7 +191,7 @@ describe("buildChatSystemPrompt - Review (code review) findings section", () => 
     expect(result).not.toContain("## Code Review Findings");
   });
 
-  it("uses the highest-version Review artifact when multiple exist", () => {
+  it("uses the highest-version Review artifact when multiple exist (newer listed first)", () => {
     const older = makeArtifact({
       type: "Review",
       version: 1,
@@ -207,5 +207,38 @@ describe("buildChatSystemPrompt - Review (code review) findings section", () => 
 
     expect(result).toContain("New review summary");
     expect(result).not.toContain("Old review summary");
+  });
+
+  it("uses the highest-version Review artifact when the higher version is listed first", () => {
+    // Exercises the reduce() comparison's "keep best" (false) branch, not just
+    // the "replace with cur" (true) branch exercised by the test above.
+    const newer = makeArtifact({
+      type: "Review",
+      version: 2,
+      payloadJson: { summary: "New review summary" },
+    });
+    const older = makeArtifact({
+      type: "Review",
+      version: 1,
+      payloadJson: { summary: "Old review summary" },
+    });
+
+    const result = buildChatSystemPrompt(makeRun(), [newer, older]);
+
+    expect(result).toContain("New review summary");
+    expect(result).not.toContain("Old review summary");
+  });
+
+  it("falls back to empty strings for missing Review finding sub-fields", () => {
+    const artifact = makeArtifact({
+      type: "Review",
+      version: 1,
+      payloadJson: { findings: [{}] },
+    });
+
+    const result = buildChatSystemPrompt(makeRun(), [artifact]);
+
+    expect(result).toContain("## Code Review Findings");
+    expect(result).toContain("[] ** ():");
   });
 });
