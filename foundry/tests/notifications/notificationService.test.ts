@@ -94,7 +94,7 @@ describe("NotificationService.sendHumanRequest", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("posts to the slack webhook url with a JSON body containing the summary and buttons", async () => {
+  it("posts to the slack webhook url with a JSON body containing the summary, context, and buttons", async () => {
     fetchMock.mockResolvedValue({ ok: true, text: () => Promise.resolve("") });
     const svc = new NotificationService(
       makeConfig({ slackWebhookUrl: "https://hooks.slack.com/services/x" }),
@@ -104,6 +104,7 @@ describe("NotificationService.sendHumanRequest", () => {
     const result = await svc.sendHumanRequest(
       makePayload({
         planConfidence: 0.42,
+        context: "extra slack context",
         openQuestions: [
           { id: "q1", question: "Which provider?", requiredForExecution: true },
           { id: "q2", question: "Which scopes?", requiredForExecution: false },
@@ -127,6 +128,7 @@ describe("NotificationService.sendHumanRequest", () => {
     expect(body.text).toContain("Add OAuth support");
     expect(JSON.stringify(body.blocks)).toContain("Which provider?");
     expect(JSON.stringify(body.blocks)).toContain("0.42");
+    expect(JSON.stringify(body.blocks)).toContain("extra slack context");
   });
 
   it("marks slack failed and logs a warning when the slack webhook returns a non-ok response", async () => {

@@ -180,6 +180,24 @@ describe("RealLinearClient", () => {
 
       expect(results).toEqual([]);
     });
+
+    it("defaults labels/project/team/cycle to empty/undefined when nullish", async () => {
+      const fakeIssue = makeFakeIssue({
+        id: "issue-3",
+        labels: () => Promise.resolve(undefined),
+        project: Promise.resolve(null),
+        cycle: Promise.resolve(null),
+        team: Promise.resolve(null),
+      });
+      injectSdk(client, { issues: vi.fn().mockResolvedValue({ nodes: [fakeIssue] }) });
+
+      const [result] = await client.searchIssues({ state: "Todo" });
+
+      expect(result.labels).toEqual([]);
+      expect(result.project).toBeUndefined();
+      expect(result.team).toBeUndefined();
+      expect(result.cycle).toBeUndefined();
+    });
   });
 
   describe("postComment", () => {
