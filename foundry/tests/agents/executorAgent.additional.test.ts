@@ -93,6 +93,62 @@ function buildAgent() {
   return { agent, getUserPrompt: () => capturedUserPrompt };
 }
 
+describe("ExecutorAgent.run() isRetry detection", () => {
+  it("logs isRetry=true when only existingBranch is set (existingPR absent)", async () => {
+    const agentRunner = {
+      run: vi.fn().mockResolvedValue({
+        raw: "raw",
+        parsed: { stage: "executor" as const, payload: makeReport() },
+      }),
+    };
+    const artifactRepo = { create: vi.fn().mockResolvedValue({ id: "artifact-new" }) };
+    const githubClient = { createDraftPR: vi.fn().mockResolvedValue(101) };
+    const gitService = { commitAndPush: vi.fn().mockResolvedValue(undefined) };
+    const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
+    const agent = new ExecutorAgent(
+      agentRunner as never,
+      artifactRepo as never,
+      githubClient as never,
+      gitService as never,
+      logger as never,
+    );
+
+    await agent.run(makePlan(), makeTaskBundle(), "run-1", { existingBranch: "ai/lin-1" });
+
+    const startLog = logger.info.mock.calls.find(
+      (c: unknown[]) => c[1] === "Starting executor agent",
+    );
+    expect((startLog?.[0] as Record<string, unknown>)?.isRetry).toBe(true);
+  });
+
+  it("logs isRetry=true when only existingPR is set (existingBranch absent)", async () => {
+    const agentRunner = {
+      run: vi.fn().mockResolvedValue({
+        raw: "raw",
+        parsed: { stage: "executor" as const, payload: makeReport() },
+      }),
+    };
+    const artifactRepo = { create: vi.fn().mockResolvedValue({ id: "artifact-new" }) };
+    const githubClient = { createDraftPR: vi.fn().mockResolvedValue(101) };
+    const gitService = { commitAndPush: vi.fn().mockResolvedValue(undefined) };
+    const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
+    const agent = new ExecutorAgent(
+      agentRunner as never,
+      artifactRepo as never,
+      githubClient as never,
+      gitService as never,
+      logger as never,
+    );
+
+    await agent.run(makePlan(), makeTaskBundle(), "run-1", { existingPR: 555 });
+
+    const startLog = logger.info.mock.calls.find(
+      (c: unknown[]) => c[1] === "Starting executor agent",
+    );
+    expect((startLog?.[0] as Record<string, unknown>)?.isRetry).toBe(true);
+  });
+});
+
 describe("ExecutorAgent.run() operator note section", () => {
   it("renders the Operator Note section when an operatorNote is provided", async () => {
     const { agent, getUserPrompt } = buildAgent();
