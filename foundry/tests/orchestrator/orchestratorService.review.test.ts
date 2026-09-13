@@ -224,14 +224,14 @@ describe("OrchestratorService.runReview", () => {
     await expect(svc.runReview("run-1")).rejects.toBeInstanceOf(PolicyViolationError);
   });
 
-  it("fetches the PR diff only when the run has a PR number", async () => {
-    const { deps, githubClient } = buildDeps({ run: makeRun({ prNumber: null }) });
+  it("fetches the PR diff via githubClient using the run's repo and PR number", async () => {
+    const { deps, githubClient } = buildDeps();
     const svc = new OrchestratorService(deps as never);
     vi.spyOn(svc, "markReady").mockResolvedValue(makeRun());
 
     await svc.runReview("run-1");
 
-    expect(githubClient.getPRDiff).not.toHaveBeenCalled();
+    expect(githubClient.getPRDiff).toHaveBeenCalledWith("test-repo", 77);
   });
 
   it("posts review findings to GitHub and builds a comment map when there are findings and a PR", async () => {

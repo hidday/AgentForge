@@ -13,11 +13,21 @@ vi.mock("@prisma/adapter-pg", () => ({
   PrismaPg: vi.fn().mockImplementation((opts: unknown) => ({ opts })),
 }));
 
+const envMock: { DATABASE_URL: string; LOG_LEVEL: string } = {
+  DATABASE_URL: "postgresql://test:test@localhost:5432/test",
+  LOG_LEVEL: "info",
+};
+
+vi.mock("../../src/config/env.js", () => ({
+  env: envMock,
+}));
+
 describe("db/prisma", () => {
   beforeEach(() => {
     vi.resetModules();
     PrismaClientCtor.mockClear();
     disconnectMock.mockClear();
+    envMock.LOG_LEVEL = "info";
   });
 
   it("getPrismaClient() constructs and returns a PrismaClient instance", async () => {
@@ -52,6 +62,39 @@ describe("db/prisma", () => {
 
     expect(PrismaClientCtor).toHaveBeenCalledTimes(2);
     expect(second).not.toBe(first);
+  });
+
+  it("getPrismaClient() enables query/info logging when LOG_LEVEL is debug", async () => {
+    envMock.LOG_LEVEL = "debug";
+    const { getPrismaClient } = await import("../../src/db/prisma.js");
+
+    getPrismaClient();
+
+    expect(PrismaClientCtor).toHaveBeenCalledWith(
+      expect.objectContaining({ log: ["query", "info", "warn", "error"] }),
+    );
+  });
+
+  it("getPrismaClient() enables query/info logging when LOG_LEVEL is trace", async () => {
+    envMock.LOG_LEVEL = "trace";
+    const { getPrismaClient } = await import("../../src/db/prisma.js");
+
+    getPrismaClient();
+
+    expect(PrismaClientCtor).toHaveBeenCalledWith(
+      expect.objectContaining({ log: ["query", "info", "warn", "error"] }),
+    );
+  });
+
+  it("getPrismaClient() restricts logging to warn/error for a non-debug LOG_LEVEL", async () => {
+    envMock.LOG_LEVEL = "info";
+    const { getPrismaClient } = await import("../../src/db/prisma.js");
+
+    getPrismaClient();
+
+    expect(PrismaClientCtor).toHaveBeenCalledWith(
+      expect.objectContaining({ log: ["warn", "error"] }),
+    );
   });
 
   it("disconnectPrisma() is a safe no-op when no client was ever created", async () => {
