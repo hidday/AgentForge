@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach } from "vitest";
+import { describe, it, expect, afterEach, vi } from "vitest";
 import { logger } from "../../src/utils/logger.js";
 import { env } from "../../src/config/env.js";
 
@@ -23,18 +23,17 @@ describe("logger", () => {
 
     afterEach(() => {
       process.env.NODE_ENV = originalNodeEnv;
+      vi.resetModules();
     });
 
-    it("omits the pino-pretty transport when NODE_ENV is production", async () => {
+    it("constructs a logger with no transport (undefined branch) when NODE_ENV is production", async () => {
       process.env.NODE_ENV = "production";
-      let prodLogger: typeof logger;
-      await import("../../src/utils/logger.js").then((mod) => {
-        prodLogger = mod.logger;
-      });
-      // The module is cached across the test run (no vi.resetModules here) so
-      // this asserts the already-constructed logger still behaves correctly
-      // and that re-importing is stable/non-throwing under NODE_ENV=production.
-      expect(() => prodLogger.info("production mode smoke test")).not.toThrow();
+      vi.resetModules();
+
+      const mod = await import("../../src/utils/logger.js");
+
+      expect(mod.logger.level).toBe(env.LOG_LEVEL);
+      expect(() => mod.logger.info("production mode smoke test")).not.toThrow();
     });
   });
 });
