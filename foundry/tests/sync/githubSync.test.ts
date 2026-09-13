@@ -115,7 +115,9 @@ describe("GitHubSyncService.syncState", () => {
     const { githubClient, logger } = buildDeps();
     const svc = new GitHubSyncService(githubClient as never, logger as never);
 
-    await svc.syncState(makeRun({ prNumber: 42, repo: "acme/repo", state: RunState.ReadyForHumanReview }));
+    await svc.syncState(
+      makeRun({ prNumber: 42, repo: "acme/repo", state: RunState.ReadyForHumanReview }),
+    );
 
     expect(githubClient.markPRReady).toHaveBeenCalledWith("acme/repo", 42);
     expect(githubClient.commentOnPR).toHaveBeenCalledWith(
@@ -201,7 +203,11 @@ describe("GitHubSyncService.postReviewFindings", () => {
       "REQUEST_CHANGES",
     );
     expect(logger.info).toHaveBeenCalledWith(
-      expect.objectContaining({ mappedComments: 0, findingsCount: 1, verdict: "changes_requested" }),
+      expect.objectContaining({
+        mappedComments: 0,
+        findingsCount: 1,
+        verdict: "changes_requested",
+      }),
       "Posted review findings as PR review comments",
     );
   });
@@ -275,7 +281,10 @@ describe("GitHubSyncService.postExecutionReportUpdate", () => {
     const svc = new GitHubSyncService(githubClient as never, logger as never);
 
     const nineFiles = Array.from({ length: 9 }, (_, i) => `file${String(i)}.ts`);
-    const report = makeExecutionReport({ filesChanged: nineFiles, notes: ["Note one", "Note two"] });
+    const report = makeExecutionReport({
+      filesChanged: nineFiles,
+      notes: ["Note one", "Note two"],
+    });
 
     await svc.postExecutionReportUpdate("acme/repo", 9, report);
 
@@ -353,9 +362,7 @@ describe("GitHubSyncService.postRemediationResolutions", () => {
     expect(summaryBody).toContain("## AI Remediation Summary");
     expect(summaryBody).toContain("| :white_check_mark: **f1** | accepted | Fixed | R1 |");
     expect(summaryBody).toContain("| :no_entry_sign: **f2** | rejected | No change | R2 |");
-    expect(summaryBody).toContain(
-      "| :warning: **f3** | partially addressed | Partly fixed | R3 |",
-    );
+    expect(summaryBody).toContain("| :warning: **f3** | partially addressed | Partly fixed | R3 |");
 
     expect(logger.info).toHaveBeenCalledWith(
       {
@@ -414,9 +421,12 @@ describe("GitHubSyncService.postRemediationResolutions", () => {
     expect(githubClient.replyToReviewComment).not.toHaveBeenCalled();
     const summaryBody = githubClient.commentOnPR.mock.calls[0][2] as string;
     expect(summaryBody).toBe(
-      ["## AI Remediation Summary", "", "| Finding | Status | Action | Rationale |", "|---------|--------|--------|-----------|"].join(
-        "\n",
-      ),
+      [
+        "## AI Remediation Summary",
+        "",
+        "| Finding | Status | Action | Rationale |",
+        "|---------|--------|--------|-----------|",
+      ].join("\n"),
     );
     expect(logger.info).toHaveBeenCalledWith(
       expect.objectContaining({ resolutionCount: 0, repliedTo: 0 }),

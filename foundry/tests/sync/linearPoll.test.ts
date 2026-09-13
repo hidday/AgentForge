@@ -134,7 +134,12 @@ describe("LinearPollService.discoverPendingIssues", () => {
     const { linearClient, runRepo, orchestrator, repoRegistry, logger } = buildDeps();
     repoRegistry.listRepos.mockReturnValue([
       makeRepoEntry({ name: "proj-repo", linearProject: "Project X", linearTeam: undefined }),
-      makeRepoEntry({ name: "assignee-repo", linearProject: undefined, assigneeMe: true, linearTeam: "ENG" }),
+      makeRepoEntry({
+        name: "assignee-repo",
+        linearProject: undefined,
+        assigneeMe: true,
+        linearTeam: "ENG",
+      }),
       makeRepoEntry({ name: "irrelevant-repo", linearProject: undefined, assigneeMe: undefined }),
     ]);
 
@@ -233,10 +238,7 @@ describe("LinearPollService.startRunsForIssues", () => {
 
     expect(orchestrator.startRun).toHaveBeenCalledWith("issue-1");
     expect(result).toEqual({ started: ["issue-1"], skipped: [] });
-    expect(logger.info).toHaveBeenCalledWith(
-      { started: 1, skipped: 0 },
-      "Ingested Linear issues",
-    );
+    expect(logger.info).toHaveBeenCalledWith({ started: 1, skipped: 0 }, "Ingested Linear issues");
   });
 
   it("skips an issue that already has an active run without starting a new one", async () => {
@@ -322,9 +324,6 @@ describe("LinearPollService.startRunsForIssues", () => {
 
     const emptyResult = await svc.startRunsForIssues([]);
     expect(emptyResult).toEqual({ started: [], skipped: [] });
-    expect(logger.info).toHaveBeenCalledWith(
-      { started: 0, skipped: 0 },
-      "Ingested Linear issues",
-    );
+    expect(logger.info).toHaveBeenCalledWith({ started: 0, skipped: 0 }, "Ingested Linear issues");
   });
 });

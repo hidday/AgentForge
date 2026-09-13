@@ -32,7 +32,10 @@ function buildLogger() {
   };
 }
 
-function jsonResponse(ok: boolean, status = 200): { ok: boolean; status: number; text: () => Promise<string> } {
+function jsonResponse(
+  ok: boolean,
+  status = 200,
+): { ok: boolean; status: number; text: () => Promise<string> } {
   return { ok, status, text: () => Promise.resolve(ok ? "" : "error body from server") };
 }
 
@@ -63,7 +66,10 @@ describe("NotificationService.isConfigured", () => {
   });
 
   it("is false when only emailTo is configured without a resendApiKey", () => {
-    const config: NotificationConfig = { emailFrom: "bot@example.com", emailTo: "human@example.com" };
+    const config: NotificationConfig = {
+      emailFrom: "bot@example.com",
+      emailTo: "human@example.com",
+    };
     const svc = new NotificationService(config, buildLogger() as never);
     expect(svc.isConfigured()).toBe(false);
   });
@@ -503,7 +509,9 @@ describe("NotificationService email rendering branches", () => {
     expect(body.html).toContain("<strong>[required]</strong> Required one?");
     expect(body.html).toContain("Optional one?");
     expect(body.html).toContain("Plan confidence:</strong> 0.50");
-    expect(body.html).toContain('<a href="https://linear.app/team/issue/ENG-7">Open Linear issue</a>');
+    expect(body.html).toContain(
+      '<a href="https://linear.app/team/issue/ENG-7">Open Linear issue</a>',
+    );
 
     expect(body.text).toContain("[required] Required one?");
     expect(body.text).toContain("- Optional one?");
