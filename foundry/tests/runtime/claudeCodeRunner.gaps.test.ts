@@ -31,6 +31,84 @@ BEGIN_STRUCTURED_OUTPUT
 END_STRUCTURED_OUTPUT
 `;
 
+describe("ClaudeCodeRunner — process context propagation (input.runId)", () => {
+  it("run() passes a context object with runId/stage/runtime when input.runId is set", async () => {
+    const processRunner = makeMockProcessRunner({
+      stdout: JSON.stringify({ type: "result", result: validStructuredOutput }),
+      stderr: "",
+      exitCode: 0,
+      durationMs: 10,
+      timedOut: false,
+    });
+    const logger = makeMockLogger();
+    const runner = new ClaudeCodeRunner(
+      processRunner as never,
+      "claude",
+      [],
+      "claude-opus-4-8",
+      logger as never,
+    );
+
+    await runner.run(
+      { prompt: "x", workingDirectory: "/tmp", timeoutMs: 1000, runId: "run-123" },
+      "planner",
+      echoSchema,
+    );
+
+    const call = processRunner.execute.mock.calls[0]![0] as { context?: unknown };
+    expect(call.context).toEqual({ runId: "run-123", stage: "planner", runtime: "claude-code" });
+  });
+
+  it("run() passes undefined context when input.runId is not set", async () => {
+    const processRunner = makeMockProcessRunner({
+      stdout: JSON.stringify({ type: "result", result: validStructuredOutput }),
+      stderr: "",
+      exitCode: 0,
+      durationMs: 10,
+      timedOut: false,
+    });
+    const logger = makeMockLogger();
+    const runner = new ClaudeCodeRunner(
+      processRunner as never,
+      "claude",
+      [],
+      "claude-opus-4-8",
+      logger as never,
+    );
+
+    await runner.run({ prompt: "x", workingDirectory: "/tmp", timeoutMs: 1000 }, "planner", echoSchema);
+
+    const call = processRunner.execute.mock.calls[0]![0] as { context?: unknown };
+    expect(call.context).toBeUndefined();
+  });
+
+  it("chatRun() passes a context object with runId/stage/runtime when input.runId is set", async () => {
+    const processRunner = makeMockProcessRunner({
+      stdout: JSON.stringify({ type: "result", result: "hi", is_error: false }),
+      stderr: "",
+      exitCode: 0,
+      durationMs: 10,
+      timedOut: false,
+    });
+    const logger = makeMockLogger();
+    const runner = new ClaudeCodeRunner(
+      processRunner as never,
+      "claude",
+      [],
+      "claude-opus-4-8",
+      logger as never,
+    );
+
+    await runner.chatRun(
+      { prompt: "Hello", workingDirectory: "/tmp", timeoutMs: 1000, runId: "run-456" },
+      "chat",
+    );
+
+    const call = processRunner.execute.mock.calls[0]![0] as { context?: unknown };
+    expect(call.context).toEqual({ runId: "run-456", stage: "chat", runtime: "claude-code" });
+  });
+});
+
 describe("ClaudeCodeRunner.buildArgs — systemPrompt branch", () => {
   it("appends --system-prompt with the provided value when input.systemPrompt is set", async () => {
     const processRunner = makeMockProcessRunner({
