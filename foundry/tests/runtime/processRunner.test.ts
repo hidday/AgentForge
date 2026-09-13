@@ -640,7 +640,7 @@ describe("ProcessRunner executeReal: timeout handling", () => {
     expect(child.kill).not.toHaveBeenCalled();
 
     // Advancing time afterwards must not throw or double-settle the already-resolved promise.
-    await expect(vi.advanceTimersByTimeAsync(10_000)).resolves.toBeUndefined();
+    await vi.advanceTimersByTimeAsync(10_000);
     expect(child.kill).not.toHaveBeenCalled();
   });
 });
@@ -981,7 +981,7 @@ describe("ProcessRunner orphan polling: finalizeOrphan via tailLogForOrphan", ()
 
     fakeFileStore.delete(join(spoolDir, "live-3.json"));
 
-    await expect(vi.advanceTimersByTimeAsync(5000)).resolves.toBeUndefined();
+    await vi.advanceTimersByTimeAsync(5000);
     expect(runner.getActiveProcesses()).toEqual([]);
     expect(emitter.emitProcessCompleted).toHaveBeenCalled();
   });

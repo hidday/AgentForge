@@ -94,6 +94,44 @@ describe("POST /api/runs/:id/actions/re-review-plan", () => {
     await new Promise((resolve) => setTimeout(resolve, 10));
     expect(mockOrchestrator.runManualReReview).toHaveBeenCalled();
   });
+
+  it("logs a truncated message when runManualReReview rejects with a non-Error value", async () => {
+    const { app } = await buildApp({
+      runManualReReview: vi.fn().mockRejectedValue("background boom"),
+    });
+    const errorSpy = vi.fn();
+    app.log.error = errorSpy as never;
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/actions/re-review-plan",
+      payload: {},
+    });
+
+    expect(res.statusCode).toBe(200);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(errorSpy).toHaveBeenCalledWith(
+      { runId: "run-1", error: "background boom" },
+      "Manual re-review failed",
+    );
+  });
+
+  it("returns 400 when calling runManualReReview throws synchronously", async () => {
+    const { app } = await buildApp({
+      runManualReReview: vi.fn(() => {
+        throw new Error("sync failure");
+      }),
+    });
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/actions/re-review-plan",
+      payload: {},
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toEqual({ error: "sync failure" });
+  });
 });
 
 describe("POST /api/runs/:id/actions/revise-plan", () => {

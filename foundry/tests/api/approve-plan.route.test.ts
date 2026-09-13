@@ -123,6 +123,43 @@ describe("POST /api/runs/:id/actions/approve-plan", () => {
     expect(mockOrchestrator.runExecution).not.toHaveBeenCalled();
   });
 
+  it("returns 400 with String(err) when approvePlan rejects with a non-Error value", async () => {
+    const { app, mockOrchestrator } = await buildApp();
+    mockOrchestrator.approvePlan.mockRejectedValue("plain string failure");
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/actions/approve-plan",
+      payload: {},
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toEqual({ error: "plain string failure" });
+  });
+
+  it("logs a truncated message when the fire-and-forget runExecution rejects with a non-Error value", async () => {
+    const run = makeRun();
+    const { app, mockOrchestrator } = await buildApp({
+      runExecution: vi.fn().mockRejectedValue("background failure"),
+    });
+    mockOrchestrator.approvePlan.mockResolvedValue(run);
+    const errorSpy = vi.fn();
+    app.log.error = errorSpy as never;
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/actions/approve-plan",
+      payload: {},
+    });
+
+    expect(res.statusCode).toBe(200);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(errorSpy).toHaveBeenCalledWith(
+      { runId: "run-1", error: "background failure" },
+      "Execution failed",
+    );
+  });
+
   it("does not fail the request when the fire-and-forget runExecution rejects", async () => {
     const run = makeRun();
     const { app, mockOrchestrator } = await buildApp({
