@@ -57,9 +57,15 @@ function resetFakeFs() {
 
   fsMocks.readdirSync.mockReset().mockReturnValue([]);
 
+  // Note: deliberately does NOT create the backing file eagerly. Real
+  // fs.createWriteStream() opens the fd asynchronously, so a synchronous
+  // readFileSync() immediately after opening a *new* log file can race and
+  // throw ENOENT — the source code relies on this and catches it. Only
+  // materialize the fake file once something is actually written, so tests
+  // can exercise both that race (nothing written yet) and the normal path
+  // (content already flushed).
   fsMocks.createWriteStream.mockReset().mockImplementation((path: unknown) => {
     const key = String(path);
-    if (!fakeFileStore.has(key)) fakeFileStore.set(key, "");
     return {
       write: vi.fn((chunk: Buffer | string) => {
         fakeFileStore.set(key, (fakeFileStore.get(key) ?? "") + chunk.toString());
@@ -914,7 +920,11 @@ describe("ProcessRunner orphan polling: finalizeOrphan via tailLogForOrphan", ()
     fsMocks.readdirSync.mockReturnValueOnce(["live-2.json"]);
     fakeFileStore.set(join(spoolDir, "live-2.json"), JSON.stringify(manifest));
     const closeSpy = vi.fn();
-    fsMocks.watch.mockImplementationOnce(() => ({ close: closeSpy }));
+    let watchCb: (() => void) | undefined;
+    fsMocks.watch.mockImplementationOnce((_p: string, cb: () => void) => {
+      watchCb = cb;
+      return { close: closeSpy };
+    });
 
     let killCallCount = 0;
     vi.spyOn(process, "kill").mockImplementation(() => {
@@ -949,6 +959,11 @@ describe("ProcessRunner orphan polling: finalizeOrphan via tailLogForOrphan", ()
     expect(updatedManifest.exitCode).toBe(-1);
     expect(typeof updatedManifest.completedAt).toBe("string");
     expect(typeof updatedManifest.durationMs).toBe("number");
+
+    // A late-arriving fs.watch event after the entry was already finalized and
+    // removed should just close the (already-closed) watcher and return, not throw.
+    expect(() => watchCb?.()).not.toThrow();
+    expect(closeSpy).toHaveBeenCalledTimes(2);
   });
 
   it("finalizeOrphan tolerates a manifest file that vanished before finalization (best-effort)", async () => {
@@ -1015,5 +1030,45 @@ describe("ProcessRunner orphan polling: finalizeOrphan via tailLogForOrphan", ()
     expect(closeSpy).not.toHaveBeenCalled();
     expect(emitter.emitProcessCompleted).not.toHaveBeenCalled();
     expect(runner.getActiveProcesses()).toHaveLength(1);
+  });
+
+  it("tolerates the tracked entry disappearing concurrently right before a poll tick (defensive race-guard branches)", async () => {
+    const spoolDir = resolve("/spool-cc");
+    const manifest = {
+      id: "live-7",
+      pid: 33333,
+      command: "claude",
+      args: [],
+      runId: "r8",
+      stage: "executor",
+      runtime: "claude-code",
+      startedAt: new Date().toISOString(),
+      logFile: join(spoolDir, "live-7.log"),
+    };
+    fsMocks.readdirSync.mockReturnValueOnce(["live-7.json"]);
+    fakeFileStore.set(join(spoolDir, "live-7.json"), JSON.stringify(manifest));
+    fsMocks.watch.mockImplementationOnce(() => ({ close: vi.fn() }));
+
+    let killCalls = 0;
+    vi.spyOn(process, "kill").mockImplementation(() => {
+      killCalls += 1;
+      if (killCalls === 1) return true; // rehydrateOrphans' initial liveness check
+      throw new Error("no such process"); // the poll tick: pid 0 fallback also reads as dead
+    });
+
+    const emitter = makeEmitter();
+    const runner = new ProcessRunner("mock", logger as never, emitter as never, "/spool-cc");
+    runner.rehydrateOrphans();
+    expect(runner.getActiveProcesses()).toHaveLength(1);
+
+    // Simulate the entry being torn down by some other concurrent path
+    // (e.g. cleanupProcess) right before the poll interval's next tick, so
+    // both the `?? 0` pid fallback and finalizeOrphan's "already gone"
+    // early-return are exercised.
+    (runner as unknown as { activeProcesses: Map<string, unknown> }).activeProcesses.delete("live-7");
+
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(emitter.emitProcessCompleted).not.toHaveBeenCalled();
+    expect(runner.getActiveProcesses()).toEqual([]);
   });
 });

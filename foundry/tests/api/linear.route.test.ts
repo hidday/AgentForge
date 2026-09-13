@@ -69,6 +69,16 @@ describe("GET /api/linear/pending", () => {
     expect(res.statusCode).toBe(500);
     expect(res.json()).toEqual({ error: "Linear API down" });
   });
+
+  it("returns 500 with String(err) when discoverPendingIssues rejects with a non-Error value", async () => {
+    const discoverPendingIssues = vi.fn().mockRejectedValue("plain string failure");
+    const { app } = await buildApp({ discoverPendingIssues });
+
+    const res = await app.inject({ method: "GET", url: "/api/linear/pending" });
+
+    expect(res.statusCode).toBe(500);
+    expect(res.json()).toEqual({ error: "plain string failure" });
+  });
 });
 
 describe("POST /api/linear/ingest", () => {
@@ -151,5 +161,19 @@ describe("POST /api/linear/ingest", () => {
 
     expect(res.statusCode).toBe(500);
     expect(res.json()).toEqual({ error: "db unavailable" });
+  });
+
+  it("returns 500 with String(err) when startRunsForIssues rejects with a non-Error value", async () => {
+    const startRunsForIssues = vi.fn().mockRejectedValue("plain string failure");
+    const { app } = await buildApp({ startRunsForIssues });
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/linear/ingest",
+      payload: { issueIds: ["LIN-1"] },
+    });
+
+    expect(res.statusCode).toBe(500);
+    expect(res.json()).toEqual({ error: "plain string failure" });
   });
 });

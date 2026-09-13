@@ -132,6 +132,24 @@ describe("POST /api/runs/:id/actions/re-review-plan", () => {
     expect(res.statusCode).toBe(400);
     expect(res.json()).toEqual({ error: "sync failure" });
   });
+
+  it("returns 400 with String(err) when calling runManualReReview throws a non-Error value synchronously", async () => {
+    const { app } = await buildApp({
+      runManualReReview: vi.fn(() => {
+        // eslint-disable-next-line @typescript-eslint/no-throw-literal
+        throw "sync string failure";
+      }),
+    });
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/actions/re-review-plan",
+      payload: {},
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toEqual({ error: "sync string failure" });
+  });
 });
 
 describe("POST /api/runs/:id/actions/revise-plan", () => {
@@ -170,6 +188,62 @@ describe("POST /api/runs/:id/actions/revise-plan", () => {
     await new Promise((resolve) => setTimeout(resolve, 10));
     expect(mockOrchestrator.runManualPlanRevision).toHaveBeenCalled();
   });
+
+  it("logs a truncated message when runManualPlanRevision rejects with a non-Error value", async () => {
+    const { app } = await buildApp({
+      runManualPlanRevision: vi.fn().mockRejectedValue("background boom"),
+    });
+    const errorSpy = vi.fn();
+    app.log.error = errorSpy as never;
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/actions/revise-plan",
+      payload: {},
+    });
+
+    expect(res.statusCode).toBe(200);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(errorSpy).toHaveBeenCalledWith(
+      { runId: "run-1", error: "background boom" },
+      "Manual plan revision failed",
+    );
+  });
+
+  it("returns 400 when calling runManualPlanRevision throws synchronously", async () => {
+    const { app } = await buildApp({
+      runManualPlanRevision: vi.fn(() => {
+        throw new Error("sync failure");
+      }),
+    });
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/actions/revise-plan",
+      payload: {},
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toEqual({ error: "sync failure" });
+  });
+
+  it("returns 400 with String(err) when calling runManualPlanRevision throws a non-Error value synchronously", async () => {
+    const { app } = await buildApp({
+      runManualPlanRevision: vi.fn(() => {
+        // eslint-disable-next-line @typescript-eslint/no-throw-literal
+        throw "sync string failure";
+      }),
+    });
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/actions/revise-plan",
+      payload: {},
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toEqual({ error: "sync string failure" });
+  });
 });
 
 describe("POST /api/runs/:id/actions/approve-review", () => {
@@ -203,6 +277,19 @@ describe("POST /api/runs/:id/actions/approve-review", () => {
 
     expect(res.statusCode).toBe(400);
     expect(res.json()).toEqual({ error: "Wrong state" });
+  });
+
+  it("returns 400 with String(err) when approveHumanReview rejects with a non-Error value", async () => {
+    const { app, mockOrchestrator } = await buildApp();
+    mockOrchestrator.approveHumanReview.mockRejectedValue("plain string failure");
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/actions/approve-review",
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toEqual({ error: "plain string failure" });
   });
 });
 
@@ -254,6 +341,21 @@ describe("POST /api/runs/:id/actions/pause", () => {
     expect(res.statusCode).toBe(400);
     expect(res.json()).toEqual({ error: "Cannot pause a finished run" });
   });
+
+  it("returns 400 with String(err) when handleCommand rejects with a non-Error value", async () => {
+    const run = makeRun();
+    const { app, mockRunRepo, mockOrchestrator } = await buildApp();
+    mockRunRepo.findById.mockResolvedValue(run);
+    mockOrchestrator.handleCommand.mockRejectedValue("plain string failure");
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/actions/pause",
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toEqual({ error: "plain string failure" });
+  });
 });
 
 describe("POST /api/runs/:id/actions/resume", () => {
@@ -303,5 +405,20 @@ describe("POST /api/runs/:id/actions/resume", () => {
 
     expect(res.statusCode).toBe(400);
     expect(res.json()).toEqual({ error: "Cannot resume" });
+  });
+
+  it("returns 400 with String(err) when handleCommand rejects with a non-Error value", async () => {
+    const run = makeRun();
+    const { app, mockRunRepo, mockOrchestrator } = await buildApp();
+    mockRunRepo.findById.mockResolvedValue(run);
+    mockOrchestrator.handleCommand.mockRejectedValue("plain string failure");
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/actions/resume",
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toEqual({ error: "plain string failure" });
   });
 });

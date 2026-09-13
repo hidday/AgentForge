@@ -32,6 +32,7 @@ function makeRun(overrides: Record<string, unknown> = {}) {
 
 interface BuildAppOptions {
   run?: ReturnType<typeof makeRun>;
+  runNotFound?: boolean;
   existingEvents?: { eventType: string; createdAt: Date; payloadJson: unknown }[];
   registerOptions?: Record<string, unknown>;
 }
@@ -39,7 +40,10 @@ interface BuildAppOptions {
 async function buildApp(opts: BuildAppOptions = {}) {
   const run = opts.run ?? makeRun();
 
-  const mockRunRepo = { findById: vi.fn().mockResolvedValue(run), findAll: vi.fn() };
+  const mockRunRepo = {
+    findById: vi.fn().mockResolvedValue(opts.runNotFound ? null : run),
+    findAll: vi.fn(),
+  };
   const mockArtifactRepo = {
     findByRunId: vi.fn().mockResolvedValue([]),
     findLatestByType: vi.fn().mockResolvedValue(null),
@@ -86,6 +90,20 @@ async function buildApp(opts: BuildAppOptions = {}) {
 describe("POST /api/runs/:id/actions/request-human — default options and extra branches", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+  });
+
+  it("returns 404 when the run does not exist", async () => {
+    const { app, notificationService } = await buildApp({ runNotFound: true });
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/runs/missing-run/actions/request-human",
+      payload: { reason: "other", summary: "Needs eyes" },
+    });
+
+    expect(res.statusCode).toBe(404);
+    expect(res.json()).toEqual({ error: "Run not found" });
+    expect(notificationService.sendHumanRequest).not.toHaveBeenCalled();
   });
 
   it("uses the default 6h debounceHours and default uiBaseUrl when options are omitted", async () => {

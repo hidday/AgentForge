@@ -129,4 +129,22 @@ describe("POST /api/runs/:id/actions/retry", () => {
     await new Promise((resolve) => setTimeout(resolve, 10));
     expect(mockOrchestrator.runExecution).toHaveBeenCalledWith("run-1");
   });
+
+  it("logs a truncated message when the fire-and-forget trigger rejects with a non-Error value", async () => {
+    const run = makeRun(RunState.Implementing);
+    const { app, mockRunRepo, mockOrchestrator } = await buildApp();
+    mockRunRepo.findById.mockResolvedValue(run);
+    mockOrchestrator.runExecution.mockRejectedValue("background boom");
+    const errorSpy = vi.fn();
+    app.log.error = errorSpy as never;
+
+    const res = await app.inject({ method: "POST", url: "/api/runs/run-1/actions/retry" });
+
+    expect(res.statusCode).toBe(200);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(errorSpy).toHaveBeenCalledWith(
+      { runId: "run-1", error: "background boom" },
+      "Retry stage failed",
+    );
+  });
 });
