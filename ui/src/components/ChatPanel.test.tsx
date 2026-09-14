@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor, act } from "@testing-library/react";
+import { render, screen, waitFor, act, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { Artifact } from "@/api/client.ts";
 
@@ -250,5 +250,114 @@ describe("ChatPanel", () => {
       // "New question" should NOT appear
       expect(screen.queryByText("New question")).toBeNull();
     });
+  });
+
+  it("renders an empty string when a ChatMessage artifact has no content field", () => {
+    const artifacts: Artifact[] = [
+      {
+        id: "a1",
+        runId: RUN_ID,
+        type: "ChatMessage",
+        version: 1,
+        payloadJson: { role: "user" },
+        rawText: "",
+        createdAt: "2024-01-01T00:00:01Z",
+      },
+    ];
+    const { container } = render(<ChatPanel runId={RUN_ID} artifacts={artifacts} />);
+    // One message bubble renders with empty text content instead of crashing.
+    const bubble = container.querySelector(".justify-end .max-w-\\[85\\%\\]");
+    expect(bubble).not.toBeNull();
+    expect(bubble!.textContent).toBe("");
+  });
+
+  it("ignores a form-submit while a request is already in flight (isLoading guard)", async () => {
+    let resolveRequest!: (v: { reply: string; durationMs: number }) => void;
+    mockApi.sendChatMessage.mockReturnValue(
+      new Promise<{ reply: string; durationMs: number }>((res) => {
+        resolveRequest = res;
+      }),
+    );
+
+    render(<ChatPanel runId={RUN_ID} artifacts={[]} />);
+    const input = screen.getByPlaceholderText(/ask the agent/i);
+    await userEvent.type(input, "First question");
+    const form = input.closest("form") as HTMLFormElement;
+    fireEvent.submit(form);
+
+    await waitFor(() => {
+      expect(mockApi.sendChatMessage).toHaveBeenCalledTimes(1);
+    });
+
+    // Firing submit again while isLoading is true should be a no-op — the
+    // input value is unchanged (still "First question") and the trimmed
+    // guard's isLoading branch short-circuits before calling the API again.
+    fireEvent.submit(form);
+    expect(mockApi.sendChatMessage).toHaveBeenCalledTimes(1);
+
+    act(() => {
+      resolveRequest({ reply: "Done", durationMs: 10 });
+    });
+    await waitFor(() => {
+      expect(screen.queryByText(/agent is thinking/i)).toBeNull();
+    });
+  });
+
+  it("ignores a form-submit with only whitespace input (trimmed guard)", () => {
+    render(<ChatPanel runId={RUN_ID} artifacts={[]} />);
+    const input = screen.getByPlaceholderText(/ask the agent/i) as HTMLInputElement;
+    fireEvent.change(input, { target: { value: "   " } });
+    const form = input.closest("form") as HTMLFormElement;
+    fireEvent.submit(form);
+    expect(mockApi.sendChatMessage).not.toHaveBeenCalled();
+  });
+
+  it("shows a generic error message when the rejection is not an Error instance", async () => {
+    mockApi.sendChatMessage.mockRejectedValue("plain string failure");
+
+    render(<ChatPanel runId={RUN_ID} artifacts={[]} />);
+    const input = screen.getByPlaceholderText(/ask the agent/i);
+    await userEvent.type(input, "Question");
+    await userEvent.click(screen.getByRole("button", { name: /send/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText("Chat request failed")).toBeDefined();
+    });
+  });
+
+  it("collapses and re-expands the panel when the header button is clicked", async () => {
+    render(<ChatPanel runId={RUN_ID} artifacts={[]} />);
+
+    // Open by default: input is visible
+    expect(screen.getByPlaceholderText(/ask the agent/i)).toBeDefined();
+
+    const header = screen.getByText("Chat with Agent").closest("button") as HTMLButtonElement;
+    await userEvent.click(header);
+    expect(screen.queryByPlaceholderText(/ask the agent/i)).toBeNull();
+
+    await userEvent.click(header);
+    expect(screen.getByPlaceholderText(/ask the agent/i)).toBeDefined();
+  });
+
+  it("calls scrollIntoView on the anchor element when the message count changes", async () => {
+    const scrollIntoView = vi.fn();
+    const originalScrollIntoView = (
+      HTMLDivElement.prototype as unknown as { scrollIntoView?: () => void }
+    ).scrollIntoView;
+    HTMLDivElement.prototype.scrollIntoView = scrollIntoView;
+
+    try {
+      const artifacts: Artifact[] = [
+        makeArtifact("user", "Hi", "a1", "2024-01-01T00:00:01Z"),
+      ];
+      render(<ChatPanel runId={RUN_ID} artifacts={artifacts} />);
+
+      await waitFor(() => {
+        expect(scrollIntoView).toHaveBeenCalledWith({ behavior: "smooth" });
+      });
+    } finally {
+      (HTMLDivElement.prototype as unknown as { scrollIntoView?: () => void }).scrollIntoView =
+        originalScrollIntoView;
+    }
   });
 });
