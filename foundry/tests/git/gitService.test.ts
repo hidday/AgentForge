@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { mkdtempSync, writeFileSync, rmSync, existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -180,6 +180,58 @@ describe("GitService", () => {
       expect(existsSync(stalePath)).toBe(false);
 
       await svc.removeWorktree(repoPath, result.worktreePath);
+    });
+
+    it("removes and recreates the worktree when a worktree already exists at the computed path", async () => {
+      const warn = vi.fn();
+      const spiedSvc = new GitService({ ...noopLogger, warn } as never);
+
+      const runId = "aaaaaaaa-3456-7890-abcd-ef1234567890";
+      const branchName = "hidday/pry-77-existing-path";
+
+      // Pre-create a worktree at the exact deterministic path setupRunWorktree will compute,
+      // under a DIFFERENT branch, so the second call must remove it before recreating.
+      const shortId = runId.slice(0, 8);
+      const precomputedDirName = buildWorktreeDirName(shortId, branchName);
+      const precomputedPath = join(repoPath, ".worktrees", precomputedDirName);
+      await spiedSvc.createWorktree(repoPath, precomputedPath, "pry-77-placeholder", "main");
+      expect(existsSync(precomputedPath)).toBe(true);
+
+      const result = await spiedSvc.setupRunWorktree(repoPath, runId, "main", branchName);
+
+      expect(result.worktreePath).toBe(precomputedPath);
+      expect(await spiedSvc.currentBranch(result.worktreePath)).toBe(branchName);
+      expect(warn).toHaveBeenCalledWith(
+        { worktreePath: precomputedPath },
+        "Worktree path already exists, removing first",
+      );
+
+      await spiedSvc.removeWorktree(repoPath, result.worktreePath);
+    });
+
+    it("warns and still succeeds when origin/<branch> already exists on the remote", async () => {
+      const warn = vi.fn();
+      const spiedSvc = new GitService({ ...noopLogger, warn } as never);
+
+      const branchName = "hidday/pry-88-remote-exists";
+      // Push the branch to origin first so origin/<branch> already exists.
+      git(["checkout", "-b", branchName], repoPath);
+      git(["push", "origin", branchName], repoPath);
+      git(["checkout", "main"], repoPath);
+      git(["branch", "-D", branchName], repoPath);
+      git(["fetch", "origin"], repoPath);
+      expect(await spiedSvc.remoteBranchExists(repoPath, branchName)).toBe(true);
+
+      const runId = "bbbbbbbb-3456-7890-abcd-ef1234567890";
+      const result = await spiedSvc.setupRunWorktree(repoPath, runId, "main", branchName);
+
+      expect(await spiedSvc.currentBranch(result.worktreePath)).toBe(branchName);
+      expect(warn).toHaveBeenCalledWith(
+        { repoPath, branchName },
+        expect.stringContaining("origin/<branch> already exists"),
+      );
+
+      await spiedSvc.removeWorktree(repoPath, result.worktreePath);
     });
   });
 
