@@ -90,6 +90,31 @@ function buildPlanReviewerAgent() {
   return { agent, getPrompt: () => capturedPrompt };
 }
 
+describe("PlanReviewerAgent.run() operator note", () => {
+  it("injects the operator note into the prompt when provided", async () => {
+    const { agent, getPrompt } = buildPlanReviewerAgent();
+
+    await agent.run(makePlan(), makeTaskBundle(), "run-1", {
+      operatorNote: "Focus on the auth changes.",
+    });
+
+    const prompt = getPrompt();
+    expect(prompt).toContain("## Operator Note");
+    expect(prompt).toContain("Focus on the auth changes.");
+    expect(prompt).toContain("prefer `changes_requested`");
+  });
+
+  it("omits the operator note section when absent", async () => {
+    const { agent, getPrompt } = buildPlanReviewerAgent();
+
+    await agent.run(makePlan(), makeTaskBundle(), "run-1");
+
+    const prompt = getPrompt();
+    expect(prompt).not.toContain("## Operator Note");
+    expect(prompt).not.toContain("{{operatorNoteSection}}");
+  });
+});
+
 describe("PlanReviewerAgent.run() relatedContext rendering", () => {
   it("renders the Related Linear Context section when bundle has relatedContext", async () => {
     const { agent, getPrompt } = buildPlanReviewerAgent();
