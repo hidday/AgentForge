@@ -134,6 +134,41 @@ describe("RealLinearClient.getIssue", () => {
   });
 });
 
+describe("RealLinearClient.getRelatedContext: null-connection defaults", () => {
+  it("treats a null inverseRelations connection as no blockers", async () => {
+    const { client, sdk } = makeClient();
+    const focus = makeFakeIssue({
+      id: "focus-id",
+      parent: Promise.resolve(null),
+      inverseRelations: () =>
+        Promise.resolve(null as unknown as { nodes: Array<{ id: string; type: string; issue: Promise<FakeIssue> }> }),
+    });
+    sdk.issue.mockResolvedValue(focus);
+
+    const ctx = await client.getRelatedContext("focus-id");
+
+    expect(ctx.blockers).toEqual([]);
+  });
+
+  it("defaults labels to [] and state to 'Unknown' for a related issue with null labels/state", async () => {
+    const { client, sdk } = makeClient();
+    const parent = makeFakeIssue({
+      id: "parent-id",
+      labels: () => Promise.resolve(null),
+      state: Promise.resolve(null),
+    });
+    const focus = makeFakeIssue({ id: "focus-id", parent: Promise.resolve(parent) });
+    sdk.issue.mockImplementation((id: string) =>
+      Promise.resolve(id === "parent-id" ? parent : focus),
+    );
+
+    const ctx = await client.getRelatedContext("focus-id");
+
+    expect(ctx.parent?.labels).toEqual([]);
+    expect(ctx.parent?.state).toBe("Unknown");
+  });
+});
+
 describe("RealLinearClient.getRelatedContext: blocker hydration failure", () => {
   it("logs a warning and drops a blocker whose relation.issue rejects", async () => {
     const { client, sdk, logger } = makeClient();
@@ -230,6 +265,7 @@ describe("RealLinearClient.searchIssues", () => {
       nodes: [
         makeFakeIssue({
           id: "s2",
+          description: null,
           labels: () => Promise.resolve(null),
           project: Promise.resolve(null),
           cycle: Promise.resolve(null),
@@ -244,6 +280,7 @@ describe("RealLinearClient.searchIssues", () => {
     expect(result!.project).toBeUndefined();
     expect(result!.team).toBeUndefined();
     expect(result!.cycle).toBeUndefined();
+    expect(result!.description).toBe("");
   });
 
   it("logs the search summary", async () => {

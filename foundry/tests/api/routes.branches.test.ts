@@ -320,6 +320,44 @@ describe("re-review-plan / revise-plan routes: synchronous-throw branches", () =
     expect(res.json()).toEqual({ error: "sync re-review boom" });
   });
 
+  it("re-review-plan returns 400 with a stringified message on a non-Error synchronous throw", async () => {
+    const { app, mockOrchestrator } = buildApp();
+    await app.ready();
+    mockOrchestrator.runManualReReview.mockImplementation(() => {
+      // eslint-disable-next-line @typescript-eslint/no-throw-literal
+      throw "sync re-review string throw";
+    });
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/actions/re-review-plan",
+      payload: {},
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toEqual({ error: "sync re-review string throw" });
+  });
+
+  it("re-review-plan logs a stringified message when the background call rejects with a non-Error", async () => {
+    const { app, mockOrchestrator } = buildApp();
+    await app.ready();
+    const errorSpy = vi.spyOn(app.log, "error").mockImplementation(() => {});
+    mockOrchestrator.runManualReReview.mockRejectedValue("re-review string rejection");
+
+    await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/actions/re-review-plan",
+      payload: {},
+    });
+
+    await vi.waitFor(() => {
+      expect(errorSpy).toHaveBeenCalledWith(
+        expect.objectContaining({ runId: "run-1", error: "re-review string rejection" }),
+        "Manual re-review failed",
+      );
+    });
+  });
+
   it("revise-plan returns 400 when orchestrator.runManualPlanRevision throws synchronously", async () => {
     const { app, mockOrchestrator } = buildApp();
     await app.ready();
@@ -335,6 +373,44 @@ describe("re-review-plan / revise-plan routes: synchronous-throw branches", () =
 
     expect(res.statusCode).toBe(400);
     expect(res.json()).toEqual({ error: "sync revise boom" });
+  });
+
+  it("revise-plan returns 400 with a stringified message on a non-Error synchronous throw", async () => {
+    const { app, mockOrchestrator } = buildApp();
+    await app.ready();
+    mockOrchestrator.runManualPlanRevision.mockImplementation(() => {
+      // eslint-disable-next-line @typescript-eslint/no-throw-literal
+      throw "sync revise string throw";
+    });
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/actions/revise-plan",
+      payload: {},
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toEqual({ error: "sync revise string throw" });
+  });
+
+  it("revise-plan logs a stringified message when the background call rejects with a non-Error", async () => {
+    const { app, mockOrchestrator } = buildApp();
+    await app.ready();
+    const errorSpy = vi.spyOn(app.log, "error").mockImplementation(() => {});
+    mockOrchestrator.runManualPlanRevision.mockRejectedValue("revise string rejection");
+
+    await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/actions/revise-plan",
+      payload: {},
+    });
+
+    await vi.waitFor(() => {
+      expect(errorSpy).toHaveBeenCalledWith(
+        expect.objectContaining({ runId: "run-1", error: "revise string rejection" }),
+        "Manual plan revision failed",
+      );
+    });
   });
 });
 
@@ -392,6 +468,21 @@ describe("answer-questions route: generic Error fallback branch", () => {
 
     expect(res.statusCode).toBe(400);
     expect(res.json()).toEqual({ error: "totally unexpected failure" });
+  });
+
+  it("returns 400 with a stringified message for a non-Error, non-typed rejection", async () => {
+    const { app, mockOrchestrator } = buildApp();
+    await app.ready();
+    mockOrchestrator.answerQuestions.mockRejectedValue("plain string rejection");
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/actions/answer-questions",
+      payload: { answers: [{ questionId: "q1", answer: "a1" }] },
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toEqual({ error: "plain string rejection" });
   });
 });
 

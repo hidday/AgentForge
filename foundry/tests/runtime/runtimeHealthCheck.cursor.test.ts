@@ -63,6 +63,20 @@ describe("RuntimeHealthCheck: cursor exitCodeOnly auth probe (forced required)",
     expect(cursorResult?.authCheck.error).toContain("not logged in");
   });
 
+  it("falls back to stdout in the error message when stderr is empty", async () => {
+    processRunner.execute.mockImplementation(async ({ command, args }) => {
+      if (args.includes("--version")) return ok(`${command} v1.0.0`);
+      if (command === "claude") return ok('{"loggedIn": true}');
+      if (command === "codex") return ok("PONG");
+      return ok("stdout failure detail", "", 1);
+    });
+
+    await expect(check.runPreflight()).rejects.toThrow(PreflightError);
+    const cursorResult = check.getLastResult()?.results.find((r) => r.runtime === "cursor");
+    expect(cursorResult?.authCheck.error).toContain("Exit code 1");
+    expect(cursorResult?.authCheck.error).toContain("stdout failure detail");
+  });
+
   it("passes auth check via exitCodeOnly on exit code 0 regardless of output", async () => {
     processRunner.execute.mockImplementation(async ({ command, args }) => {
       if (args.includes("--version")) return ok(`${command} v1.0.0`);

@@ -147,6 +147,22 @@ describe("RuntimeHealthCheck.runPreflight", () => {
     expect(codexResult?.binaryCheck.error).toBe("Timed out after 5000ms");
   });
 
+  it("stringifies a non-Error thrown from the binary check", async () => {
+    processRunner.execute.mockImplementation(async ({ command, args }) => {
+      if (command === "codex" && args.includes("--version")) {
+        // eslint-disable-next-line @typescript-eslint/no-throw-literal
+        throw "codex binary check string failure";
+      }
+      if (args.includes("--version")) return ok(`${command} v1.0.0`);
+      if (command === "claude") return ok('{"loggedIn": true}');
+      return ok("PONG");
+    });
+
+    await expect(check.runPreflight()).rejects.toThrow(PreflightError);
+    const codexResult = check.getLastResult()?.results.find((r) => r.runtime === "codex");
+    expect(codexResult?.binaryCheck.error).toBe("codex binary check string failure");
+  });
+
   it("marks binary check failed when the process throws (spawn error)", async () => {
     processRunner.execute.mockImplementation(async ({ command, args }) => {
       if (command === "codex" && args.includes("--version")) {
@@ -271,6 +287,20 @@ describe("RuntimeHealthCheck.runPreflight", () => {
     const claudeResult = check.getLastResult()?.results.find((r) => r.runtime === "claude-code");
     expect(claudeResult?.authCheck.ok).toBe(false);
     expect(claudeResult?.authCheck.error).toBe("auth probe crashed");
+  });
+
+  it("stringifies a non-Error thrown from the auth probe", async () => {
+    processRunner.execute.mockImplementation(async ({ command, args }) => {
+      if (args.includes("--version")) return ok(`${command} v1.0.0`);
+      // eslint-disable-next-line @typescript-eslint/no-throw-literal
+      if (command === "claude") throw "auth probe string failure";
+      if (command === "cursor") return ok();
+      return ok("PONG");
+    });
+
+    await expect(check.runPreflight()).rejects.toThrow(PreflightError);
+    const claudeResult = check.getLastResult()?.results.find((r) => r.runtime === "claude-code");
+    expect(claudeResult?.authCheck.error).toBe("auth probe string failure");
   });
 
   it("passes stdinData through to the auth probe when configured (codex)", async () => {

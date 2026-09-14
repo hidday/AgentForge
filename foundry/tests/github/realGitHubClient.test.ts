@@ -57,6 +57,11 @@ function apiError(status: number, message = "api error"): Error & { status: numb
   return Object.assign(new Error(message), { status });
 }
 
+/** A non-Error rejection value carrying a `status`, as some HTTP clients throw. */
+function nonErrorApiError(status: number, message = "plain rejection"): { status: number } {
+  return { status, toString: () => message };
+}
+
 beforeEach(() => {
   octokitInstances.length = 0;
   vi.clearAllMocks();
@@ -99,6 +104,15 @@ describe("RealGitHubClient.verifyRepoAccess", () => {
       expect((err as Error).cause).toBe(original);
     }
   });
+
+  it("stringifies a non-Error rejection in the wrapped message", async () => {
+    const { client, octokit } = makeClient();
+    octokit.repos.get.mockRejectedValue("plain rejection reason");
+
+    await expect(client.verifyRepoAccess("acme/widgets")).rejects.toThrow(
+      /Original: plain rejection reason/,
+    );
+  });
 });
 
 describe("RealGitHubClient.getDefaultBranch", () => {
@@ -115,6 +129,15 @@ describe("RealGitHubClient.getDefaultBranch", () => {
 
     await expect(client.getDefaultBranch("acme/widgets")).rejects.toThrow(
       'GitHub getDefaultBranch failed for "acme/widgets": boom',
+    );
+  });
+
+  it("stringifies a non-Error rejection (wrapError's fallback branch)", async () => {
+    const { client, octokit } = makeClient();
+    octokit.repos.get.mockRejectedValue("network hiccup");
+
+    await expect(client.getDefaultBranch("acme/widgets")).rejects.toThrow(
+      'GitHub getDefaultBranch failed for "acme/widgets": network hiccup',
     );
   });
 });
@@ -245,6 +268,16 @@ describe("RealGitHubClient.createDraftPR", () => {
     await expect(client.createDraftPR("acme/widgets", "feat", "main", "T", "B")).rejects.toThrow(
       /GitHub createDraftPR failed.*network down/,
     );
+  });
+
+  it("treats a non-Error 422 rejection as a duplicate-PR case (message stringified, no field-validation match)", async () => {
+    const { client, octokit } = makeClient();
+    octokit.pulls.create.mockRejectedValue(nonErrorApiError(422, "duplicate"));
+    octokit.pulls.list.mockResolvedValue({ data: [{ number: 88 }] });
+
+    const num = await client.createDraftPR("acme/widgets", "feat", "main", "T", "B");
+
+    expect(num).toBe(88);
   });
 });
 
@@ -493,6 +526,18 @@ describe("RealGitHubClient.replyToReviewComment", () => {
       "Failed to reply to PR review comment, skipping",
     );
   });
+
+  it("stringifies a non-Error rejection in the warning", async () => {
+    const { client, octokit, logger } = makeClient();
+    octokit.pulls.createReplyForReviewComment.mockRejectedValue("comment gone");
+
+    await client.replyToReviewComment("acme/widgets", 5, 501, "thanks");
+
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.objectContaining({ error: "comment gone" }),
+      "Failed to reply to PR review comment, skipping",
+    );
+  });
 });
 
 describe("RealGitHubClient.submitPRReview", () => {
@@ -555,6 +600,15 @@ describe("RealGitHubClient.submitPRReview", () => {
 
     await expect(client.submitPRReview("acme/widgets", 5, "note", "APPROVE")).rejects.toThrow(
       /GitHub submitPRReview failed.*service unavailable/,
+    );
+  });
+
+  it("throws a wrapped, stringified error for a non-Error rejection", async () => {
+    const { client, octokit } = makeClient();
+    octokit.pulls.createReview.mockRejectedValue("service down");
+
+    await expect(client.submitPRReview("acme/widgets", 5, "note", "APPROVE")).rejects.toThrow(
+      /GitHub submitPRReview failed.*service down/,
     );
   });
 });

@@ -315,6 +315,21 @@ describe("NotificationService.sendHumanRequest", () => {
       expect(body.text).not.toContain("Linear:");
     });
 
+    it("falls back to '(untitled)' in the subject, html and text when linearIssue.title is null", async () => {
+      fetchMock.mockResolvedValue(okResponse());
+      const svc = new NotificationService(config, logger as never);
+
+      await svc.sendHumanRequest(
+        makePayload({ linearIssue: { id: "issue-1", title: null, url: null } }),
+      );
+
+      const [, init] = fetchMock.mock.calls[0]!;
+      const body = JSON.parse(init.body as string);
+      expect(body.subject).toContain("(untitled)");
+      expect(body.html).toContain("(untitled)");
+      expect(body.text).toContain("(untitled)");
+    });
+
     it("marks ok:false and logs a warning on a non-2xx response", async () => {
       fetchMock.mockResolvedValue(failResponse(422, "invalid_recipient"));
       const svc = new NotificationService(config, logger as never);
