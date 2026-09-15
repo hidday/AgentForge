@@ -1,165 +1,138 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect } from "vitest";
 import { render, screen } from "@testing-library/react";
+import { WorkflowStepper } from "./WorkflowStepper.tsx";
 import type { RunEventRecord } from "@/api/client.ts";
 
-vi.mock("lucide-react", () => {
-  function makeIcon(name: string) {
-    return function MockIcon({ className }: { className?: string }) {
-      return <div data-testid={`icon-${name}`} className={className} />;
-    };
-  }
+function makeEvent(overrides: Partial<RunEventRecord> = {}): RunEventRecord {
   return {
-    Check: makeIcon("check"),
-    Circle: makeIcon("circle"),
-    Loader2: makeIcon("loader2"),
-  };
-});
-
-import { WorkflowStepper } from "./WorkflowStepper.tsx";
-
-const HAPPY_PATH_LABELS = [
-  "To Do",
-  "Planning",
-  "Plan Review",
-  "Awaiting Approval",
-  "Implementing",
-  "AI Review",
-  "Human Review",
-  "Done",
-];
-
-function makeEvent(overrides: Partial<RunEventRecord> & { id: string }): RunEventRecord {
-  return {
-    id: overrides.id,
+    id: "evt-1",
     runId: "run-1",
-    eventType: "SOME_EVENT",
+    eventType: "PLAN_CREATED",
     source: "agent",
     payloadJson: null,
-    createdAt: "2024-01-01T00:00:00.000Z",
+    createdAt: new Date().toISOString(),
     ...overrides,
   };
 }
 
 describe("WorkflowStepper", () => {
-  it("renders all 8 happy-path step labels", () => {
+  it("renders the Workflow header and all happy-path state labels", () => {
     render(<WorkflowStepper currentState="Todo" events={[]} />);
-    for (const label of HAPPY_PATH_LABELS) {
-      expect(screen.getByText(label)).toBeDefined();
-    }
+    expect(screen.getByText("Workflow")).toBeDefined();
+    expect(screen.getByText("To Do")).toBeDefined();
+    expect(screen.getByText("Planning")).toBeDefined();
+    expect(screen.getByText("Plan Review")).toBeDefined();
+    expect(screen.getByText("Awaiting Approval")).toBeDefined();
+    expect(screen.getByText("Implementing")).toBeDefined();
+    expect(screen.getByText("AI Review")).toBeDefined();
+    expect(screen.getByText("Human Review")).toBeDefined();
+    expect(screen.getByText("Done")).toBeDefined();
   });
 
-  it("marks steps before the current state as completed, the current step as current, and later steps as upcoming", () => {
-    render(<WorkflowStepper currentState="Implementing" events={[]} />);
-
-    // Completed: To Do, Planning, Plan Review, Awaiting Approval
-    for (const label of ["To Do", "Planning", "Plan Review", "Awaiting Approval"]) {
-      const row = screen.getByText(label).closest("div.min-w-0")?.parentElement;
-      expect(row?.querySelector('[data-testid="icon-check"]')).not.toBeNull();
-      expect(screen.getByText(label).className).toContain("text-state-done");
-    }
-
-    // Current: Implementing
-    const currentRow = screen.getByText("Implementing").closest("div.min-w-0")?.parentElement;
-    expect(currentRow?.querySelector('[data-testid="icon-loader2"]')).not.toBeNull();
-    expect(screen.getByText("Implementing").className).toContain("text-accent");
-
-    // Upcoming: AI Review, Human Review, Done
-    for (const label of ["AI Review", "Human Review", "Done"]) {
-      const row = screen.getByText(label).closest("div.min-w-0")?.parentElement;
-      expect(row?.querySelector('[data-testid="icon-circle"]')).not.toBeNull();
-      expect(screen.getByText(label).className).toContain("text-text-muted");
-    }
+  it("marks the current state and does not render the side-state panel for a happy-path state", () => {
+    const { container } = render(
+      <WorkflowStepper currentState="Implementing" events={[]} />,
+    );
+    const label = screen.getByText("Implementing");
+    expect(label.className).toContain("text-accent");
+    // No side-state panel should exist
+    expect(container.querySelectorAll(".animate-pulse-dot").length).toBe(0);
   });
 
-  it("marks every step as completed when currentState is Done", () => {
+  it("marks earlier states as completed with the done color and a check icon", () => {
+    const { container } = render(
+      <WorkflowStepper currentState="Implementing" events={[]} />,
+    );
+    const todoLabel = screen.getByText("To Do");
+    expect(todoLabel.className).toContain("text-state-done");
+    // Check icons rendered for completed steps (lucide Check icon)
+    expect(container.querySelectorAll("svg").length).toBeGreaterThan(0);
+  });
+
+  it("marks later states as upcoming with the muted color", () => {
+    render(<WorkflowStepper currentState="Planning" events={[]} />);
+    const doneLabel = screen.getByText("Done");
+    expect(doneLabel.className).toContain("text-text-muted");
+  });
+
+  it("marks all steps completed when currentState is Done, including earlier steps", () => {
     render(<WorkflowStepper currentState="Done" events={[]} />);
-
-    for (const label of HAPPY_PATH_LABELS) {
-      const row = screen.getByText(label).closest("div.min-w-0")?.parentElement;
-      expect(row?.querySelector('[data-testid="icon-check"]')).not.toBeNull();
-    }
-    expect(screen.queryByTestId("icon-circle")).toBeNull();
+    // The Done step is both completed and current; tailwind-merge keeps the
+    // last conflicting text-color utility, so "text-accent" (current) wins
+    // over "text-state-done" (completed) for this specific label.
+    const doneLabel = screen.getByText("Done");
+    expect(doneLabel.className).toContain("text-accent");
+    const todoLabel = screen.getByText("To Do");
+    expect(todoLabel.className).toContain("text-state-done");
   });
 
-  it.each([
-    ["PlanRevision", "Revising Plan"],
-    ["AddressingReview", "Addressing Review"],
-    ["AIBlocked", "Blocked"],
-    ["HumanClarificationNeeded", "Needs Clarification"],
-  ])("renders the side-state banner with the correct label for %s", (state, expectedLabel) => {
-    render(<WorkflowStepper currentState={state} events={[]} />);
-    expect(screen.getByText(expectedLabel)).toBeDefined();
+  it("shows a timestamp for a state that appears as a 'to' target in events", () => {
+    const events = [
+      makeEvent({
+        eventType: "PLAN_APPROVED",
+        payloadJson: { to: "Implementing" },
+        createdAt: new Date(Date.now() - 5 * 60 * 1000).toISOString(),
+      }),
+    ];
+    render(<WorkflowStepper currentState="Implementing" events={events} />);
+    expect(screen.getByText("5m ago")).toBeDefined();
   });
 
-  it("does not render a side-state banner for a happy-path state", () => {
-    render(<WorkflowStepper currentState="Implementing" events={[]} />);
-    expect(screen.queryByText("Revising Plan")).toBeNull();
-    expect(screen.queryByText("Addressing Review")).toBeNull();
+  it("uses the earliest event's timestamp when multiple events target the same state", () => {
+    const events = [
+      makeEvent({
+        id: "e1",
+        payloadJson: { to: "Implementing" },
+        createdAt: new Date(Date.now() - 10 * 60 * 1000).toISOString(),
+      }),
+      makeEvent({
+        id: "e2",
+        payloadJson: { to: "Implementing" },
+        createdAt: new Date(Date.now() - 2 * 60 * 1000).toISOString(),
+      }),
+    ];
+    render(<WorkflowStepper currentState="Implementing" events={events} />);
+    // First-seen (10m ago) wins because stateTimestamps.has() guards against overwrite
+    expect(screen.getByText("10m ago")).toBeDefined();
+    expect(screen.queryByText("2m ago")).toBeNull();
   });
 
-  it("shows the blocked-red dot for a blocked side-state and the active-pulse dot for a non-blocked side-state", () => {
-    const { container: blockedContainer } = render(
-      <WorkflowStepper currentState="AIBlocked" events={[]} />,
+  it("ignores events without a payload 'to' field", () => {
+    const events = [makeEvent({ payloadJson: null })];
+    const { container } = render(
+      <WorkflowStepper currentState="Todo" events={events} />,
     );
-    const blockedDot = blockedContainer.querySelector(".bg-state-blocked");
-    expect(blockedDot).not.toBeNull();
-
-    const { container: activeContainer } = render(
-      <WorkflowStepper currentState="PlanRevision" events={[]} />,
-    );
-    const activeDot = activeContainer.querySelector(".bg-state-active.animate-pulse-dot");
-    expect(activeDot).not.toBeNull();
+    expect(container.textContent).not.toContain("ago");
   });
 
-  it("marks the happy-path steps preceding a side-state's mapped step as completed", () => {
-    // PlanRevision maps to "PlanReview" (index 2): Todo and Planning (indices 0,1) should be completed.
-    render(<WorkflowStepper currentState="PlanRevision" events={[]} />);
+  describe("side states", () => {
+    it("renders 'Revising Plan' for PlanRevision and maps effective progress to PlanReview", () => {
+      render(<WorkflowStepper currentState="PlanRevision" events={[]} />);
+      expect(screen.getByText("Revising Plan")).toBeDefined();
+      // PlanReview itself should not be marked "current" (PlanRevision isn't literally PlanReview)
+      const planReviewLabel = screen.getByText("Plan Review");
+      expect(planReviewLabel.className).not.toContain("text-accent");
+    });
 
-    for (const label of ["To Do", "Planning"]) {
-      const row = screen.getByText(label).closest("div.min-w-0")?.parentElement;
-      expect(row?.querySelector('[data-testid="icon-check"]')).not.toBeNull();
-    }
-  });
+    it("renders 'Addressing Review' for AddressingReview with active pulse styling", () => {
+      const { container } = render(
+        <WorkflowStepper currentState="AddressingReview" events={[]} />,
+      );
+      expect(screen.getByText("Addressing Review")).toBeDefined();
+      expect(container.querySelector(".bg-state-active")).not.toBeNull();
+    });
 
-  it("renders a per-step relative timestamp when events include a matching payloadJson.to", () => {
-    const events: RunEventRecord[] = [
-      makeEvent({ id: "e1", payloadJson: { to: "Planning" }, createdAt: "2024-01-01T00:00:00.000Z" }),
-    ];
-    render(<WorkflowStepper currentState="Implementing" events={events} />);
+    it("renders 'Blocked' for AIBlocked with blocked dot styling", () => {
+      const { container } = render(
+        <WorkflowStepper currentState="AIBlocked" events={[]} />,
+      );
+      expect(screen.getByText("Blocked")).toBeDefined();
+      expect(container.querySelector(".bg-state-blocked")).not.toBeNull();
+    });
 
-    const planningLabel = screen.getByText("Planning");
-    const planningRow = planningLabel.closest("div.min-w-0");
-    expect(planningRow?.textContent).toMatch(/ago$/);
-  });
-
-  it("does not render a timestamp for a step with no matching event", () => {
-    render(<WorkflowStepper currentState="Implementing" events={[]} />);
-
-    const todoRow = screen.getByText("To Do").closest("div.min-w-0");
-    expect(todoRow?.textContent).toBe("To Do");
-  });
-
-  it("ignores events whose payload has no 'to' field when building timestamps", () => {
-    const events: RunEventRecord[] = [
-      makeEvent({ id: "e1", payloadJson: { from: "Todo" } }),
-      makeEvent({ id: "e2", payloadJson: null }),
-    ];
-    render(<WorkflowStepper currentState="Implementing" events={events} />);
-
-    const todoRow = screen.getByText("To Do").closest("div.min-w-0");
-    expect(todoRow?.textContent).toBe("To Do");
-  });
-
-  it("keeps only the earliest timestamp when multiple events transition to the same state", () => {
-    const events: RunEventRecord[] = [
-      makeEvent({ id: "e1", payloadJson: { to: "Planning" }, createdAt: "2024-01-01T00:00:00.000Z" }),
-      makeEvent({ id: "e2", payloadJson: { to: "Planning" }, createdAt: "2020-06-15T00:00:00.000Z" }),
-    ];
-    render(<WorkflowStepper currentState="Implementing" events={events} />);
-
-    // Only one timestamp note is rendered for "Planning" (the first event's, not the second's).
-    const planningRow = screen.getByText("Planning").closest("div.min-w-0");
-    const timestampEls = planningRow?.querySelectorAll(".text-\\[10px\\].text-text-muted");
-    expect(timestampEls?.length).toBe(1);
+    it("renders 'Needs Clarification' for HumanClarificationNeeded", () => {
+      render(<WorkflowStepper currentState="HumanClarificationNeeded" events={[]} />);
+      expect(screen.getByText("Needs Clarification")).toBeDefined();
+    });
   });
 });

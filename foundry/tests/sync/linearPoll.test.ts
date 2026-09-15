@@ -1,14 +1,10 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { LinearPollService } from "../../src/sync/linearPoll.js";
-import type { LinearClient, LinearIssue } from "../../src/linear/linearClient.js";
-import type { RunRepository } from "../../src/orchestrator/runRepository.js";
-import type { OrchestratorService } from "../../src/orchestrator/orchestratorService.js";
-import type { RepoRegistry, RepoEntry } from "../../src/config/repoRegistry.js";
-import type { Run } from "../../src/domain/types.js";
-import type { Logger } from "../../src/utils/logger.js";
+import type { LinearIssue } from "../../src/linear/linearClient.js";
+import type { RepoEntry } from "../../src/config/repoRegistry.js";
 
 function makeLogger() {
-  return { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() } as unknown as Logger;
+  return { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
 }
 
 function makeRepoEntry(overrides: Partial<RepoEntry> = {}): RepoEntry {
@@ -16,7 +12,7 @@ function makeRepoEntry(overrides: Partial<RepoEntry> = {}): RepoEntry {
     name: "repo-a",
     directory: "repo-a",
     defaultBranch: "main",
-    allowedPaths: ["src/"],
+    allowedPaths: [],
     protectedPaths: [],
     constraints: {
       requiredChecks: [],
@@ -31,11 +27,10 @@ function makeRepoEntry(overrides: Partial<RepoEntry> = {}): RepoEntry {
 
 function makeIssue(overrides: Partial<LinearIssue> = {}): LinearIssue {
   return {
-    id: "issue-1",
-    identifier: "ENG-1",
+    id: "iss-1",
     title: "Do the thing",
-    description: "Details",
-    branchName: "ai/eng-1",
+    description: "desc",
+    branchName: "ai/iss-1",
     state: "Todo",
     labels: [],
     priority: 0,
@@ -43,173 +38,255 @@ function makeIssue(overrides: Partial<LinearIssue> = {}): LinearIssue {
   };
 }
 
-function makeLinearClient(): LinearClient {
-  return {
-    getIssue: vi.fn(),
-    getRelatedContext: vi.fn(),
-    searchIssues: vi.fn().mockResolvedValue([]),
-    postComment: vi.fn(),
-    updateIssueState: vi.fn(),
-    addLabel: vi.fn(),
-    removeLabel: vi.fn(),
-    listLabels: vi.fn(),
-  } as unknown as LinearClient;
-}
-
-function makeRunRepo(activeRun: Run | null = null): RunRepository {
-  return {
-    findActiveByIssueId: vi.fn().mockResolvedValue(activeRun),
-  } as unknown as RunRepository;
-}
-
-function makeOrchestrator(): OrchestratorService {
-  return {
-    startRun: vi.fn().mockResolvedValue({}),
-  } as unknown as OrchestratorService;
-}
-
-function makeRepoRegistry(repos: RepoEntry[]): RepoRegistry {
-  return {
-    listRepos: vi.fn().mockReturnValue(repos),
-  } as unknown as RepoRegistry;
-}
-
 describe("LinearPollService.discoverPendingIssues", () => {
-  let logger: Logger;
+  it("returns [] and logs a warning when no repo has linearProject or assigneeMe configured", async () => {
+    const logger = makeLogger();
+    const repoRegistry = {
+      listRepos: vi.fn().mockReturnValue([makeRepoEntry()]),
+    };
+    const linearClient = { searchIssues: vi.fn() };
+    const runRepo = { findActiveByIssueId: vi.fn() };
+    const orchestrator = { startRun: vi.fn() };
 
-  beforeEach(() => {
-    logger = makeLogger();
-  });
+    const svc = new LinearPollService(
+      linearClient as never,
+      runRepo as never,
+      orchestrator as never,
+      repoRegistry as never,
+      logger as never,
+    );
 
-  it("filters repos to those with linearProject or assigneeMe and builds the expected filters", async () => {
-    const repos = [
-      makeRepoEntry({ name: "with-project", linearProject: "Project X", linearTeam: "PRX" }),
-      makeRepoEntry({ name: "with-assignee", assigneeMe: true }),
-      makeRepoEntry({ name: "neither" }),
-    ];
-    const linearClient = makeLinearClient();
-    const runRepo = makeRunRepo(null);
-    const orchestrator = makeOrchestrator();
-    const repoRegistry = makeRepoRegistry(repos);
-
-    const service = new LinearPollService(linearClient, runRepo, orchestrator, repoRegistry, logger);
-    await service.discoverPendingIssues();
-
-    expect(linearClient.searchIssues).toHaveBeenCalledTimes(2);
-    expect(linearClient.searchIssues).toHaveBeenCalledWith({
-      projectName: "Project X",
-      assigneeMe: undefined,
-      team: "PRX",
-      state: "Todo",
-    });
-    expect(linearClient.searchIssues).toHaveBeenCalledWith({
-      projectName: undefined,
-      assigneeMe: true,
-      team: undefined,
-      state: "Todo",
-    });
-  });
-
-  it("warns and returns [] when no filters are configured", async () => {
-    const repos = [makeRepoEntry({ name: "neither" })];
-    const linearClient = makeLinearClient();
-    const runRepo = makeRunRepo(null);
-    const orchestrator = makeOrchestrator();
-    const repoRegistry = makeRepoRegistry(repos);
-
-    const service = new LinearPollService(linearClient, runRepo, orchestrator, repoRegistry, logger);
-    const result = await service.discoverPendingIssues();
+    const result = await svc.discoverPendingIssues();
 
     expect(result).toEqual([]);
+    expect(linearClient.searchIssues).not.toHaveBeenCalled();
     expect(logger.warn).toHaveBeenCalledWith(
       "No Linear projects or assigneeMe repos configured in repo registry",
     );
-    expect(linearClient.searchIssues).not.toHaveBeenCalled();
   });
 
-  it("de-duplicates issue ids seen across multiple filters/repos", async () => {
+  it("builds one search filter per configured repo and returns candidates with no active run", async () => {
     const repos = [
-      makeRepoEntry({ name: "repo-a", assigneeMe: true }),
-      makeRepoEntry({ name: "repo-b", linearProject: "Project Y" }),
+      makeRepoEntry({ name: "repo-a", linearProject: "Project A" }),
+      makeRepoEntry({ name: "repo-b", assigneeMe: true, linearTeam: "TeamB" }),
+      makeRepoEntry({ name: "repo-c" }), // not configured for polling
     ];
-    const sharedIssue = makeIssue({ id: "dup-1" });
-    const linearClient = makeLinearClient();
-    (linearClient.searchIssues as ReturnType<typeof vi.fn>)
-      .mockResolvedValueOnce([sharedIssue])
-      .mockResolvedValueOnce([sharedIssue]);
-    const runRepo = makeRunRepo(null);
-    const orchestrator = makeOrchestrator();
-    const repoRegistry = makeRepoRegistry(repos);
+    const repoRegistry = { listRepos: vi.fn().mockReturnValue(repos) };
 
-    const service = new LinearPollService(linearClient, runRepo, orchestrator, repoRegistry, logger);
-    const result = await service.discoverPendingIssues();
+    const issueA = makeIssue({ id: "a1" });
+    const issueB = makeIssue({ id: "b1" });
+    const linearClient = {
+      searchIssues: vi
+        .fn()
+        .mockResolvedValueOnce([issueA])
+        .mockResolvedValueOnce([issueB]),
+    };
+    const runRepo = { findActiveByIssueId: vi.fn().mockResolvedValue(null) };
+    const orchestrator = { startRun: vi.fn() };
+    const logger = makeLogger();
+
+    const svc = new LinearPollService(
+      linearClient as never,
+      runRepo as never,
+      orchestrator as never,
+      repoRegistry as never,
+      logger as never,
+    );
+
+    const result = await svc.discoverPendingIssues();
+
+    expect(linearClient.searchIssues).toHaveBeenCalledTimes(2);
+    expect(linearClient.searchIssues).toHaveBeenNthCalledWith(1, {
+      projectName: "Project A",
+      assigneeMe: undefined,
+      team: undefined,
+      state: "Todo",
+    });
+    expect(linearClient.searchIssues).toHaveBeenNthCalledWith(2, {
+      projectName: undefined,
+      assigneeMe: true,
+      team: "TeamB",
+      state: "Todo",
+    });
+    expect(result.map((i) => i.id)).toEqual(["a1", "b1"]);
+    expect(logger.info).toHaveBeenCalledWith(
+      expect.objectContaining({ candidateCount: 2 }),
+      "Discovered pending Linear issues",
+    );
+  });
+
+  it("excludes issues that already have an active run", async () => {
+    const repos = [makeRepoEntry({ name: "repo-a", linearProject: "Project A" })];
+    const repoRegistry = { listRepos: vi.fn().mockReturnValue(repos) };
+
+    const issue1 = makeIssue({ id: "i1" });
+    const issue2 = makeIssue({ id: "i2" });
+    const linearClient = { searchIssues: vi.fn().mockResolvedValue([issue1, issue2]) };
+    const runRepo = {
+      findActiveByIssueId: vi.fn().mockImplementation((id: string) =>
+        Promise.resolve(id === "i1" ? { id: "run-x" } : null),
+      ),
+    };
+    const orchestrator = { startRun: vi.fn() };
+
+    const svc = new LinearPollService(
+      linearClient as never,
+      runRepo as never,
+      orchestrator as never,
+      repoRegistry as never,
+      makeLogger() as never,
+    );
+
+    const result = await svc.discoverPendingIssues();
+
+    expect(result.map((i) => i.id)).toEqual(["i2"]);
+  });
+
+  it("deduplicates issues that appear in more than one filter's results", async () => {
+    const repos = [
+      makeRepoEntry({ name: "repo-a", linearProject: "Project A" }),
+      makeRepoEntry({ name: "repo-b", linearProject: "Project B" }),
+    ];
+    const repoRegistry = { listRepos: vi.fn().mockReturnValue(repos) };
+
+    const sharedIssue = makeIssue({ id: "dup-1" });
+    const linearClient = {
+      searchIssues: vi
+        .fn()
+        .mockResolvedValueOnce([sharedIssue])
+        .mockResolvedValueOnce([sharedIssue]),
+    };
+    const runRepo = { findActiveByIssueId: vi.fn().mockResolvedValue(null) };
+    const orchestrator = { startRun: vi.fn() };
+
+    const svc = new LinearPollService(
+      linearClient as never,
+      runRepo as never,
+      orchestrator as never,
+      repoRegistry as never,
+      makeLogger() as never,
+    );
+
+    const result = await svc.discoverPendingIssues();
 
     expect(result).toHaveLength(1);
     expect(result[0].id).toBe("dup-1");
-  });
-
-  it("skips issues that already have an active run", async () => {
-    const repos = [makeRepoEntry({ name: "repo-a", assigneeMe: true })];
-    const issue = makeIssue({ id: "issue-with-run" });
-    const linearClient = makeLinearClient();
-    (linearClient.searchIssues as ReturnType<typeof vi.fn>).mockResolvedValue([issue]);
-    const runRepo = makeRunRepo({ id: "existing-run" } as Run);
-    const orchestrator = makeOrchestrator();
-    const repoRegistry = makeRepoRegistry(repos);
-
-    const service = new LinearPollService(linearClient, runRepo, orchestrator, repoRegistry, logger);
-    const result = await service.discoverPendingIssues();
-
-    expect(result).toEqual([]);
-    expect(runRepo.findActiveByIssueId).toHaveBeenCalledWith("issue-with-run");
+    // findActiveByIssueId should only be checked once for the deduplicated issue
+    expect(runRepo.findActiveByIssueId).toHaveBeenCalledTimes(1);
   });
 });
 
 describe("LinearPollService.startRunsForIssues", () => {
-  let logger: Logger;
-  let linearClient: LinearClient;
-  let repoRegistry: RepoRegistry;
+  it("starts runs for issues with no active run and reports them as started", async () => {
+    const runRepo = { findActiveByIssueId: vi.fn().mockResolvedValue(null) };
+    const orchestrator = { startRun: vi.fn().mockResolvedValue({ id: "run-1" }) };
+    const logger = makeLogger();
 
-  beforeEach(() => {
-    logger = makeLogger();
-    linearClient = makeLinearClient();
-    repoRegistry = makeRepoRegistry([]);
+    const svc = new LinearPollService(
+      {} as never,
+      runRepo as never,
+      orchestrator as never,
+      {} as never,
+      logger as never,
+    );
+
+    const result = await svc.startRunsForIssues(["i1", "i2"]);
+
+    expect(result.started).toEqual(["i1", "i2"]);
+    expect(result.skipped).toEqual([]);
+    expect(orchestrator.startRun).toHaveBeenCalledWith("i1");
+    expect(orchestrator.startRun).toHaveBeenCalledWith("i2");
+    expect(logger.info).toHaveBeenCalledWith(
+      { started: 2, skipped: 0 },
+      "Ingested Linear issues",
+    );
   });
 
-  it("skips an issue that already has an active run", async () => {
-    const runRepo = makeRunRepo({ id: "existing-run" } as Run);
-    const orchestrator = makeOrchestrator();
-    const service = new LinearPollService(linearClient, runRepo, orchestrator, repoRegistry, logger);
+  it("skips issues that already have an active run without starting a new one", async () => {
+    const runRepo = {
+      findActiveByIssueId: vi
+        .fn()
+        .mockResolvedValueOnce({ id: "existing-run" })
+        .mockResolvedValueOnce(null),
+    };
+    const orchestrator = { startRun: vi.fn().mockResolvedValue({ id: "run-2" }) };
 
-    const result = await service.startRunsForIssues(["issue-1"]);
+    const svc = new LinearPollService(
+      {} as never,
+      runRepo as never,
+      orchestrator as never,
+      {} as never,
+      makeLogger() as never,
+    );
 
-    expect(result).toEqual({ started: [], skipped: ["issue-1"] });
-    expect(orchestrator.startRun).not.toHaveBeenCalled();
+    const result = await svc.startRunsForIssues(["already-running", "fresh"]);
+
+    expect(result.skipped).toEqual(["already-running"]);
+    expect(result.started).toEqual(["fresh"]);
+    expect(orchestrator.startRun).toHaveBeenCalledTimes(1);
+    expect(orchestrator.startRun).toHaveBeenCalledWith("fresh");
   });
 
-  it("starts a run for a new issue and adds it to started", async () => {
-    const runRepo = makeRunRepo(null);
-    const orchestrator = makeOrchestrator();
-    const service = new LinearPollService(linearClient, runRepo, orchestrator, repoRegistry, logger);
+  it("catches errors from orchestrator.startRun, logs them, and marks the issue skipped", async () => {
+    const runRepo = { findActiveByIssueId: vi.fn().mockResolvedValue(null) };
+    const error = new Error("boom");
+    const orchestrator = { startRun: vi.fn().mockRejectedValue(error) };
+    const logger = makeLogger();
 
-    const result = await service.startRunsForIssues(["issue-2"]);
+    const svc = new LinearPollService(
+      {} as never,
+      runRepo as never,
+      orchestrator as never,
+      {} as never,
+      logger as never,
+    );
 
-    expect(result).toEqual({ started: ["issue-2"], skipped: [] });
-    expect(orchestrator.startRun).toHaveBeenCalledWith("issue-2");
-  });
+    const result = await svc.startRunsForIssues(["failing-issue"]);
 
-  it("adds the issue to skipped and logs the error (without rethrowing) when startRun throws", async () => {
-    const runRepo = makeRunRepo(null);
-    const orchestrator = makeOrchestrator();
-    (orchestrator.startRun as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("boom"));
-    const service = new LinearPollService(linearClient, runRepo, orchestrator, repoRegistry, logger);
-
-    const result = await service.startRunsForIssues(["issue-3"]);
-
-    expect(result).toEqual({ started: [], skipped: ["issue-3"] });
+    expect(result.skipped).toEqual(["failing-issue"]);
+    expect(result.started).toEqual([]);
     expect(logger.error).toHaveBeenCalledWith(
-      { issueId: "issue-3", error: "boom" },
+      { issueId: "failing-issue", error: "boom" },
       "Failed to start run for issue",
     );
+  });
+
+  it("stringifies a non-Error thrown value in the error log", async () => {
+    const runRepo = { findActiveByIssueId: vi.fn().mockResolvedValue(null) };
+    const orchestrator = { startRun: vi.fn().mockRejectedValue("plain string failure") };
+    const logger = makeLogger();
+
+    const svc = new LinearPollService(
+      {} as never,
+      runRepo as never,
+      orchestrator as never,
+      {} as never,
+      logger as never,
+    );
+
+    await svc.startRunsForIssues(["weird-issue"]);
+
+    expect(logger.error).toHaveBeenCalledWith(
+      { issueId: "weird-issue", error: "plain string failure" },
+      "Failed to start run for issue",
+    );
+  });
+
+  it("returns empty started/skipped for an empty issue id list", async () => {
+    const runRepo = { findActiveByIssueId: vi.fn() };
+    const orchestrator = { startRun: vi.fn() };
+
+    const svc = new LinearPollService(
+      {} as never,
+      runRepo as never,
+      orchestrator as never,
+      {} as never,
+      makeLogger() as never,
+    );
+
+    const result = await svc.startRunsForIssues([]);
+
+    expect(result).toEqual({ started: [], skipped: [] });
+    expect(orchestrator.startRun).not.toHaveBeenCalled();
   });
 });

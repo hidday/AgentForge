@@ -1,152 +1,174 @@
 import { describe, it, expect, vi } from "vitest";
 import { z } from "zod";
 import { AgentRunner } from "../../src/runtime/agentRunner.js";
-import { env } from "../../src/config/env.js";
-import type { ClaudeCodeRunner } from "../../src/runtime/claudeCodeRunner.js";
-import type { CodexRunner } from "../../src/runtime/codexRunner.js";
-import type { CursorRunner } from "../../src/runtime/cursorRunner.js";
-import type { AgentRuntime } from "../../src/domain/types.js";
 import type { AgentOutput } from "../../src/runtime/runnerTypes.js";
 
 function makeMockLogger() {
-  return { info: vi.fn(), error: vi.fn(), warn: vi.fn(), debug: vi.fn() };
-}
-
-const echoSchema = z.object({ ok: z.boolean() });
-
-function makeRunners() {
   return {
-    claudeCodeRunner: { run: vi.fn() },
-    codexRunner: { run: vi.fn() },
-    cursorRunner: { run: vi.fn() },
+    info: vi.fn(),
+    error: vi.fn(),
+    warn: vi.fn(),
+    debug: vi.fn(),
   };
 }
 
-describe("AgentRunner.run()", () => {
-  it("routes to claudeCodeRunner and resolves the model via resolveAgentModel when input.model is unset", async () => {
-    const runners = makeRunners();
-    const expectedOutput: AgentOutput<{ ok: boolean }> = {
-      raw: "raw",
-      parsed: { ok: true },
-      success: true,
-      stage: "planner",
-      durationMs: 10,
-    };
-    runners.claudeCodeRunner.run.mockResolvedValue(expectedOutput);
+const schema = z.object({ value: z.string() });
+
+function makeOutput(stage: string): AgentOutput<{ value: string }> {
+  return {
+    raw: "raw",
+    parsed: { value: "ok" },
+    success: true,
+    // AgentOutput.stage is typed as Stage but we only care that it round-trips.
+    stage: stage as never,
+    durationMs: 5,
+  };
+}
+
+describe("AgentRunner.run", () => {
+  it("routes to claudeCodeRunner.run for runtime 'claude-code' with model-resolved input", async () => {
+    const claudeCodeRunner = { run: vi.fn().mockResolvedValue(makeOutput("planner")) };
+    const codexRunner = { run: vi.fn() };
+    const cursorRunner = { run: vi.fn() };
     const logger = makeMockLogger();
 
     const runner = new AgentRunner(
-      runners.claudeCodeRunner as unknown as ClaudeCodeRunner,
-      runners.codexRunner as unknown as CodexRunner,
-      runners.cursorRunner as unknown as CursorRunner,
+      claudeCodeRunner as never,
+      codexRunner as never,
+      cursorRunner as never,
       logger as never,
     );
 
-    const input = { prompt: "do it", workingDirectory: "/tmp", timeoutMs: 1000 };
-    const result = await runner.run("claude-code", input, "planner", echoSchema);
+    const input = { prompt: "hi", workingDirectory: "/tmp", timeoutMs: 1000 };
+    const out = await runner.run("claude-code", input, "planner", schema);
 
-    expect(result).toBe(expectedOutput);
-    expect(runners.claudeCodeRunner.run).toHaveBeenCalledTimes(1);
-    expect(runners.codexRunner.run).not.toHaveBeenCalled();
-    expect(runners.cursorRunner.run).not.toHaveBeenCalled();
+    expect(out.parsed.value).toBe("ok");
+    expect(claudeCodeRunner.run).toHaveBeenCalledOnce();
+    expect(codexRunner.run).not.toHaveBeenCalled();
+    expect(cursorRunner.run).not.toHaveBeenCalled();
 
-    // "planner" is a "lead" tier stage -> resolves to env.CLAUDE_CODE_MODEL
-    const [routedInput, stage, schema] = runners.claudeCodeRunner.run.mock.calls[0]!;
-    expect(routedInput).toEqual({ ...input, model: env.CLAUDE_CODE_MODEL });
+    const [routedInput, stage, routedSchema] = claudeCodeRunner.run.mock.calls[0]!;
     expect(stage).toBe("planner");
-    expect(schema).toBe(echoSchema);
-
-    expect(logger.info).toHaveBeenCalledWith(
-      { runtime: "claude-code", stage: "planner", model: env.CLAUDE_CODE_MODEL },
-      "Routing agent execution",
-    );
+    expect(routedSchema).toBe(schema);
+    // model defaults from env since input.model was unset (planner is a "lead" stage).
+    expect(routedInput.model).toBe("claude-fable-5");
+    expect(routedInput.prompt).toBe("hi");
   });
 
-  it("uses input.model directly (skipping resolution) and routes to codexRunner for a review-tier stage", async () => {
-    const runners = makeRunners();
-    const expectedOutput: AgentOutput<{ ok: boolean }> = {
-      raw: "raw",
-      parsed: { ok: true },
-      success: true,
-      stage: "reviewer",
-      durationMs: 5,
-    };
-    runners.codexRunner.run.mockResolvedValue(expectedOutput);
+  it("routes to codexRunner.run for runtime 'codex'", async () => {
+    const claudeCodeRunner = { run: vi.fn() };
+    const codexRunner = { run: vi.fn().mockResolvedValue(makeOutput("plan-reviewer")) };
+    const cursorRunner = { run: vi.fn() };
     const logger = makeMockLogger();
 
     const runner = new AgentRunner(
-      runners.claudeCodeRunner as unknown as ClaudeCodeRunner,
-      runners.codexRunner as unknown as CodexRunner,
-      runners.cursorRunner as unknown as CursorRunner,
+      claudeCodeRunner as never,
+      codexRunner as never,
+      cursorRunner as never,
+      logger as never,
+    );
+
+    const input = { prompt: "review", workingDirectory: "/tmp", timeoutMs: 1000 };
+    const out = await runner.run("codex", input, "plan-reviewer", schema);
+
+    expect(out.parsed.value).toBe("ok");
+    expect(codexRunner.run).toHaveBeenCalledOnce();
+    expect(claudeCodeRunner.run).not.toHaveBeenCalled();
+    expect(cursorRunner.run).not.toHaveBeenCalled();
+    // plan-reviewer is a "review" tier stage -> CODEX_MODEL default.
+    const [routedInput] = codexRunner.run.mock.calls[0]!;
+    expect(routedInput.model).toBe("gpt-5.6-sol");
+  });
+
+  it("routes to cursorRunner.run for runtime 'cursor'", async () => {
+    const claudeCodeRunner = { run: vi.fn() };
+    const codexRunner = { run: vi.fn() };
+    const cursorRunner = { run: vi.fn().mockResolvedValue(makeOutput("executor")) };
+    const logger = makeMockLogger();
+
+    const runner = new AgentRunner(
+      claudeCodeRunner as never,
+      codexRunner as never,
+      cursorRunner as never,
+      logger as never,
+    );
+
+    const input = { prompt: "exec", workingDirectory: "/tmp", timeoutMs: 1000 };
+    const out = await runner.run("cursor", input, "executor", schema);
+
+    expect(out.parsed.value).toBe("ok");
+    expect(cursorRunner.run).toHaveBeenCalledOnce();
+    expect(claudeCodeRunner.run).not.toHaveBeenCalled();
+    expect(codexRunner.run).not.toHaveBeenCalled();
+  });
+
+  it("preserves an explicit input.model instead of resolving one from env/stage", async () => {
+    const claudeCodeRunner = { run: vi.fn().mockResolvedValue(makeOutput("planner")) };
+    const codexRunner = { run: vi.fn() };
+    const cursorRunner = { run: vi.fn() };
+    const logger = makeMockLogger();
+
+    const runner = new AgentRunner(
+      claudeCodeRunner as never,
+      codexRunner as never,
+      cursorRunner as never,
       logger as never,
     );
 
     const input = {
-      prompt: "review it",
+      prompt: "hi",
       workingDirectory: "/tmp",
       timeoutMs: 1000,
-      model: "custom-explicit-model",
+      model: "custom-model-override",
     };
-    const result = await runner.run("codex", input, "reviewer", echoSchema);
+    await runner.run("claude-code", input, "planner", schema);
 
-    expect(result).toBe(expectedOutput);
-    expect(runners.codexRunner.run).toHaveBeenCalledTimes(1);
-    expect(runners.claudeCodeRunner.run).not.toHaveBeenCalled();
-    expect(runners.cursorRunner.run).not.toHaveBeenCalled();
-
-    const [routedInput] = runners.codexRunner.run.mock.calls[0]!;
-    // Explicit input.model must win over resolveAgentModel's env.CODEX_MODEL default.
-    expect(routedInput.model).toBe("custom-explicit-model");
+    const [routedInput] = claudeCodeRunner.run.mock.calls[0]!;
+    expect(routedInput.model).toBe("custom-model-override");
   });
 
-  it("routes to cursorRunner when runtime is 'cursor'", async () => {
-    const runners = makeRunners();
-    const expectedOutput: AgentOutput<{ ok: boolean }> = {
-      raw: "raw",
-      parsed: { ok: true },
-      success: true,
-      stage: "executor",
-      durationMs: 7,
-    };
-    runners.cursorRunner.run.mockResolvedValue(expectedOutput);
+  it("logs the routing decision at info level before dispatching", async () => {
+    const claudeCodeRunner = { run: vi.fn().mockResolvedValue(makeOutput("planner")) };
+    const codexRunner = { run: vi.fn() };
+    const cursorRunner = { run: vi.fn() };
     const logger = makeMockLogger();
 
     const runner = new AgentRunner(
-      runners.claudeCodeRunner as unknown as ClaudeCodeRunner,
-      runners.codexRunner as unknown as CodexRunner,
-      runners.cursorRunner as unknown as CursorRunner,
+      claudeCodeRunner as never,
+      codexRunner as never,
+      cursorRunner as never,
       logger as never,
     );
 
-    const input = { prompt: "execute it", workingDirectory: "/tmp", timeoutMs: 1000 };
-    const result = await runner.run("cursor", input, "executor", echoSchema);
+    await runner.run(
+      "claude-code",
+      { prompt: "hi", workingDirectory: "/tmp", timeoutMs: 1000 },
+      "planner",
+      schema,
+    );
 
-    expect(result).toBe(expectedOutput);
-    expect(runners.cursorRunner.run).toHaveBeenCalledTimes(1);
-    expect(runners.claudeCodeRunner.run).not.toHaveBeenCalled();
-    expect(runners.codexRunner.run).not.toHaveBeenCalled();
+    expect(logger.info).toHaveBeenCalledWith(
+      expect.objectContaining({ runtime: "claude-code", stage: "planner" }),
+      "Routing agent execution",
+    );
   });
 
-  it("throws 'Unknown runtime' for an invalid runtime value (default/exhaustiveness branch)", async () => {
-    const runners = makeRunners();
+  it("throws for an unknown runtime value", async () => {
+    const claudeCodeRunner = { run: vi.fn() };
+    const codexRunner = { run: vi.fn() };
+    const cursorRunner = { run: vi.fn() };
     const logger = makeMockLogger();
 
     const runner = new AgentRunner(
-      runners.claudeCodeRunner as unknown as ClaudeCodeRunner,
-      runners.codexRunner as unknown as CodexRunner,
-      runners.cursorRunner as unknown as CursorRunner,
+      claudeCodeRunner as never,
+      codexRunner as never,
+      cursorRunner as never,
       logger as never,
     );
 
-    const input = { prompt: "x", workingDirectory: "/tmp", timeoutMs: 1000 };
-    const invalidRuntime = "not-a-real-runtime" as unknown as AgentRuntime;
-
-    await expect(runner.run(invalidRuntime, input, "planner", echoSchema)).rejects.toThrow(
-      "Unknown runtime: not-a-real-runtime",
-    );
-
-    expect(runners.claudeCodeRunner.run).not.toHaveBeenCalled();
-    expect(runners.codexRunner.run).not.toHaveBeenCalled();
-    expect(runners.cursorRunner.run).not.toHaveBeenCalled();
+    const input = { prompt: "hi", workingDirectory: "/tmp", timeoutMs: 1000 };
+    await expect(
+      runner.run("bogus-runtime" as never, input, "planner", schema),
+    ).rejects.toThrow(/Unknown runtime: bogus-runtime/);
   });
 });

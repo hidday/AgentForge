@@ -11,121 +11,137 @@ import {
 } from "../../src/utils/errors.js";
 
 describe("PolicyViolationError", () => {
-  it("sets message, rule, and name", () => {
-    const err = new PolicyViolationError("file not allowed", "allowedPaths");
-    expect(err.message).toBe("file not allowed");
-    expect(err.rule).toBe("allowedPaths");
-    expect(err.name).toBe("PolicyViolationError");
+  it("sets message, name, and the offending rule", () => {
+    const err = new PolicyViolationError("touched a protected path", "no-protected-paths");
     expect(err).toBeInstanceOf(Error);
+    expect(err.message).toBe("touched a protected path");
+    expect(err.name).toBe("PolicyViolationError");
+    expect(err.rule).toBe("no-protected-paths");
   });
 });
 
 describe("PolicyError", () => {
-  it("sets statusCode 409 and name", () => {
-    const err = new PolicyError("policy violated");
-    expect(err.message).toBe("policy violated");
-    expect(err.statusCode).toBe(409);
+  it("sets message, name, and a 409 status code", () => {
+    const err = new PolicyError("policy conflict");
+    expect(err).toBeInstanceOf(Error);
+    expect(err.message).toBe("policy conflict");
     expect(err.name).toBe("PolicyError");
+    expect(err.statusCode).toBe(409);
   });
 });
 
 describe("ValidationError", () => {
-  it("sets statusCode 400 and name", () => {
+  it("sets message, name, and a 400 status code", () => {
     const err = new ValidationError("bad input");
+    expect(err).toBeInstanceOf(Error);
     expect(err.message).toBe("bad input");
-    expect(err.statusCode).toBe(400);
     expect(err.name).toBe("ValidationError");
+    expect(err.statusCode).toBe(400);
   });
 });
 
 describe("AgentTimeoutError", () => {
-  it("formats the message and exposes agent/timeoutMs", () => {
+  it("builds a message from the agent name and timeout, and exposes both fields", () => {
     const err = new AgentTimeoutError("executor", 5000);
+    expect(err).toBeInstanceOf(Error);
     expect(err.message).toBe('Agent "executor" timed out after 5000ms');
+    expect(err.name).toBe("AgentTimeoutError");
     expect(err.agent).toBe("executor");
     expect(err.timeoutMs).toBe(5000);
-    expect(err.name).toBe("AgentTimeoutError");
+  });
+
+  it("reflects a different agent/timeout pair in the message", () => {
+    const err = new AgentTimeoutError("planner", 120_000);
+    expect(err.message).toBe('Agent "planner" timed out after 120000ms');
+    expect(err.agent).toBe("planner");
+    expect(err.timeoutMs).toBe(120_000);
   });
 });
 
 describe("OutputParseError", () => {
-  it("sets message and name with rawOutput omitted", () => {
-    const err = new OutputParseError("could not parse");
-    expect(err.message).toBe("could not parse");
-    expect(err.rawOutput).toBeUndefined();
+  it("sets message, name, and optional raw output when provided", () => {
+    const err = new OutputParseError("could not parse JSON", "not json");
+    expect(err).toBeInstanceOf(Error);
+    expect(err.message).toBe("could not parse JSON");
     expect(err.name).toBe("OutputParseError");
+    expect(err.rawOutput).toBe("not json");
   });
 
-  it("preserves rawOutput when provided", () => {
-    const err = new OutputParseError("could not parse", "garbage output");
-    expect(err.rawOutput).toBe("garbage output");
+  it("leaves rawOutput undefined when omitted", () => {
+    const err = new OutputParseError("could not parse JSON");
+    expect(err.rawOutput).toBeUndefined();
   });
 });
 
 describe("StateTransitionError", () => {
-  it("formats the message from fromState and event", () => {
-    const err = new StateTransitionError("planning", "approve");
-    expect(err.message).toBe('No transition from state "planning" for event "approve"');
-    expect(err.fromState).toBe("planning");
-    expect(err.event).toBe("approve");
+  it("builds a message from the from-state and event, and exposes both fields", () => {
+    const err = new StateTransitionError("PLANNING", "approve");
+    expect(err).toBeInstanceOf(Error);
+    expect(err.message).toBe('No transition from state "PLANNING" for event "approve"');
     expect(err.name).toBe("StateTransitionError");
+    expect(err.fromState).toBe("PLANNING");
+    expect(err.event).toBe("approve");
   });
 });
 
 describe("PreflightError", () => {
-  function makeResult(overrides?: Partial<PreflightSummary>): PreflightSummary {
-    return {
+  const makeResult = (
+    overrides: Partial<PreflightSummary["results"][number]> = {},
+  ): PreflightSummary["results"][number] => ({
+    runtime: "claude",
+    command: "claude --version",
+    binaryCheck: { ok: true, version: "1.0.0", durationMs: 10 },
+    authCheck: { ok: true, durationMs: 5 },
+    ...overrides,
+  });
+
+  it("lists runtimes with a failing binary check in the message", () => {
+    const result: PreflightSummary = {
       ok: false,
       requiredRuntimes: ["claude", "codex"],
       results: [
-        {
-          runtime: "claude",
-          command: "claude",
-          binaryCheck: { ok: true, version: "1.0.0", durationMs: 10 },
-          authCheck: { ok: false, durationMs: 5, error: "unauthorized" },
-        },
-        {
-          runtime: "codex",
-          command: "codex",
-          binaryCheck: { ok: true, version: "2.0.0", durationMs: 8 },
-          authCheck: { ok: true, durationMs: 3 },
-        },
+        makeResult({ runtime: "claude", binaryCheck: { ok: false, error: "not found", durationMs: 3 } }),
+        makeResult({ runtime: "codex" }),
       ],
-      ...overrides,
     };
-  }
-
-  it("lists only the failing runtimes in the message", () => {
-    const result = makeResult();
     const err = new PreflightError(result);
-    expect(err.message).toBe("Preflight failed for runtimes: claude");
+    expect(err).toBeInstanceOf(Error);
     expect(err.name).toBe("PreflightError");
-  });
-
-  it("preserves the full result on the .result property", () => {
-    const result = makeResult();
-    const err = new PreflightError(result);
+    expect(err.message).toBe("Preflight failed for runtimes: claude");
     expect(err.result).toBe(result);
   });
 
-  it("lists multiple failing runtimes when several fail", () => {
-    const result = makeResult({
-      results: [
-        {
-          runtime: "claude",
-          command: "claude",
-          binaryCheck: { ok: false, error: "not found", durationMs: 1 },
-          authCheck: { ok: false, durationMs: 1 },
-        },
-        {
-          runtime: "cursor",
-          command: "agent",
-          binaryCheck: { ok: true, durationMs: 1 },
-          authCheck: { ok: false, durationMs: 1 },
-        },
-      ],
-    });
+  it("lists runtimes with a failing auth check in the message", () => {
+    const result: PreflightSummary = {
+      ok: false,
+      requiredRuntimes: ["cursor"],
+      results: [makeResult({ runtime: "cursor", authCheck: { ok: false, durationMs: 2, error: "unauthorized" } })],
+    };
     const err = new PreflightError(result);
-    expect(err.message).toBe("Preflight failed for runtimes: claude, cursor");
+    expect(err.message).toBe("Preflight failed for runtimes: cursor");
+  });
+
+  it("joins multiple failing runtimes with a comma", () => {
+    const result: PreflightSummary = {
+      ok: false,
+      requiredRuntimes: ["claude", "codex", "cursor"],
+      results: [
+        makeResult({ runtime: "claude", binaryCheck: { ok: false, durationMs: 1 } }),
+        makeResult({ runtime: "codex", authCheck: { ok: false, durationMs: 1 } }),
+        makeResult({ runtime: "cursor" }),
+      ],
+    };
+    const err = new PreflightError(result);
+    expect(err.message).toBe("Preflight failed for runtimes: claude, codex");
+  });
+
+  it("produces an empty failures list in the message when all checks pass", () => {
+    const result: PreflightSummary = {
+      ok: true,
+      requiredRuntimes: ["claude"],
+      results: [makeResult()],
+    };
+    const err = new PreflightError(result);
+    expect(err.message).toBe("Preflight failed for runtimes: ");
   });
 });

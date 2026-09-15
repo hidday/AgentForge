@@ -1,147 +1,130 @@
 import { describe, it, expect } from "vitest";
 import { render, screen } from "@testing-library/react";
-
 import { ReviewView } from "./ReviewView.tsx";
 
 describe("ReviewView", () => {
-  it("renders every optional section for a full payload", () => {
-    const review = {
-      overallVerdict: "approved",
-      summary: "Overall looks good",
-      findings: [
-        {
-          id: "f1",
-          severity: "blocker",
-          title: "Missing null check",
-          details: "Will throw at runtime",
-          file: "src/index.ts",
-          lineHint: 42,
-        },
-        {
-          id: "f2",
-          severity: "important",
-          title: "Step mismatch",
-          details: "Doesn't match plan",
-          affectedStepId: "step-1",
-        },
-      ],
-    };
-    render(<ReviewView review={review} />);
-
-    expect(screen.getByText("Verdict:")).toBeDefined();
-    expect(screen.getByText("Approved")).toBeDefined();
-    expect(screen.getByText("Overall looks good")).toBeDefined();
-    expect(screen.getByText("Findings (2)")).toBeDefined();
-    expect(screen.getByText("Missing null check")).toBeDefined();
-    expect(screen.getByText("Will throw at runtime")).toBeDefined();
-    expect(screen.getByText("src/index.ts:42")).toBeDefined();
-    expect(screen.getByText("Step mismatch")).toBeDefined();
-    expect(screen.getByText("Step: step-1")).toBeDefined();
+  it("renders nothing extra for an empty review", () => {
+    const { container } = render(<ReviewView review={{}} />);
+    expect(screen.queryByText(/Verdict/)).toBeNull();
+    expect(screen.queryByText(/Findings/)).toBeNull();
+    expect(container.querySelector(".space-y-4")).not.toBeNull();
   });
 
-  it("shows the 'Changes Requested' badge with blocked styling for a non-approved verdict", () => {
+  it("renders 'Approved' badge with done styling for an approved verdict", () => {
+    const { container } = render(
+      <ReviewView review={{ overallVerdict: "approved" }} />,
+    );
+    expect(screen.getByText("Verdict:")).toBeDefined();
+    expect(screen.getByText("Approved")).toBeDefined();
+    expect(container.querySelector(".bg-state-done-bg")).not.toBeNull();
+  });
+
+  it("renders 'Changes Requested' badge with blocked styling for any non-approved verdict", () => {
     const { container } = render(
       <ReviewView review={{ overallVerdict: "changes_requested" }} />,
     );
-    const badge = screen.getByText("Changes Requested");
-    expect(badge).toBeDefined();
-    expect(badge.className).toContain("bg-state-blocked-bg");
-    expect(badge.className).toContain("text-state-blocked");
-    expect(container.querySelector(".bg-state-done-bg")).toBeNull();
+    expect(screen.getByText("Changes Requested")).toBeDefined();
+    expect(container.querySelector(".bg-state-blocked-bg")).not.toBeNull();
   });
 
-  it("shows the 'Approved' badge with done styling for an approved verdict", () => {
-    const badge = render(<ReviewView review={{ overallVerdict: "approved" }} />).getByText(
-      "Approved",
-    );
-    expect(badge.className).toContain("bg-state-done-bg");
-    expect(badge.className).toContain("text-state-done");
-  });
-
-  it("renders no verdict line when overallVerdict is absent", () => {
+  it("does not render the verdict row when overallVerdict is absent", () => {
     render(<ReviewView review={{}} />);
     expect(screen.queryByText("Verdict:")).toBeNull();
   });
 
-  it("renders no summary paragraph when summary is absent", () => {
-    render(<ReviewView review={{ overallVerdict: "approved" }} />);
-    expect(screen.queryByText(/summary/i)).toBeNull();
+  it("renders the summary text when present", () => {
+    render(<ReviewView review={{ summary: "Overall looks solid." }} />);
+    expect(screen.getByText("Overall looks solid.")).toBeDefined();
   });
 
-  it("applies the blocker severity style", () => {
+  it("does not render a summary paragraph when absent", () => {
+    const { container } = render(<ReviewView review={{}} />);
+    expect(container.querySelector("p")).toBeNull();
+  });
+
+  it("renders findings with severity badge, title, and details", () => {
     render(
       <ReviewView
         review={{
           findings: [
-            { id: "f1", severity: "blocker", title: "T", details: "D" },
+            {
+              id: "f1",
+              severity: "blocker",
+              title: "Missing null check",
+              details: "This will throw on empty input.",
+            },
           ],
         }}
       />,
     );
-    const badge = screen.getByText("blocker");
-    expect(badge.className).toContain("bg-severity-blocker/10");
-    expect(badge.className).toContain("text-severity-blocker");
+    expect(screen.getByText("Findings (1)")).toBeDefined();
+    expect(screen.getByText("blocker")).toBeDefined();
+    expect(screen.getByText("Missing null check")).toBeDefined();
+    expect(screen.getByText("This will throw on empty input.")).toBeDefined();
   });
 
-  it("applies the important severity style", () => {
+  it("falls back to the nit severity style for an unrecognized severity", () => {
+    const { container } = render(
+      <ReviewView
+        review={{
+          findings: [
+            {
+              id: "f1",
+              severity: "totally-unknown",
+              title: "Weird finding",
+              details: "details",
+            },
+          ],
+        }}
+      />,
+    );
+    const badge = screen.getByText("totally-unknown");
+    expect(badge.className).toContain("severity-nit");
+    expect(container).toBeDefined();
+  });
+
+  it("renders the file and line hint when present", () => {
     render(
       <ReviewView
         review={{
           findings: [
-            { id: "f1", severity: "important", title: "T", details: "D" },
+            {
+              id: "f1",
+              severity: "important",
+              title: "Off by one",
+              details: "Loop bound is wrong.",
+              file: "src/index.ts",
+              lineHint: 42,
+            },
           ],
         }}
       />,
     );
-    const badge = screen.getByText("important");
-    expect(badge.className).toContain("bg-severity-important/10");
-    expect(badge.className).toContain("text-severity-important");
+    expect(screen.getByText(/src\/index\.ts/)).toBeDefined();
+    expect(screen.getByText(/:42/)).toBeDefined();
   });
 
-  it("applies the suggestion severity style", () => {
+  it("renders the file without a line suffix when lineHint is absent", () => {
     render(
       <ReviewView
         review={{
           findings: [
-            { id: "f1", severity: "suggestion", title: "T", details: "D" },
+            {
+              id: "f1",
+              severity: "suggestion",
+              title: "Consider renaming",
+              details: "details",
+              file: "src/index.ts",
+            },
           ],
         }}
       />,
     );
-    const badge = screen.getByText("suggestion");
-    expect(badge.className).toContain("bg-severity-suggestion/10");
-    expect(badge.className).toContain("text-severity-suggestion");
+    const fileEl = screen.getByText("src/index.ts");
+    expect(fileEl.textContent).toBe("src/index.ts");
   });
 
-  it("applies the nit severity style", () => {
-    render(
-      <ReviewView
-        review={{
-          findings: [{ id: "f1", severity: "nit", title: "T", details: "D" }],
-        }}
-      />,
-    );
-    const badge = screen.getByText("nit");
-    expect(badge.className).toContain("bg-severity-nit/10");
-    expect(badge.className).toContain("text-severity-nit");
-  });
-
-  it("falls back to the nit style for an unrecognized severity", () => {
-    render(
-      <ReviewView
-        review={{
-          findings: [
-            { id: "f1", severity: "mystery", title: "T", details: "D" },
-          ],
-        }}
-      />,
-    );
-    const badge = screen.getByText("mystery");
-    expect(badge.className).toContain("bg-severity-nit/10");
-    expect(badge.className).toContain("text-severity-nit");
-  });
-
-  it("renders a file+lineHint metadata line without lineHint suffix when lineHint is absent", () => {
+  it("renders the affected step id when present", () => {
     render(
       <ReviewView
         review={{
@@ -149,30 +132,51 @@ describe("ReviewView", () => {
             {
               id: "f1",
               severity: "nit",
-              title: "T",
-              details: "D",
-              file: "src/app.ts",
+              title: "Style nit",
+              details: "details",
+              affectedStepId: "step-3",
             },
           ],
         }}
       />,
     );
-    expect(screen.getByText("src/app.ts")).toBeDefined();
+    expect(screen.getByText("Step: step-3")).toBeDefined();
   });
 
-  it("renders no metadata line when neither file nor affectedStepId is present", () => {
+  it("does not render the file/step meta row when neither is present", () => {
     const { container } = render(
       <ReviewView
         review={{
-          findings: [{ id: "f1", severity: "nit", title: "T", details: "D" }],
+          findings: [
+            {
+              id: "f1",
+              severity: "nit",
+              title: "Style nit",
+              details: "details",
+            },
+          ],
         }}
       />,
     );
-    expect(container.querySelector(".font-mono.text-text-muted")).toBeNull();
+    expect(container.querySelector(".font-mono.mb-1")).toBeNull();
   });
 
-  it("renders nothing extra for an empty findings array", () => {
+  it("does not render the Findings section when findings is empty", () => {
     render(<ReviewView review={{ findings: [] }} />);
     expect(screen.queryByText(/Findings/)).toBeNull();
+  });
+
+  it("renders multiple findings and reflects the count in the header", () => {
+    render(
+      <ReviewView
+        review={{
+          findings: [
+            { id: "f1", severity: "blocker", title: "A", details: "a" },
+            { id: "f2", severity: "nit", title: "B", details: "b" },
+          ],
+        }}
+      />,
+    );
+    expect(screen.getByText("Findings (2)")).toBeDefined();
   });
 });

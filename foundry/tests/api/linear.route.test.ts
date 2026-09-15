@@ -1,11 +1,11 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import Fastify from "fastify";
 import { registerApiRoutes } from "../../src/api/routes.js";
 
 async function buildApp(linearPollService?: Record<string, unknown>) {
   const mockRunRepo = { findById: vi.fn(), findAll: vi.fn() };
-  const mockArtifactRepo = { findByRunId: vi.fn(), findLatestByType: vi.fn() };
-  const mockEventRepo = { findByRunId: vi.fn(), create: vi.fn() };
+  const mockArtifactRepo = { findByRunId: vi.fn() };
+  const mockEventRepo = { findByRunId: vi.fn() };
 
   const mockOrchestrator = {
     getRunRepo: () => mockRunRepo,
@@ -27,127 +27,153 @@ async function buildApp(linearPollService?: Record<string, unknown>) {
     mockProcessRunner as never,
     linearPollService as never,
   );
+
   await app.ready();
   return { app };
 }
 
 describe("GET /api/linear/pending", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
   it("returns 501 when no linearPollService is configured", async () => {
     const { app } = await buildApp(undefined);
 
-    const response = await app.inject({ method: "GET", url: "/api/linear/pending" });
+    const res = await app.inject({ method: "GET", url: "/api/linear/pending" });
 
-    expect(response.statusCode).toBe(501);
-    expect(response.json()).toEqual({
+    expect(res.statusCode).toBe(501);
+    expect(res.json()).toEqual({
       error: "Linear polling not available (no LINEAR_API_KEY configured)",
     });
   });
 
-  it("returns discovered issues on success", async () => {
+  it("returns { issues } on success", async () => {
     const issues = [{ id: "LIN-1", title: "Fix bug" }];
-    const mockLinearPollService = {
-      discoverPendingIssues: vi.fn().mockResolvedValue(issues),
-      startRunsForIssues: vi.fn(),
-    };
-    const { app } = await buildApp(mockLinearPollService);
+    const discoverPendingIssues = vi.fn().mockResolvedValue(issues);
+    const { app } = await buildApp({ discoverPendingIssues });
 
-    const response = await app.inject({ method: "GET", url: "/api/linear/pending" });
+    const res = await app.inject({ method: "GET", url: "/api/linear/pending" });
 
-    expect(response.statusCode).toBe(200);
-    expect(response.json()).toEqual({ issues });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ issues });
+    expect(discoverPendingIssues).toHaveBeenCalledOnce();
   });
 
   it("returns 500 when discoverPendingIssues throws", async () => {
-    const mockLinearPollService = {
-      discoverPendingIssues: vi.fn().mockRejectedValue(new Error("Linear API down")),
-      startRunsForIssues: vi.fn(),
-    };
-    const { app } = await buildApp(mockLinearPollService);
+    const discoverPendingIssues = vi.fn().mockRejectedValue(new Error("Linear API down"));
+    const { app } = await buildApp({ discoverPendingIssues });
 
-    const response = await app.inject({ method: "GET", url: "/api/linear/pending" });
+    const res = await app.inject({ method: "GET", url: "/api/linear/pending" });
 
-    expect(response.statusCode).toBe(500);
-    expect(response.json()).toEqual({ error: "Linear API down" });
+    expect(res.statusCode).toBe(500);
+    expect(res.json()).toEqual({ error: "Linear API down" });
+  });
+
+  it("returns 500 with String(err) when discoverPendingIssues rejects with a non-Error value", async () => {
+    const discoverPendingIssues = vi.fn().mockRejectedValue("plain string failure");
+    const { app } = await buildApp({ discoverPendingIssues });
+
+    const res = await app.inject({ method: "GET", url: "/api/linear/pending" });
+
+    expect(res.statusCode).toBe(500);
+    expect(res.json()).toEqual({ error: "plain string failure" });
   });
 });
 
 describe("POST /api/linear/ingest", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
   it("returns 501 when no linearPollService is configured", async () => {
     const { app } = await buildApp(undefined);
 
-    const response = await app.inject({
+    const res = await app.inject({
       method: "POST",
       url: "/api/linear/ingest",
       payload: { issueIds: ["LIN-1"] },
     });
 
-    expect(response.statusCode).toBe(501);
-    expect(response.json()).toEqual({
+    expect(res.statusCode).toBe(501);
+    expect(res.json()).toEqual({
       error: "Linear polling not available (no LINEAR_API_KEY configured)",
     });
   });
 
   it("returns 400 when issueIds is missing", async () => {
-    const mockLinearPollService = {
-      discoverPendingIssues: vi.fn(),
-      startRunsForIssues: vi.fn(),
-    };
-    const { app } = await buildApp(mockLinearPollService);
+    const { app } = await buildApp({ startRunsForIssues: vi.fn() });
 
-    const response = await app.inject({ method: "POST", url: "/api/linear/ingest", payload: {} });
+    const res = await app.inject({ method: "POST", url: "/api/linear/ingest", payload: {} });
 
-    expect(response.statusCode).toBe(400);
-    expect(response.json()).toEqual({ error: "Required: { issueIds: string[] }" });
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toEqual({ error: "Required: { issueIds: string[] }" });
   });
 
   it("returns 400 when issueIds is an empty array", async () => {
-    const mockLinearPollService = {
-      discoverPendingIssues: vi.fn(),
-      startRunsForIssues: vi.fn(),
-    };
-    const { app } = await buildApp(mockLinearPollService);
+    const { app } = await buildApp({ startRunsForIssues: vi.fn() });
 
-    const response = await app.inject({
+    const res = await app.inject({
       method: "POST",
       url: "/api/linear/ingest",
       payload: { issueIds: [] },
     });
 
-    expect(response.statusCode).toBe(400);
+    expect(res.statusCode).toBe(400);
   });
 
-  it("returns the started/skipped result on success", async () => {
-    const mockLinearPollService = {
-      discoverPendingIssues: vi.fn(),
-      startRunsForIssues: vi.fn().mockResolvedValue({ started: ["LIN-1"], skipped: ["LIN-2"] }),
-    };
-    const { app } = await buildApp(mockLinearPollService);
+  it("returns 400 when issueIds is not an array", async () => {
+    const { app } = await buildApp({ startRunsForIssues: vi.fn() });
 
-    const response = await app.inject({
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/linear/ingest",
+      payload: { issueIds: "LIN-1" },
+    });
+
+    expect(res.statusCode).toBe(400);
+  });
+
+  it("returns { ok: true, started, skipped } on success", async () => {
+    const startRunsForIssues = vi.fn().mockResolvedValue({ started: ["LIN-1"], skipped: ["LIN-2"] });
+    const { app } = await buildApp({ startRunsForIssues });
+
+    const res = await app.inject({
       method: "POST",
       url: "/api/linear/ingest",
       payload: { issueIds: ["LIN-1", "LIN-2"] },
     });
 
-    expect(response.statusCode).toBe(200);
-    expect(mockLinearPollService.startRunsForIssues).toHaveBeenCalledWith(["LIN-1", "LIN-2"]);
-    expect(response.json()).toEqual({ ok: true, started: ["LIN-1"], skipped: ["LIN-2"] });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ ok: true, started: ["LIN-1"], skipped: ["LIN-2"] });
+    expect(startRunsForIssues).toHaveBeenCalledWith(["LIN-1", "LIN-2"]);
   });
 
   it("returns 500 when startRunsForIssues throws", async () => {
-    const mockLinearPollService = {
-      discoverPendingIssues: vi.fn(),
-      startRunsForIssues: vi.fn().mockRejectedValue(new Error("DB write failed")),
-    };
-    const { app } = await buildApp(mockLinearPollService);
+    const startRunsForIssues = vi.fn().mockRejectedValue(new Error("db unavailable"));
+    const { app } = await buildApp({ startRunsForIssues });
 
-    const response = await app.inject({
+    const res = await app.inject({
       method: "POST",
       url: "/api/linear/ingest",
       payload: { issueIds: ["LIN-1"] },
     });
 
-    expect(response.statusCode).toBe(500);
-    expect(response.json()).toEqual({ error: "DB write failed" });
+    expect(res.statusCode).toBe(500);
+    expect(res.json()).toEqual({ error: "db unavailable" });
+  });
+
+  it("returns 500 with String(err) when startRunsForIssues rejects with a non-Error value", async () => {
+    const startRunsForIssues = vi.fn().mockRejectedValue("plain string failure");
+    const { app } = await buildApp({ startRunsForIssues });
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/linear/ingest",
+      payload: { issueIds: ["LIN-1"] },
+    });
+
+    expect(res.statusCode).toBe(500);
+    expect(res.json()).toEqual({ error: "plain string failure" });
   });
 });

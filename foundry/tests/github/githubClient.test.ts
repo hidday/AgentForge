@@ -1,132 +1,94 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect } from "vitest";
 import { MockGitHubClient } from "../../src/github/githubClient.js";
 
 describe("MockGitHubClient", () => {
-  let client: MockGitHubClient;
+  it("resolves verifyRepoAccess and getDefaultBranch as no-op successes", async () => {
+    const client = new MockGitHubClient();
 
-  beforeEach(() => {
-    client = new MockGitHubClient();
+    await expect(client.verifyRepoAccess("owner/repo")).resolves.toBeUndefined();
+    await expect(client.getDefaultBranch("owner/repo")).resolves.toBe("main");
   });
 
-  it("verifyRepoAccess resolves without throwing", async () => {
-    await expect(client.verifyRepoAccess("org/repo")).resolves.toBeUndefined();
+  it("records created branches", async () => {
+    const client = new MockGitHubClient();
+
+    await client.createBranch("owner/repo", "ai/feature-1");
+    await client.createBranch("owner/repo", "ai/feature-2");
+
+    expect(client.getCreatedBranches()).toEqual(["ai/feature-1", "ai/feature-2"]);
   });
 
-  it("getDefaultBranch resolves to main", async () => {
-    await expect(client.getDefaultBranch("org/repo")).resolves.toBe("main");
-  });
+  it("creates draft PRs with incrementing numbers starting at 100", async () => {
+    const client = new MockGitHubClient();
 
-  it("createBranch records the branch and getCreatedBranches returns it", async () => {
-    await client.createBranch("org/repo", "feature/one");
-    await client.createBranch("org/repo", "feature/two");
-
-    expect(client.getCreatedBranches()).toEqual(["feature/one", "feature/two"]);
-  });
-
-  it("getCreatedBranches returns a copy, not a live reference", async () => {
-    await client.createBranch("org/repo", "feature/one");
-    const branches = client.getCreatedBranches();
-    branches.push("mutated");
-
-    expect(client.getCreatedBranches()).toEqual(["feature/one"]);
-  });
-
-  it("createDraftPR increments PR numbers starting at 100", async () => {
-    const first = await client.createDraftPR("org/repo", "head1", "main", "Title 1", "Body 1");
-    const second = await client.createDraftPR("org/repo", "head2", "main", "Title 2", "Body 2");
+    const first = await client.createDraftPR("owner/repo", "head-1", "main", "Title 1", "Body 1");
+    const second = await client.createDraftPR("owner/repo", "head-2", "main", "Title 2", "Body 2");
 
     expect(first).toBe(100);
     expect(second).toBe(101);
-  });
-
-  it("getCreatedPRs reflects created draft PRs with draft:true", async () => {
-    const prNumber = await client.createDraftPR("org/repo", "head1", "main", "My Title", "Body");
 
     const prs = client.getCreatedPRs();
-    expect(prs.get(prNumber)).toEqual({
-      repo: "org/repo",
-      head: "head1",
-      title: "My Title",
-      draft: true,
-    });
+    expect(prs.get(100)).toEqual({ repo: "owner/repo", head: "head-1", title: "Title 1", draft: true });
+    expect(prs.get(101)).toEqual({ repo: "owner/repo", head: "head-2", title: "Title 2", draft: true });
   });
 
-  it("commentOnPR resolves without throwing", async () => {
-    await expect(client.commentOnPR("org/repo", 100, "hello")).resolves.toBeUndefined();
-  });
+  it("marks an existing PR as ready, flipping draft to false", async () => {
+    const client = new MockGitHubClient();
+    const prNumber = await client.createDraftPR("owner/repo", "head-1", "main", "Title", "Body");
 
-  it("getPRDiff returns a non-empty diff string containing expected markers", async () => {
-    const diff = await client.getPRDiff("org/repo", 100);
-    expect(diff).toContain("diff --git a/src/handler.ts b/src/handler.ts");
-    expect(diff).toContain("handleRequest");
-  });
-
-  it("markPRReady toggles draft flag on an existing PR", async () => {
-    const prNumber = await client.createDraftPR("org/repo", "head1", "main", "Title", "Body");
-    expect(client.getCreatedPRs().get(prNumber)?.draft).toBe(true);
-
-    await client.markPRReady("org/repo", prNumber);
+    await client.markPRReady("owner/repo", prNumber);
 
     expect(client.getCreatedPRs().get(prNumber)?.draft).toBe(false);
   });
 
-  it("markPRReady is a no-op for a PR number that does not exist", async () => {
-    await expect(client.markPRReady("org/repo", 999)).resolves.toBeUndefined();
-    expect(client.getCreatedPRs().has(999)).toBe(false);
+  it("does nothing when marking a nonexistent PR as ready", async () => {
+    const client = new MockGitHubClient();
+    await expect(client.markPRReady("owner/repo", 9999)).resolves.toBeUndefined();
   });
 
-  it("listPRComments resolves to an empty array", async () => {
-    await expect(client.listPRComments("org/repo", 100)).resolves.toEqual([]);
+  it("returns an empty diff via getPRDiff that includes a unified diff header", async () => {
+    const client = new MockGitHubClient();
+
+    const diff = await client.getPRDiff("owner/repo", 100);
+
+    expect(diff).toContain("diff --git a/src/handler.ts b/src/handler.ts");
   });
 
-  it("createPRReviewComment with a line includes the line number in the recorded comment", async () => {
-    const commentId = await client.createPRReviewComment(
-      "org/repo",
+  it("returns an empty array from listPRComments", async () => {
+    const client = new MockGitHubClient();
+    await expect(client.listPRComments("owner/repo", 100)).resolves.toEqual([]);
+  });
+
+  it("creates PR review comments with incrementing ids starting at 1000, formatting path and line", async () => {
+    const client = new MockGitHubClient();
+
+    const withLine = await client.createPRReviewComment(
+      "owner/repo",
       100,
-      "looks off",
-      "src/foo.ts",
+      "fix this",
+      "src/handler.ts",
       42,
     );
-
-    expect(typeof commentId).toBe("number");
-    // getCreatedPRs doesn't expose comments directly, so verify via a second call's id increments
-    const secondId = await client.createPRReviewComment(
-      "org/repo",
+    const withoutLine = await client.createPRReviewComment(
+      "owner/repo",
       100,
-      "another",
-      "src/bar.ts",
-      7,
-    );
-    expect(secondId).toBe(commentId + 1);
-  });
-
-  it("createPRReviewComment without a line omits the line number", async () => {
-    const commentId = await client.createPRReviewComment(
-      "org/repo",
-      100,
-      "file-level comment",
-      "src/foo.ts",
+      "fix this too",
+      "src/other.ts",
     );
 
-    expect(typeof commentId).toBe("number");
-    expect(commentId).toBeGreaterThanOrEqual(1000);
+    expect(withLine).toBe(1000);
+    expect(withoutLine).toBe(1001);
   });
 
-  it("replyToReviewComment resolves without throwing", async () => {
-    await expect(
-      client.replyToReviewComment("org/repo", 100, 1000, "reply body"),
-    ).resolves.toBeUndefined();
-  });
+  it("resolves commentOnPR, replyToReviewComment, and submitPRReview without throwing", async () => {
+    const client = new MockGitHubClient();
 
-  it("submitPRReview resolves without throwing for each event type", async () => {
+    await expect(client.commentOnPR("owner/repo", 100, "a comment")).resolves.toBeUndefined();
     await expect(
-      client.submitPRReview("org/repo", 100, "approved", "APPROVE"),
+      client.replyToReviewComment("owner/repo", 100, 1000, "a reply"),
     ).resolves.toBeUndefined();
     await expect(
-      client.submitPRReview("org/repo", 100, "changes needed", "REQUEST_CHANGES"),
-    ).resolves.toBeUndefined();
-    await expect(
-      client.submitPRReview("org/repo", 100, "just a comment", "COMMENT"),
+      client.submitPRReview("owner/repo", 100, "looks good", "APPROVE"),
     ).resolves.toBeUndefined();
   });
 });

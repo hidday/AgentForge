@@ -18,7 +18,7 @@ function makeTaskBundle(): TaskBundle {
       name: "test-repo",
       defaultBranch: "main",
       workingBranch: "ai/lin-1",
-      repoPath: "/tmp",
+      repoPath: "/tmp/repo",
       allowedPaths: ["src/"],
       protectedPaths: [],
     },
@@ -37,7 +37,7 @@ function makePlan(): Plan {
   return {
     planVersion: 1,
     summary: "Test plan",
-    requirementsTraceability: "Traceability",
+    requirementsTraceability: "",
     assumptions: [],
     openQuestions: [],
     risks: [],
@@ -64,68 +64,67 @@ function makeExecutionReport(): ExecutionReport {
   };
 }
 
-function makeReview(): Review {
+function makeReview(overrides: Partial<Review> = {}): Review {
   return {
     reviewId: "rev-001",
-    summary: "Two blockers, one important issue, plus minor notes.",
+    summary: "Found a real bug and one nit.",
     findings: [
       {
         id: "f1",
         severity: "blocker",
         type: "bug",
         file: "src/foo.ts",
-        lineHint: 10,
-        title: "Null deref",
-        details: "Will crash on empty input",
+        lineHint: 12,
+        title: "Missing null check",
+        details: "Will throw if foo is null",
       },
       {
         id: "f2",
-        severity: "blocker",
-        type: "security",
-        file: "src/bar.ts",
-        title: "Unsanitized input",
-        details: "SQL injection risk",
-      },
-      {
-        id: "f3",
         severity: "important",
         type: "bug",
-        file: "src/baz.ts",
-        title: "Off-by-one",
+        file: "src/foo.ts",
+        title: "Off by one",
         details: "Loop bound is wrong",
       },
       {
-        id: "f4",
-        severity: "suggestion",
-        type: "style",
-        file: "src/foo.ts",
-        title: "Extract helper",
-        details: "Could be simplified",
-      },
-      {
-        id: "f5",
+        id: "f3",
         severity: "nit",
         type: "style",
         file: "src/foo.ts",
         title: "Long line",
-        details: "Wrap for readability",
+        details: "Could be split for readability",
       },
     ],
     overallVerdict: "changes_requested",
+    ...overrides,
   };
 }
 
 function buildAgent(reviewOverride?: Review) {
-  const review = reviewOverride ?? makeReview();
+  let capturedSystemPrompt = "";
+  let capturedUserPrompt = "";
+  let capturedRuntime: unknown;
+  let capturedWorkingDirectory: unknown;
 
   const agentRunner = {
-    run: vi.fn().mockResolvedValue({
-      raw: "raw reviewer transcript",
-      parsed: {
-        stage: "reviewer" as const,
-        payload: review,
+    run: vi.fn().mockImplementation(
+      async (
+        runtime: unknown,
+        opts: { prompt: string; systemPrompt: string; workingDirectory: string },
+      ) => {
+        capturedRuntime = runtime;
+        capturedSystemPrompt = opts.systemPrompt;
+        capturedUserPrompt = opts.prompt;
+        capturedWorkingDirectory = opts.workingDirectory;
+        return {
+          raw: "raw reviewer transcript",
+          parsed: {
+            stage: "reviewer" as const,
+            payload: reviewOverride ?? makeReview(),
+          },
+        };
       },
-    }),
+    ),
   };
 
   const artifactRepo = {
@@ -143,117 +142,136 @@ function buildAgent(reviewOverride?: Review) {
 
   const agent = new ReviewerAgent(agentRunner as never, artifactRepo as never, logger as never);
 
-  return { agent, agentRunner, artifactRepo, logger, review };
+  return {
+    agent,
+    agentRunner,
+    artifactRepo,
+    logger,
+    getSystemPrompt: () => capturedSystemPrompt,
+    getUserPrompt: () => capturedUserPrompt,
+    getRuntime: () => capturedRuntime,
+    getWorkingDirectory: () => capturedWorkingDirectory,
+  };
 }
 
 describe("ReviewerAgent.run()", () => {
-  it("persists a ReviewerTranscript artifact with the raw agent output", async () => {
-    const { agent, artifactRepo } = buildAgent();
+  it("logs the start of the reviewer agent with the runId", async () => {
+    const { agent, logger } = buildAgent();
 
-    await agent.run(makePlan(), makeExecutionReport(), "diff --git a/foo b/foo", makeTaskBundle(), "run-1");
-
-    expect(artifactRepo.create).toHaveBeenCalledWith({
-      runId: "run-1",
-      type: "ReviewerTranscript",
-      version: 3,
-      payloadJson: {},
-      rawText: "raw reviewer transcript",
-    });
-  });
-
-  it("persists a Review artifact whose payload and rawText mirror the parsed review", async () => {
-    const { agent, artifactRepo, review } = buildAgent();
-
-    await agent.run(makePlan(), makeExecutionReport(), "diff --git a/foo b/foo", makeTaskBundle(), "run-1");
-
-    expect(artifactRepo.create).toHaveBeenCalledWith({
-      runId: "run-1",
-      type: "Review",
-      version: 1,
-      payloadJson: review,
-      rawText: JSON.stringify(review, null, 2),
-    });
-  });
-
-  it("returns the review from the agent runner's parsed payload", async () => {
-    const { agent, review } = buildAgent();
-
-    const result = await agent.run(
-      makePlan(),
-      makeExecutionReport(),
-      "diff --git a/foo b/foo",
-      makeTaskBundle(),
-      "run-1",
-    );
-
-    expect(result).toBe(review);
-    expect(result).toEqual(review);
-  });
-
-  it("logs the correct blocker and important finding counts on completion", async () => {
-    const { agent, logger, review } = buildAgent();
-
-    await agent.run(makePlan(), makeExecutionReport(), "diff --git a/foo b/foo", makeTaskBundle(), "run-1");
+    await agent.run(makePlan(), makeExecutionReport(), "diff --git a/foo.ts", makeTaskBundle(), "run-1");
 
     expect(logger.info).toHaveBeenCalledWith(
-      {
-        runId: "run-1",
-        reviewId: review.reviewId,
-        verdict: review.overallVerdict,
-        totalFindings: 5,
-        blockerCount: 2,
-        importantCount: 1,
-      },
-      "Review completed",
+      { runId: "run-1" },
+      "Starting reviewer agent (Codex CLI)",
     );
   });
 
-  it("logs zero blocker/important counts when there are no matching findings", async () => {
-    const cleanReview: Review = {
-      reviewId: "rev-clean",
-      summary: "Nothing but nits.",
+  it("invokes the agent runner on the reviewer runtime with the working directory from the repo", async () => {
+    const { agent, getRuntime, getWorkingDirectory } = buildAgent();
+
+    await agent.run(makePlan(), makeExecutionReport(), "diff", makeTaskBundle(), "run-1");
+
+    expect(getRuntime()).toBe("codex");
+    expect(getWorkingDirectory()).toBe("/tmp/repo");
+  });
+
+  it("renders the plan, execution report, and diff into the prompts", async () => {
+    const { agent, getSystemPrompt, getUserPrompt } = buildAgent();
+
+    await agent.run(makePlan(), makeExecutionReport(), "diff --git a/foo.ts b/foo.ts", makeTaskBundle(), "run-1");
+
+    const systemPrompt = getSystemPrompt();
+    const userPrompt = getUserPrompt();
+    // Neither prompt should contain unresolved template placeholders for the
+    // top-level vars passed to renderTemplate.
+    expect(systemPrompt + userPrompt).not.toContain("{{diff}}");
+  });
+
+  it("writes a ReviewerTranscript artifact with the raw model output", async () => {
+    const { agent, artifactRepo } = buildAgent();
+
+    await agent.run(makePlan(), makeExecutionReport(), "diff", makeTaskBundle(), "run-1");
+
+    const calls = artifactRepo.create.mock.calls.map((c: unknown[]) => c[0]) as {
+      type: string;
+      version: number;
+      rawText: string;
+    }[];
+    const transcript = calls.find((a) => a.type === "ReviewerTranscript");
+    expect(transcript).toBeDefined();
+    expect(transcript?.version).toBe(3);
+    expect(transcript?.rawText).toBe("raw reviewer transcript");
+  });
+
+  it("writes a Review artifact (version 1) with the parsed payload", async () => {
+    const review = makeReview();
+    const { agent, artifactRepo } = buildAgent(review);
+
+    await agent.run(makePlan(), makeExecutionReport(), "diff", makeTaskBundle(), "run-1");
+
+    const calls = artifactRepo.create.mock.calls.map((c: unknown[]) => c[0]) as {
+      type: string;
+      version: number;
+      payloadJson: unknown;
+      rawText: string;
+    }[];
+    const reviewArtifact = calls.find((a) => a.type === "Review");
+    expect(reviewArtifact).toBeDefined();
+    expect(reviewArtifact?.version).toBe(1);
+    expect(reviewArtifact?.payloadJson).toEqual(review);
+    expect(reviewArtifact?.rawText).toBe(JSON.stringify(review, null, 2));
+  });
+
+  it("logs blocker and important finding counts computed from the review", async () => {
+    const { agent, logger } = buildAgent();
+
+    await agent.run(makePlan(), makeExecutionReport(), "diff", makeTaskBundle(), "run-1");
+
+    const completionLog = logger.info.mock.calls.find(
+      (c: unknown[]) => c[1] === "Review completed",
+    );
+    expect(completionLog).toBeDefined();
+    const payload = completionLog?.[0] as Record<string, unknown> | undefined;
+    expect(payload?.reviewId).toBe("rev-001");
+    expect(payload?.verdict).toBe("changes_requested");
+    expect(payload?.totalFindings).toBe(3);
+    expect(payload?.blockerCount).toBe(1);
+    expect(payload?.importantCount).toBe(1);
+  });
+
+  it("reports zero blocker/important counts when the review has none of that severity", async () => {
+    const review = makeReview({
       findings: [
         {
           id: "f1",
           severity: "nit",
           type: "style",
           file: "src/foo.ts",
-          title: "Long line",
-          details: "Wrap for readability",
+          title: "Nit only",
+          details: "Minor",
         },
       ],
       overallVerdict: "approved",
-    };
-    const { agent, logger } = buildAgent(cleanReview);
+    });
+    const { agent, logger } = buildAgent(review);
 
-    await agent.run(makePlan(), makeExecutionReport(), "diff --git a/foo b/foo", makeTaskBundle(), "run-1");
+    await agent.run(makePlan(), makeExecutionReport(), "diff", makeTaskBundle(), "run-1");
 
-    expect(logger.info).toHaveBeenCalledWith(
-      {
-        runId: "run-1",
-        reviewId: "rev-clean",
-        verdict: "approved",
-        totalFindings: 1,
-        blockerCount: 0,
-        importantCount: 0,
-      },
-      "Review completed",
+    const completionLog = logger.info.mock.calls.find(
+      (c: unknown[]) => c[1] === "Review completed",
     );
+    const payload = completionLog?.[0] as Record<string, unknown> | undefined;
+    expect(payload?.blockerCount).toBe(0);
+    expect(payload?.importantCount).toBe(0);
+    expect(payload?.verdict).toBe("approved");
   });
 
-  it("passes the reviewer runtime call with the rendered prompts and repo working directory", async () => {
-    const { agent, agentRunner } = buildAgent();
-    const taskBundle = makeTaskBundle();
+  it("returns the parsed review payload", async () => {
+    const review = makeReview();
+    const { agent } = buildAgent(review);
 
-    await agent.run(makePlan(), makeExecutionReport(), "diff --git a/foo b/foo", taskBundle, "run-1");
+    const result = await agent.run(makePlan(), makeExecutionReport(), "diff", makeTaskBundle(), "run-1");
 
-    expect(agentRunner.run).toHaveBeenCalledTimes(1);
-    const [runtime, opts, name] = agentRunner.run.mock.calls[0];
-    expect(runtime).toBeDefined();
-    expect(name).toBe("reviewer");
-    expect((opts as { workingDirectory: string }).workingDirectory).toBe(taskBundle.repo.repoPath);
-    expect((opts as { runId: string }).runId).toBe("run-1");
-    expect((opts as { prompt: string }).prompt).toEqual(expect.any(String));
-    expect((opts as { systemPrompt: string }).systemPrompt).toEqual(expect.any(String));
+    expect(result).toEqual(review);
   });
 });

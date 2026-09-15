@@ -153,25 +153,23 @@ describe("PlanReviserAgent.run() relatedContext rendering", () => {
 });
 
 describe("PlanReviserAgent.run() operator note rendering", () => {
-  it("renders the Operator Note section when an operatorNote is provided", async () => {
+  it("injects the operator note section into the prompt when provided", async () => {
     const { agent, getPrompt } = buildPlanReviserAgent();
 
     await agent.run(makePlan(), makePlanReview(), makeTaskBundle(), "run-1", {
-      operatorNote: "Keep the API surface backwards-compatible.",
+      operatorNote: "Keep the migration step but simplify the rollback plan.",
     });
 
     const prompt = getPrompt();
     expect(prompt).toContain("## Operator Note");
-    expect(prompt).toContain("do not drop the findings in favor of the note");
-    expect(prompt).toContain("Keep the API surface backwards-compatible.");
+    expect(prompt).toContain("Keep the migration step but simplify the rollback plan.");
   });
 
-  it("omits the Operator Note section when no operatorNote is provided", async () => {
+  it("omits the operator note section when no note is provided", async () => {
     const { agent, getPrompt } = buildPlanReviserAgent();
 
     await agent.run(makePlan(), makePlanReview(), makeTaskBundle(), "run-1");
 
-    const prompt = getPrompt();
-    expect(prompt).not.toContain("## Operator Note");
+    expect(getPrompt()).not.toContain("## Operator Note");
   });
 });

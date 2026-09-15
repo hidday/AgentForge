@@ -1,33 +1,42 @@
 import { describe, it, expect, vi } from "vitest";
 import Fastify from "fastify";
 import { registerGitHubWebhook } from "../../src/github/githubWebhook.js";
-import type { OrchestratorService } from "../../src/orchestrator/orchestratorService.js";
 
-async function buildApp() {
-  const mockOrchestrator = {} as OrchestratorService;
+function buildApp() {
+  const mockOrchestrator = {};
   const app = Fastify({ logger: false });
-  registerGitHubWebhook(app, mockOrchestrator);
-  await app.ready();
-  return app;
+  registerGitHubWebhook(app, mockOrchestrator as never);
+  return { app };
 }
 
 describe("POST /webhooks/github", () => {
-  it("returns 400 for an invalid payload", async () => {
-    const app = await buildApp();
+  it("returns 400 for a payload missing the required action field", async () => {
+    const { app } = buildApp();
 
     const response = await app.inject({
       method: "POST",
       url: "/webhooks/github",
-      payload: { not: "a valid github event" },
+      payload: { pull_request: { number: 1, state: "open" } },
     });
 
     expect(response.statusCode).toBe(400);
-    const body = JSON.parse(response.body) as { error: string };
-    expect(body.error).toBe("Invalid webhook payload");
+    expect(JSON.parse(response.body)).toEqual({ error: "Invalid webhook payload" });
   });
 
-  it("returns 200 ok:true for a valid minimal payload", async () => {
-    const app = await buildApp();
+  it("returns 400 when pull_request is present but malformed", async () => {
+    const { app } = buildApp();
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/webhooks/github",
+      payload: { action: "opened", pull_request: { number: "not-a-number" } },
+    });
+
+    expect(response.statusCode).toBe(400);
+  });
+
+  it("returns 200 ok for a minimal valid payload with only action", async () => {
+    const { app } = buildApp();
 
     const response = await app.inject({
       method: "POST",
@@ -36,12 +45,11 @@ describe("POST /webhooks/github", () => {
     });
 
     expect(response.statusCode).toBe(200);
-    const body = JSON.parse(response.body) as { ok: boolean };
-    expect(body).toEqual({ ok: true });
+    expect(JSON.parse(response.body)).toEqual({ ok: true });
   });
 
-  it("returns 200 ok:true for a valid full payload with pull_request and repository", async () => {
-    const app = await buildApp();
+  it("returns 200 ok for a full valid payload including pull_request and repository", async () => {
+    const { app } = buildApp();
 
     const response = await app.inject({
       method: "POST",
@@ -49,12 +57,11 @@ describe("POST /webhooks/github", () => {
       payload: {
         action: "closed",
         pull_request: { number: 42, state: "closed", merged: true },
-        repository: { full_name: "org/repo" },
+        repository: { full_name: "owner/repo" },
       },
     });
 
     expect(response.statusCode).toBe(200);
-    const body = JSON.parse(response.body) as { ok: boolean };
-    expect(body.ok).toBe(true);
+    expect(JSON.parse(response.body)).toEqual({ ok: true });
   });
 });

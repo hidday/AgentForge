@@ -6,124 +6,119 @@ import {
 } from "../../src/repo/repoPolicies.js";
 import type { Constraints } from "../../src/schemas/taskBundle.js";
 
+function makeConstraints(overrides: Partial<Constraints> = {}): Constraints {
+  return {
+    requiredChecks: [],
+    maxFilesChanged: 10,
+    maxDiffLines: 500,
+    forbiddenPatterns: [],
+    mustNotTouch: [],
+    ...overrides,
+  };
+}
+
 describe("validateFilePaths", () => {
-  it("allows everything when allowedPaths is empty", () => {
-    const result = validateFilePaths(["src/anywhere.ts", "random/file.md"], [], []);
+  it("is valid when every file is within an allowed path and none are protected", () => {
+    const result = validateFilePaths(
+      ["src/foo.ts", "src/bar/baz.ts"],
+      ["src/"],
+      ["src/protected/"],
+    );
+    expect(result).toEqual({ valid: true, violations: [] });
+  });
+
+  it("treats every file as allowed when allowedPaths is empty", () => {
+    const result = validateFilePaths(["anything/file.ts"], [], []);
     expect(result.valid).toBe(true);
     expect(result.violations).toEqual([]);
   });
 
-  it("flags a file that matches neither allowed nor protected paths", () => {
+  it("flags a file outside all allowed paths", () => {
     const result = validateFilePaths(["other/file.ts"], ["src/"], []);
     expect(result.valid).toBe(false);
     expect(result.violations).toEqual(['File "other/file.ts" is not in any allowed path']);
   });
 
-  it("passes a file that matches an allowed path", () => {
-    const result = validateFilePaths(["src/index.ts"], ["src/"], []);
-    expect(result.valid).toBe(true);
-    expect(result.violations).toEqual([]);
-  });
-
-  it("flags a file matching a protected path even if also allowed", () => {
+  it("flags a file under a protected path even if it is also allowed", () => {
     const result = validateFilePaths(
-      ["src/migrations/001.sql"],
+      ["src/protected/secret.ts"],
       ["src/"],
-      ["src/migrations/"],
+      ["src/protected/"],
     );
     expect(result.valid).toBe(false);
-    expect(result.violations).toEqual(['File "src/migrations/001.sql" is in a protected path']);
+    expect(result.violations).toEqual(['File "src/protected/secret.ts" is in a protected path']);
   });
 
-  it("flags a file that is both not allowed and protected with both violations", () => {
-    const result = validateFilePaths(
-      ["infra/secrets.yaml"],
-      ["src/"],
-      ["infra/"],
-    );
+  it("reports both violations for a file that is unallowed and protected", () => {
+    const result = validateFilePaths(["secret/x.ts"], ["src/"], ["secret/"]);
     expect(result.valid).toBe(false);
+    expect(result.violations).toHaveLength(2);
     expect(result.violations).toEqual([
-      'File "infra/secrets.yaml" is not in any allowed path',
-      'File "infra/secrets.yaml" is in a protected path',
+      'File "secret/x.ts" is not in any allowed path',
+      'File "secret/x.ts" is in a protected path',
     ]);
   });
 
-  it("handles multiple files, mixing valid and invalid", () => {
+  it("accumulates violations across multiple files", () => {
     const result = validateFilePaths(
-      ["src/a.ts", "docs/readme.md"],
+      ["src/ok.ts", "other/bad.ts", "src/protected/nope.ts"],
       ["src/"],
-      [],
+      ["src/protected/"],
     );
     expect(result.valid).toBe(false);
-    expect(result.violations).toEqual(['File "docs/readme.md" is not in any allowed path']);
+    expect(result.violations).toHaveLength(2);
   });
 
-  it("returns valid for an empty filesChanged list", () => {
-    const result = validateFilePaths([], ["src/"], ["infra/"]);
-    expect(result.valid).toBe(true);
-    expect(result.violations).toEqual([]);
+  it("returns valid for an empty file list", () => {
+    const result = validateFilePaths([], ["src/"], ["src/protected/"]);
+    expect(result).toEqual({ valid: true, violations: [] });
   });
 });
 
 describe("validateDiffSize", () => {
-  const baseConstraints: Constraints = {
-    requiredChecks: [],
-    maxFilesChanged: 5,
-    maxDiffLines: 500,
-    forbiddenPatterns: [],
-    mustNotTouch: [],
-  };
-
-  it("is valid when file count is exactly at the max", () => {
-    const files = Array.from({ length: 5 }, (_, i) => `src/file${i}.ts`);
-    const result = validateDiffSize(files, baseConstraints);
-    expect(result.valid).toBe(true);
-    expect(result.violations).toEqual([]);
+  it("is valid when filesChanged count is at the max boundary", () => {
+    const result = validateDiffSize(
+      Array.from({ length: 10 }, (_, i) => `file${String(i)}.ts`),
+      makeConstraints({ maxFilesChanged: 10 }),
+    );
+    expect(result).toEqual({ valid: true, violations: [] });
   });
 
-  it("is invalid when file count exceeds the max", () => {
-    const files = Array.from({ length: 6 }, (_, i) => `src/file${i}.ts`);
-    const result = validateDiffSize(files, baseConstraints);
+  it("is invalid when filesChanged exceeds the max by one", () => {
+    const result = validateDiffSize(
+      Array.from({ length: 11 }, (_, i) => `file${String(i)}.ts`),
+      makeConstraints({ maxFilesChanged: 10 }),
+    );
     expect(result.valid).toBe(false);
-    expect(result.violations).toEqual(["Changed 6 files (max: 5)"]);
-  });
-
-  it("is valid when well under the max", () => {
-    const result = validateDiffSize(["src/a.ts"], baseConstraints);
-    expect(result.valid).toBe(true);
-    expect(result.violations).toEqual([]);
+    expect(result.violations).toEqual(["Changed 11 files (max: 10)"]);
   });
 
   it("is valid for an empty file list", () => {
-    const result = validateDiffSize([], baseConstraints);
-    expect(result.valid).toBe(true);
-    expect(result.violations).toEqual([]);
+    const result = validateDiffSize([], makeConstraints({ maxFilesChanged: 1 }));
+    expect(result).toEqual({ valid: true, violations: [] });
   });
 });
 
 describe("checkForbiddenPatterns", () => {
-  it("reports no matches when content does not match any pattern", () => {
-    const result = checkForbiddenPatterns("const x = 1;", ["eval\\(", "process\\.exit"]);
-    expect(result.valid).toBe(true);
-    expect(result.matches).toEqual([]);
+  it("is valid when content matches no forbidden pattern", () => {
+    const result = checkForbiddenPatterns("const x = 1;", ["eval\\(", "TODO"]);
+    expect(result).toEqual({ valid: true, matches: [] });
   });
 
-  it("reports a match when a forbidden pattern is found", () => {
-    const result = checkForbiddenPatterns("eval('danger')", ["eval\\("]);
+  it("reports a single matching pattern", () => {
+    const result = checkForbiddenPatterns("eval(userInput)", ["eval\\("]);
     expect(result.valid).toBe(false);
     expect(result.matches).toEqual(["eval\\("]);
   });
 
-  it("reports multiple matches when several patterns match", () => {
-    const content = "eval('x'); process.exit(1);";
-    const result = checkForbiddenPatterns(content, ["eval\\(", "process\\.exit"]);
+  it("reports every pattern that matches, in order", () => {
+    const result = checkForbiddenPatterns("eval(x); // TODO fix", ["eval\\(", "TODO"]);
     expect(result.valid).toBe(false);
-    expect(result.matches).toEqual(["eval\\(", "process\\.exit"]);
+    expect(result.matches).toEqual(["eval\\(", "TODO"]);
   });
 
-  it("returns valid for an empty forbiddenPatterns list", () => {
+  it("returns valid with no matches when there are no patterns to check", () => {
     const result = checkForbiddenPatterns("anything at all", []);
-    expect(result.valid).toBe(true);
-    expect(result.matches).toEqual([]);
+    expect(result).toEqual({ valid: true, matches: [] });
   });
 });

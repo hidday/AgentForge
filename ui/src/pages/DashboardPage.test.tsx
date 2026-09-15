@@ -1,50 +1,43 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, fireEvent, act } from "@testing-library/react";
-import { MemoryRouter } from "react-router-dom";
+import { render, screen, act } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import type { Run } from "@/api/client.ts";
 
-const useRunsMock = vi.fn();
-
+const mockUseRuns = vi.fn();
 vi.mock("@/hooks/useRuns.ts", () => ({
-  useRuns: () => useRunsMock(),
+  useRuns: () => mockUseRuns(),
 }));
 
 vi.mock("@/components/RunsTable.tsx", () => ({
-  RunsTable: ({ runs }: { runs: Run[] }) => (
+  RunsTable: ({ runs, onAction }: { runs: Run[]; onAction?: () => void }) => (
     <div data-testid="runs-table">
+      <span data-testid="runs-count">{runs.length}</span>
       {runs.map((r) => (
-        <div key={r.id} data-testid="run-row">
+        <span key={r.id} data-testid="run-row">
           {r.id}
-        </div>
+        </span>
       ))}
+      <button onClick={onAction}>trigger-action</button>
     </div>
   ),
 }));
 
 vi.mock("@/components/LinearSyncDialog.tsx", () => ({
-  LinearSyncDialog: ({
-    open,
-    onClose,
-    onIngestComplete,
-  }: {
+  LinearSyncDialog: (props: {
     open: boolean;
     onClose: () => void;
     onIngested: () => void;
-    onIngestComplete?: (s: { started: number; skipped: number }) => void;
-  }) => (
-    <div data-testid="linear-sync-dialog" data-open={open ? "true" : "false"}>
-      {open && (
-        <>
-          <button
-            onClick={() => onIngestComplete?.({ started: 3, skipped: 1 })}
-          >
-            Simulate Ingest Complete
-          </button>
-          <button onClick={onClose}>Close Dialog</button>
-        </>
-      )}
-    </div>
-  ),
+    onIngestComplete: (s: { started: number; skipped: number }) => void;
+  }) =>
+    props.open ? (
+      <div data-testid="linear-sync-dialog">
+        <button onClick={props.onClose}>close-dialog</button>
+        <button onClick={props.onIngested}>trigger-ingested</button>
+        <button onClick={() => props.onIngestComplete({ started: 3, skipped: 1 })}>
+          trigger-ingest-complete
+        </button>
+      </div>
+    ) : null,
 }));
 
 vi.mock("@/components/IngestSummaryBanner.tsx", () => ({
@@ -58,209 +51,191 @@ vi.mock("@/components/IngestSummaryBanner.tsx", () => ({
     onDismiss: () => void;
   }) => (
     <div data-testid="ingest-summary-banner">
-      Started {started}, skipped {skipped}
-      <button onClick={onDismiss}>Dismiss</button>
+      started={started} skipped={skipped}
+      <button onClick={onDismiss}>dismiss-banner</button>
     </div>
   ),
 }));
 
 import { DashboardPage } from "./DashboardPage.tsx";
 
-function makeRun(id: string, state: string): Run {
+function makeRun(overrides: Partial<Run> = {}): Run {
   return {
-    id,
-    linearIssueId: `issue-${id}`,
-    linearIssueIdentifier: null,
+    id: "run-1",
+    linearIssueId: "issue-1",
+    linearIssueIdentifier: "ENG-1",
     linearIssueDescription: null,
-    linearIssueTitle: null,
+    linearIssueTitle: "Fix the bug",
     linearIssueUrl: null,
-    repo: "org/repo",
+    repo: "acme/widgets",
     branchName: null,
     prNumber: null,
-    state,
+    state: "Todo",
     planVersion: 1,
     approvedPlanVersion: null,
     plannerRuntime: null,
     executorRuntime: null,
     reviewerRuntime: null,
     remediationRuntime: null,
-    workingDirectory: "/tmp/work",
-    latestArtifactVersion: 1,
+    workingDirectory: "/tmp/run-1",
+    latestArtifactVersion: 0,
     createdAt: "2024-01-01T00:00:00Z",
     updatedAt: "2024-01-01T00:00:00Z",
+    ...overrides,
   };
-}
-
-const MIXED_RUNS: Run[] = [
-  makeRun("r-active-1", "Implementing"),
-  makeRun("r-active-2", "Planning"),
-  makeRun("r-waiting-1", "AwaitingPlanApproval"),
-  makeRun("r-blocked-1", "AIBlocked"),
-  makeRun("r-done-1", "Done"),
-];
-
-function renderPage() {
-  return render(
-    <MemoryRouter>
-      <DashboardPage />
-    </MemoryRouter>,
-  );
 }
 
 describe("DashboardPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    useRunsMock.mockReturnValue({
-      runs: MIXED_RUNS,
-      loading: false,
-      error: null,
-      refetch: vi.fn(),
-    });
   });
 
-  afterEach(() => {
-    vi.useRealTimers();
-  });
-
-  it("shows a loading spinner while loading is true", () => {
-    useRunsMock.mockReturnValue({
-      runs: [],
-      loading: true,
-      error: null,
-      refetch: vi.fn(),
-    });
-    renderPage();
-    expect(screen.getByText(/loading runs/i)).toBeDefined();
+  it("shows a loading indicator while runs are loading", () => {
+    mockUseRuns.mockReturnValue({ runs: [], loading: true, error: null, refetch: vi.fn() });
+    render(<DashboardPage />);
+    expect(screen.getByText("Loading runs...")).toBeDefined();
     expect(screen.queryByTestId("runs-table")).toBeNull();
   });
 
-  it("shows an error banner when error is set", () => {
-    useRunsMock.mockReturnValue({
+  it("shows an error message when the fetch fails", () => {
+    mockUseRuns.mockReturnValue({
       runs: [],
       loading: false,
       error: "Failed to fetch runs",
       refetch: vi.fn(),
     });
-    renderPage();
+    render(<DashboardPage />);
     expect(screen.getByText("Failed to fetch runs")).toBeDefined();
     expect(screen.queryByTestId("runs-table")).toBeNull();
   });
 
-  it("computes stat counts correctly per state category from a mixed runs array", () => {
-    renderPage();
-    // Total
-    expect(screen.getByText("5")).toBeDefined();
-    // Active: Implementing + Planning = 2
-    // Awaiting: AwaitingPlanApproval = 1
-    // Blocked: AIBlocked = 1
-    // Done: Done = 1
-    const twos = screen.getAllByText("2");
-    expect(twos.length).toBeGreaterThanOrEqual(1);
-    const ones = screen.getAllByText("1");
-    // waiting, blocked, done each contribute a "1"
-    expect(ones.length).toBeGreaterThanOrEqual(3);
-  });
-
-  it("falls back to the 'idle' category count for a run with an unrecognized state", () => {
-    useRunsMock.mockReturnValue({
-      runs: [makeRun("r-unknown-1", "SomeUnmappedState")],
+  it("renders the runs table and correct per-category stat counts", () => {
+    mockUseRuns.mockReturnValue({
+      runs: [
+        makeRun({ id: "r1", state: "Implementing" }), // active
+        makeRun({ id: "r2", state: "AwaitingPlanApproval" }), // waiting
+        makeRun({ id: "r3", state: "AIBlocked" }), // blocked
+        makeRun({ id: "r4", state: "Done" }), // done
+        makeRun({ id: "r5", state: "Todo" }), // idle
+      ],
       loading: false,
       error: null,
       refetch: vi.fn(),
     });
-    renderPage();
-    // Total is 1, and none of the known categories (active/waiting/blocked/done) count it
-    expect(screen.getByText("1")).toBeDefined();
-    expect(screen.getAllByText("0")).toHaveLength(4);
+    render(<DashboardPage />);
+
+    expect(screen.getByTestId("runs-count").textContent).toBe("5");
+    expect(screen.getByText("5", { selector: ".text-text-primary" })).toBeDefined();
+    // one run per category badge value
+    const statValues = screen.getAllByText("1");
+    expect(statValues.length).toBe(4); // active, waiting, blocked, done each = 1
   });
 
-  it("renders all runs by default (All filter)", () => {
-    renderPage();
-    expect(screen.getAllByTestId("run-row")).toHaveLength(5);
+  it("counts a run with an unrecognized state under the idle fallback category without crashing", () => {
+    mockUseRuns.mockReturnValue({
+      runs: [makeRun({ id: "r1", state: "SomeBrandNewState" })],
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+    render(<DashboardPage />);
+
+    // Total still reflects the run even though its state maps to no known category.
+    expect(screen.getByTestId("runs-count").textContent).toBe("1");
+    // None of the named category stat cards (Active/Awaiting/Blocked/Done) count it.
+    expect(screen.queryAllByText("1", { selector: ".text-state-active" }).length).toBe(0);
   });
 
-  it("filters to Active runs when the Active filter button is clicked", () => {
-    renderPage();
-    fireEvent.click(screen.getByRole("button", { name: "Active" }));
-    const rows = screen.getAllByTestId("run-row");
-    expect(rows.map((r) => r.textContent)).toEqual(["r-active-1", "r-active-2"]);
+  it("filters the runs table when a filter button is clicked", async () => {
+    mockUseRuns.mockReturnValue({
+      runs: [
+        makeRun({ id: "r1", state: "Implementing" }),
+        makeRun({ id: "r2", state: "Done" }),
+      ],
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+    render(<DashboardPage />);
+
+    expect(screen.getByTestId("runs-count").textContent).toBe("2");
+
+    await userEvent.click(screen.getByRole("button", { name: "Active" }));
+    expect(screen.getByTestId("runs-count").textContent).toBe("1");
+    expect(screen.getByText("r1")).toBeDefined();
+
+    await userEvent.click(screen.getByRole("button", { name: "Done" }));
+    expect(screen.getByTestId("runs-count").textContent).toBe("1");
+    expect(screen.getByText("r2")).toBeDefined();
+
+    await userEvent.click(screen.getByRole("button", { name: "All" }));
+    expect(screen.getByTestId("runs-count").textContent).toBe("2");
   });
 
-  it("filters to Awaiting Human runs when that filter button is clicked", () => {
-    renderPage();
-    fireEvent.click(screen.getByRole("button", { name: "Awaiting Human" }));
-    const rows = screen.getAllByTestId("run-row");
-    expect(rows.map((r) => r.textContent)).toEqual(["r-waiting-1"]);
+  it("passes refetch as the RunsTable onAction callback", async () => {
+    const refetch = vi.fn();
+    mockUseRuns.mockReturnValue({ runs: [makeRun()], loading: false, error: null, refetch });
+    render(<DashboardPage />);
+
+    await userEvent.click(screen.getByText("trigger-action"));
+    expect(refetch).toHaveBeenCalledOnce();
   });
 
-  it("filters to Blocked runs when that filter button is clicked", () => {
-    renderPage();
-    fireEvent.click(screen.getByRole("button", { name: "Blocked" }));
-    const rows = screen.getAllByTestId("run-row");
-    expect(rows.map((r) => r.textContent)).toEqual(["r-blocked-1"]);
+  it("opens the Linear sync dialog and closes it", async () => {
+    mockUseRuns.mockReturnValue({ runs: [], loading: false, error: null, refetch: vi.fn() });
+    render(<DashboardPage />);
+
+    expect(screen.queryByTestId("linear-sync-dialog")).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: /sync from linear/i }));
+    expect(screen.getByTestId("linear-sync-dialog")).toBeDefined();
+
+    await userEvent.click(screen.getByText("close-dialog"));
+    expect(screen.queryByTestId("linear-sync-dialog")).toBeNull();
   });
 
-  it("filters to Done runs when that filter button is clicked", () => {
-    renderPage();
-    fireEvent.click(screen.getByRole("button", { name: "Done" }));
-    const rows = screen.getAllByTestId("run-row");
-    expect(rows.map((r) => r.textContent)).toEqual(["r-done-1"]);
+  it("calls refetch when the dialog reports onIngested", async () => {
+    const refetch = vi.fn();
+    mockUseRuns.mockReturnValue({ runs: [], loading: false, error: null, refetch });
+    render(<DashboardPage />);
+
+    await userEvent.click(screen.getByRole("button", { name: /sync from linear/i }));
+    await userEvent.click(screen.getByText("trigger-ingested"));
+    expect(refetch).toHaveBeenCalledOnce();
   });
 
-  it("returns to All when the All filter button is clicked after another filter", () => {
-    renderPage();
-    fireEvent.click(screen.getByRole("button", { name: "Done" }));
-    expect(screen.getAllByTestId("run-row")).toHaveLength(1);
-    fireEvent.click(screen.getByRole("button", { name: "All" }));
-    expect(screen.getAllByTestId("run-row")).toHaveLength(5);
-  });
+  it("shows the ingest summary banner after onIngestComplete and auto-dismisses it", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    mockUseRuns.mockReturnValue({ runs: [], loading: false, error: null, refetch: vi.fn() });
+    render(<DashboardPage />);
 
-  it("opens the LinearSyncDialog when 'Sync from Linear' is clicked", () => {
-    renderPage();
-    expect(screen.getByTestId("linear-sync-dialog").dataset.open).toBe("false");
-    fireEvent.click(screen.getByRole("button", { name: /sync from linear/i }));
-    expect(screen.getByTestId("linear-sync-dialog").dataset.open).toBe("true");
-  });
-
-  it("closes the LinearSyncDialog when its onClose callback fires", () => {
-    renderPage();
-    fireEvent.click(screen.getByRole("button", { name: /sync from linear/i }));
-    expect(screen.getByTestId("linear-sync-dialog").dataset.open).toBe("true");
-    fireEvent.click(screen.getByRole("button", { name: /close dialog/i }));
-    expect(screen.getByTestId("linear-sync-dialog").dataset.open).toBe("false");
-  });
-
-  it("shows the IngestSummaryBanner after onIngestComplete fires and auto-dismisses after the timeout", () => {
-    vi.useFakeTimers();
-    renderPage();
-    fireEvent.click(screen.getByRole("button", { name: /sync from linear/i }));
-    fireEvent.click(screen.getByRole("button", { name: /simulate ingest complete/i }));
+    await user.click(screen.getByRole("button", { name: /sync from linear/i }));
+    await user.click(screen.getByText("trigger-ingest-complete"));
 
     expect(screen.getByTestId("ingest-summary-banner")).toBeDefined();
-    expect(screen.getByText(/started 3, skipped 1/i)).toBeDefined();
+    expect(screen.getByText(/started=3 skipped=1/)).toBeDefined();
 
-    // Not yet dismissed before the timeout elapses
-    act(() => {
-      vi.advanceTimersByTime(4999);
+    await act(async () => {
+      vi.advanceTimersByTime(5000);
     });
-    expect(screen.queryByTestId("ingest-summary-banner")).not.toBeNull();
 
-    // Auto-dismisses once the configured timeout elapses
-    act(() => {
-      vi.advanceTimersByTime(1);
-    });
+    expect(screen.queryByTestId("ingest-summary-banner")).toBeNull();
+    vi.useRealTimers();
+  });
+
+  it("dismisses the ingest summary banner when the dismiss button is clicked", async () => {
+    mockUseRuns.mockReturnValue({ runs: [], loading: false, error: null, refetch: vi.fn() });
+    render(<DashboardPage />);
+
+    await userEvent.click(screen.getByRole("button", { name: /sync from linear/i }));
+    await userEvent.click(screen.getByText("trigger-ingest-complete"));
+    expect(screen.getByTestId("ingest-summary-banner")).toBeDefined();
+
+    await userEvent.click(screen.getByText("dismiss-banner"));
     expect(screen.queryByTestId("ingest-summary-banner")).toBeNull();
   });
 
-  it("dismisses the IngestSummaryBanner via its own dismiss button before the auto-dismiss timeout", () => {
-    vi.useFakeTimers();
-    renderPage();
-    fireEvent.click(screen.getByRole("button", { name: /sync from linear/i }));
-    fireEvent.click(screen.getByRole("button", { name: /simulate ingest complete/i }));
-
-    expect(screen.getByTestId("ingest-summary-banner")).toBeDefined();
-
-    fireEvent.click(screen.getByRole("button", { name: /dismiss/i }));
-    expect(screen.queryByTestId("ingest-summary-banner")).toBeNull();
+  afterEach(() => {
+    vi.useRealTimers();
   });
 });

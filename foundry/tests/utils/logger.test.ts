@@ -1,42 +1,51 @@
-import { describe, it, expect, vi, afterEach } from "vitest";
-import { env } from "../../src/config/env.js";
+import { describe, it, expect, vi } from "vitest";
 import { logger } from "../../src/utils/logger.js";
+import { env } from "../../src/config/env.js";
 
 describe("logger", () => {
-  it("exposes a level matching env.LOG_LEVEL", () => {
+  it("is a pino logger instance exposing the standard level methods", () => {
+    expect(logger).toBeDefined();
+    expect(typeof logger.info).toBe("function");
+    expect(typeof logger.warn).toBe("function");
+    expect(typeof logger.error).toBe("function");
+    expect(typeof logger.debug).toBe("function");
+    expect(typeof logger.fatal).toBe("function");
+    expect(typeof logger.trace).toBe("function");
+    expect(typeof logger.child).toBe("function");
+  });
+
+  it("is configured with the level from env.LOG_LEVEL", () => {
     expect(logger.level).toBe(env.LOG_LEVEL);
   });
 
-  it("does not throw when logging", () => {
-    expect(() => logger.info("x")).not.toThrow();
+  it("supports creating a child logger with bound bindings", () => {
+    const child = logger.child({ component: "test" });
+    expect(typeof child.info).toBe("function");
+    expect(child.level).toBe(logger.level);
   });
-});
 
-describe("logger transport ternary", () => {
-  const ORIGINAL_NODE_ENV = process.env.NODE_ENV;
+  it("does not throw when logging at each configured level", () => {
+    expect(() => logger.info("logger test info message")).not.toThrow();
+    expect(() => logger.warn("logger test warn message")).not.toThrow();
+    expect(() => logger.debug("logger test debug message")).not.toThrow();
+  });
 
-  afterEach(() => {
-    if (ORIGINAL_NODE_ENV === undefined) {
-      delete process.env.NODE_ENV;
-    } else {
-      process.env.NODE_ENV = ORIGINAL_NODE_ENV;
+  it("omits the pino-pretty transport when NODE_ENV is 'production'", async () => {
+    const originalNodeEnv = process.env.NODE_ENV;
+    process.env.NODE_ENV = "production";
+    vi.resetModules();
+    try {
+      const fresh = await import("../../src/utils/logger.js");
+      expect(fresh.logger).toBeDefined();
+      expect(typeof fresh.logger.info).toBe("function");
+      expect(() => fresh.logger.info("production mode logger message")).not.toThrow();
+    } finally {
+      if (originalNodeEnv === undefined) {
+        delete process.env.NODE_ENV;
+      } else {
+        process.env.NODE_ENV = originalNodeEnv;
+      }
+      vi.resetModules();
     }
-    vi.resetModules();
-  });
-
-  it("does not throw when re-imported under a non-production NODE_ENV", async () => {
-    vi.resetModules();
-    vi.stubEnv("NODE_ENV", "development");
-    const mod = await import("../../src/utils/logger.js");
-    expect(mod.logger.level).toBe(env.LOG_LEVEL);
-    vi.unstubAllEnvs();
-  });
-
-  it("does not throw when re-imported under NODE_ENV=production", async () => {
-    vi.resetModules();
-    vi.stubEnv("NODE_ENV", "production");
-    const mod = await import("../../src/utils/logger.js");
-    expect(mod.logger.level).toBe(env.LOG_LEVEL);
-    vi.unstubAllEnvs();
   });
 });

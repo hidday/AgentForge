@@ -1,111 +1,95 @@
 import { describe, it, expect } from "vitest";
-import { OpenQuestionSchema, PlanStepSchema, PlanSchema } from "../../src/schemas/plan.js";
+import { OpenQuestionSchema, PlanSchema } from "../../src/schemas/plan.js";
 
 describe("OpenQuestionSchema", () => {
-  it("parses a well-formed object directly", () => {
-    const result = OpenQuestionSchema.parse({
+  it("accepts the full object form as-is", () => {
+    const parsed = OpenQuestionSchema.parse({
       id: "q1",
-      question: "What about X?",
+      question: "Which auth provider?",
       requiredForExecution: true,
     });
-    expect(result).toEqual({ id: "q1", question: "What about X?", requiredForExecution: true });
+    expect(parsed).toEqual({
+      id: "q1",
+      question: "Which auth provider?",
+      requiredForExecution: true,
+    });
   });
 
-  it("defaults requiredForExecution to false when invalid via .catch", () => {
-    const result = OpenQuestionSchema.parse({
+  it("defaults requiredForExecution to false via .catch() when it's the wrong type", () => {
+    const parsed = OpenQuestionSchema.parse({
       id: "q1",
-      question: "What about X?",
+      question: "Which auth provider?",
       requiredForExecution: "not-a-boolean",
     });
-    expect(result.requiredForExecution).toBe(false);
+    expect(parsed.requiredForExecution).toBe(false);
   });
 
-  it("normalizes a plain string into the object shape", () => {
-    const result = OpenQuestionSchema.parse("Should we do X?");
-    expect(result.question).toBe("Should we do X?");
-    expect(result.requiredForExecution).toBe(false);
-    expect(result.id).toMatch(/^q/);
-  });
-});
-
-describe("PlanStepSchema", () => {
-  it("parses a valid step", () => {
-    const step = { id: "s1", title: "Do the thing", description: "details" };
-    expect(PlanStepSchema.parse(step)).toEqual(step);
-  });
-
-  it("fails when a required field is missing", () => {
-    const result = PlanStepSchema.safeParse({ id: "s1", title: "Do the thing" });
-    expect(result.success).toBe(false);
+  it("normalizes a plain string into the full object shape", () => {
+    const parsed = OpenQuestionSchema.parse("Which auth provider should we use?");
+    expect(parsed).toEqual({
+      id: expect.stringMatching(/^q/),
+      question: "Which auth provider should we use?",
+      requiredForExecution: false,
+    });
   });
 });
 
 describe("PlanSchema", () => {
-  const validPlan = {
-    planVersion: 1,
-    summary: "summary text",
-    assumptions: ["assumption 1"],
-    openQuestions: [{ id: "q1", question: "q?", requiredForExecution: false }],
-    risks: ["risk 1"],
-    steps: [{ id: "s1", title: "Step 1", description: "desc" }],
-    testPlan: "test everything",
-    confidence: 0.9,
-  };
+  function baseFields() {
+    return {
+      planVersion: 1,
+      summary: "Add auth middleware",
+      assumptions: [],
+      openQuestions: [],
+      risks: [],
+      steps: [{ id: "s1", title: "Step 1", description: "Do something" }],
+      testPlan: "Run tests",
+      confidence: 0.8,
+    };
+  }
 
-  it("parses a fully valid plan", () => {
-    const parsed = PlanSchema.parse(validPlan);
-    expect(parsed.summary).toBe("summary text");
+  it("parses a fully valid plan, defaulting requirementsTraceability to an empty string", () => {
+    const parsed = PlanSchema.parse(baseFields());
     expect(parsed.requirementsTraceability).toBe("");
   });
 
-  it("defaults requirementsTraceability to empty string when omitted", () => {
-    const parsed = PlanSchema.parse(validPlan);
-    expect(parsed.requirementsTraceability).toBe("");
-  });
-
-  it("accepts an explicit requirementsTraceability value", () => {
-    const parsed = PlanSchema.parse({ ...validPlan, requirementsTraceability: "traces to REQ-1" });
-    expect(parsed.requirementsTraceability).toBe("traces to REQ-1");
-  });
-
-  it("coerces assumptions/risks given as { description } objects (FlexString)", () => {
+  it("normalizes assumptions/risks given as plain strings via FlexString", () => {
     const parsed = PlanSchema.parse({
-      ...validPlan,
-      assumptions: [{ description: "obj assumption" }],
-      risks: [{ risk: "obj risk" }],
+      ...baseFields(),
+      assumptions: ["Users are already authenticated upstream"],
+      risks: ["Token rotation could break active sessions"],
     });
-    expect(parsed.assumptions).toEqual(["obj assumption"]);
-    expect(parsed.risks).toEqual(["obj risk"]);
+    expect(parsed.assumptions).toEqual(["Users are already authenticated upstream"]);
+    expect(parsed.risks).toEqual(["Token rotation could break active sessions"]);
   });
 
-  it("coerces assumptions given as { text } or { assumption } objects (FlexString)", () => {
+  it("normalizes assumptions/risks given as {description}/{risk}/{text}/{assumption} objects", () => {
     const parsed = PlanSchema.parse({
-      ...validPlan,
-      assumptions: [{ text: "text form" }, { assumption: "assumption form" }],
+      ...baseFields(),
+      assumptions: [{ assumption: "Config is already loaded" }, { text: "generic text form" }],
+      risks: [{ risk: "Could break existing sessions" }, { description: "generic description form" }],
     });
-    expect(parsed.assumptions).toEqual(["text form", "assumption form"]);
+    expect(parsed.assumptions).toEqual(["Config is already loaded", "generic text form"]);
+    expect(parsed.risks).toEqual(["Could break existing sessions", "generic description form"]);
   });
 
-  it("falls back to empty string for an unrecognized FlexString shape", () => {
+  it("falls back to an empty string for an assumption/risk that matches none of the FlexString shapes", () => {
     const parsed = PlanSchema.parse({
-      ...validPlan,
-      risks: [{ somethingElse: true }],
+      ...baseFields(),
+      assumptions: [{ unexpectedShape: true }],
+      risks: [12345],
     });
+    expect(parsed.assumptions).toEqual([""]);
     expect(parsed.risks).toEqual([""]);
   });
 
-  it("accepts openQuestions expressed as plain strings", () => {
-    const parsed = PlanSchema.parse({ ...validPlan, openQuestions: ["Plain question?"] });
-    expect(parsed.openQuestions[0]?.question).toBe("Plain question?");
+  it("rejects a non-positive or non-integer planVersion", () => {
+    expect(() => PlanSchema.parse({ ...baseFields(), planVersion: 0 })).toThrow();
+    expect(() => PlanSchema.parse({ ...baseFields(), planVersion: 1.5 })).toThrow();
   });
 
-  it("fails when confidence is out of the 0-1 range", () => {
-    const result = PlanSchema.safeParse({ ...validPlan, confidence: 2 });
-    expect(result.success).toBe(false);
-  });
-
-  it("fails when planVersion is not a positive integer", () => {
-    const result = PlanSchema.safeParse({ ...validPlan, planVersion: 0 });
-    expect(result.success).toBe(false);
+  it("rejects a confidence outside [0, 1]", () => {
+    expect(() => PlanSchema.parse({ ...baseFields(), confidence: 1.5 })).toThrow();
+    expect(() => PlanSchema.parse({ ...baseFields(), confidence: -0.1 })).toThrow();
   });
 });

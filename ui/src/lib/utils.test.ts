@@ -1,61 +1,77 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 import { cn, relativeTime, formatTimestamp } from "./utils.ts";
 
 describe("cn", () => {
-  it("merges class names, deduping conflicting tailwind utilities in favor of the last one", () => {
-    expect(cn("px-2", "px-4")).toBe("px-4");
-  });
-
-  it("passes through non-conflicting class names combined", () => {
-    expect(cn("text-sm", "font-bold")).toBe("text-sm font-bold");
+  it("merges class name strings", () => {
+    expect(cn("a", "b")).toBe("a b");
   });
 
   it("drops falsy values", () => {
-    expect(cn("a", false && "b", undefined, null, "c")).toBe("a c");
+    expect(cn("a", false, null, undefined, "b")).toBe("a b");
+  });
+
+  it("resolves conflicting tailwind classes via tailwind-merge (last wins)", () => {
+    expect(cn("px-2", "px-4")).toBe("px-4");
   });
 });
 
 describe("relativeTime", () => {
-  beforeEach(() => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date("2024-06-01T12:00:00Z"));
-  });
-
   afterEach(() => {
     vi.useRealTimers();
   });
 
-  it("returns 'just now' for a timestamp less than 60 seconds old", () => {
-    expect(relativeTime(new Date("2024-06-01T11:59:30Z"))).toBe("just now");
+  it("returns 'just now' for a timestamp under 60 seconds old", () => {
+    const now = new Date("2024-01-01T00:01:00Z");
+    vi.useFakeTimers();
+    vi.setSystemTime(now);
+    const then = new Date("2024-01-01T00:00:30Z").toISOString();
+    expect(relativeTime(then)).toBe("just now");
   });
 
-  it("returns '<N>m ago' for a timestamp less than 60 minutes old", () => {
-    expect(relativeTime(new Date("2024-06-01T11:55:00Z"))).toBe("5m ago");
+  it("returns minutes ago for a timestamp between 1 and 59 minutes old", () => {
+    const now = new Date("2024-01-01T01:00:00Z");
+    vi.useFakeTimers();
+    vi.setSystemTime(now);
+    const then = new Date("2024-01-01T00:55:00Z").toISOString();
+    expect(relativeTime(then)).toBe("5m ago");
   });
 
-  it("returns '<N>h ago' for a timestamp less than 24 hours old", () => {
-    expect(relativeTime(new Date("2024-06-01T09:00:00Z"))).toBe("3h ago");
+  it("returns hours ago for a timestamp between 1 and 23 hours old", () => {
+    const now = new Date("2024-01-02T00:00:00Z");
+    vi.useFakeTimers();
+    vi.setSystemTime(now);
+    const then = new Date("2024-01-01T20:00:00Z").toISOString();
+    expect(relativeTime(then)).toBe("4h ago");
   });
 
-  it("returns '<N>d ago' for a timestamp 24 hours or older", () => {
-    expect(relativeTime(new Date("2024-05-30T12:00:00Z"))).toBe("2d ago");
+  it("returns days ago for a timestamp 24 hours or older", () => {
+    const now = new Date("2024-01-10T00:00:00Z");
+    vi.useFakeTimers();
+    vi.setSystemTime(now);
+    const then = new Date("2024-01-07T00:00:00Z").toISOString();
+    expect(relativeTime(then)).toBe("3d ago");
   });
 
-  it("accepts a date string as well as a Date object", () => {
-    expect(relativeTime("2024-06-01T11:59:50Z")).toBe("just now");
+  it("accepts a Date object as well as a string", () => {
+    const now = new Date("2024-01-01T00:01:00Z");
+    vi.useFakeTimers();
+    vi.setSystemTime(now);
+    const then = new Date("2024-01-01T00:00:30Z");
+    expect(relativeTime(then)).toBe("just now");
   });
 });
 
 describe("formatTimestamp", () => {
-  it("returns a non-empty formatted string containing the month and day", () => {
-    const formatted = formatTimestamp(new Date("2024-03-15T10:30:00Z"));
-    expect(formatted.length).toBeGreaterThan(0);
-    expect(formatted).toContain("Mar");
-    expect(formatted).toContain("15");
+  it("formats a date string into a locale-formatted timestamp with month/day/hour/minute/second", () => {
+    const result = formatTimestamp("2024-03-15T14:30:45Z");
+    // Avoid asserting an exact locale string (timezone-dependent); assert shape/content instead.
+    expect(result).toMatch(/Mar/);
+    expect(result).toMatch(/15/);
+    expect(typeof result).toBe("string");
   });
 
-  it("accepts a date string input", () => {
-    const formatted = formatTimestamp("2024-12-25T00:00:00Z");
-    expect(formatted).toContain("Dec");
+  it("formats a Date object the same way as an equivalent date string", () => {
+    const date = new Date("2024-03-15T14:30:45Z");
+    expect(formatTimestamp(date)).toBe(formatTimestamp(date.toISOString()));
   });
 });

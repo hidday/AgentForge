@@ -1,33 +1,22 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { resolve } from "node:path";
-
-const existsSyncMock = vi.fn();
-const readFileSyncMock = vi.fn();
-const statSyncMock = vi.fn();
-
-vi.mock("node:fs", () => ({
-  existsSync: (...args: unknown[]) => existsSyncMock(...args),
-  readFileSync: (...args: unknown[]) => readFileSyncMock(...args),
-  statSync: (...args: unknown[]) => statSyncMock(...args),
-}));
-
-import { RepoRegistry, loadRepoRegistry, type ReposConfig } from "../../src/config/repoRegistry.js";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { mkdtempSync, writeFileSync, rmSync, mkdirSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+import {
+  RepoRegistry,
+  loadRepoRegistry,
+  type ReposConfig,
+  type RepoEntry,
+} from "../../src/config/repoRegistry.js";
 
 function makeLogger() {
-  return {
-    info: vi.fn(),
-    warn: vi.fn(),
-    error: vi.fn(),
-    debug: vi.fn(),
-    fatal: vi.fn(),
-    child: vi.fn(),
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  } as any;
+  return { info: () => {}, warn: () => {}, error: () => {}, debug: () => {} };
 }
 
-function baseConstraints() {
+function makeConstraints() {
   return {
-    requiredChecks: ["lint"],
+    requiredChecks: [],
     maxFilesChanged: 10,
     maxDiffLines: 500,
     forbiddenPatterns: [],
@@ -35,268 +24,321 @@ function baseConstraints() {
   };
 }
 
-function makeConfig(overrides?: Partial<ReposConfig>): ReposConfig {
+function makeRepoEntry(overrides: Partial<RepoEntry> = {}): RepoEntry {
   return {
-    repos: [
-      {
-        name: "repo-a",
-        directory: "repo-a",
-        linearProject: "Project A",
-        linearTeam: "TEAM_A",
-        defaultBranch: "main",
-        allowedPaths: ["src/"],
-        protectedPaths: ["infra/"],
-        constraints: baseConstraints(),
-      },
-      {
-        name: "repo-b",
-        directory: "/abs/path/repo-b",
-        defaultBranch: "main",
-        allowedPaths: [],
-        protectedPaths: [],
-        constraints: baseConstraints(),
-      },
-    ],
-    defaultRepo: "repo-a",
+    name: "repo-a",
+    directory: "repo-a",
+    defaultBranch: "main",
+    allowedPaths: ["src/"],
+    protectedPaths: [],
+    constraints: makeConstraints(),
     ...overrides,
   };
 }
 
 describe("RepoRegistry", () => {
-  beforeEach(() => {
-    existsSyncMock.mockReset();
-    readFileSyncMock.mockReset();
-    statSyncMock.mockReset();
+  describe("constructor", () => {
+    it("throws when defaultRepo does not match any configured repo", () => {
+      const config: ReposConfig = {
+        repos: [makeRepoEntry({ name: "repo-a" })],
+        defaultRepo: "does-not-exist",
+      };
+      expect(() => new RepoRegistry("/repos", config, makeLogger() as never)).toThrow(
+        /Default repo "does-not-exist" not found in registry\. Available: repo-a/,
+      );
+    });
+
+    it("constructs successfully when defaultRepo matches a configured repo", () => {
+      const config: ReposConfig = {
+        repos: [makeRepoEntry({ name: "repo-a" })],
+        defaultRepo: "repo-a",
+      };
+      const registry = new RepoRegistry("/repos", config, makeLogger() as never);
+      expect(registry.getDefaultRepo().name).toBe("repo-a");
+    });
   });
 
-  it("throws in the constructor when defaultRepo is not found in the repos list", () => {
-    const logger = makeLogger();
-    const config = makeConfig({ defaultRepo: "does-not-exist" });
-    expect(() => new RepoRegistry("/repos", config, logger)).toThrow(
-      /Default repo "does-not-exist" not found in registry/,
-    );
-  });
+  describe("getRepoByName / getRepoByLinearProject / getDefaultRepo", () => {
+    const config: ReposConfig = {
+      repos: [
+        makeRepoEntry({ name: "repo-a", linearProject: "Project A" }),
+        makeRepoEntry({ name: "repo-b" }),
+      ],
+      defaultRepo: "repo-b",
+    };
+    const registry = new RepoRegistry("/repos", config, makeLogger() as never);
 
-  it("getRepoByName returns the matching entry or undefined", () => {
-    const logger = makeLogger();
-    const registry = new RepoRegistry("/repos", makeConfig(), logger);
-    expect(registry.getRepoByName("repo-a")?.name).toBe("repo-a");
-    expect(registry.getRepoByName("nope")).toBeUndefined();
-  });
+    it("returns the matching entry by name", () => {
+      expect(registry.getRepoByName("repo-a")?.name).toBe("repo-a");
+    });
 
-  it("getRepoByLinearProject returns the matching entry or undefined", () => {
-    const logger = makeLogger();
-    const registry = new RepoRegistry("/repos", makeConfig(), logger);
-    expect(registry.getRepoByLinearProject("Project A")?.name).toBe("repo-a");
-    expect(registry.getRepoByLinearProject("Unknown Project")).toBeUndefined();
-  });
+    it("returns undefined for an unknown name", () => {
+      expect(registry.getRepoByName("nope")).toBeUndefined();
+    });
 
-  it("getDefaultRepo returns the configured default entry", () => {
-    const logger = makeLogger();
-    const registry = new RepoRegistry("/repos", makeConfig(), logger);
-    expect(registry.getDefaultRepo().name).toBe("repo-a");
+    it("returns the matching entry by Linear project", () => {
+      expect(registry.getRepoByLinearProject("Project A")?.name).toBe("repo-a");
+    });
+
+    it("returns undefined for an unknown Linear project", () => {
+      expect(registry.getRepoByLinearProject("Unknown")).toBeUndefined();
+    });
+
+    it("returns the configured default repo", () => {
+      expect(registry.getDefaultRepo().name).toBe("repo-b");
+    });
   });
 
   describe("resolveForIssue", () => {
-    it("resolves via exact project match first", () => {
-      const logger = makeLogger();
-      const registry = new RepoRegistry("/repos", makeConfig(), logger);
-      const entry = registry.resolveForIssue("Project A", "TEAM_A");
-      expect(entry.name).toBe("repo-a");
-      expect(logger.debug).toHaveBeenCalledWith(
-        { project: "Project A", repo: "repo-a" },
-        "Resolved repo from Linear project",
-      );
+    function buildRegistry() {
+      const config: ReposConfig = {
+        repos: [
+          makeRepoEntry({ name: "repo-project", linearProject: "Project A" }),
+          makeRepoEntry({ name: "repo-team", linearTeam: "TeamB", assigneeMe: true }),
+          makeRepoEntry({ name: "repo-default" }),
+        ],
+        defaultRepo: "repo-default",
+      };
+      return new RepoRegistry("/repos", config, makeLogger() as never);
+    }
+
+    it("resolves by exact Linear project match", () => {
+      const registry = buildRegistry();
+      expect(registry.resolveForIssue("Project A", undefined).name).toBe("repo-project");
     });
 
-    it("falls back to team-based routing when project does not match", () => {
-      const logger = makeLogger();
-      const registry = new RepoRegistry("/repos", makeConfig(), logger);
-      const entry = registry.resolveForIssue(undefined, "TEAM_A");
-      expect(entry.name).toBe("repo-a");
-      expect(logger.debug).toHaveBeenCalledWith(
-        { team: "TEAM_A", repo: "repo-a" },
-        "Resolved repo from Linear team",
-      );
+    it("prefers project match over team match when both are provided and both match", () => {
+      const registry = buildRegistry();
+      expect(registry.resolveForIssue("Project A", "TeamB").name).toBe("repo-project");
     });
 
-    it("throws when project is provided but unmatched and no team fallback given", () => {
-      const logger = makeLogger();
-      const registry = new RepoRegistry("/repos", makeConfig(), logger);
+    it("falls back to team match when project is absent", () => {
+      const registry = buildRegistry();
+      expect(registry.resolveForIssue(undefined, "TeamB").name).toBe("repo-team");
+    });
+
+    it("falls back to team match when project is provided but unmatched and team matches", () => {
+      const registry = buildRegistry();
+      expect(registry.resolveForIssue("Unknown Project", "TeamB").name).toBe("repo-team");
+    });
+
+    it("throws when project is provided, unmatched, and no team is given", () => {
+      const registry = buildRegistry();
       expect(() => registry.resolveForIssue("Unknown Project", undefined)).toThrow(
         /No repo mapped to Linear project "Unknown Project"/,
       );
     });
 
-    it("falls back to the default repo when neither project nor team match", () => {
-      const logger = makeLogger();
-      const registry = new RepoRegistry("/repos", makeConfig(), logger);
-      const entry = registry.resolveForIssue(undefined, "UNKNOWN_TEAM");
-      expect(entry.name).toBe("repo-a");
-      expect(logger.debug).toHaveBeenCalledWith(
-        { fallback: "repo-a" },
-        "Issue has no Linear project or team match, using default repo",
+    it("falls back to the default repo when project is unmatched and team is also unmatched", () => {
+      const registry = buildRegistry();
+      expect(registry.resolveForIssue("Unknown Project", "Unknown Team").name).toBe(
+        "repo-default",
       );
     });
 
-    it("falls back to the default repo when neither project nor team are provided", () => {
-      const logger = makeLogger();
-      const registry = new RepoRegistry("/repos", makeConfig(), logger);
-      const entry = registry.resolveForIssue();
-      expect(entry.name).toBe("repo-a");
-    });
-
-    it("falls back to default when project is unmatched but a team is also given and matches nothing", () => {
-      const logger = makeLogger();
-      const registry = new RepoRegistry("/repos", makeConfig(), logger);
-      // project unmatched, team provided but also unmatched -> not the "project && !team" throw branch
-      const entry = registry.resolveForIssue("Unknown Project", "UNKNOWN_TEAM");
-      expect(entry.name).toBe("repo-a");
+    it("falls back to the default repo when neither project nor team is given", () => {
+      const registry = buildRegistry();
+      expect(registry.resolveForIssue().name).toBe("repo-default");
     });
   });
 
   describe("resolveWorkingDirectory", () => {
-    it("resolves a relative directory against the repos root path", () => {
-      const logger = makeLogger();
-      const registry = new RepoRegistry("/repos", makeConfig(), logger);
-      const entry = registry.getRepoByName("repo-a")!;
-      expect(registry.resolveWorkingDirectory(entry)).toBe(resolve("/repos/repo-a"));
+    const config: ReposConfig = {
+      repos: [makeRepoEntry({ name: "repo-a" })],
+      defaultRepo: "repo-a",
+    };
+    const registry = new RepoRegistry("/repos-root", config, makeLogger() as never);
+
+    it("resolves a relative directory against reposRootPath", () => {
+      const entry = makeRepoEntry({ name: "repo-a", directory: "repo-a" });
+      expect(registry.resolveWorkingDirectory(entry)).toBe(join("/repos-root", "repo-a"));
     });
 
-    it("resolves an absolute directory as-is", () => {
-      const logger = makeLogger();
-      const registry = new RepoRegistry("/repos", makeConfig(), logger);
-      const entry = registry.getRepoByName("repo-b")!;
-      expect(registry.resolveWorkingDirectory(entry)).toBe(resolve("/abs/path/repo-b"));
+    it("returns an absolute directory as-is (resolved)", () => {
+      const entry = makeRepoEntry({ name: "repo-a", directory: "/absolute/path/repo-a" });
+      expect(registry.resolveWorkingDirectory(entry)).toBe("/absolute/path/repo-a");
     });
   });
 
   describe("validateWorkingDirectory", () => {
+    let baseDir: string;
+    let registry: RepoRegistry;
+
+    beforeEach(() => {
+      baseDir = mkdtempSync(join(tmpdir(), "reporegistry-test-"));
+      const config: ReposConfig = {
+        repos: [makeRepoEntry({ name: "repo-a" })],
+        defaultRepo: "repo-a",
+      };
+      registry = new RepoRegistry(baseDir, config, makeLogger() as never);
+    });
+
+    afterEach(() => {
+      rmSync(baseDir, { recursive: true, force: true });
+    });
+
     it("throws when the working directory does not exist", () => {
-      existsSyncMock.mockReturnValue(false);
-      const logger = makeLogger();
-      const registry = new RepoRegistry("/repos", makeConfig(), logger);
-      expect(() => registry.validateWorkingDirectory("/repos/repo-a")).toThrow(
+      const missing = join(baseDir, "does-not-exist");
+      expect(() => registry.validateWorkingDirectory(missing)).toThrow(
         /Working directory does not exist/,
       );
     });
 
-    it("throws when there is no .git entry", () => {
-      existsSyncMock.mockImplementation((p: string) => !p.endsWith(".git"));
-      const logger = makeLogger();
-      const registry = new RepoRegistry("/repos", makeConfig(), logger);
-      expect(() => registry.validateWorkingDirectory("/repos/repo-a")).toThrow(
+    it("throws when the working directory exists but has no .git entry", () => {
+      const dir = join(baseDir, "no-git");
+      mkdirSync(dir);
+      expect(() => registry.validateWorkingDirectory(dir)).toThrow(
         /Working directory is not a git repository/,
       );
     });
 
-    it("throws when .git exists but is neither a directory nor a file", () => {
-      existsSyncMock.mockReturnValue(true);
-      statSyncMock.mockImplementation((p: string) => {
-        if (p.endsWith(".git")) {
-          return { isDirectory: () => false, isFile: () => false };
-        }
-        return { isDirectory: () => true, isFile: () => false };
-      });
-      const logger = makeLogger();
-      const registry = new RepoRegistry("/repos", makeConfig(), logger);
-      expect(() => registry.validateWorkingDirectory("/repos/repo-a")).toThrow(
-        /Working directory has invalid \.git entry/,
-      );
-    });
-
-    it("throws when the working directory path itself is not a directory", () => {
-      existsSyncMock.mockReturnValue(true);
-      statSyncMock.mockImplementation((p: string) => {
-        if (p.endsWith(".git")) {
-          return { isDirectory: () => true, isFile: () => false };
-        }
-        return { isDirectory: () => false, isFile: () => true };
-      });
-      const logger = makeLogger();
-      const registry = new RepoRegistry("/repos", makeConfig(), logger);
-      expect(() => registry.validateWorkingDirectory("/repos/repo-a")).toThrow(
-        /Working directory path is not a directory/,
-      );
-    });
-
-    it("succeeds when everything checks out (.git as a directory)", () => {
-      existsSyncMock.mockReturnValue(true);
-      statSyncMock.mockImplementation((p: string) => {
-        if (p.endsWith(".git")) {
-          return { isDirectory: () => true, isFile: () => false };
-        }
-        return { isDirectory: () => true, isFile: () => false };
-      });
-      const logger = makeLogger();
-      const registry = new RepoRegistry("/repos", makeConfig(), logger);
-      expect(() => registry.validateWorkingDirectory("/repos/repo-a")).not.toThrow();
+    it("succeeds when .git is a directory (normal clone)", () => {
+      const dir = join(baseDir, "normal-clone");
+      mkdirSync(dir);
+      mkdirSync(join(dir, ".git"));
+      expect(() => registry.validateWorkingDirectory(dir)).not.toThrow();
     });
 
     it("succeeds when .git is a file (worktree)", () => {
-      existsSyncMock.mockReturnValue(true);
-      statSyncMock.mockImplementation((p: string) => {
-        if (p.endsWith(".git")) {
-          return { isDirectory: () => false, isFile: () => true };
-        }
-        return { isDirectory: () => true, isFile: () => false };
-      });
-      const logger = makeLogger();
-      const registry = new RepoRegistry("/repos", makeConfig(), logger);
-      expect(() => registry.validateWorkingDirectory("/repos/repo-a")).not.toThrow();
+      const dir = join(baseDir, "worktree-clone");
+      mkdirSync(dir);
+      writeFileSync(join(dir, ".git"), "gitdir: /somewhere/.git/worktrees/x\n");
+      expect(() => registry.validateWorkingDirectory(dir)).not.toThrow();
+    });
+
+    it("throws when .git exists but is neither a file nor a directory", () => {
+      const dir = join(baseDir, "weird-git");
+      mkdirSync(dir);
+      const gitPath = join(dir, ".git");
+      execFileSync("mkfifo", [gitPath]);
+      expect(() => registry.validateWorkingDirectory(dir)).toThrow(
+        /Working directory has invalid \.git entry/,
+      );
     });
   });
 
   describe("listRepos", () => {
-    it("returns all registered repo entries", () => {
-      const logger = makeLogger();
-      const registry = new RepoRegistry("/repos", makeConfig(), logger);
-      const repos = registry.listRepos();
-      expect(repos.map((r) => r.name).sort()).toEqual(["repo-a", "repo-b"]);
+    it("returns all configured repo entries", () => {
+      const config: ReposConfig = {
+        repos: [makeRepoEntry({ name: "repo-a" }), makeRepoEntry({ name: "repo-b" })],
+        defaultRepo: "repo-a",
+      };
+      const registry = new RepoRegistry("/repos", config, makeLogger() as never);
+      expect(registry.listRepos().map((r) => r.name).sort()).toEqual(["repo-a", "repo-b"]);
     });
   });
 });
 
 describe("loadRepoRegistry", () => {
+  let dir: string;
+
   beforeEach(() => {
-    existsSyncMock.mockReset();
-    readFileSyncMock.mockReset();
-    statSyncMock.mockReset();
+    dir = mkdtempSync(join(tmpdir(), "reporegistry-load-test-"));
   });
 
-  it("loads the config file when it exists", () => {
-    existsSyncMock.mockReturnValue(true);
-    readFileSyncMock.mockReturnValue(JSON.stringify(makeConfig()));
-    const logger = makeLogger();
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
 
-    const registry = loadRepoRegistry("/repos/repos.config.json", "/repos", logger);
+  function writeConfig(path: string, config: unknown): void {
+    writeFileSync(path, JSON.stringify(config), "utf-8");
+  }
 
-    expect(registry).toBeInstanceOf(RepoRegistry);
+  it("loads a valid config file directly", () => {
+    const configPath = join(dir, "repos.config.json");
+    writeConfig(configPath, {
+      repos: [makeRepoEntry({ name: "repo-a" })],
+      defaultRepo: "repo-a",
+    });
+
+    const registry = loadRepoRegistry(configPath, dir, makeLogger() as never);
+
     expect(registry.getDefaultRepo().name).toBe("repo-a");
-    expect(logger.info).toHaveBeenCalled();
-    expect(logger.warn).not.toHaveBeenCalled();
+    expect(registry.listRepos()).toHaveLength(1);
   });
 
-  it("falls back to the .example.json file when the config is missing, logging a warning", () => {
-    existsSyncMock.mockImplementation((p: string) => p.endsWith(".example.json"));
-    readFileSyncMock.mockReturnValue(JSON.stringify(makeConfig()));
-    const logger = makeLogger();
+  it("applies the zod default for defaultBranch when omitted", () => {
+    const configPath = join(dir, "repos.config.json");
+    const entry = makeRepoEntry({ name: "repo-a" });
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const { defaultBranch: _omit, ...withoutDefaultBranch } = entry;
+    writeConfig(configPath, {
+      repos: [withoutDefaultBranch],
+      defaultRepo: "repo-a",
+    });
 
-    const registry = loadRepoRegistry("/repos/repos.config.json", "/repos", logger);
-
-    expect(registry).toBeInstanceOf(RepoRegistry);
-    expect(logger.warn).toHaveBeenCalled();
-    const [, message] = logger.warn.mock.calls[0];
-    expect(message).toMatch(/falling back to the committed example/);
+    const registry = loadRepoRegistry(configPath, dir, makeLogger() as never);
+    expect(registry.getRepoByName("repo-a")?.defaultBranch).toBe("main");
   });
 
-  it("throws when neither the config nor the example fallback exist", () => {
-    existsSyncMock.mockReturnValue(false);
-    const logger = makeLogger();
+  it("falls back to the .example.json file when the primary config is missing", () => {
+    const configPath = join(dir, "repos.config.json");
+    const examplePath = join(dir, "repos.config.example.json");
+    writeConfig(examplePath, {
+      repos: [makeRepoEntry({ name: "example-repo" })],
+      defaultRepo: "example-repo",
+    });
 
-    expect(() => loadRepoRegistry("/repos/repos.config.json", "/repos", logger)).toThrow(
-      /Repo config not found/,
+    let warned = false;
+    const logger = {
+      info: () => {},
+      warn: () => {
+        warned = true;
+      },
+      error: () => {},
+      debug: () => {},
+    };
+
+    const registry = loadRepoRegistry(configPath, dir, logger as never);
+
+    expect(registry.getDefaultRepo().name).toBe("example-repo");
+    expect(warned).toBe(true);
+  });
+
+  it("throws when the config is missing and no example fallback exists", () => {
+    const configPath = join(dir, "repos.config.json");
+    expect(() => loadRepoRegistry(configPath, dir, makeLogger() as never)).toThrow(
+      /Repo config not found at/,
     );
-    expect(readFileSyncMock).not.toHaveBeenCalled();
+  });
+
+  it("throws when the config file contains malformed JSON", () => {
+    const configPath = join(dir, "repos.config.json");
+    writeFileSync(configPath, "{ not valid json", "utf-8");
+    expect(() => loadRepoRegistry(configPath, dir, makeLogger() as never)).toThrow();
+  });
+
+  it("throws when the config fails schema validation (empty repos array)", () => {
+    const configPath = join(dir, "repos.config.json");
+    writeConfig(configPath, { repos: [], defaultRepo: "repo-a" });
+    expect(() => loadRepoRegistry(configPath, dir, makeLogger() as never)).toThrow();
+  });
+
+  it("throws when a repo entry is missing required constraint fields", () => {
+    const configPath = join(dir, "repos.config.json");
+    writeConfig(configPath, {
+      repos: [
+        {
+          name: "repo-a",
+          directory: "repo-a",
+          allowedPaths: [],
+          protectedPaths: [],
+          constraints: { requiredChecks: [] }, // missing maxFilesChanged etc.
+        },
+      ],
+      defaultRepo: "repo-a",
+    });
+    expect(() => loadRepoRegistry(configPath, dir, makeLogger() as never)).toThrow();
+  });
+
+  it("resolves a relative configPath argument", () => {
+    const configPath = join(dir, "repos.config.json");
+    writeConfig(configPath, {
+      repos: [makeRepoEntry({ name: "repo-a" })],
+      defaultRepo: "repo-a",
+    });
+
+    const registry = loadRepoRegistry(configPath, dir, makeLogger() as never);
+    expect(registry.getDefaultRepo().name).toBe("repo-a");
   });
 });

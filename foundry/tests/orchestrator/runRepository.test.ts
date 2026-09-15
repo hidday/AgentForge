@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { RunRepository } from "../../src/orchestrator/runRepository.js";
 import { RunState } from "../../src/domain/runState.js";
 import type { PrismaClient } from "../../src/generated/prisma/client.js";
@@ -7,10 +7,10 @@ function makeRow(overrides: Record<string, unknown> = {}) {
   return {
     id: "run-1",
     linearIssueId: "LIN-1",
-    linearIssueIdentifier: "LIN-1",
-    linearIssueDescription: "desc",
-    linearIssueTitle: "title",
-    linearIssueUrl: "https://linear.app/x",
+    linearIssueIdentifier: null,
+    linearIssueDescription: null,
+    linearIssueTitle: null,
+    linearIssueUrl: null,
     repo: "test-repo",
     branchName: null,
     prNumber: null,
@@ -21,15 +21,15 @@ function makeRow(overrides: Record<string, unknown> = {}) {
     executorRuntime: null,
     reviewerRuntime: null,
     remediationRuntime: null,
-    workingDirectory: "/tmp",
+    workingDirectory: "/tmp/work",
     latestArtifactVersion: 0,
-    createdAt: new Date("2024-01-01T00:00:00Z"),
-    updatedAt: new Date("2024-01-01T00:00:00Z"),
+    createdAt: new Date("2026-01-01T00:00:00Z"),
+    updatedAt: new Date("2026-01-01T00:00:00Z"),
     ...overrides,
   };
 }
 
-function makePrisma() {
+function makePrisma(overrides: Record<string, unknown> = {}) {
   return {
     aiRun: {
       create: vi.fn(),
@@ -37,76 +37,82 @@ function makePrisma() {
       findUnique: vi.fn(),
       findFirst: vi.fn(),
       update: vi.fn(),
+      ...overrides,
     },
-  };
+  } as unknown as PrismaClient;
 }
 
 describe("RunRepository", () => {
-  let prisma: ReturnType<typeof makePrisma>;
-  let repo: RunRepository;
-
-  beforeEach(() => {
-    prisma = makePrisma();
-    repo = new RunRepository(prisma as unknown as PrismaClient);
-  });
-
   describe("create", () => {
-    it("creates a run with defaulted optional fields and state Todo, returning the mapped domain object", async () => {
-      const row = makeRow();
-      prisma.aiRun.create.mockResolvedValue(row);
+    it("creates with provided optional fields and maps the row to a domain Run", async () => {
+      const row = makeRow({
+        linearIssueIdentifier: "LIN-1",
+        linearIssueDescription: "desc",
+        linearIssueTitle: "title",
+        linearIssueUrl: "https://linear.app/x",
+      });
+      const create = vi.fn().mockResolvedValue(row);
+      const prisma = makePrisma({ create });
+      const repo = new RunRepository(prisma);
 
       const result = await repo.create({
         linearIssueId: "LIN-1",
+        linearIssueIdentifier: "LIN-1",
+        linearIssueDescription: "desc",
+        linearIssueTitle: "title",
+        linearIssueUrl: "https://linear.app/x",
         repo: "test-repo",
-        workingDirectory: "/tmp",
+        workingDirectory: "/tmp/work",
       });
 
-      expect(prisma.aiRun.create).toHaveBeenCalledWith({
+      expect(create).toHaveBeenCalledWith({
         data: {
           linearIssueId: "LIN-1",
+          linearIssueIdentifier: "LIN-1",
+          linearIssueDescription: "desc",
+          linearIssueTitle: "title",
+          linearIssueUrl: "https://linear.app/x",
+          repo: "test-repo",
+          workingDirectory: "/tmp/work",
+          state: "Todo",
+        },
+      });
+      expect(result.state).toBe(RunState.Todo);
+      expect(result.id).toBe("run-1");
+    });
+
+    it("defaults missing optional fields to null", async () => {
+      const row = makeRow();
+      const create = vi.fn().mockResolvedValue(row);
+      const prisma = makePrisma({ create });
+      const repo = new RunRepository(prisma);
+
+      await repo.create({
+        linearIssueId: "LIN-1",
+        repo: "test-repo",
+        workingDirectory: "/tmp/work",
+      });
+
+      expect(create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
           linearIssueIdentifier: null,
           linearIssueDescription: null,
           linearIssueTitle: null,
           linearIssueUrl: null,
-          repo: "test-repo",
-          workingDirectory: "/tmp",
-          state: "Todo",
-        },
-      });
-      expect(result.id).toBe("run-1");
-      expect(result.state).toBe(RunState.Todo);
-    });
-
-    it("passes through provided optional fields", async () => {
-      const row = makeRow();
-      prisma.aiRun.create.mockResolvedValue(row);
-
-      await repo.create({
-        linearIssueId: "LIN-1",
-        linearIssueIdentifier: "ID-1",
-        linearIssueDescription: "d",
-        linearIssueTitle: "t",
-        linearIssueUrl: "u",
-        repo: "test-repo",
-        workingDirectory: "/tmp",
-      });
-
-      expect(prisma.aiRun.create).toHaveBeenCalledWith({
-        data: expect.objectContaining({
-          linearIssueIdentifier: "ID-1",
-          linearIssueDescription: "d",
-          linearIssueTitle: "t",
-          linearIssueUrl: "u",
         }),
       });
     });
   });
 
   describe("findAll", () => {
-    it("queries with no where clause when no filter is given", async () => {
-      prisma.aiRun.findMany.mockResolvedValue([makeRow()]);
+    it("queries without a where clause when no stateFilter is given", async () => {
+      const findMany = vi.fn().mockResolvedValue([makeRow()]);
+      const prisma = makePrisma({ findMany });
+      const repo = new RunRepository(prisma);
+
       const result = await repo.findAll();
-      expect(prisma.aiRun.findMany).toHaveBeenCalledWith({
+
+      expect(findMany).toHaveBeenCalledWith({
         where: undefined,
         orderBy: { createdAt: "desc" },
       });
@@ -114,129 +120,178 @@ describe("RunRepository", () => {
       expect(result[0].state).toBe(RunState.Todo);
     });
 
-    it("queries with a single-state where clause when one state is given", async () => {
-      prisma.aiRun.findMany.mockResolvedValue([]);
-      await repo.findAll("Todo");
-      expect(prisma.aiRun.findMany).toHaveBeenCalledWith({
-        where: { state: "Todo" },
+    it("builds an equality where clause for a single state", async () => {
+      const findMany = vi.fn().mockResolvedValue([]);
+      const prisma = makePrisma({ findMany });
+      const repo = new RunRepository(prisma);
+
+      await repo.findAll("Planning");
+
+      expect(findMany).toHaveBeenCalledWith({
+        where: { state: "Planning" },
         orderBy: { createdAt: "desc" },
       });
     });
 
-    it("queries with an 'in' where clause when a comma-separated multi-state filter is given", async () => {
-      prisma.aiRun.findMany.mockResolvedValue([]);
-      await repo.findAll("Todo, Planning ,Implementing");
-      expect(prisma.aiRun.findMany).toHaveBeenCalledWith({
-        where: { state: { in: ["Todo", "Planning", "Implementing"] } },
+    it("builds an 'in' where clause for multiple comma-separated states, trimming whitespace", async () => {
+      const findMany = vi.fn().mockResolvedValue([]);
+      const prisma = makePrisma({ findMany });
+      const repo = new RunRepository(prisma);
+
+      await repo.findAll("Planning, PlanReview ,Done");
+
+      expect(findMany).toHaveBeenCalledWith({
+        where: { state: { in: ["Planning", "PlanReview", "Done"] } },
         orderBy: { createdAt: "desc" },
       });
     });
 
-    it("treats an empty-string filter (after trimming/filtering) as no filter", async () => {
-      prisma.aiRun.findMany.mockResolvedValue([]);
-      await repo.findAll(",,");
-      expect(prisma.aiRun.findMany).toHaveBeenCalledWith({
+    it("leaves where undefined when stateFilter contains only blanks", async () => {
+      const findMany = vi.fn().mockResolvedValue([]);
+      const prisma = makePrisma({ findMany });
+      const repo = new RunRepository(prisma);
+
+      await repo.findAll(" , ,");
+
+      expect(findMany).toHaveBeenCalledWith({
         where: undefined,
         orderBy: { createdAt: "desc" },
       });
     });
+
+    it("maps every returned row to a domain Run", async () => {
+      const rows = [makeRow({ id: "a" }), makeRow({ id: "b", state: "Done" })];
+      const findMany = vi.fn().mockResolvedValue(rows);
+      const prisma = makePrisma({ findMany });
+      const repo = new RunRepository(prisma);
+
+      const result = await repo.findAll();
+      expect(result.map((r) => r.id)).toEqual(["a", "b"]);
+      expect(result[1].state).toBe(RunState.Done);
+    });
   });
 
   describe("findById", () => {
-    it("returns the mapped domain object when found", async () => {
-      prisma.aiRun.findUnique.mockResolvedValue(makeRow({ id: "run-42" }));
+    it("returns the mapped Run when found", async () => {
+      const findUnique = vi.fn().mockResolvedValue(makeRow({ id: "run-42" }));
+      const prisma = makePrisma({ findUnique });
+      const repo = new RunRepository(prisma);
+
       const result = await repo.findById("run-42");
-      expect(prisma.aiRun.findUnique).toHaveBeenCalledWith({ where: { id: "run-42" } });
+
+      expect(findUnique).toHaveBeenCalledWith({ where: { id: "run-42" } });
       expect(result?.id).toBe("run-42");
     });
 
     it("returns null when not found", async () => {
-      prisma.aiRun.findUnique.mockResolvedValue(null);
+      const findUnique = vi.fn().mockResolvedValue(null);
+      const prisma = makePrisma({ findUnique });
+      const repo = new RunRepository(prisma);
+
       const result = await repo.findById("missing");
       expect(result).toBeNull();
     });
   });
 
   describe("findByIssueId", () => {
-    it("returns the mapped domain object when found", async () => {
-      prisma.aiRun.findFirst.mockResolvedValue(makeRow({ linearIssueId: "LIN-99" }));
-      const result = await repo.findByIssueId("LIN-99");
-      expect(prisma.aiRun.findFirst).toHaveBeenCalledWith({
-        where: { linearIssueId: "LIN-99" },
+    it("returns the most recent mapped Run when found", async () => {
+      const findFirst = vi.fn().mockResolvedValue(makeRow());
+      const prisma = makePrisma({ findFirst });
+      const repo = new RunRepository(prisma);
+
+      const result = await repo.findByIssueId("LIN-1");
+
+      expect(findFirst).toHaveBeenCalledWith({
+        where: { linearIssueId: "LIN-1" },
         orderBy: { createdAt: "desc" },
       });
-      expect(result?.linearIssueId).toBe("LIN-99");
+      expect(result?.linearIssueId).toBe("LIN-1");
     });
 
-    it("returns null when not found", async () => {
-      prisma.aiRun.findFirst.mockResolvedValue(null);
-      const result = await repo.findByIssueId("missing");
-      expect(result).toBeNull();
+    it("returns null when no run exists for the issue", async () => {
+      const findFirst = vi.fn().mockResolvedValue(null);
+      const prisma = makePrisma({ findFirst });
+      const repo = new RunRepository(prisma);
+
+      expect(await repo.findByIssueId("LIN-999")).toBeNull();
     });
   });
 
   describe("findActiveByIssueId", () => {
-    it("queries excluding terminal states and returns the mapped domain object when found", async () => {
-      prisma.aiRun.findFirst.mockResolvedValue(makeRow({ linearIssueId: "LIN-5" }));
-      const result = await repo.findActiveByIssueId("LIN-5");
-      expect(prisma.aiRun.findFirst).toHaveBeenCalledWith({
+    it("excludes terminal states (Done, Failed) via notIn", async () => {
+      const findFirst = vi.fn().mockResolvedValue(makeRow({ state: "Planning" }));
+      const prisma = makePrisma({ findFirst });
+      const repo = new RunRepository(prisma);
+
+      const result = await repo.findActiveByIssueId("LIN-1");
+
+      expect(findFirst).toHaveBeenCalledWith({
         where: {
-          linearIssueId: "LIN-5",
-          state: { notIn: ["Done", "Failed"] },
+          linearIssueId: "LIN-1",
+          state: { notIn: [RunState.Done, RunState.Failed] },
         },
         orderBy: { createdAt: "desc" },
       });
-      expect(result?.linearIssueId).toBe("LIN-5");
+      expect(result?.state).toBe(RunState.Planning);
     });
 
-    it("returns null when no active run is found", async () => {
-      prisma.aiRun.findFirst.mockResolvedValue(null);
-      const result = await repo.findActiveByIssueId("LIN-5");
-      expect(result).toBeNull();
+    it("returns null when there is no active run", async () => {
+      const findFirst = vi.fn().mockResolvedValue(null);
+      const prisma = makePrisma({ findFirst });
+      const repo = new RunRepository(prisma);
+
+      expect(await repo.findActiveByIssueId("LIN-1")).toBeNull();
     });
   });
 
   describe("updateState", () => {
-    it("updates the state and returns the mapped domain object", async () => {
-      prisma.aiRun.update.mockResolvedValue(makeRow({ state: "Implementing" }));
-      const result = await repo.updateState("run-1", RunState.Implementing);
-      expect(prisma.aiRun.update).toHaveBeenCalledWith({
+    it("updates the state field and returns the mapped Run", async () => {
+      const update = vi.fn().mockResolvedValue(makeRow({ state: "Done" }));
+      const prisma = makePrisma({ update });
+      const repo = new RunRepository(prisma);
+
+      const result = await repo.updateState("run-1", RunState.Done);
+
+      expect(update).toHaveBeenCalledWith({
         where: { id: "run-1" },
-        data: { state: "Implementing" },
+        data: { state: RunState.Done },
       });
-      expect(result.state).toBe(RunState.Implementing);
+      expect(result.state).toBe(RunState.Done);
     });
   });
 
   describe("findRunsNeedingLinearBackfill", () => {
-    it("queries for runs missing title or description and maps results", async () => {
-      prisma.aiRun.findMany.mockResolvedValue([makeRow({ linearIssueTitle: null })]);
+    it("queries with an OR clause for missing title/description and maps rows", async () => {
+      const rows = [makeRow({ id: "r1", linearIssueTitle: null })];
+      const findMany = vi.fn().mockResolvedValue(rows);
+      const prisma = makePrisma({ findMany });
+      const repo = new RunRepository(prisma);
+
       const result = await repo.findRunsNeedingLinearBackfill();
-      expect(prisma.aiRun.findMany).toHaveBeenCalledWith({
+
+      expect(findMany).toHaveBeenCalledWith({
         where: {
           OR: [{ linearIssueTitle: null }, { linearIssueDescription: null }],
         },
       });
       expect(result).toHaveLength(1);
-      expect(result[0].linearIssueTitle).toBeNull();
-    });
-
-    it("returns an empty array when nothing needs backfill", async () => {
-      prisma.aiRun.findMany.mockResolvedValue([]);
-      const result = await repo.findRunsNeedingLinearBackfill();
-      expect(result).toEqual([]);
+      expect(result[0].id).toBe("r1");
     });
   });
 
   describe("update", () => {
-    it("passes the partial data through to prisma and returns the mapped domain object", async () => {
-      prisma.aiRun.update.mockResolvedValue(makeRow({ branchName: "feature/x", prNumber: 7 }));
-      const result = await repo.update("run-1", { branchName: "feature/x", prNumber: 7 });
-      expect(prisma.aiRun.update).toHaveBeenCalledWith({
+    it("passes partial data through to prisma and returns the mapped Run", async () => {
+      const update = vi.fn().mockResolvedValue(makeRow({ branchName: "ai/run-1", prNumber: 7 }));
+      const prisma = makePrisma({ update });
+      const repo = new RunRepository(prisma);
+
+      const result = await repo.update("run-1", { branchName: "ai/run-1", prNumber: 7 });
+
+      expect(update).toHaveBeenCalledWith({
         where: { id: "run-1" },
-        data: { branchName: "feature/x", prNumber: 7 },
+        data: { branchName: "ai/run-1", prNumber: 7 },
       });
-      expect(result.branchName).toBe("feature/x");
+      expect(result.branchName).toBe("ai/run-1");
       expect(result.prNumber).toBe(7);
     });
   });

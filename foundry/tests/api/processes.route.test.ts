@@ -1,11 +1,25 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import Fastify from "fastify";
 import { registerApiRoutes } from "../../src/api/routes.js";
 
+function makeProcess(overrides: Record<string, unknown> = {}) {
+  return {
+    id: "proc-1",
+    pid: 1234,
+    command: "npm test",
+    runId: "run-1",
+    stage: "implement",
+    runtime: "node",
+    startedAt: new Date().toISOString(),
+    elapsedMs: 500,
+    ...overrides,
+  };
+}
+
 async function buildApp() {
   const mockRunRepo = { findById: vi.fn(), findAll: vi.fn() };
-  const mockArtifactRepo = { findByRunId: vi.fn(), findLatestByType: vi.fn() };
-  const mockEventRepo = { findByRunId: vi.fn(), create: vi.fn() };
+  const mockArtifactRepo = { findByRunId: vi.fn() };
+  const mockEventRepo = { findByRunId: vi.fn() };
 
   const mockOrchestrator = {
     getRunRepo: () => mockRunRepo,
@@ -21,62 +35,86 @@ async function buildApp() {
 
   const app = Fastify({ logger: false });
   registerApiRoutes(app, mockOrchestrator as never, mockEmitter as never, mockProcessRunner as never);
+
   await app.ready();
   return { app, mockProcessRunner };
 }
 
 describe("GET /api/processes", () => {
-  it("returns all active processes when no runId filter is given", async () => {
-    const { app, mockProcessRunner } = await buildApp();
-    const processes = [
-      { id: "p1", runId: "run-1", stage: "planning" },
-      { id: "p2", runId: "run-2", stage: "implementing" },
-    ];
-    mockProcessRunner.getActiveProcesses.mockReturnValue(processes);
-
-    const response = await app.inject({ method: "GET", url: "/api/processes" });
-
-    expect(response.statusCode).toBe(200);
-    const body = response.json() as { processes: unknown[] };
-    expect(body.processes).toEqual(processes);
+  beforeEach(() => {
+    vi.clearAllMocks();
   });
 
-  it("filters processes by runId when ?runId= is given", async () => {
+  it("returns all active processes when no runId query param is given", async () => {
+    const procs = [makeProcess(), makeProcess({ id: "proc-2", runId: "run-2" })];
     const { app, mockProcessRunner } = await buildApp();
-    const processes = [
-      { id: "p1", runId: "run-1", stage: "planning" },
-      { id: "p2", runId: "run-2", stage: "implementing" },
-    ];
-    mockProcessRunner.getActiveProcesses.mockReturnValue(processes);
+    mockProcessRunner.getActiveProcesses.mockReturnValue(procs);
 
-    const response = await app.inject({ method: "GET", url: "/api/processes?runId=run-2" });
+    const res = await app.inject({ method: "GET", url: "/api/processes" });
 
-    expect(response.statusCode).toBe(200);
-    const body = response.json() as { processes: { runId: string }[] };
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as { processes: unknown[] };
+    expect(body.processes).toHaveLength(2);
+  });
+
+  it("filters processes by runId query param", async () => {
+    const procs = [makeProcess({ id: "proc-1", runId: "run-1" }), makeProcess({ id: "proc-2", runId: "run-2" })];
+    const { app, mockProcessRunner } = await buildApp();
+    mockProcessRunner.getActiveProcesses.mockReturnValue(procs);
+
+    const res = await app.inject({ method: "GET", url: "/api/processes?runId=run-2" });
+
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as { processes: { id: string; runId: string }[] };
     expect(body.processes).toHaveLength(1);
-    expect(body.processes[0].runId).toBe("run-2");
+    expect(body.processes[0].id).toBe("proc-2");
+  });
+
+  it("returns an empty array when runId matches nothing", async () => {
+    const procs = [makeProcess({ runId: "run-1" })];
+    const { app, mockProcessRunner } = await buildApp();
+    mockProcessRunner.getActiveProcesses.mockReturnValue(procs);
+
+    const res = await app.inject({ method: "GET", url: "/api/processes?runId=no-such-run" });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ processes: [] });
   });
 });
 
 describe("GET /api/processes/:id/output", () => {
-  it("returns 404 when the process output is not found", async () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("returns 404 when there is no output for the process", async () => {
     const { app, mockProcessRunner } = await buildApp();
     mockProcessRunner.getProcessOutput.mockReturnValue(null);
 
-    const response = await app.inject({ method: "GET", url: "/api/processes/missing/output" });
+    const res = await app.inject({ method: "GET", url: "/api/processes/unknown/output" });
 
-    expect(response.statusCode).toBe(404);
-    expect(response.json()).toEqual({ error: "Process not found or no output available" });
+    expect(res.statusCode).toBe(404);
+    expect(res.json()).toEqual({ error: "Process not found or no output available" });
   });
 
-  it("returns the output for an existing process", async () => {
+  it("returns processId and output when found", async () => {
     const { app, mockProcessRunner } = await buildApp();
     mockProcessRunner.getProcessOutput.mockReturnValue("some log output");
 
-    const response = await app.inject({ method: "GET", url: "/api/processes/p1/output" });
+    const res = await app.inject({ method: "GET", url: "/api/processes/proc-1/output" });
 
-    expect(response.statusCode).toBe(200);
-    expect(mockProcessRunner.getProcessOutput).toHaveBeenCalledWith("p1");
-    expect(response.json()).toEqual({ processId: "p1", output: "some log output" });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ processId: "proc-1", output: "some log output" });
+    expect(mockProcessRunner.getProcessOutput).toHaveBeenCalledWith("proc-1");
+  });
+
+  it("treats an empty-string output as found (not 404)", async () => {
+    const { app, mockProcessRunner } = await buildApp();
+    mockProcessRunner.getProcessOutput.mockReturnValue("");
+
+    const res = await app.inject({ method: "GET", url: "/api/processes/proc-1/output" });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ processId: "proc-1", output: "" });
   });
 });

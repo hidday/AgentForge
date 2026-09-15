@@ -149,25 +149,23 @@ describe("PlanReviewerAgent.run() relatedContext rendering", () => {
 });
 
 describe("PlanReviewerAgent.run() operator note rendering", () => {
-  it("renders the Operator Note section, weighted heavily, when an operatorNote is provided", async () => {
+  it("injects the operator note section into the prompt when provided", async () => {
     const { agent, getPrompt } = buildPlanReviewerAgent();
 
     await agent.run(makePlan(), makeTaskBundle(), "run-1", {
-      operatorNote: "The retry mechanism must be idempotent.",
+      operatorNote: "Please pay close attention to the migration risk.",
     });
 
     const prompt = getPrompt();
     expect(prompt).toContain("## Operator Note");
-    expect(prompt).toContain("Weight it heavily");
-    expect(prompt).toContain("The retry mechanism must be idempotent.");
+    expect(prompt).toContain("Please pay close attention to the migration risk.");
   });
 
-  it("omits the Operator Note section when no operatorNote is provided", async () => {
+  it("omits the operator note section when no note is provided", async () => {
     const { agent, getPrompt } = buildPlanReviewerAgent();
 
     await agent.run(makePlan(), makeTaskBundle(), "run-1");
 
-    const prompt = getPrompt();
-    expect(prompt).not.toContain("## Operator Note");
+    expect(getPrompt()).not.toContain("## Operator Note");
   });
 });

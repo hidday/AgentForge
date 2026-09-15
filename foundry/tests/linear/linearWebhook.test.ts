@@ -1,41 +1,38 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import Fastify, { type FastifyInstance } from "fastify";
+import { describe, it, expect, vi } from "vitest";
+import Fastify from "fastify";
 import { registerLinearWebhook } from "../../src/linear/linearWebhook.js";
 
-async function buildApp() {
-  const idempotencyRepo = { tryMarkProcessed: vi.fn().mockResolvedValue(true) };
-  const orchestrator = { handleLinearWebhook: vi.fn().mockResolvedValue(undefined) };
+function buildApp(opts: { tryMarkProcessed?: ReturnType<typeof vi.fn> } = {}) {
+  const mockOrchestrator = {
+    handleLinearWebhook: vi.fn().mockResolvedValue(undefined),
+  };
+  const mockIdempotencyRepo = {
+    tryMarkProcessed: opts.tryMarkProcessed ?? vi.fn().mockResolvedValue(true),
+  };
 
-  const app: FastifyInstance = Fastify({ logger: false });
-  registerLinearWebhook(app, orchestrator as never, idempotencyRepo as never);
-  await app.ready();
+  const app = Fastify({ logger: false });
+  registerLinearWebhook(app, mockOrchestrator as never, mockIdempotencyRepo as never);
 
-  return { app, orchestrator, idempotencyRepo };
+  return { app, mockOrchestrator, mockIdempotencyRepo };
 }
 
 describe("POST /webhooks/linear", () => {
-  let app: FastifyInstance;
-  let orchestrator: { handleLinearWebhook: ReturnType<typeof vi.fn> };
-  let idempotencyRepo: { tryMarkProcessed: ReturnType<typeof vi.fn> };
+  it("returns 400 for a payload missing required fields", async () => {
+    const { app } = buildApp();
 
-  beforeEach(async () => {
-    ({ app, orchestrator, idempotencyRepo } = await buildApp());
-  });
-
-  it("returns 400 for an invalid payload", async () => {
     const response = await app.inject({
       method: "POST",
       url: "/webhooks/linear",
-      payload: { action: "create" }, // missing required `type` and `data`
+      payload: { action: "create" },
     });
 
     expect(response.statusCode).toBe(400);
-    expect(response.json()).toEqual({ error: "Invalid webhook payload" });
-    expect(orchestrator.handleLinearWebhook).not.toHaveBeenCalled();
+    expect(JSON.parse(response.body)).toEqual({ error: "Invalid webhook payload" });
   });
 
-  it("returns duplicate:true and skips the orchestrator when tryMarkProcessed resolves false", async () => {
-    idempotencyRepo.tryMarkProcessed.mockResolvedValue(false);
+  it("returns 200 with duplicate:true and skips the orchestrator when the event was already processed", async () => {
+    const tryMarkProcessed = vi.fn().mockResolvedValue(false);
+    const { app, mockOrchestrator } = buildApp({ tryMarkProcessed });
 
     const response = await app.inject({
       method: "POST",
@@ -44,98 +41,152 @@ describe("POST /webhooks/linear", () => {
     });
 
     expect(response.statusCode).toBe(200);
-    expect(response.json()).toEqual({ ok: true, duplicate: true });
-    expect(orchestrator.handleLinearWebhook).not.toHaveBeenCalled();
-    expect(idempotencyRepo.tryMarkProcessed).toHaveBeenCalledWith("linear", "Issue:create:issue-1");
+    expect(JSON.parse(response.body)).toEqual({ ok: true, duplicate: true });
+    expect(mockOrchestrator.handleLinearWebhook).not.toHaveBeenCalled();
+    expect(tryMarkProcessed).toHaveBeenCalledWith("linear", "Issue:create:issue-1");
   });
 
-  it("handles Issue create by calling handleLinearWebhook with issue.created", async () => {
+  it("handles Issue create events", async () => {
+    const { app, mockOrchestrator } = buildApp();
+
     const response = await app.inject({
       method: "POST",
       url: "/webhooks/linear",
-      payload: { action: "create", type: "Issue", data: { id: "issue-42" } },
+      payload: { action: "create", type: "Issue", data: { id: "issue-1" } },
     });
 
     expect(response.statusCode).toBe(200);
-    expect(response.json()).toEqual({ ok: true });
-    expect(orchestrator.handleLinearWebhook).toHaveBeenCalledWith({
+    expect(JSON.parse(response.body)).toEqual({ ok: true });
+    expect(mockOrchestrator.handleLinearWebhook).toHaveBeenCalledWith({
       action: "issue.created",
-      issueId: "issue-42",
+      issueId: "issue-1",
     });
   });
 
-  it("handles Issue update by calling handleLinearWebhook with issue.updated", async () => {
+  it("handles Issue update events", async () => {
+    const { app, mockOrchestrator } = buildApp();
+
     const response = await app.inject({
       method: "POST",
       url: "/webhooks/linear",
-      payload: { action: "update", type: "Issue", data: { id: "issue-42" } },
+      payload: { action: "update", type: "Issue", data: { id: "issue-1" } },
     });
 
     expect(response.statusCode).toBe(200);
-    expect(response.json()).toEqual({ ok: true });
-    expect(orchestrator.handleLinearWebhook).toHaveBeenCalledWith({
+    expect(mockOrchestrator.handleLinearWebhook).toHaveBeenCalledWith({
       action: "issue.updated",
-      issueId: "issue-42",
+      issueId: "issue-1",
     });
   });
 
-  it("handles Comment create with a parsable command by calling handleLinearWebhook with comment.command", async () => {
+  it("parses a recognized slash command from a Comment create event", async () => {
+    const { app, mockOrchestrator } = buildApp();
+
     const response = await app.inject({
       method: "POST",
       url: "/webhooks/linear",
       payload: {
         action: "create",
         type: "Comment",
-        data: { id: "comment-1", body: "/approve-plan", issueId: "issue-99" },
+        data: { id: "comment-1", issueId: "issue-1", body: "/approve-plan" },
       },
     });
 
     expect(response.statusCode).toBe(200);
-    expect(response.json()).toEqual({ ok: true });
-    expect(orchestrator.handleLinearWebhook).toHaveBeenCalledWith({
+    expect(JSON.parse(response.body)).toEqual({ ok: true });
+    expect(mockOrchestrator.handleLinearWebhook).toHaveBeenCalledWith({
       action: "comment.command",
-      issueId: "issue-99",
+      issueId: "issue-1",
       command: { type: "approve-plan" },
     });
   });
 
-  it("handles Comment create whose body does not parse to a command without calling handleLinearWebhook", async () => {
+  it("parses a reject-plan command with a body", async () => {
+    const { app, mockOrchestrator } = buildApp();
+
     const response = await app.inject({
       method: "POST",
       url: "/webhooks/linear",
       payload: {
         action: "create",
         type: "Comment",
-        data: { id: "comment-2", body: "just a regular comment", issueId: "issue-99" },
+        data: { id: "comment-1", issueId: "issue-1", body: "/reject-plan use OAuth2" },
       },
     });
 
     expect(response.statusCode).toBe(200);
-    expect(response.json()).toEqual({ ok: true });
-    expect(orchestrator.handleLinearWebhook).not.toHaveBeenCalled();
+    expect(mockOrchestrator.handleLinearWebhook).toHaveBeenCalledWith({
+      action: "comment.command",
+      issueId: "issue-1",
+      command: { type: "reject-plan", body: "use OAuth2" },
+    });
+  });
+
+  it("returns 200 without invoking the orchestrator when the comment body is not a command", async () => {
+    const { app, mockOrchestrator } = buildApp();
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/webhooks/linear",
+      payload: {
+        action: "create",
+        type: "Comment",
+        data: { id: "comment-1", issueId: "issue-1", body: "just a regular comment" },
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(JSON.parse(response.body)).toEqual({ ok: true });
+    expect(mockOrchestrator.handleLinearWebhook).not.toHaveBeenCalled();
+  });
+
+  it("falls through to the ignored branch for a Comment create with no body", async () => {
+    const { app, mockOrchestrator } = buildApp();
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/webhooks/linear",
+      payload: {
+        action: "create",
+        type: "Comment",
+        data: { id: "comment-1", issueId: "issue-1" },
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(JSON.parse(response.body)).toEqual({ ok: true, ignored: true });
+    expect(mockOrchestrator.handleLinearWebhook).not.toHaveBeenCalled();
+  });
+
+  it("falls through to the ignored branch for a Comment create with no issueId", async () => {
+    const { app, mockOrchestrator } = buildApp();
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/webhooks/linear",
+      payload: {
+        action: "create",
+        type: "Comment",
+        data: { id: "comment-1", body: "/approve-plan" },
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(JSON.parse(response.body)).toEqual({ ok: true, ignored: true });
+    expect(mockOrchestrator.handleLinearWebhook).not.toHaveBeenCalled();
   });
 
   it("returns ignored:true for an unrecognized type/action combination", async () => {
+    const { app, mockOrchestrator } = buildApp();
+
     const response = await app.inject({
       method: "POST",
       url: "/webhooks/linear",
-      payload: { action: "remove", type: "Project", data: { id: "proj-1" } },
+      payload: { action: "remove", type: "Reaction", data: { id: "reaction-1" } },
     });
 
     expect(response.statusCode).toBe(200);
-    expect(response.json()).toEqual({ ok: true, ignored: true });
-    expect(orchestrator.handleLinearWebhook).not.toHaveBeenCalled();
-  });
-
-  it("returns ok:true without calling handleLinearWebhook for a Comment create missing body/issueId", async () => {
-    const response = await app.inject({
-      method: "POST",
-      url: "/webhooks/linear",
-      payload: { action: "create", type: "Comment", data: { id: "comment-3" } },
-    });
-
-    expect(response.statusCode).toBe(200);
-    expect(response.json()).toEqual({ ok: true, ignored: true });
-    expect(orchestrator.handleLinearWebhook).not.toHaveBeenCalled();
+    expect(JSON.parse(response.body)).toEqual({ ok: true, ignored: true });
+    expect(mockOrchestrator.handleLinearWebhook).not.toHaveBeenCalled();
   });
 });

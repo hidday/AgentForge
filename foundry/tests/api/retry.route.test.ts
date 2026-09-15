@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import Fastify from "fastify";
 import { registerApiRoutes } from "../../src/api/routes.js";
 import { RunState } from "../../src/domain/runState.js";
@@ -30,8 +30,8 @@ function makeRun(state: RunState) {
 
 async function buildApp() {
   const mockRunRepo = { findById: vi.fn(), findAll: vi.fn() };
-  const mockArtifactRepo = { findByRunId: vi.fn(), findLatestByType: vi.fn() };
-  const mockEventRepo = { findByRunId: vi.fn(), create: vi.fn() };
+  const mockArtifactRepo = { findByRunId: vi.fn() };
+  const mockEventRepo = { findByRunId: vi.fn() };
 
   const mockOrchestrator = {
     getRunRepo: () => mockRunRepo,
@@ -54,67 +54,97 @@ async function buildApp() {
 
   const app = Fastify({ logger: false });
   registerApiRoutes(app, mockOrchestrator as never, mockEmitter as never, mockProcessRunner as never);
+
   await app.ready();
-  return { app, mockRunRepo, mockOrchestrator };
+  return { app, mockOrchestrator, mockRunRepo };
 }
 
 describe("POST /api/runs/:id/actions/retry", () => {
-  it("returns 404 when the run does not exist", async () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("returns 404 when the run is not found", async () => {
     const { app, mockRunRepo } = await buildApp();
     mockRunRepo.findById.mockResolvedValue(null);
 
-    const response = await app.inject({ method: "POST", url: "/api/runs/missing/actions/retry" });
+    const res = await app.inject({ method: "POST", url: "/api/runs/missing/actions/retry" });
 
-    expect(response.statusCode).toBe(404);
-    expect(response.json()).toEqual({ error: "Run not found" });
+    expect(res.statusCode).toBe(404);
+    expect(res.json()).toEqual({ error: "Run not found" });
   });
 
-  it("returns 400 for an unsupported state", async () => {
-    const { app, mockRunRepo } = await buildApp();
-    mockRunRepo.findById.mockResolvedValue(makeRun(RunState.Done));
+  it("returns 400 with the list of retryable states when run.state is not retryable", async () => {
+    const run = makeRun(RunState.Done);
+    const { app, mockRunRepo, mockOrchestrator } = await buildApp();
+    mockRunRepo.findById.mockResolvedValue(run);
 
-    const response = await app.inject({ method: "POST", url: "/api/runs/run-1/actions/retry" });
+    const res = await app.inject({ method: "POST", url: "/api/runs/run-1/actions/retry" });
 
-    expect(response.statusCode).toBe(400);
-    const body = response.json() as { error: string };
+    expect(res.statusCode).toBe(400);
+    const body = res.json() as { error: string };
     expect(body.error).toContain('Retry is not supported for state "Done"');
+    expect(body.error).toContain("Retryable states:");
+    expect(mockOrchestrator.retryRun).not.toHaveBeenCalled();
   });
 
-  const cases: { state: RunState; method: string }[] = [
-    { state: RunState.Todo, method: "retryRun" },
-    { state: RunState.Planning, method: "runPlanning" },
-    { state: RunState.PlanRevision, method: "runPlanRevision" },
-    { state: RunState.PlanReview, method: "runPlanReview" },
-    { state: RunState.Implementing, method: "runExecution" },
-    { state: RunState.AIReview, method: "runReview" },
-    { state: RunState.AddressingReview, method: "runRemediation" },
+  const cases: [RunState, string][] = [
+    [RunState.Todo, "retryRun"],
+    [RunState.Planning, "runPlanning"],
+    [RunState.PlanRevision, "runPlanRevision"],
+    [RunState.PlanReview, "runPlanReview"],
+    [RunState.Implementing, "runExecution"],
+    [RunState.AIReview, "runReview"],
+    [RunState.AddressingReview, "runRemediation"],
   ];
 
-  for (const { state, method } of cases) {
-    it(`triggers orchestrator.${method}() for state ${state} and returns 200`, async () => {
+  it.each(cases)(
+    "state %s triggers orchestrator.%s and returns ok/retrying",
+    async (state, methodName) => {
+      const run = makeRun(state);
       const { app, mockRunRepo, mockOrchestrator } = await buildApp();
-      mockRunRepo.findById.mockResolvedValue(makeRun(state));
+      mockRunRepo.findById.mockResolvedValue(run);
 
-      const response = await app.inject({ method: "POST", url: "/api/runs/run-1/actions/retry" });
+      const res = await app.inject({ method: "POST", url: "/api/runs/run-1/actions/retry" });
 
-      expect(response.statusCode).toBe(200);
-      expect(response.json()).toEqual({ ok: true, runId: "run-1", state, retrying: true });
-      expect(
-        (mockOrchestrator as unknown as Record<string, ReturnType<typeof vi.fn>>)[method],
-      ).toHaveBeenCalledWith("run-1");
-    });
-  }
+      expect(res.statusCode).toBe(200);
+      const body = res.json() as { ok: boolean; runId: string; state: string; retrying: boolean };
+      expect(body).toEqual({ ok: true, runId: "run-1", state, retrying: true });
+      const method = (mockOrchestrator as unknown as Record<string, ReturnType<typeof vi.fn>>)[
+        methodName
+      ];
+      expect(method).toHaveBeenCalledWith("run-1");
+    },
+  );
 
-  it("logs the error but does not fail the request when the fired-and-forgotten retry rejects", async () => {
+  it("does not fail the request when the fire-and-forget trigger rejects", async () => {
+    const run = makeRun(RunState.Implementing);
     const { app, mockRunRepo, mockOrchestrator } = await buildApp();
-    mockRunRepo.findById.mockResolvedValue(makeRun(RunState.Todo));
-    mockOrchestrator.retryRun.mockRejectedValue(new Error("boom"));
+    mockRunRepo.findById.mockResolvedValue(run);
+    mockOrchestrator.runExecution.mockRejectedValue(new Error("execution crashed"));
 
-    const response = await app.inject({ method: "POST", url: "/api/runs/run-1/actions/retry" });
+    const res = await app.inject({ method: "POST", url: "/api/runs/run-1/actions/retry" });
 
-    expect(response.statusCode).toBe(200);
-    // Allow the fire-and-forget rejection's .catch() handler to run.
-    await new Promise((resolve) => setImmediate(resolve));
-    expect(mockOrchestrator.retryRun).toHaveBeenCalledWith("run-1");
+    expect(res.statusCode).toBe(200);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(mockOrchestrator.runExecution).toHaveBeenCalledWith("run-1");
+  });
+
+  it("logs a truncated message when the fire-and-forget trigger rejects with a non-Error value", async () => {
+    const run = makeRun(RunState.Implementing);
+    const { app, mockRunRepo, mockOrchestrator } = await buildApp();
+    mockRunRepo.findById.mockResolvedValue(run);
+    mockOrchestrator.runExecution.mockRejectedValue("background boom");
+    const errorSpy = vi.fn();
+    app.log.error = errorSpy as never;
+
+    const res = await app.inject({ method: "POST", url: "/api/runs/run-1/actions/retry" });
+
+    expect(res.statusCode).toBe(200);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(errorSpy).toHaveBeenCalledWith(
+      { runId: "run-1", error: "background boom" },
+      "Retry stage failed",
+    );
   });
 });

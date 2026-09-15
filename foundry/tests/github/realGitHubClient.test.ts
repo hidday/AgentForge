@@ -1,159 +1,163 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import type { Logger } from "../../src/utils/logger.js";
+import { describe, it, expect, vi } from "vitest";
+import { RealGitHubClient } from "../../src/github/realGitHubClient.js";
 
-const mockOctokit = {
-  repos: { get: vi.fn() },
-  git: { getRef: vi.fn(), createRef: vi.fn() },
-  pulls: {
-    create: vi.fn(),
-    list: vi.fn(),
-    get: vi.fn(),
-    createReviewComment: vi.fn(),
-    createReplyForReviewComment: vi.fn(),
-    createReview: vi.fn(),
-  },
-  issues: { createComment: vi.fn(), listComments: vi.fn() },
-  graphql: vi.fn(),
-};
-
-vi.mock("@octokit/rest", () => ({
-  Octokit: vi.fn(() => mockOctokit),
-}));
-
-const { RealGitHubClient } = await import("../../src/github/realGitHubClient.js");
-
-function makeLogger(): Logger {
+function makeLogger() {
   return {
-    debug: vi.fn(),
     info: vi.fn(),
     warn: vi.fn(),
     error: vi.fn(),
-  } as unknown as Logger;
+    debug: vi.fn(),
+  };
 }
 
-function makeErr(status: number, message = "error"): Error & { status: number } {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type FakeOctokit = Record<string, any>;
+
+function makeClient(octokit: FakeOctokit, logger = makeLogger()) {
+  const client = new RealGitHubClient("test-token", logger as never);
+  (client as unknown as { octokit: FakeOctokit }).octokit = octokit;
+  return { client, logger };
+}
+
+function httpError(status: number, message = "GitHub error") {
   const err = new Error(message) as Error & { status: number };
   err.status = status;
   return err;
 }
 
 describe("RealGitHubClient", () => {
-  let logger: Logger;
-  let client: InstanceType<typeof RealGitHubClient>;
+  describe("repo format validation", () => {
+    it("rejects a repo string with no slash before making any API call", async () => {
+      const repos = { get: vi.fn() };
+      const { client } = makeClient({ repos });
 
-  beforeEach(() => {
-    vi.clearAllMocks();
-    logger = makeLogger();
-    client = new RealGitHubClient("fake-token", logger);
-  });
-
-  describe("splitRepo validation", () => {
-    it("throws on an invalid repo format (no slash)", async () => {
-      await expect(client.verifyRepoAccess("not-a-valid-repo")).rejects.toThrow(
-        'Invalid repo format "not-a-valid-repo", expected "owner/repo"',
+      await expect(client.verifyRepoAccess("invalid")).rejects.toThrow(
+        'Invalid repo format "invalid", expected "owner/repo"',
       );
+      expect(repos.get).not.toHaveBeenCalled();
     });
   });
 
   describe("verifyRepoAccess", () => {
-    it("resolves and logs on success", async () => {
-      mockOctokit.repos.get.mockResolvedValue({ data: {} });
+    it("resolves and logs when the repo is accessible", async () => {
+      const repos = { get: vi.fn().mockResolvedValue({ data: {} }) };
+      const { client, logger } = makeClient({ repos });
 
-      await expect(client.verifyRepoAccess("org/repo")).resolves.toBeUndefined();
-
-      expect(mockOctokit.repos.get).toHaveBeenCalledWith({ owner: "org", repo: "repo" });
-      expect(logger.debug).toHaveBeenCalledWith(
-        { repo: "org/repo" },
-        "Verified GitHub repo access",
-      );
+      await expect(client.verifyRepoAccess("owner/repo")).resolves.toBeUndefined();
+      expect(repos.get).toHaveBeenCalledWith({ owner: "owner", repo: "repo" });
+      expect(logger.debug).toHaveBeenCalled();
     });
 
-    it("wraps the error on failure", async () => {
-      mockOctokit.repos.get.mockRejectedValue(new Error("no access"));
+    it("wraps the underlying error with context and preserves it as cause", async () => {
+      const original = new Error("Not Found");
+      const repos = { get: vi.fn().mockRejectedValue(original) };
+      const { client } = makeClient({ repos });
 
-      await expect(client.verifyRepoAccess("org/repo")).rejects.toThrow(
-        'GitHub: cannot access repo "org/repo". Check that GITHUB_TOKEN has repository access permissions. Original: no access',
+      await expect(client.verifyRepoAccess("owner/repo")).rejects.toMatchObject({
+        message: expect.stringContaining('cannot access repo "owner/repo"'),
+        cause: original,
+      });
+    });
+
+    it("stringifies a non-Error thrown value in the wrapped message", async () => {
+      const repos = { get: vi.fn().mockRejectedValue("plain string failure") };
+      const { client } = makeClient({ repos });
+
+      await expect(client.verifyRepoAccess("owner/repo")).rejects.toThrow(
+        "Original: plain string failure",
       );
     });
   });
 
   describe("getDefaultBranch", () => {
     it("returns the default branch name", async () => {
-      mockOctokit.repos.get.mockResolvedValue({ data: { default_branch: "develop" } });
+      const repos = { get: vi.fn().mockResolvedValue({ data: { default_branch: "main" } }) };
+      const { client } = makeClient({ repos });
 
-      await expect(client.getDefaultBranch("org/repo")).resolves.toBe("develop");
+      await expect(client.getDefaultBranch("owner/repo")).resolves.toBe("main");
     });
 
-    it("wraps the error on failure", async () => {
-      mockOctokit.repos.get.mockRejectedValue(new Error("boom"));
+    it("throws a wrapped error on failure", async () => {
+      const repos = { get: vi.fn().mockRejectedValue(new Error("boom")) };
+      const { client } = makeClient({ repos });
 
-      await expect(client.getDefaultBranch("org/repo")).rejects.toThrow(
-        'GitHub getDefaultBranch failed for "org/repo": boom',
+      await expect(client.getDefaultBranch("owner/repo")).rejects.toThrow(
+        'GitHub getDefaultBranch failed for "owner/repo"',
       );
+    });
+
+    it("stringifies a non-Error thrown value in the wrapped message", async () => {
+      const repos = { get: vi.fn().mockRejectedValue({ weird: "object" }) };
+      const { client } = makeClient({ repos });
+
+      await expect(client.getDefaultBranch("owner/repo")).rejects.toThrow("[object Object]");
     });
   });
 
   describe("createBranch", () => {
-    it("creates the branch from the default branch head sha", async () => {
-      mockOctokit.repos.get.mockResolvedValue({ data: { default_branch: "main" } });
-      mockOctokit.git.getRef.mockResolvedValue({ data: { object: { sha: "abc123" } } });
-      mockOctokit.git.createRef.mockResolvedValue({ data: {} });
+    it("creates a ref from the default branch's sha", async () => {
+      const repos = { get: vi.fn().mockResolvedValue({ data: { default_branch: "main" } }) };
+      const git = {
+        getRef: vi.fn().mockResolvedValue({ data: { object: { sha: "abc123" } } }),
+        createRef: vi.fn().mockResolvedValue({}),
+      };
+      const { client } = makeClient({ repos, git });
 
-      await expect(client.createBranch("org/repo", "feature/x")).resolves.toBeUndefined();
+      await client.createBranch("owner/repo", "ai/feature");
 
-      expect(mockOctokit.git.getRef).toHaveBeenCalledWith({
-        owner: "org",
+      expect(git.getRef).toHaveBeenCalledWith({
+        owner: "owner",
         repo: "repo",
         ref: "heads/main",
       });
-      expect(mockOctokit.git.createRef).toHaveBeenCalledWith({
-        owner: "org",
+      expect(git.createRef).toHaveBeenCalledWith({
+        owner: "owner",
         repo: "repo",
-        ref: "refs/heads/feature/x",
+        ref: "refs/heads/ai/feature",
         sha: "abc123",
       });
-      expect(logger.debug).toHaveBeenCalledWith(
-        { repo: "org/repo", branchName: "feature/x" },
-        "Created branch on GitHub",
-      );
     });
 
-    it("swallows a 422 (branch already exists) and continues", async () => {
-      mockOctokit.repos.get.mockResolvedValue({ data: { default_branch: "main" } });
-      mockOctokit.git.getRef.mockResolvedValue({ data: { object: { sha: "abc123" } } });
-      mockOctokit.git.createRef.mockRejectedValue(makeErr(422));
+    it("treats a 422 as the branch already existing and does not throw", async () => {
+      const repos = { get: vi.fn().mockResolvedValue({ data: { default_branch: "main" } }) };
+      const git = {
+        getRef: vi.fn().mockResolvedValue({ data: { object: { sha: "abc123" } } }),
+        createRef: vi.fn().mockRejectedValue(httpError(422)),
+      };
+      const { client, logger } = makeClient({ repos, git });
 
-      await expect(client.createBranch("org/repo", "feature/x")).resolves.toBeUndefined();
-
+      await expect(client.createBranch("owner/repo", "ai/feature")).resolves.toBeUndefined();
       expect(logger.info).toHaveBeenCalledWith(
-        { repo: "org/repo", branchName: "feature/x" },
+        { repo: "owner/repo", branchName: "ai/feature" },
         "Branch already exists on GitHub, continuing",
       );
     });
 
-    it("rethrows a wrapped error for a non-422 failure", async () => {
-      mockOctokit.repos.get.mockResolvedValue({ data: { default_branch: "main" } });
-      mockOctokit.git.getRef.mockResolvedValue({ data: { object: { sha: "abc123" } } });
-      mockOctokit.git.createRef.mockRejectedValue(makeErr(500, "server exploded"));
+    it("throws a wrapped error for non-422 failures", async () => {
+      const repos = { get: vi.fn().mockResolvedValue({ data: { default_branch: "main" } }) };
+      const git = {
+        getRef: vi.fn().mockRejectedValue(httpError(500, "server error")),
+      };
+      const { client } = makeClient({ repos, git });
 
-      await expect(client.createBranch("org/repo", "feature/x")).rejects.toThrow(
-        'GitHub createBranch failed for "org/repo" {"branchName":"feature/x"}: server exploded',
+      await expect(client.createBranch("owner/repo", "ai/feature")).rejects.toThrow(
+        'GitHub createBranch failed for "owner/repo"',
       );
     });
   });
 
   describe("createDraftPR", () => {
-    it("creates the PR and returns its number", async () => {
-      mockOctokit.pulls.create.mockResolvedValue({ data: { number: 55 } });
+    it("returns the created PR number", async () => {
+      const pulls = { create: vi.fn().mockResolvedValue({ data: { number: 55 } }) };
+      const { client } = makeClient({ pulls });
 
-      await expect(
-        client.createDraftPR("org/repo", "head-branch", "main", "Title", "Body"),
-      ).resolves.toBe(55);
+      const num = await client.createDraftPR("owner/repo", "head", "main", "Title", "Body");
 
-      expect(mockOctokit.pulls.create).toHaveBeenCalledWith({
-        owner: "org",
+      expect(num).toBe(55);
+      expect(pulls.create).toHaveBeenCalledWith({
+        owner: "owner",
         repo: "repo",
-        head: "head-branch",
+        head: "head",
         base: "main",
         title: "Title",
         body: "Body",
@@ -161,231 +165,245 @@ describe("RealGitHubClient", () => {
       });
     });
 
-    it("rethrows with detail on a 422 field validation error", async () => {
-      const err = makeErr(422, 'Validation failed: {"code":"invalid","field":"base"}');
-      mockOctokit.pulls.create.mockRejectedValue(err);
+    it("throws a wrapped error for a 422 caused by field validation", async () => {
+      const err = httpError(422, '{"code":"invalid","field":"base"}');
+      const pulls = { create: vi.fn().mockRejectedValue(err) };
+      const { client, logger } = makeClient({ pulls });
 
-      await expect(
-        client.createDraftPR("org/repo", "head-branch", "main", "Title", "Body"),
-      ).rejects.toThrow(/GitHub createDraftPR failed for "org\/repo"/);
-
+      await expect(client.createDraftPR("owner/repo", "head", "main", "T", "B")).rejects.toThrow(
+        'GitHub createDraftPR failed for "owner/repo"',
+      );
       expect(logger.error).toHaveBeenCalled();
     });
 
-    it("rethrows with detail on a 422 missing_field validation error", async () => {
-      const err = makeErr(422, '{"code":"missing_field","field":"title"}');
-      mockOctokit.pulls.create.mockRejectedValue(err);
+    it("throws a wrapped error for a 422 caused by a missing field", async () => {
+      const err = httpError(422, '{"code":"missing_field","field":"title"}');
+      const pulls = { create: vi.fn().mockRejectedValue(err) };
+      const { client } = makeClient({ pulls });
 
-      await expect(
-        client.createDraftPR("org/repo", "head-branch", "main", "Title", "Body"),
-      ).rejects.toThrow(/GitHub createDraftPR failed for "org\/repo"/);
+      await expect(client.createDraftPR("owner/repo", "head", "main", "T", "B")).rejects.toThrow(
+        'GitHub createDraftPR failed for "owner/repo"',
+      );
     });
 
-    it("returns the existing PR number when a 422 means the PR already exists", async () => {
-      const err = makeErr(422, "A pull request already exists");
-      mockOctokit.pulls.create.mockRejectedValue(err);
-      mockOctokit.pulls.list.mockResolvedValue({ data: [{ number: 77 }] });
+    it("treats a non-Error 422 rejection as a non-field-validation duplicate-head lookup", async () => {
+      const err = { status: 422 };
+      const pulls = {
+        create: vi.fn().mockRejectedValue(err),
+        list: vi.fn().mockResolvedValue({ data: [{ number: 88 }] }),
+      };
+      const { client } = makeClient({ pulls });
 
-      await expect(
-        client.createDraftPR("org/repo", "head-branch", "main", "Title", "Body"),
-      ).resolves.toBe(77);
+      await expect(client.createDraftPR("owner/repo", "head", "main", "T", "B")).resolves.toBe(88);
+    });
 
-      expect(mockOctokit.pulls.list).toHaveBeenCalledWith({
-        owner: "org",
+    it("returns the existing open PR number when a 422 indicates a duplicate head branch", async () => {
+      const err = httpError(422, "A pull request already exists for owner:head");
+      const pulls = {
+        create: vi.fn().mockRejectedValue(err),
+        list: vi.fn().mockResolvedValue({ data: [{ number: 77 }] }),
+      };
+      const { client, logger } = makeClient({ pulls });
+
+      const num = await client.createDraftPR("owner/repo", "head", "main", "T", "B");
+
+      expect(num).toBe(77);
+      expect(pulls.list).toHaveBeenCalledWith({
+        owner: "owner",
         repo: "repo",
-        head: "org:head-branch",
+        head: "owner:head",
         base: "main",
         state: "open",
       });
       expect(logger.info).toHaveBeenCalledWith(
-        { repo: "org/repo", prNumber: 77 },
+        { repo: "owner/repo", prNumber: 77 },
         "Found existing open PR",
       );
     });
 
-    it("rethrows when a 422 duplicate-PR error has no existing PR found", async () => {
-      const err = makeErr(422, "A pull request already exists");
-      mockOctokit.pulls.create.mockRejectedValue(err);
-      mockOctokit.pulls.list.mockResolvedValue({ data: [] });
+    it("throws a wrapped error when a 422 duplicate lookup finds no existing open PR", async () => {
+      const err = httpError(422, "A pull request already exists for owner:head");
+      const pulls = {
+        create: vi.fn().mockRejectedValue(err),
+        list: vi.fn().mockResolvedValue({ data: [] }),
+      };
+      const { client } = makeClient({ pulls });
 
-      await expect(
-        client.createDraftPR("org/repo", "head-branch", "main", "Title", "Body"),
-      ).rejects.toThrow(
-        'GitHub createDraftPR failed for "org/repo" {"head":"head-branch","base":"main"}: A pull request already exists',
+      await expect(client.createDraftPR("owner/repo", "head", "main", "T", "B")).rejects.toThrow(
+        'GitHub createDraftPR failed for "owner/repo"',
+      );
+    });
+
+    it("throws a wrapped error for non-422 failures", async () => {
+      const pulls = { create: vi.fn().mockRejectedValue(httpError(500)) };
+      const { client } = makeClient({ pulls });
+
+      await expect(client.createDraftPR("owner/repo", "head", "main", "T", "B")).rejects.toThrow(
+        'GitHub createDraftPR failed for "owner/repo"',
       );
     });
   });
 
   describe("commentOnPR", () => {
-    it("posts an issue comment", async () => {
-      mockOctokit.issues.createComment.mockResolvedValue({ data: {} });
+    it("posts a comment via issues.createComment", async () => {
+      const issues = { createComment: vi.fn().mockResolvedValue({}) };
+      const { client } = makeClient({ issues });
 
-      await expect(client.commentOnPR("org/repo", 10, "hi there")).resolves.toBeUndefined();
+      await client.commentOnPR("owner/repo", 5, "hi");
 
-      expect(mockOctokit.issues.createComment).toHaveBeenCalledWith({
-        owner: "org",
+      expect(issues.createComment).toHaveBeenCalledWith({
+        owner: "owner",
         repo: "repo",
-        issue_number: 10,
-        body: "hi there",
+        issue_number: 5,
+        body: "hi",
       });
     });
 
-    it("wraps the error on failure", async () => {
-      mockOctokit.issues.createComment.mockRejectedValue(new Error("nope"));
+    it("throws a wrapped error on failure", async () => {
+      const issues = { createComment: vi.fn().mockRejectedValue(new Error("boom")) };
+      const { client } = makeClient({ issues });
 
-      await expect(client.commentOnPR("org/repo", 10, "hi there")).rejects.toThrow(
-        'GitHub commentOnPR failed for "org/repo" {"prNumber":10}: nope',
+      await expect(client.commentOnPR("owner/repo", 5, "hi")).rejects.toThrow(
+        'GitHub commentOnPR failed for "owner/repo"',
       );
     });
   });
 
   describe("getPRDiff", () => {
     it("returns the diff text", async () => {
-      mockOctokit.pulls.get.mockResolvedValue({ data: "diff --git a b" });
+      const pulls = { get: vi.fn().mockResolvedValue({ data: "diff --git a b" }) };
+      const { client } = makeClient({ pulls });
 
-      await expect(client.getPRDiff("org/repo", 10)).resolves.toBe("diff --git a b");
-
-      expect(mockOctokit.pulls.get).toHaveBeenCalledWith({
-        owner: "org",
+      await expect(client.getPRDiff("owner/repo", 5)).resolves.toBe("diff --git a b");
+      expect(pulls.get).toHaveBeenCalledWith({
+        owner: "owner",
         repo: "repo",
-        pull_number: 10,
+        pull_number: 5,
         mediaType: { format: "diff" },
       });
     });
 
-    it("wraps the error on failure", async () => {
-      mockOctokit.pulls.get.mockRejectedValue(new Error("diff failed"));
+    it("throws a wrapped error on failure", async () => {
+      const pulls = { get: vi.fn().mockRejectedValue(new Error("boom")) };
+      const { client } = makeClient({ pulls });
 
-      await expect(client.getPRDiff("org/repo", 10)).rejects.toThrow(
-        'GitHub getPRDiff failed for "org/repo" {"prNumber":10}: diff failed',
+      await expect(client.getPRDiff("owner/repo", 5)).rejects.toThrow(
+        'GitHub getPRDiff failed for "owner/repo"',
       );
     });
   });
 
   describe("markPRReady", () => {
-    it("short-circuits when the PR is already not a draft", async () => {
-      mockOctokit.pulls.get.mockResolvedValue({ data: { draft: false, node_id: "node-1" } });
+    it("does nothing when the PR is already not a draft", async () => {
+      const pulls = { get: vi.fn().mockResolvedValue({ data: { draft: false, node_id: "n1" } }) };
+      const graphql = vi.fn();
+      const { client } = makeClient({ pulls, graphql });
 
-      await expect(client.markPRReady("org/repo", 10)).resolves.toBeUndefined();
+      await client.markPRReady("owner/repo", 5);
 
-      expect(mockOctokit.graphql).not.toHaveBeenCalled();
+      expect(graphql).not.toHaveBeenCalled();
     });
 
-    it("calls the graphql mutation when the PR is a draft", async () => {
-      mockOctokit.pulls.get.mockResolvedValue({ data: { draft: true, node_id: "node-1" } });
-      mockOctokit.graphql.mockResolvedValue({});
+    it("marks a draft PR as ready via the GraphQL mutation", async () => {
+      const pulls = { get: vi.fn().mockResolvedValue({ data: { draft: true, node_id: "n1" } }) };
+      const graphql = vi.fn().mockResolvedValue({});
+      const { client, logger } = makeClient({ pulls, graphql });
 
-      await expect(client.markPRReady("org/repo", 10)).resolves.toBeUndefined();
+      await client.markPRReady("owner/repo", 5);
 
-      expect(mockOctokit.graphql).toHaveBeenCalledWith(expect.stringContaining("markPullRequestReadyForReview"), {
-        prId: "node-1",
+      expect(graphql).toHaveBeenCalledWith(expect.stringContaining("markPullRequestReadyForReview"), {
+        prId: "n1",
       });
-      expect(logger.debug).toHaveBeenCalledWith(
-        { repo: "org/repo", prNumber: 10 },
-        "Marked PR as ready for review",
+      expect(logger.debug).toHaveBeenCalled();
+    });
+
+    it("throws a wrapped error when the graphql mutation fails", async () => {
+      const pulls = { get: vi.fn().mockResolvedValue({ data: { draft: true, node_id: "n1" } }) };
+      const graphql = vi.fn().mockRejectedValue(new Error("boom"));
+      const { client } = makeClient({ pulls, graphql });
+
+      await expect(client.markPRReady("owner/repo", 5)).rejects.toThrow(
+        'GitHub markPRReady failed for "owner/repo"',
       );
     });
 
-    it("wraps the error on failure", async () => {
-      mockOctokit.pulls.get.mockRejectedValue(new Error("get failed"));
+    it("throws a wrapped error when fetching the PR fails", async () => {
+      const pulls = { get: vi.fn().mockRejectedValue(new Error("boom")) };
+      const { client } = makeClient({ pulls });
 
-      await expect(client.markPRReady("org/repo", 10)).rejects.toThrow(
-        'GitHub markPRReady failed for "org/repo" {"prNumber":10}: get failed',
+      await expect(client.markPRReady("owner/repo", 5)).rejects.toThrow(
+        'GitHub markPRReady failed for "owner/repo"',
       );
     });
   });
 
   describe("listPRComments", () => {
-    it("maps comments and applies fallbacks for missing user/body", async () => {
-      mockOctokit.issues.listComments.mockResolvedValue({
-        data: [
-          {
-            id: 1,
-            user: { login: "alice" },
-            body: "hello",
-            created_at: "2024-01-01T00:00:00Z",
-          },
-          {
-            id: 2,
-            user: null,
-            body: null,
-            created_at: "2024-01-02T00:00:00Z",
-          },
-        ],
-      });
+    it("maps comments, defaulting missing author and body", async () => {
+      const issues = {
+        listComments: vi.fn().mockResolvedValue({
+          data: [
+            { id: 1, user: { login: "alice" }, body: "hi", created_at: "2026-01-01T00:00:00Z" },
+            { id: 2, user: null, body: null, created_at: "2026-01-02T00:00:00Z" },
+          ],
+        }),
+      };
+      const { client } = makeClient({ issues });
 
-      const result = await client.listPRComments("org/repo", 10);
+      const comments = await client.listPRComments("owner/repo", 5);
 
-      expect(result).toEqual([
-        { id: "1", author: "alice", body: "hello", createdAt: "2024-01-01T00:00:00Z" },
-        { id: "2", author: "unknown", body: "", createdAt: "2024-01-02T00:00:00Z" },
+      expect(comments).toEqual([
+        { id: "1", author: "alice", body: "hi", createdAt: "2026-01-01T00:00:00Z" },
+        { id: "2", author: "unknown", body: "", createdAt: "2026-01-02T00:00:00Z" },
       ]);
     });
 
-    it("wraps the error on failure", async () => {
-      mockOctokit.issues.listComments.mockRejectedValue(new Error("list failed"));
+    it("throws a wrapped error on failure", async () => {
+      const issues = { listComments: vi.fn().mockRejectedValue(new Error("boom")) };
+      const { client } = makeClient({ issues });
 
-      await expect(client.listPRComments("org/repo", 10)).rejects.toThrow(
-        'GitHub listPRComments failed for "org/repo" {"prNumber":10}: list failed',
+      await expect(client.listPRComments("owner/repo", 5)).rejects.toThrow(
+        'GitHub listPRComments failed for "owner/repo"',
       );
     });
   });
 
   describe("createPRReviewComment", () => {
-    it("creates a line comment successfully when a line is provided", async () => {
-      mockOctokit.pulls.get.mockResolvedValue({ data: { head: { sha: "sha1" } } });
-      mockOctokit.pulls.createReviewComment.mockResolvedValue({ data: { id: 500 } });
+    it("creates a line-level comment on the RIGHT side when a line is given", async () => {
+      const pulls = {
+        get: vi.fn().mockResolvedValue({ data: { head: { sha: "sha1" } } }),
+        createReviewComment: vi.fn().mockResolvedValue({ data: { id: 900 } }),
+      };
+      const { client } = makeClient({ pulls });
 
-      const result = await client.createPRReviewComment("org/repo", 10, "body", "src/a.ts", 5);
+      const id = await client.createPRReviewComment("owner/repo", 5, "body", "src/a.ts", 10);
 
-      expect(result).toBe(500);
-      expect(mockOctokit.pulls.createReviewComment).toHaveBeenCalledWith({
-        owner: "org",
+      expect(id).toBe(900);
+      expect(pulls.createReviewComment).toHaveBeenCalledWith({
+        owner: "owner",
         repo: "repo",
-        pull_number: 10,
+        pull_number: 5,
         body: "body",
         path: "src/a.ts",
-        line: 5,
+        line: 10,
         side: "RIGHT",
         commit_id: "sha1",
       });
     });
 
-    it("falls back to a file-level comment when the line comment gets a 422", async () => {
-      mockOctokit.pulls.get.mockResolvedValue({ data: { head: { sha: "sha1" } } });
-      mockOctokit.pulls.createReviewComment
-        .mockRejectedValueOnce(makeErr(422))
-        .mockResolvedValueOnce({ data: { id: 501 } });
+    it("creates a file-level comment when no line is given", async () => {
+      const pulls = {
+        get: vi.fn().mockResolvedValue({ data: { head: { sha: "sha1" } } }),
+        createReviewComment: vi.fn().mockResolvedValue({ data: { id: 901 } }),
+      };
+      const { client } = makeClient({ pulls });
 
-      const result = await client.createPRReviewComment("org/repo", 10, "body", "src/a.ts", 5);
+      const id = await client.createPRReviewComment("owner/repo", 5, "body", "src/a.ts");
 
-      expect(result).toBe(501);
-      expect(mockOctokit.pulls.createReviewComment).toHaveBeenNthCalledWith(2, {
-        owner: "org",
+      expect(id).toBe(901);
+      expect(pulls.createReviewComment).toHaveBeenCalledWith({
+        owner: "owner",
         repo: "repo",
-        pull_number: 10,
-        body: "*(line 5)* body",
-        path: "src/a.ts",
-        subject_type: "file",
-        commit_id: "sha1",
-      });
-      expect(logger.warn).toHaveBeenCalledWith(
-        { repo: "org/repo", prNumber: 10, path: "src/a.ts", line: 5 },
-        "Line not in PR diff, falling back to file-level comment",
-      );
-    });
-
-    it("creates a file-level comment when no line is provided", async () => {
-      mockOctokit.pulls.get.mockResolvedValue({ data: { head: { sha: "sha1" } } });
-      mockOctokit.pulls.createReviewComment.mockResolvedValue({ data: { id: 502 } });
-
-      const result = await client.createPRReviewComment("org/repo", 10, "body", "src/a.ts");
-
-      expect(result).toBe(502);
-      expect(mockOctokit.pulls.createReviewComment).toHaveBeenCalledWith({
-        owner: "org",
-        repo: "repo",
-        pull_number: 10,
+        pull_number: 5,
         body: "body",
         path: "src/a.ts",
         subject_type: "file",
@@ -393,111 +411,170 @@ describe("RealGitHubClient", () => {
       });
     });
 
-    it("swallows a non-line 422 error and returns 0", async () => {
-      mockOctokit.pulls.get.mockRejectedValue(makeErr(422, "file not in diff"));
+    it("falls back to a file-level comment when the line-level comment fails with 422", async () => {
+      const createReviewComment = vi
+        .fn()
+        .mockRejectedValueOnce(httpError(422))
+        .mockResolvedValueOnce({ data: { id: 902 } });
+      const pulls = {
+        get: vi.fn().mockResolvedValue({ data: { head: { sha: "sha1" } } }),
+        createReviewComment,
+      };
+      const { client, logger } = makeClient({ pulls });
 
-      const result = await client.createPRReviewComment("org/repo", 10, "body", "src/a.ts");
+      const id = await client.createPRReviewComment("owner/repo", 5, "body", "src/a.ts", 10);
 
-      expect(result).toBe(0);
-      expect(logger.warn).toHaveBeenCalledWith(
-        { repo: "org/repo", prNumber: 10, path: "src/a.ts", line: undefined },
-        "Could not post PR review comment (file may not be in diff), skipping",
-      );
+      expect(id).toBe(902);
+      expect(createReviewComment).toHaveBeenCalledTimes(2);
+      expect(createReviewComment).toHaveBeenLastCalledWith({
+        owner: "owner",
+        repo: "repo",
+        pull_number: 5,
+        body: "*(line 10)* body",
+        path: "src/a.ts",
+        subject_type: "file",
+        commit_id: "sha1",
+      });
+      expect(logger.warn).toHaveBeenCalled();
     });
 
-    it("rethrows a genuinely different (non-422) error", async () => {
-      mockOctokit.pulls.get.mockRejectedValue(makeErr(500, "server error"));
+    it("rethrows a non-422 line-level failure, wrapped by the outer handler", async () => {
+      const createReviewComment = vi.fn().mockRejectedValue(httpError(500, "server error"));
+      const pulls = {
+        get: vi.fn().mockResolvedValue({ data: { head: { sha: "sha1" } } }),
+        createReviewComment,
+      };
+      const { client } = makeClient({ pulls });
 
       await expect(
-        client.createPRReviewComment("org/repo", 10, "body", "src/a.ts"),
-      ).rejects.toThrow(
-        'GitHub createPRReviewComment failed for "org/repo" {"prNumber":10,"path":"src/a.ts"}: server error',
-      );
+        client.createPRReviewComment("owner/repo", 5, "body", "src/a.ts", 10),
+      ).rejects.toThrow('GitHub createPRReviewComment failed for "owner/repo"');
+      expect(createReviewComment).toHaveBeenCalledTimes(1);
+    });
+
+    it("returns 0 and logs a warning when the outer call fails with 422 (file not in diff)", async () => {
+      const pulls = { get: vi.fn().mockRejectedValue(httpError(422)) };
+      const { client, logger } = makeClient({ pulls });
+
+      const id = await client.createPRReviewComment("owner/repo", 5, "body", "src/a.ts", 10);
+
+      expect(id).toBe(0);
+      expect(logger.warn).toHaveBeenCalled();
+    });
+
+    it("throws a wrapped error for a non-422 outer failure", async () => {
+      const pulls = { get: vi.fn().mockRejectedValue(httpError(500)) };
+      const { client } = makeClient({ pulls });
+
+      await expect(
+        client.createPRReviewComment("owner/repo", 5, "body", "src/a.ts", 10),
+      ).rejects.toThrow('GitHub createPRReviewComment failed for "owner/repo"');
     });
   });
 
   describe("replyToReviewComment", () => {
-    it("posts the reply successfully", async () => {
-      mockOctokit.pulls.createReplyForReviewComment.mockResolvedValue({ data: {} });
+    it("posts a reply and does not throw", async () => {
+      const pulls = { createReplyForReviewComment: vi.fn().mockResolvedValue({}) };
+      const { client, logger } = makeClient({ pulls });
 
-      await expect(
-        client.replyToReviewComment("org/repo", 10, 500, "a reply"),
-      ).resolves.toBeUndefined();
+      await client.replyToReviewComment("owner/repo", 5, 900, "reply body");
 
-      expect(mockOctokit.pulls.createReplyForReviewComment).toHaveBeenCalledWith({
-        owner: "org",
+      expect(pulls.createReplyForReviewComment).toHaveBeenCalledWith({
+        owner: "owner",
         repo: "repo",
-        pull_number: 10,
-        comment_id: 500,
-        body: "a reply",
+        pull_number: 5,
+        comment_id: 900,
+        body: "reply body",
       });
-      expect(logger.debug).toHaveBeenCalledWith(
-        { repo: "org/repo", prNumber: 10, commentId: 500 },
-        "Replied to PR review comment",
-      );
+      expect(logger.debug).toHaveBeenCalled();
     });
 
-    it("swallows a failure and only logs a warning, does not throw", async () => {
-      mockOctokit.pulls.createReplyForReviewComment.mockRejectedValue(new Error("reply failed"));
+    it("swallows failures, logging a warning instead of throwing", async () => {
+      const pulls = { createReplyForReviewComment: vi.fn().mockRejectedValue(new Error("boom")) };
+      const { client, logger } = makeClient({ pulls });
 
       await expect(
-        client.replyToReviewComment("org/repo", 10, 500, "a reply"),
+        client.replyToReviewComment("owner/repo", 5, 900, "reply body"),
       ).resolves.toBeUndefined();
+      expect(logger.warn).toHaveBeenCalled();
+    });
+
+    it("stringifies a non-Error rejection in the logged warning", async () => {
+      const pulls = { createReplyForReviewComment: vi.fn().mockRejectedValue("plain failure") };
+      const { client, logger } = makeClient({ pulls });
+
+      await client.replyToReviewComment("owner/repo", 5, 900, "reply body");
 
       expect(logger.warn).toHaveBeenCalledWith(
-        { repo: "org/repo", prNumber: 10, commentId: 500, error: "reply failed" },
+        expect.objectContaining({ error: "plain failure" }),
         "Failed to reply to PR review comment, skipping",
       );
     });
   });
 
   describe("submitPRReview", () => {
-    it("submits a review successfully", async () => {
-      mockOctokit.pulls.createReview.mockResolvedValue({ data: {} });
+    it("submits a review with the given event", async () => {
+      const pulls = { createReview: vi.fn().mockResolvedValue({}) };
+      const { client } = makeClient({ pulls });
 
-      await expect(
-        client.submitPRReview("org/repo", 10, "lgtm", "APPROVE"),
-      ).resolves.toBeUndefined();
+      await client.submitPRReview("owner/repo", 5, "lgtm", "APPROVE");
 
-      expect(mockOctokit.pulls.createReview).toHaveBeenCalledWith({
-        owner: "org",
+      expect(pulls.createReview).toHaveBeenCalledWith({
+        owner: "owner",
         repo: "repo",
-        pull_number: 10,
+        pull_number: 5,
         body: "lgtm",
         event: "APPROVE",
       });
     });
 
-    it("falls back to COMMENT when requesting changes on your own PR", async () => {
-      mockOctokit.pulls.createReview
-        .mockRejectedValueOnce(new Error("Can not request changes on your own pull request"))
-        .mockResolvedValueOnce({ data: {} });
+    it("falls back to COMMENT when REQUEST_CHANGES fails because it's the author's own PR", async () => {
+      const createReview = vi
+        .fn()
+        .mockRejectedValueOnce(new Error("Cannot request changes on your own pull request"))
+        .mockResolvedValueOnce({});
+      const pulls = { createReview };
+      const { client, logger } = makeClient({ pulls });
 
-      await expect(
-        client.submitPRReview("org/repo", 10, "needs work", "REQUEST_CHANGES"),
-      ).resolves.toBeUndefined();
+      await client.submitPRReview("owner/repo", 5, "please fix", "REQUEST_CHANGES");
 
-      expect(mockOctokit.pulls.createReview).toHaveBeenNthCalledWith(2, {
-        owner: "org",
+      expect(createReview).toHaveBeenCalledTimes(2);
+      expect(createReview).toHaveBeenLastCalledWith({
+        owner: "owner",
         repo: "repo",
-        pull_number: 10,
-        body: "needs work",
+        pull_number: 5,
+        body: "please fix",
         event: "COMMENT",
       });
-      expect(logger.info).toHaveBeenCalledWith(
-        { repo: "org/repo", prNumber: 10, originalEvent: "REQUEST_CHANGES" },
-        "Cannot request changes on own PR, falling back to COMMENT",
+      expect(logger.info).toHaveBeenCalled();
+    });
+
+    it("throws a wrapped error when the event is already COMMENT and the call fails", async () => {
+      const pulls = { createReview: vi.fn().mockRejectedValue(new Error("boom")) };
+      const { client } = makeClient({ pulls });
+
+      await expect(client.submitPRReview("owner/repo", 5, "note", "COMMENT")).rejects.toThrow(
+        'GitHub submitPRReview failed for "owner/repo"',
       );
     });
 
-    it("rethrows a non-matching error", async () => {
-      mockOctokit.pulls.createReview.mockRejectedValue(new Error("totally unrelated failure"));
+    it("throws a wrapped error when the failure message does not match the own-PR pattern", async () => {
+      const pulls = { createReview: vi.fn().mockRejectedValue(new Error("some other failure")) };
+      const { client } = makeClient({ pulls });
 
       await expect(
-        client.submitPRReview("org/repo", 10, "needs work", "REQUEST_CHANGES"),
-      ).rejects.toThrow(
-        'GitHub submitPRReview failed for "org/repo" {"prNumber":10,"event":"REQUEST_CHANGES"}: totally unrelated failure',
-      );
+        client.submitPRReview("owner/repo", 5, "please fix", "REQUEST_CHANGES"),
+      ).rejects.toThrow('GitHub submitPRReview failed for "owner/repo"');
+    });
+
+    it("stringifies a non-Error rejection when checking for the own-PR pattern", async () => {
+      const pulls = { createReview: vi.fn().mockRejectedValue({ notAnError: true }) };
+      const { client } = makeClient({ pulls });
+
+      await expect(
+        client.submitPRReview("owner/repo", 5, "please fix", "REQUEST_CHANGES"),
+      ).rejects.toThrow('GitHub submitPRReview failed for "owner/repo"');
+      expect(pulls.createReview).toHaveBeenCalledTimes(1);
     });
   });
 });

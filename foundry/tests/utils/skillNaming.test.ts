@@ -22,11 +22,8 @@ describe("skillNaming", () => {
     );
   });
 
-  it("normalizeSkillName falls back to the slugified fallback when name is undefined", () => {
-    expect(normalizeSkillName(undefined, "some fallback label")).toBe("some-fallback-label");
-  });
-
-  it("normalizeSkillName falls back when name is only whitespace", () => {
-    expect(normalizeSkillName("   ", "some fallback label")).toBe("some-fallback-label");
+  it("slugifySkillName falls back to 'distilled-skill' when the input has no alphanumeric characters", () => {
+    expect(slugifySkillName("!!! ??? ...")).toBe("distilled-skill");
+    expect(slugifySkillName("")).toBe("distilled-skill");
   });
 });

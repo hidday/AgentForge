@@ -1,173 +1,158 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect } from "vitest";
 import { render, screen } from "@testing-library/react";
+import { EventTimeline } from "./EventTimeline.tsx";
 import type { RunEventRecord } from "@/api/client.ts";
 
-// Mock lucide-react so each icon renders as an identifiable, dependency-version-agnostic
-// element that still forwards `className` (used to assert color logic).
-vi.mock("lucide-react", () => {
-  function makeIcon(name: string) {
-    return function MockIcon({ className }: { className?: string }) {
-      return <div data-testid={`icon-${name}`} className={className} />;
-    };
-  }
+function makeEvent(overrides: Partial<RunEventRecord> = {}): RunEventRecord {
   return {
-    Zap: makeIcon("zap"),
-    FileText: makeIcon("file-text"),
-    CheckCircle2: makeIcon("check-circle-2"),
-    XCircle: makeIcon("x-circle"),
-    AlertTriangle: makeIcon("alert-triangle"),
-    User: makeIcon("user"),
-    Bot: makeIcon("bot"),
-    ArrowRight: makeIcon("arrow-right"),
-  };
-});
-
-import { EventTimeline } from "./EventTimeline.tsx";
-
-function makeEvent(overrides: Partial<RunEventRecord> & { id: string }): RunEventRecord {
-  return {
-    id: overrides.id,
+    id: "evt-1",
     runId: "run-1",
     eventType: "RUN_REQUESTED",
     source: "human",
     payloadJson: null,
-    createdAt: "2024-01-01T00:00:00.000Z",
+    createdAt: new Date().toISOString(),
     ...overrides,
   };
 }
 
 describe("EventTimeline", () => {
-  it("renders 'No events yet' for an empty array", () => {
+  it("shows an empty state when there are no events", () => {
     render(<EventTimeline events={[]} />);
     expect(screen.getByText("No events yet")).toBeDefined();
   });
 
-  it("renders events newest-first with formatted event type labels", () => {
-    const events: RunEventRecord[] = [
-      makeEvent({ id: "e1", eventType: "RUN_REQUESTED", createdAt: "2024-01-01T00:00:01.000Z" }),
-      makeEvent({ id: "e2", eventType: "PLAN_CREATED", createdAt: "2024-01-01T00:00:02.000Z" }),
-    ];
-    const { container } = render(<EventTimeline events={events} />);
-
-    expect(screen.getByText("Run Requested")).toBeDefined();
-    expect(screen.getByText("Plan Created")).toBeDefined();
-
-    const html = container.innerHTML;
-    // Reversed: the second (newer) event's label must appear before the first's.
-    expect(html.indexOf("Plan Created")).toBeLessThan(html.indexOf("Run Requested"));
+  it("renders the Events header when events are present", () => {
+    render(<EventTimeline events={[makeEvent()]} />);
+    expect(screen.getByText("Events")).toBeDefined();
   });
 
-  it("renders the from/to transition arrow when payload has from and to", () => {
-    const events: RunEventRecord[] = [
-      makeEvent({
-        id: "e1",
-        eventType: "PLAN_CREATED",
-        payloadJson: { from: "Todo", to: "Planning" },
-      }),
+  it("formats event type into title case with spaces", () => {
+    render(
+      <EventTimeline events={[makeEvent({ eventType: "PLAN_REVIEW_APPROVED" })]} />,
+    );
+    expect(screen.getByText("Plan Review Approved")).toBeDefined();
+  });
+
+  it("renders events in reverse (most recent first)", () => {
+    const events = [
+      makeEvent({ id: "e1", eventType: "RUN_REQUESTED" }),
+      makeEvent({ id: "e2", eventType: "PLAN_CREATED" }),
     ];
     render(<EventTimeline events={events} />);
+    const headings = screen.getAllByText(/Run Requested|Plan Created/);
+    expect(headings[0].textContent).toBe("Plan Created");
+    expect(headings[1].textContent).toBe("Run Requested");
+  });
 
+  it("shows the from/to transition when payload has from and to", () => {
+    render(
+      <EventTimeline
+        events={[
+          makeEvent({
+            eventType: "RESET_TO_TODO",
+            payloadJson: { from: "Implementing", to: "Todo" },
+          }),
+        ]}
+      />,
+    );
+    expect(screen.getByText("Implementing")).toBeDefined();
     expect(screen.getByText("Todo")).toBeDefined();
-    expect(screen.getByText("Planning")).toBeDefined();
-    expect(screen.getByTestId("icon-arrow-right")).toBeDefined();
   });
 
-  it("does not render the transition arrow when payload has no from/to", () => {
-    const events: RunEventRecord[] = [
-      makeEvent({ id: "e1", eventType: "RUN_REQUESTED", payloadJson: null }),
-    ];
-    render(<EventTimeline events={events} />);
-
-    expect(screen.queryByTestId("icon-arrow-right")).toBeNull();
+  it("does not show a transition when only 'from' is present", () => {
+    const { container } = render(
+      <EventTimeline
+        events={[
+          makeEvent({
+            eventType: "RESET_TO_TODO",
+            payloadJson: { from: "Implementing" },
+          }),
+        ]}
+      />,
+    );
+    expect(container.querySelector(".font-mono")).toBeNull();
   });
 
-  it("renders PLAN_REJECTED feedback as an italic note", () => {
-    const events: RunEventRecord[] = [
-      makeEvent({
-        id: "e1",
-        eventType: "PLAN_REJECTED",
-        payloadJson: { feedback: "Needs more detail on rollout." },
-      }),
-    ];
-    render(<EventTimeline events={events} />);
-
-    const note = screen.getByText("Needs more detail on rollout.");
-    expect(note.className).toContain("italic");
+  it("shows feedback text for PLAN_REJECTED events", () => {
+    render(
+      <EventTimeline
+        events={[
+          makeEvent({
+            eventType: "PLAN_REJECTED",
+            payloadJson: { feedback: "Needs more detail on rollback." },
+          }),
+        ]}
+      />,
+    );
+    expect(screen.getByText("Needs more detail on rollback.")).toBeDefined();
   });
 
-  it("does not render a feedback note for non PLAN_REJECTED events even with feedback present", () => {
-    const events: RunEventRecord[] = [
-      makeEvent({
-        id: "e1",
-        eventType: "PLAN_REVIEW_APPROVED",
-        payloadJson: { feedback: "Should not show" },
-      }),
-    ];
-    render(<EventTimeline events={events} />);
-
-    expect(screen.queryByText("Should not show")).toBeNull();
+  it("does not show feedback text for non PLAN_REJECTED events even if present", () => {
+    render(
+      <EventTimeline
+        events={[
+          makeEvent({
+            eventType: "PLAN_CREATED",
+            payloadJson: { feedback: "should not show" },
+          }),
+        ]}
+      />,
+    );
+    expect(screen.queryByText("should not show")).toBeNull();
   });
 
-  it.each([
-    ["PLAN_REVIEW_APPROVED", "check-circle-2"],
-    ["EXECUTION_FINISHED", "check-circle-2"],
-    ["REMEDIATION_FINISHED", "check-circle-2"],
-  ])("colors %s icon done-green", (eventType, iconName) => {
-    const events: RunEventRecord[] = [makeEvent({ id: "e1", eventType })];
-    render(<EventTimeline events={events} />);
-
-    const icon = screen.getByTestId(`icon-${iconName}`);
-    expect(icon.className).toContain("text-state-done");
+  it("renders the event source", () => {
+    render(<EventTimeline events={[makeEvent({ source: "user-command" })]} />);
+    expect(screen.getByText("user-command")).toBeDefined();
   });
 
-  it.each([
-    ["PLAN_REJECTED", "x-circle"],
-    ["REVIEW_CHANGES_REQUESTED", "x-circle"],
-    ["BLOCKED", "alert-triangle"],
-  ])("colors %s icon blocked-red", (eventType, iconName) => {
-    const events: RunEventRecord[] = [makeEvent({ id: "e1", eventType })];
-    render(<EventTimeline events={events} />);
-
-    const icon = screen.getByTestId(`icon-${iconName}`);
-    expect(icon.className).toContain("text-state-blocked");
+  it("renders an unknown event type using the fallback icon without crashing", () => {
+    render(<EventTimeline events={[makeEvent({ eventType: "SOME_UNKNOWN_TYPE" })]} />);
+    expect(screen.getByText("Some Unknown Type")).toBeDefined();
   });
 
-  it("colors an unmatched event type icon with the default accent color", () => {
-    const events: RunEventRecord[] = [makeEvent({ id: "e1", eventType: "RUN_REQUESTED" })];
-    render(<EventTimeline events={events} />);
-
-    const icon = screen.getByTestId("icon-zap");
-    expect(icon.className).toContain("text-accent");
-    expect(icon.className).not.toContain("text-state-done");
-    expect(icon.className).not.toContain("text-state-blocked");
+  it("renders an unknown source using the fallback Bot icon without crashing", () => {
+    render(<EventTimeline events={[makeEvent({ source: "agent" })]} />);
+    expect(screen.getByText("agent")).toBeDefined();
   });
 
-  it("falls back to the Zap icon for an event type with no explicit icon mapping", () => {
-    const events: RunEventRecord[] = [
-      makeEvent({ id: "e1", eventType: "SOME_UNMAPPED_EVENT_TYPE" }),
-    ];
-    render(<EventTimeline events={events} />);
-
-    expect(screen.getByTestId("icon-zap")).toBeDefined();
-    expect(screen.getByText("Some Unmapped Event Type")).toBeDefined();
+  it("handles a null payload without crashing", () => {
+    render(<EventTimeline events={[makeEvent({ payloadJson: null })]} />);
+    expect(screen.getByText("Run Requested")).toBeDefined();
   });
 
-  it.each(["human", "user-command"])(
-    "renders the User source icon for source '%s'",
-    (source) => {
-      const events: RunEventRecord[] = [makeEvent({ id: "e1", source })];
-      render(<EventTimeline events={events} />);
+  it("applies done-colored icon styling for approved/finished event types", () => {
+    const { container } = render(
+      <EventTimeline events={[makeEvent({ eventType: "EXECUTION_FINISHED" })]} />,
+    );
+    const icon = container.querySelector("svg");
+    expect(icon?.getAttribute("class")).toContain("text-state-done");
+  });
 
-      expect(screen.getByTestId("icon-user")).toBeDefined();
-      expect(screen.queryByTestId("icon-bot")).toBeNull();
-    },
-  );
+  it("applies blocked-colored icon styling for rejected/blocked event types", () => {
+    const { container } = render(
+      <EventTimeline events={[makeEvent({ eventType: "BLOCKED" })]} />,
+    );
+    const icon = container.querySelector("svg");
+    expect(icon?.getAttribute("class")).toContain("text-state-blocked");
+  });
 
-  it("renders the Bot source icon for a non-human source", () => {
-    const events: RunEventRecord[] = [makeEvent({ id: "e1", source: "ai-agent" })];
-    render(<EventTimeline events={events} />);
+  it("applies accent icon styling for other event types", () => {
+    const { container } = render(
+      <EventTimeline events={[makeEvent({ eventType: "EXECUTION_STARTED" })]} />,
+    );
+    const icon = container.querySelector("svg");
+    expect(icon?.getAttribute("class")).toContain("text-accent");
+  });
 
-    expect(screen.getByTestId("icon-bot")).toBeDefined();
-    expect(screen.queryByTestId("icon-user")).toBeNull();
+  it("shows a timestamp title attribute with the formatted timestamp", () => {
+    const createdAt = "2024-01-01T12:00:00.000Z";
+    const { container } = render(
+      <EventTimeline events={[makeEvent({ createdAt })]} />,
+    );
+    const timeEl = container.querySelector("[title]");
+    expect(timeEl).not.toBeNull();
+    // formatTimestamp uses toLocaleString with month/day/hour/minute/second (no year)
+    expect(timeEl?.getAttribute("title")).toMatch(/^Jan 1, /);
   });
 });

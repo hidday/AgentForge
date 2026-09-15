@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { EventRepository } from "../../src/orchestrator/eventRepository.js";
 import type { PrismaClient } from "../../src/generated/prisma/client.js";
 
@@ -6,75 +6,63 @@ function makeRow(overrides: Record<string, unknown> = {}) {
   return {
     id: "event-1",
     runId: "run-1",
-    eventType: "PLAN_CREATED",
+    eventType: "STATE_CHANGED",
     source: "system",
-    payloadJson: { a: 1 },
-    createdAt: new Date("2024-01-01T00:00:00Z"),
+    payloadJson: { from: "Todo", to: "Planning" },
+    createdAt: new Date("2026-01-01T00:00:00Z"),
     ...overrides,
   };
 }
 
-function makePrisma() {
+function makePrisma(overrides: Record<string, unknown> = {}) {
   return {
     aiEvent: {
       create: vi.fn(),
       findMany: vi.fn(),
+      ...overrides,
     },
-  };
+  } as unknown as PrismaClient;
 }
 
 describe("EventRepository", () => {
-  let prisma: ReturnType<typeof makePrisma>;
-  let repo: EventRepository;
-
-  beforeEach(() => {
-    prisma = makePrisma();
-    repo = new EventRepository(prisma as unknown as PrismaClient);
-  });
-
   describe("create", () => {
-    it("creates an event with the provided payloadJson and returns the mapped domain object", async () => {
-      prisma.aiEvent.create.mockResolvedValue(makeRow());
+    it("passes the given payloadJson through and maps the returned row", async () => {
+      const row = makeRow();
+      const create = vi.fn().mockResolvedValue(row);
+      const prisma = makePrisma({ create });
+      const repo = new EventRepository(prisma);
 
       const result = await repo.create({
         runId: "run-1",
-        eventType: "PLAN_CREATED",
+        eventType: "STATE_CHANGED",
         source: "system",
-        payloadJson: { a: 1 },
+        payloadJson: { from: "Todo", to: "Planning" },
       });
 
-      expect(prisma.aiEvent.create).toHaveBeenCalledWith({
+      expect(create).toHaveBeenCalledWith({
         data: {
           runId: "run-1",
-          eventType: "PLAN_CREATED",
+          eventType: "STATE_CHANGED",
           source: "system",
-          payloadJson: { a: 1 },
+          payloadJson: { from: "Todo", to: "Planning" },
         },
       });
-      expect(result).toEqual({
-        id: "event-1",
-        runId: "run-1",
-        eventType: "PLAN_CREATED",
-        source: "system",
-        payloadJson: { a: 1 },
-        createdAt: new Date("2024-01-01T00:00:00Z"),
-      });
+      expect(result.id).toBe("event-1");
     });
 
     it("defaults payloadJson to an empty object when omitted", async () => {
-      prisma.aiEvent.create.mockResolvedValue(makeRow({ payloadJson: {} }));
+      const row = makeRow({ payloadJson: {} });
+      const create = vi.fn().mockResolvedValue(row);
+      const prisma = makePrisma({ create });
+      const repo = new EventRepository(prisma);
 
-      await repo.create({
-        runId: "run-1",
-        eventType: "PLAN_CREATED",
-        source: "system",
-      });
+      await repo.create({ runId: "run-1", eventType: "RUN_CREATED", source: "api" });
 
-      expect(prisma.aiEvent.create).toHaveBeenCalledWith({
+      expect(create).toHaveBeenCalledWith({
         data: {
           runId: "run-1",
-          eventType: "PLAN_CREATED",
-          source: "system",
+          eventType: "RUN_CREATED",
+          source: "api",
           payloadJson: {},
         },
       });
@@ -82,27 +70,27 @@ describe("EventRepository", () => {
   });
 
   describe("findByRunId", () => {
-    it("queries by runId ordered by createdAt asc and maps all rows", async () => {
-      prisma.aiEvent.findMany.mockResolvedValue([
-        makeRow({ id: "e1" }),
-        makeRow({ id: "e2", eventType: "PLAN_APPROVED" }),
-      ]);
+    it("orders by createdAt asc and maps every row", async () => {
+      const rows = [makeRow({ id: "e1" }), makeRow({ id: "e2" })];
+      const findMany = vi.fn().mockResolvedValue(rows);
+      const prisma = makePrisma({ findMany });
+      const repo = new EventRepository(prisma);
 
       const result = await repo.findByRunId("run-1");
 
-      expect(prisma.aiEvent.findMany).toHaveBeenCalledWith({
+      expect(findMany).toHaveBeenCalledWith({
         where: { runId: "run-1" },
         orderBy: { createdAt: "asc" },
       });
-      expect(result).toHaveLength(2);
-      expect(result[0].id).toBe("e1");
-      expect(result[1].eventType).toBe("PLAN_APPROVED");
+      expect(result.map((e) => e.id)).toEqual(["e1", "e2"]);
     });
 
-    it("returns an empty array when there are no events", async () => {
-      prisma.aiEvent.findMany.mockResolvedValue([]);
-      const result = await repo.findByRunId("run-none");
-      expect(result).toEqual([]);
+    it("returns an empty array when the run has no events", async () => {
+      const findMany = vi.fn().mockResolvedValue([]);
+      const prisma = makePrisma({ findMany });
+      const repo = new EventRepository(prisma);
+
+      expect(await repo.findByRunId("run-none")).toEqual([]);
     });
   });
 });

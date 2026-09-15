@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render } from "@testing-library/react";
 import { Markdown } from "./Markdown.tsx";
 
 describe("Markdown", () => {
@@ -11,127 +11,119 @@ describe("Markdown", () => {
     expect(p?.className).toContain("mb-2");
   });
 
+  it("applies the custom className to the wrapper div", () => {
+    const { container } = render(
+      <Markdown className="custom-class">{"text"}</Markdown>,
+    );
+    const wrapper = container.firstElementChild as HTMLElement;
+    expect(wrapper.className).toContain("custom-class");
+    expect(wrapper.className).toContain("text-text-secondary");
+  });
+
   it("renders an unordered list with items", () => {
-    render(<Markdown>{"- one\n- two"}</Markdown>);
-    const list = screen.getByRole("list");
-    expect(list.tagName).toBe("UL");
-    const items = screen.getAllByRole("listitem");
-    expect(items.map((li) => li.textContent)).toEqual(["one", "two"]);
+    const { container } = render(
+      <Markdown>{"- one\n- two\n- three"}</Markdown>,
+    );
+    const ul = container.querySelector("ul");
+    expect(ul).not.toBeNull();
+    expect(ul?.className).toContain("list-disc");
+    const items = container.querySelectorAll("li");
+    expect(items).toHaveLength(3);
+    expect(items[0].textContent).toBe("one");
   });
 
-  it("renders an ordered list with items", () => {
-    render(<Markdown>{"1. first\n2. second"}</Markdown>);
-    const list = screen.getByRole("list");
-    expect(list.tagName).toBe("OL");
-    const items = screen.getAllByRole("listitem");
-    expect(items.map((li) => li.textContent)).toEqual(["first", "second"]);
+  it("renders an ordered list", () => {
+    const { container } = render(<Markdown>{"1. first\n2. second"}</Markdown>);
+    const ol = container.querySelector("ol");
+    expect(ol).not.toBeNull();
+    expect(ol?.className).toContain("list-decimal");
+    expect(container.querySelectorAll("li")).toHaveLength(2);
   });
 
-  it("renders bold text as a styled <strong>", () => {
-    const { container } = render(<Markdown>{"**bold text**"}</Markdown>);
+  it("renders strong and em text", () => {
+    const { container } = render(<Markdown>{"**bold** and *italic*"}</Markdown>);
     const strong = container.querySelector("strong");
-    expect(strong).not.toBeNull();
-    expect(strong?.textContent).toBe("bold text");
-    expect(strong?.className).toContain("font-semibold");
-  });
-
-  it("renders italic text as a styled <em>", () => {
-    const { container } = render(<Markdown>{"*italic text*"}</Markdown>);
     const em = container.querySelector("em");
-    expect(em).not.toBeNull();
-    expect(em?.textContent).toBe("italic text");
+    expect(strong?.textContent).toBe("bold");
+    expect(strong?.className).toContain("font-semibold");
+    expect(em?.textContent).toBe("italic");
     expect(em?.className).toContain("italic");
   });
 
-  it("renders a link that opens in a new tab safely", () => {
-    render(<Markdown>{"[click here](https://example.com/page)"}</Markdown>);
-    const link = screen.getByRole("link", { name: "click here" });
-    expect(link.getAttribute("href")).toBe("https://example.com/page");
-    expect(link.getAttribute("target")).toBe("_blank");
-    expect(link.getAttribute("rel")).toBe("noreferrer noopener");
+  it("renders inline code without block styling", () => {
+    const { container } = render(<Markdown>{"here is `inline` code"}</Markdown>);
+    const code = container.querySelector("code");
+    expect(code).not.toBeNull();
+    expect(code?.textContent).toBe("inline");
+    expect(code?.className).toContain("rounded");
+    expect(code?.className).not.toContain("block");
   });
 
-  it("renders an h1 heading", () => {
-    render(<Markdown>{"# Big Title"}</Markdown>);
-    const heading = screen.getByRole("heading", { level: 1, name: "Big Title" });
-    expect(heading.tagName).toBe("H1");
-    expect(heading.className).toContain("font-semibold");
+  it("renders fenced code blocks with block styling", () => {
+    const { container } = render(
+      <Markdown>{"```js\nconst x = 1;\n```"}</Markdown>,
+    );
+    const code = container.querySelector("code");
+    expect(code).not.toBeNull();
+    expect(code?.className).toContain("block");
+    expect(code?.className).toContain("whitespace-pre");
+    const pre = container.querySelector("pre");
+    expect(pre).not.toBeNull();
+    expect(pre?.className).toContain("my-2");
   });
 
-  it("renders an h2 heading", () => {
-    render(<Markdown>{"## Section Title"}</Markdown>);
-    const heading = screen.getByRole("heading", { level: 2, name: "Section Title" });
-    expect(heading.tagName).toBe("H2");
-    expect(heading.className).toContain("font-semibold");
+  it("renders links with target=_blank and rel attributes", () => {
+    const { container } = render(
+      <Markdown>{"[click here](https://example.com)"}</Markdown>,
+    );
+    const link = container.querySelector("a");
+    expect(link).not.toBeNull();
+    expect(link?.getAttribute("href")).toBe("https://example.com");
+    expect(link?.getAttribute("target")).toBe("_blank");
+    expect(link?.getAttribute("rel")).toBe("noreferrer noopener");
+    expect(link?.className).toContain("underline");
   });
 
-  it("renders an h3 heading", () => {
-    render(<Markdown>{"### Sub Title"}</Markdown>);
-    const heading = screen.getByRole("heading", { level: 3, name: "Sub Title" });
-    expect(heading.tagName).toBe("H3");
-    expect(heading.className).toContain("font-semibold");
+  it("renders headings h1 through h4", () => {
+    const { container } = render(
+      <Markdown>{"# H1\n\n## H2\n\n### H3\n\n#### H4"}</Markdown>,
+    );
+    expect(container.querySelector("h1")?.textContent).toBe("H1");
+    expect(container.querySelector("h2")?.textContent).toBe("H2");
+    expect(container.querySelector("h3")?.textContent).toBe("H3");
+    expect(container.querySelector("h4")?.textContent).toBe("H4");
   });
 
-  it("renders an h4 heading", () => {
-    render(<Markdown>{"#### Minor Title"}</Markdown>);
-    const heading = screen.getByRole("heading", { level: 4, name: "Minor Title" });
-    expect(heading.tagName).toBe("H4");
-    expect(heading.className).toContain("font-semibold");
+  it("renders a blockquote", () => {
+    const { container } = render(<Markdown>{"> quoted text"}</Markdown>);
+    const bq = container.querySelector("blockquote");
+    expect(bq).not.toBeNull();
+    expect(bq?.textContent).toContain("quoted text");
+    expect(bq?.className).toContain("border-l-2");
   });
 
   it("renders a horizontal rule", () => {
-    const { container } = render(<Markdown>{"above\n\n---\n\nbelow"}</Markdown>);
+    const { container } = render(<Markdown>{"one\n\n---\n\ntwo"}</Markdown>);
     const hr = container.querySelector("hr");
     expect(hr).not.toBeNull();
     expect(hr?.className).toContain("border-border-subtle");
   });
 
-  it("renders a blockquote", () => {
-    const { container } = render(<Markdown>{"> a quoted line"}</Markdown>);
-    const quote = container.querySelector("blockquote");
-    expect(quote).not.toBeNull();
-    expect(quote?.textContent?.trim()).toBe("a quoted line");
-    expect(quote?.className).toContain("border-l-2");
-  });
-
-  it("renders a GFM table with headers and cells", () => {
-    const md = "| Name | Score |\n| --- | --- |\n| Alice | 10 |";
-    render(<Markdown>{md}</Markdown>);
-
-    const table = screen.getByRole("table");
+  it("renders GFM tables via remark-gfm with th/td cells", () => {
+    const md = "| A | B |\n| --- | --- |\n| 1 | 2 |";
+    const { container } = render(<Markdown>{md}</Markdown>);
+    const table = container.querySelector("table");
     expect(table).not.toBeNull();
-    expect(screen.getByRole("columnheader", { name: "Name" })).toBeDefined();
-    expect(screen.getByRole("columnheader", { name: "Score" })).toBeDefined();
-    expect(screen.getByRole("cell", { name: "Alice" })).toBeDefined();
-    expect(screen.getByRole("cell", { name: "10" })).toBeDefined();
+    const ths = container.querySelectorAll("th");
+    expect(ths).toHaveLength(2);
+    expect(ths[0].textContent).toBe("A");
+    const tds = container.querySelectorAll("td");
+    expect(tds).toHaveLength(2);
+    expect(tds[0].textContent).toBe("1");
   });
 
-  it("renders a fenced code block with the block styling class", () => {
-    const md = "```js\nconst a = 1;\n```";
-    const { container } = render(<Markdown>{md}</Markdown>);
-
-    const code = container.querySelector("code");
-    expect(code).not.toBeNull();
-    expect(code?.textContent).toBe("const a = 1;\n");
-    expect(code?.className).toContain("block");
-    expect(code?.className).toContain("whitespace-pre");
-  });
-
-  it("renders inline code without the block styling class", () => {
-    const md = "Use the `inline` value here";
-    const { container } = render(<Markdown>{md}</Markdown>);
-
-    const code = container.querySelector("code");
-    expect(code).not.toBeNull();
-    expect(code?.textContent).toBe("inline");
-    expect(code?.className).not.toContain("block");
-    expect(code?.className).toContain("px-1");
-  });
-
-  it("merges a passed className onto the wrapping element", () => {
-    const { container } = render(
-      <Markdown className="my-extra-class">{"text"}</Markdown>,
-    );
-    expect(container.firstElementChild?.className).toContain("my-extra-class");
+  it("renders empty string content without throwing", () => {
+    const { container } = render(<Markdown>{""}</Markdown>);
+    expect(container.firstElementChild).not.toBeNull();
   });
 });
