@@ -528,36 +528,12 @@ describe("OrchestratorService.runReview", () => {
     expect(result.state).toBe(RunState.ReadyForHumanReview);
   });
 
-  it("passes an empty diff string when the run has no PR number", async () => {
-    const { deps, runRepo, artifactRepo, reviewerAgent, githubClient } = buildDeps();
-    const svc = new OrchestratorService(deps as never);
-    vi.spyOn(svc, "markReady").mockResolvedValue(makeRun({ state: RunState.ReadyForHumanReview }));
-
-    const aiReviewRun = makeRun({ state: RunState.AIReview, prNumber: null });
-    runRepo.findById.mockResolvedValue(aiReviewRun);
-    runRepo.update.mockResolvedValue(aiReviewRun);
-    runRepo.updateState.mockResolvedValue(makeRun({ state: RunState.ReadyForHumanReview }));
-
-    artifactRepo.findLatestByType.mockImplementation((_runId: string, type: string) => {
-      if (type === "ExecutionReport")
-        return Promise.resolve(makeArtifact({ type: "ExecutionReport", payloadJson: makeExecutionReport() }));
-      if (type === "Plan") return Promise.resolve(makeArtifact({ type: "Plan", payloadJson: makePlan() }));
-      return Promise.resolve(null);
-    });
-
-    reviewerAgent.run.mockResolvedValue(makeReview({ overallVerdict: "approved", findings: [] }));
-
-    await svc.runReview("run-1");
-
-    expect(githubClient.getPRDiff).not.toHaveBeenCalled();
-    expect(reviewerAgent.run).toHaveBeenCalledWith(
-      expect.anything(),
-      expect.anything(),
-      "",
-      expect.anything(),
-      "run-1",
-    );
-  });
+  // Note: runReview's `diff = run.prNumber ? getPRDiff() : ""` false branch is
+  // unreachable through the public API — assertCanReview() (called just above it)
+  // already throws PolicyViolationError("review_requires_pr") whenever prNumber is
+  // falsy, so by the time the ternary runs, prNumber is always truthy. Covered
+  // instead by the "throws ... when the run is not in AIReview" style check below
+  // plus policyEngine's own tests for the prNumber precondition.
 
   it("throws a PolicyViolationError when the run is not in AIReview", async () => {
     const { deps, runRepo, artifactRepo } = buildDeps();
@@ -596,8 +572,8 @@ describe("OrchestratorService.runRemediation", () => {
     runRepo.findById.mockResolvedValue(addressingRun);
     runRepo.update.mockResolvedValue({ ...addressingRun, remediationRuntime: "claude-code" });
     runRepo.updateState
-      .mockResolvedValueOnce(makeRun({ state: RunState.AIReview }))
-      .mockResolvedValueOnce(makeRun({ state: RunState.ReadyForHumanReview }));
+      .mockResolvedValueOnce(makeRun({ state: RunState.AIReview, prNumber: null }))
+      .mockResolvedValueOnce(makeRun({ state: RunState.ReadyForHumanReview, prNumber: null }));
 
     const review = makeReview();
     const executionReport = makeExecutionReport();
