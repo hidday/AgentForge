@@ -377,6 +377,27 @@ describe("RuntimeHealthCheck.runPreflight — auth check via exitCodeOnly path",
     expect(claudeResult?.authCheck.error).toContain("Exit code 3");
     expect(claudeResult?.authCheck.error).toContain("not logged in");
   });
+
+  it("falls back to stdout for the exit-code detail when stderr is empty", async () => {
+    const execute = vi.fn(async (opts: ProcessSpawnOptions) => {
+      if (isVersionCall(opts)) return okResult({ stdout: "v1\n" });
+      if (opts.command === "claude") {
+        return okResult({ exitCode: 3, stdout: "diagnostic: not authenticated", stderr: "" });
+      }
+      return okResult({ stdout: "PONG" });
+    });
+    const health = new RuntimeHealthCheck(
+      { execute } as never,
+      exitCodeOnlyConfigs as never,
+      makeMockLogger() as never,
+    );
+
+    await expect(health.runPreflight()).rejects.toThrow(PreflightError);
+    const claudeResult = health.getLastResult()?.results.find((r) => r.runtime === "claude-code");
+    expect(claudeResult?.authCheck.ok).toBe(false);
+    expect(claudeResult?.authCheck.error).toContain("Exit code 3");
+    expect(claudeResult?.authCheck.error).toContain("diagnostic: not authenticated");
+  });
 });
 
 describe("RuntimeHealthCheck.runPreflight — auth check via PONG fallback path (codex)", () => {

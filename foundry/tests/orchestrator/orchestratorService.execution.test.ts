@@ -356,6 +356,42 @@ describe("OrchestratorService.runExecution", () => {
     expect(readyComment).toBeDefined();
   });
 
+  it("collapses the file list into a <details> block and includes a Notes section when the report has many files and notes", async () => {
+    const initialRun = makeRun({ state: RunState.Implementing, prNumber: null });
+    const store: TestStore = {
+      runState: RunState.Implementing,
+      run: initialRun,
+      artifacts: [asArtifact({ type: "Plan", version: 1, payloadJson: makePlan() })],
+      events: [],
+    };
+
+    const built = buildDeps(store);
+    const manyFiles = Array.from({ length: 9 }, (_, i) => `src/file${i}.ts`);
+    built.executorAgent.run.mockImplementation(async () => {
+      const report = makeExecutionReport({
+        filesChanged: manyFiles,
+        notes: ["Left a TODO for follow-up work."],
+      });
+      await persistExecutionReport(built.artifactRepo, report);
+      return { report, prNumber: 101 };
+    });
+
+    const svc = new OrchestratorService(built.deps as never);
+    await svc.runExecution("run-1");
+
+    const executionComment = built.linearClient.postComment.mock.calls.find((c: unknown[]) =>
+      (c[1] as string).includes("Execution Report"),
+    );
+    expect(executionComment).toBeDefined();
+    const body = executionComment?.[1] as string;
+
+    expect(body).toContain("<details>");
+    expect(body).toContain(`Files changed (${manyFiles.length})`);
+    expect(body).toContain("</details>");
+    expect(body).toContain("### Notes");
+    expect(body).toContain("- Left a TODO for follow-up work.");
+  });
+
   it("idempotency/crash recovery: skips executor when an unfinished ExecutionReport already exists for the current attempt", async () => {
     const initialRun = makeRun({ state: RunState.Implementing, prNumber: 99 });
     const existingReport = makeExecutionReport({ executionVersion: 1 });

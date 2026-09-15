@@ -352,6 +352,108 @@ describe("LinearSyncDialog", () => {
     expect(onClose).toHaveBeenCalledTimes(2);
   });
 
+  it("clears a stale pending min-delay timer when the dialog re-opens before it fires", async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    const onClose = vi.fn();
+
+    // Never resolves, so the only way to trigger maybeAutoClose is via SSE.
+    mockApi.ingestIssues.mockReturnValue(new Promise(() => {}));
+
+    const { rerender } = render(
+      <LinearSyncDialog open={true} onClose={onClose} onIngested={vi.fn()} />,
+    );
+
+    await waitFor(() => expect(screen.getByText(issueA.title)).toBeDefined());
+
+    // `shouldAdvanceTime` keeps a background timer of its own running, so
+    // compare against this baseline rather than an absolute count.
+    const baselineTimers = vi.getTimerCount();
+
+    const startBtn = screen.getByRole("button", { name: /start 2 runs/i });
+    await user.click(startBtn);
+
+    // Both selected issues are seen immediately (elapsed ~0ms), so
+    // maybeAutoClose schedules a follow-up timeout instead of closing right
+    // away (MIN_LOADER_MS hasn't elapsed) — this leaves a real pending timer.
+    fireSSE({ type: "run:created", runId: "run-a", issueId: issueA.id });
+    fireSSE({ type: "run:created", runId: "run-b", issueId: issueB.id });
+
+    expect(onClose).not.toHaveBeenCalled();
+    expect(vi.getTimerCount()).toBeGreaterThan(baselineTimers);
+
+    // The parent closes the dialog for an unrelated reason (e.g. the user
+    // hit Escape) before that scheduled timer ever fires...
+    rerender(<LinearSyncDialog open={false} onClose={onClose} onIngested={vi.fn()} />);
+    // ...then re-opens it to start a fresh sync cycle. Re-opening must clear
+    // the stale timer left over from the previous cycle.
+    mockApi.fetchPendingIssues.mockResolvedValue({ issues: [issueA, issueB] });
+    rerender(<LinearSyncDialog open={true} onClose={onClose} onIngested={vi.fn()} />);
+
+    // The re-open effect runs synchronously within this render, so the
+    // stale timer should already be cleared.
+    expect(vi.getTimerCount()).toBe(baselineTimers);
+
+    // Advancing time well past MIN_LOADER_MS confirms the stale timer is
+    // truly gone and cannot fire a leftover close from the old cycle.
+    await act(async () => {
+      vi.advanceTimersByTime(1000);
+    });
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it("fires a second, authoritative onIngestComplete when the HTTP response resolves after SSE already auto-closed the dialog", async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    const onClose = vi.fn();
+    const onIngested = vi.fn();
+    const onIngestComplete = vi.fn();
+
+    let resolveIngest!: (v: { ok: boolean; started: string[]; skipped: string[] }) => void;
+    mockApi.ingestIssues.mockReturnValue(
+      new Promise((resolve) => {
+        resolveIngest = resolve;
+      }),
+    );
+
+    render(
+      <LinearSyncDialog
+        open={true}
+        onClose={onClose}
+        onIngested={onIngested}
+        onIngestComplete={onIngestComplete}
+      />,
+    );
+
+    await waitFor(() => expect(screen.getByText(issueA.title)).toBeDefined());
+
+    const startBtn = screen.getByRole("button", { name: /start 2 runs/i });
+    await user.click(startBtn);
+
+    fireSSE({ type: "run:created", runId: "run-a", issueId: issueA.id });
+    fireSSE({ type: "run:created", runId: "run-b", issueId: issueB.id });
+
+    // Let MIN_LOADER_MS elapse so the SSE-driven maybeAutoClose actually
+    // closes the dialog while the HTTP request is still in flight.
+    await act(async () => {
+      vi.advanceTimersByTime(700);
+    });
+
+    await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
+    // Optimistic summary (no HTTP result yet): started = both pending ids.
+    expect(onIngestComplete).toHaveBeenCalledWith({ started: 2, skipped: 0 });
+    onIngestComplete.mockClear();
+
+    // The authoritative HTTP response now lands, with different real counts.
+    await act(async () => {
+      resolveIngest({ ok: true, started: [issueA.id], skipped: [issueB.id] });
+    });
+
+    await waitFor(() => {
+      expect(onIngestComplete).toHaveBeenCalledWith({ started: 1, skipped: 1 });
+    });
+    expect(onClose).toHaveBeenCalledOnce(); // not re-triggered a second time
+    expect(onIngested).toHaveBeenCalledOnce();
+  });
+
   it("ignores SSE events that aren't run:created and events for issues outside the pending set", async () => {
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     const onClose = vi.fn();

@@ -128,6 +128,23 @@ describe("ArtifactTabs", () => {
     expect(screen.getByText("No dispositions recorded")).toBeDefined();
   });
 
+  it("falls back to the default style for an unrecognized PlanRevision disposition status", () => {
+    const { container } = render(
+      <ArtifactTabs
+        artifacts={[
+          makeArtifact("PlanRevision", {
+            dispositions: [
+              { findingId: "F9", status: "pending_review", rationale: "Still triaging" },
+            ],
+          }),
+        ]}
+      />,
+    );
+    expect(screen.getByText("pending review")).toBeDefined();
+    const badge = container.querySelector("span.bg-surface-hover.text-text-muted");
+    expect(badge?.textContent).toBe("pending review");
+  });
+
   it("renders Remediation resolutions with rationale and default executionVersion fallback", () => {
     const { container } = render(
       <ArtifactTabs

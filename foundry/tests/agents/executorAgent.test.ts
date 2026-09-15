@@ -195,6 +195,27 @@ describe("ExecutorAgent.run()", () => {
     expect(githubClient.createDraftPR).not.toHaveBeenCalled();
   });
 
+  it("treats a retry context with only an existingPR (no existingBranch) as a retry in the start log", async () => {
+    const { agent, githubClient, logger } = buildAgent();
+
+    const result = await agent.run(makePlan(), makeTaskBundle(), "run-1", {
+      existingPR: 777,
+    });
+
+    // existingBranch is absent so branchName falls back to the task bundle's
+    // working branch, but existingPR alone should still be enough to skip
+    // creating a new draft PR and to mark isRetry: true in the start log.
+    expect(result.prNumber).toBe(777);
+    expect(githubClient.createDraftPR).not.toHaveBeenCalled();
+
+    const startLog = logger.info.mock.calls.find(
+      (c: unknown[]) => c[1] === "Starting executor agent",
+    );
+    expect(startLog).toBeDefined();
+    const payload = startLog?.[0] as Record<string, unknown> | undefined;
+    expect(payload?.isRetry).toBe(true);
+  });
+
   it("renders the operator note section into the user prompt when provided", async () => {
     const { agent, getUserPrompt } = buildAgent();
 
