@@ -51,6 +51,25 @@ const issueB = {
   priority: 2,
 };
 
+const issueWithMetadata = {
+  id: "issue-c",
+  title: "Issue with project and labels",
+  description: "",
+  state: "Todo",
+  project: "Foundry",
+  labels: ["bug", "urgent"],
+  priority: 1,
+};
+
+const issueUnknownPriority = {
+  id: "issue-d",
+  title: "Issue with unmapped priority",
+  description: "",
+  state: "Todo",
+  labels: [],
+  priority: 99,
+};
+
 function fireSSE(event: DashboardEvent) {
   if (!sseCallback) throw new Error("SSE callback not registered yet");
   act(() => {
@@ -180,5 +199,289 @@ describe("LinearSyncDialog", () => {
     // Start button should be re-enabled (no longer Starting...) so the user
     // can retry.
     expect(screen.getByRole("button", { name: /start 2 runs/i })).toBeDefined();
+  });
+
+  it("renders nothing when open is false", () => {
+    mockApi.fetchPendingIssues.mockResolvedValue({ issues: [] });
+    const { container } = render(
+      <LinearSyncDialog open={false} onClose={vi.fn()} onIngested={vi.fn()} />,
+    );
+    expect(container.innerHTML).toBe("");
+    expect(mockApi.fetchPendingIssues).not.toHaveBeenCalled();
+  });
+
+  it("shows a loading indicator while fetching issues", async () => {
+    let resolveFetch: (v: { issues: typeof issueA[] }) => void = () => {};
+    mockApi.fetchPendingIssues.mockReturnValue(
+      new Promise((resolve) => {
+        resolveFetch = resolve;
+      }),
+    );
+
+    render(<LinearSyncDialog open={true} onClose={vi.fn()} onIngested={vi.fn()} />);
+
+    expect(screen.getByText(/fetching issues from linear/i)).toBeDefined();
+
+    await act(async () => {
+      resolveFetch({ issues: [] });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText(/no pending issues found/i)).toBeDefined();
+    });
+  });
+
+  it("shows an empty state when there are no pending issues", async () => {
+    mockApi.fetchPendingIssues.mockResolvedValue({ issues: [] });
+
+    render(<LinearSyncDialog open={true} onClose={vi.fn()} onIngested={vi.fn()} />);
+
+    await waitFor(() => {
+      expect(screen.getByText(/no pending issues found/i)).toBeDefined();
+    });
+    // No Start button should render when there are no issues to sync.
+    expect(screen.queryByRole("button", { name: /start/i })).toBeNull();
+  });
+
+  it("shows an error state when fetching issues fails", async () => {
+    mockApi.fetchPendingIssues.mockRejectedValue(new Error("Linear API down"));
+
+    render(<LinearSyncDialog open={true} onClose={vi.fn()} onIngested={vi.fn()} />);
+
+    await waitFor(() => {
+      expect(screen.getByText(/linear api down/i)).toBeDefined();
+    });
+  });
+
+  it("falls back to a generic error message when a non-Error is thrown while fetching", async () => {
+    mockApi.fetchPendingIssues.mockRejectedValue("some string failure");
+
+    render(<LinearSyncDialog open={true} onClose={vi.fn()} onIngested={vi.fn()} />);
+
+    await waitFor(() => {
+      expect(screen.getByText(/failed to fetch issues/i)).toBeDefined();
+    });
+  });
+
+  it("re-fetches issues when the refresh button is clicked", async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    render(<LinearSyncDialog open={true} onClose={vi.fn()} onIngested={vi.fn()} />);
+
+    await waitFor(() => expect(screen.getByText(issueA.title)).toBeDefined());
+    expect(mockApi.fetchPendingIssues).toHaveBeenCalledTimes(1);
+
+    await user.click(screen.getByTitle(/refresh/i));
+
+    await waitFor(() => expect(mockApi.fetchPendingIssues).toHaveBeenCalledTimes(2));
+  });
+
+  it("renders project, priority, and label metadata, using the unmapped-priority fallback when needed", async () => {
+    mockApi.fetchPendingIssues.mockResolvedValue({
+      issues: [issueWithMetadata, issueUnknownPriority],
+    });
+
+    render(<LinearSyncDialog open={true} onClose={vi.fn()} onIngested={vi.fn()} />);
+
+    await waitFor(() => expect(screen.getByText(issueWithMetadata.title)).toBeDefined());
+
+    expect(screen.getByText("Foundry")).toBeDefined();
+    expect(screen.getByText("bug")).toBeDefined();
+    expect(screen.getByText("urgent")).toBeDefined();
+    expect(screen.getByText("Urgent")).toBeDefined();
+    // priority 99 has no entry in PRIORITY_LABELS, so it falls back to the
+    // "None" (priority 0) label instead of rendering nothing.
+    expect(screen.getByText(issueUnknownPriority.title)).toBeDefined();
+    expect(screen.getByText("None")).toBeDefined();
+  });
+
+  it("toggles individual issue selection and the select-all checkbox", async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    render(<LinearSyncDialog open={true} onClose={vi.fn()} onIngested={vi.fn()} />);
+
+    await waitFor(() => expect(screen.getByText(issueA.title)).toBeDefined());
+
+    // Both issues are selected by default.
+    expect(screen.getByRole("button", { name: /start 2 runs/i })).toBeDefined();
+
+    const checkboxA = screen.getByRole("checkbox", { name: new RegExp(issueA.title) });
+    await user.click(checkboxA);
+    expect(screen.getByRole("button", { name: /start 1 run$/i })).toBeDefined();
+
+    await user.click(checkboxA);
+    expect(screen.getByRole("button", { name: /start 2 runs/i })).toBeDefined();
+
+    const selectAll = screen.getByRole("checkbox", { name: /select all/i });
+    await user.click(selectAll);
+    expect(screen.getByRole("button", { name: /start 0 run$/i })).toBeDefined();
+    expect(screen.getByRole("button", { name: /start 0 run$/i })).toHaveProperty("disabled", true);
+
+    await user.click(selectAll);
+    expect(screen.getByRole("button", { name: /start 2 runs/i })).toBeDefined();
+  });
+
+  it("does not submit an ingest when no issues are selected", async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    render(<LinearSyncDialog open={true} onClose={vi.fn()} onIngested={vi.fn()} />);
+
+    await waitFor(() => expect(screen.getByText(issueA.title)).toBeDefined());
+
+    const selectAll = screen.getByRole("checkbox", { name: /select all/i });
+    await user.click(selectAll);
+
+    const startBtn = screen.getByRole("button", { name: /start 0 run$/i });
+    await user.click(startBtn);
+
+    expect(mockApi.ingestIssues).not.toHaveBeenCalled();
+  });
+
+  it("calls onClose when the Cancel button or the backdrop is clicked", async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    const onClose = vi.fn();
+    const { container } = render(
+      <LinearSyncDialog open={true} onClose={onClose} onIngested={vi.fn()} />,
+    );
+
+    await waitFor(() => expect(screen.getByText(issueA.title)).toBeDefined());
+
+    await user.click(screen.getByRole("button", { name: /cancel/i }));
+    expect(onClose).toHaveBeenCalledTimes(1);
+
+    const backdrop = container.querySelector(".absolute.inset-0");
+    expect(backdrop).not.toBeNull();
+    await user.click(backdrop!);
+    expect(onClose).toHaveBeenCalledTimes(2);
+  });
+
+  it("clears a stale pending min-delay timer when the dialog re-opens before it fires", async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    const onClose = vi.fn();
+
+    // Never resolves, so the only way to trigger maybeAutoClose is via SSE.
+    mockApi.ingestIssues.mockReturnValue(new Promise(() => {}));
+
+    const { rerender } = render(
+      <LinearSyncDialog open={true} onClose={onClose} onIngested={vi.fn()} />,
+    );
+
+    await waitFor(() => expect(screen.getByText(issueA.title)).toBeDefined());
+
+    // `shouldAdvanceTime` keeps a background timer of its own running, so
+    // compare against this baseline rather than an absolute count.
+    const baselineTimers = vi.getTimerCount();
+
+    const startBtn = screen.getByRole("button", { name: /start 2 runs/i });
+    await user.click(startBtn);
+
+    // Both selected issues are seen immediately (elapsed ~0ms), so
+    // maybeAutoClose schedules a follow-up timeout instead of closing right
+    // away (MIN_LOADER_MS hasn't elapsed) — this leaves a real pending timer.
+    fireSSE({ type: "run:created", runId: "run-a", issueId: issueA.id });
+    fireSSE({ type: "run:created", runId: "run-b", issueId: issueB.id });
+
+    expect(onClose).not.toHaveBeenCalled();
+    expect(vi.getTimerCount()).toBeGreaterThan(baselineTimers);
+
+    // The parent closes the dialog for an unrelated reason (e.g. the user
+    // hit Escape) before that scheduled timer ever fires...
+    rerender(<LinearSyncDialog open={false} onClose={onClose} onIngested={vi.fn()} />);
+    // ...then re-opens it to start a fresh sync cycle. Re-opening must clear
+    // the stale timer left over from the previous cycle.
+    mockApi.fetchPendingIssues.mockResolvedValue({ issues: [issueA, issueB] });
+    rerender(<LinearSyncDialog open={true} onClose={onClose} onIngested={vi.fn()} />);
+
+    // The re-open effect runs synchronously within this render, so the
+    // stale timer should already be cleared.
+    expect(vi.getTimerCount()).toBe(baselineTimers);
+
+    // Advancing time well past MIN_LOADER_MS confirms the stale timer is
+    // truly gone and cannot fire a leftover close from the old cycle.
+    await act(async () => {
+      vi.advanceTimersByTime(1000);
+    });
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it("fires a second, authoritative onIngestComplete when the HTTP response resolves after SSE already auto-closed the dialog", async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    const onClose = vi.fn();
+    const onIngested = vi.fn();
+    const onIngestComplete = vi.fn();
+
+    let resolveIngest!: (v: { ok: boolean; started: string[]; skipped: string[] }) => void;
+    mockApi.ingestIssues.mockReturnValue(
+      new Promise((resolve) => {
+        resolveIngest = resolve;
+      }),
+    );
+
+    render(
+      <LinearSyncDialog
+        open={true}
+        onClose={onClose}
+        onIngested={onIngested}
+        onIngestComplete={onIngestComplete}
+      />,
+    );
+
+    await waitFor(() => expect(screen.getByText(issueA.title)).toBeDefined());
+
+    const startBtn = screen.getByRole("button", { name: /start 2 runs/i });
+    await user.click(startBtn);
+
+    fireSSE({ type: "run:created", runId: "run-a", issueId: issueA.id });
+    fireSSE({ type: "run:created", runId: "run-b", issueId: issueB.id });
+
+    // Let MIN_LOADER_MS elapse so the SSE-driven maybeAutoClose actually
+    // closes the dialog while the HTTP request is still in flight.
+    await act(async () => {
+      vi.advanceTimersByTime(700);
+    });
+
+    await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
+    // Optimistic summary (no HTTP result yet): started = both pending ids.
+    expect(onIngestComplete).toHaveBeenCalledWith({ started: 2, skipped: 0 });
+    onIngestComplete.mockClear();
+
+    // The authoritative HTTP response now lands, with different real counts.
+    await act(async () => {
+      resolveIngest({ ok: true, started: [issueA.id], skipped: [issueB.id] });
+    });
+
+    await waitFor(() => {
+      expect(onIngestComplete).toHaveBeenCalledWith({ started: 1, skipped: 1 });
+    });
+    expect(onClose).toHaveBeenCalledOnce(); // not re-triggered a second time
+    expect(onIngested).toHaveBeenCalledOnce();
+  });
+
+  it("ignores SSE events that aren't run:created and events for issues outside the pending set", async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    const onClose = vi.fn();
+
+    mockApi.ingestIssues.mockReturnValue(new Promise(() => {}));
+
+    render(
+      <LinearSyncDialog open={true} onClose={onClose} onIngested={vi.fn()} />,
+    );
+
+    await waitFor(() => expect(screen.getByText(issueA.title)).toBeDefined());
+
+    const startBtn = screen.getByRole("button", { name: /start 2 runs/i });
+    await user.click(startBtn);
+
+    // Wrong event type: ignored.
+    fireSSE({ type: "run:updated", runId: "run-a" } as unknown as DashboardEvent);
+    // run:created for an issue we never selected: ignored.
+    fireSSE({ type: "run:created", runId: "run-x", issueId: "some-other-issue" });
+    // run:created with no issueId at all: ignored.
+    fireSSE({ type: "run:created", runId: "run-y" } as unknown as DashboardEvent);
+
+    await act(async () => {
+      vi.advanceTimersByTime(2000);
+    });
+
+    // None of the above should have satisfied the "every selected issue
+    // seen" condition, so the dialog must still be open.
+    expect(onClose).not.toHaveBeenCalled();
   });
 });
