@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, writeFileSync, rmSync, existsSync, readFileSync } from "node:fs";
+import { mkdtempSync, writeFileSync, rmSync, existsSync, readFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { execFileSync } from "node:child_process";
@@ -180,6 +180,50 @@ describe("GitService", () => {
       expect(existsSync(stalePath)).toBe(false);
 
       await svc.removeWorktree(repoPath, result.worktreePath);
+    });
+
+    it("recovers when the target worktree path already exists as a plain (non-worktree) directory", async () => {
+      const runId = "cafebabe-3456-7890-abcd-ef1234567890";
+      const branchName = "hidday/pry-200-precreated-dir";
+      const dirName = `run-${runId.slice(0, 8)}-pry-200-precreated-dir`;
+      const worktreePath = join(repoPath, ".worktrees", dirName);
+
+      // Pre-create the exact target path as an empty plain directory, not
+      // registered as a git worktree, to exercise the "already exists" branch.
+      mkdirSync(worktreePath, { recursive: true });
+      expect(existsSync(worktreePath)).toBe(true);
+
+      const result = await svc.setupRunWorktree(repoPath, runId, "main", branchName);
+
+      expect(result.worktreePath).toBe(worktreePath);
+      expect(existsSync(result.worktreePath)).toBe(true);
+      expect(await svc.currentBranch(result.worktreePath)).toBe(branchName);
+
+      await svc.removeWorktree(repoPath, result.worktreePath);
+    });
+
+    it("warns and continues when origin/<branch> already exists, resetting the local branch", async () => {
+      const branchName = "hidday/pry-300-existing-remote";
+
+      // First run: create the worktree, commit, and push so origin/<branch> exists.
+      const firstRunId = "11111111-3456-7890-abcd-ef1234567890";
+      const first = await svc.setupRunWorktree(repoPath, firstRunId, "main", branchName);
+      writeFileSync(join(first.worktreePath, "pushed.txt"), "content");
+      await svc.commitAndPush(first.worktreePath, branchName, "pushed commit");
+      expect(await svc.remoteBranchExists(repoPath, branchName)).toBe(true);
+
+      // Clean up the local worktree and branch to simulate a fresh run against
+      // a repo where only the remote branch (not local state) still exists.
+      await svc.removeWorktree(repoPath, first.worktreePath);
+      git(["branch", "-D", branchName], repoPath);
+
+      const secondRunId = "22222222-3456-7890-abcd-ef1234567890";
+      const second = await svc.setupRunWorktree(repoPath, secondRunId, "main", branchName);
+
+      expect(existsSync(second.worktreePath)).toBe(true);
+      expect(await svc.currentBranch(second.worktreePath)).toBe(branchName);
+
+      await svc.removeWorktree(repoPath, second.worktreePath);
     });
   });
 

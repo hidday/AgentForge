@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, fireEvent, createEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import type { Run } from "@/api/client.ts";
@@ -125,8 +125,7 @@ describe("RunsTable", () => {
       expect(screen.queryByTitle("Open in Linear")).toBeNull();
     });
 
-    it("is rendered when linearIssueUrl is set and stops propagation on click (no bubbling to the row)", async () => {
-      const user = userEvent.setup();
+    it("is rendered when linearIssueUrl is set and calls stopPropagation on click", () => {
       renderTable([
         makeRun({ linearIssueUrl: "https://linear.app/issue/ENG-1" }),
       ]);
@@ -134,16 +133,11 @@ describe("RunsTable", () => {
       expect(link.getAttribute("href")).toBe("https://linear.app/issue/ENG-1");
       expect(link.target).toBe("_blank");
 
-      // Attach a plain DOM listener on the ancestor row. If the anchor's
-      // onClick did not call stopPropagation, this would still fire because
-      // click events bubble by default.
-      const row = link.closest("tr")!;
-      const rowClickHandler = vi.fn();
-      row.addEventListener("click", rowClickHandler);
+      const clickEvent = createEvent.click(link);
+      const stopPropagationSpy = vi.spyOn(clickEvent, "stopPropagation");
+      fireEvent(link, clickEvent);
 
-      await user.click(link);
-
-      expect(rowClickHandler).not.toHaveBeenCalled();
+      expect(stopPropagationSpy).toHaveBeenCalledTimes(1);
     });
   });
 
