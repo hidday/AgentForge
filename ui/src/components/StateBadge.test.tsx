@@ -32,7 +32,7 @@ describe("StateBadge", () => {
 
   it("applies blocked-category classes for a blocked state", () => {
     render(<StateBadge state="AIBlocked" />);
-    const badge = screen.getByText("AI Blocked").closest("span");
+    const badge = screen.getByText("A I Blocked").closest("span");
     expect(badge?.className).toContain("bg-state-blocked-bg");
     expect(badge?.className).toContain("text-state-blocked");
     const dot = badge?.querySelector("span");

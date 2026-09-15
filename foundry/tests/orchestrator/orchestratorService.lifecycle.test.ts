@@ -363,16 +363,24 @@ describe("OrchestratorService.retryRun", () => {
     const planningRun = makeRun({ state: RunState.Planning });
     const planReviewRun = makeRun({ state: RunState.PlanReview });
     const awaitingApprovalRun = makeRun({ state: RunState.AwaitingPlanApproval });
+    const plan = makePlan({ openQuestions: [] });
 
     runRepo.findById.mockResolvedValueOnce(todoRun).mockResolvedValue(planReviewRun);
     runRepo.updateState
       .mockResolvedValueOnce(planningRun) // RUN_REQUESTED
       .mockResolvedValueOnce(planReviewRun) // PLAN_CREATED
       .mockResolvedValueOnce(awaitingApprovalRun); // PLAN_REVIEW_APPROVED
-    runRepo.update.mockResolvedValue({ ...todoRun, branchName: "ai/run-1", workingDirectory: "/tmp/worktree" });
+    // First update() call: worktree setup (state still Todo at that point).
+    // Second update() call: planVersion update (state must already be Planning).
+    runRepo.update
+      .mockResolvedValueOnce({ ...todoRun, branchName: "ai/run-1", workingDirectory: "/tmp/worktree" })
+      .mockResolvedValueOnce({ ...planningRun, planVersion: 1 });
 
-    artifactRepo.findLatestByType.mockResolvedValue(null);
-    plannerAgent.run.mockResolvedValue(makePlan({ openQuestions: [] }));
+    artifactRepo.findLatestByType.mockImplementation((_runId: string, type: string) => {
+      if (type === "Plan") return Promise.resolve(makeArtifact({ type: "Plan", payloadJson: plan }));
+      return Promise.resolve(null);
+    });
+    plannerAgent.run.mockResolvedValue(plan);
     planReviewerAgent.run.mockResolvedValue({ overallVerdict: "approved", summary: "OK", findings: [] });
 
     const result = await svc.retryRun("run-1");
@@ -390,17 +398,23 @@ describe("OrchestratorService.retryRun", () => {
     const svc = new OrchestratorService(deps as never);
 
     const todoRun = makeRun({ state: RunState.Todo, branchName: "ai/existing" });
+    const planningRun = makeRun({ state: RunState.Planning });
     const planReviewRun = makeRun({ state: RunState.PlanReview });
+    const plan = makePlan({ openQuestions: [] });
 
     runRepo.findById.mockResolvedValueOnce(todoRun).mockResolvedValue(planReviewRun);
     runRepo.updateState
-      .mockResolvedValueOnce(makeRun({ state: RunState.Planning }))
+      .mockResolvedValueOnce(planningRun)
       .mockResolvedValueOnce(planReviewRun)
       .mockResolvedValueOnce(makeRun({ state: RunState.AwaitingPlanApproval }));
-    runRepo.update.mockResolvedValue(todoRun);
+    // Only one update() call in this path: the planVersion update after planning.
+    runRepo.update.mockResolvedValue({ ...planningRun, planVersion: 1 });
 
-    artifactRepo.findLatestByType.mockResolvedValue(null);
-    plannerAgent.run.mockResolvedValue(makePlan({ openQuestions: [] }));
+    artifactRepo.findLatestByType.mockImplementation((_runId: string, type: string) => {
+      if (type === "Plan") return Promise.resolve(makeArtifact({ type: "Plan", payloadJson: plan }));
+      return Promise.resolve(null);
+    });
+    plannerAgent.run.mockResolvedValue(plan);
     planReviewerAgent.run.mockResolvedValue({ overallVerdict: "approved", summary: "OK", findings: [] });
 
     await svc.retryRun("run-1");
@@ -599,6 +613,9 @@ describe("OrchestratorService.runManualPlanRevision", () => {
       .mockResolvedValueOnce(planReviewRun) // RE_REVIEW_REQUESTED
       .mockResolvedValueOnce(planRevisionRun) // PLAN_REVIEW_CHANGES_REQUESTED
       .mockResolvedValueOnce(awaitingRun); // PLAN_REVISED
+    // runPlanRevision updates planVersion on the (still PlanRevision-state) run
+    // before transitioning it via PLAN_REVISED.
+    runRepo.update.mockResolvedValue({ ...planRevisionRun, planVersion: 2 });
 
     artifactRepo.findLatestByType.mockImplementation((_runId: string, type: string) => {
       if (type === "Plan") return Promise.resolve(makeArtifact({ type: "Plan", payloadJson: makePlan() }));

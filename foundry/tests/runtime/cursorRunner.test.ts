@@ -117,3 +117,108 @@ END_STRUCTURED_OUTPUT`;
     expect(logger.error).not.toHaveBeenCalled();
   });
 });
+
+describe("CursorRunner — buildStdinPayload() systemPrompt handling", () => {
+  it("prepends the system prompt to stdin, separated by '---', when input.systemPrompt is set", async () => {
+    const processRunner = makeMockProcessRunner({
+      stdout: JSON.stringify({ type: "result", result: "ok" }),
+      stderr: "",
+      exitCode: 0,
+      durationMs: 10,
+      timedOut: false,
+    });
+    const logger = makeMockLogger();
+    const runner = new CursorRunner(
+      processRunner as never,
+      "cursor",
+      [],
+      "claude-4.6-sonnet",
+      logger as never,
+    );
+
+    await expect(
+      runner.run(
+        {
+          prompt: "Implement the plan.",
+          systemPrompt: "You are the executor agent.",
+          workingDirectory: "/tmp",
+          timeoutMs: 1000,
+        },
+        "planner",
+        echoSchema,
+      ),
+    ).rejects.toThrow();
+
+    const { stdinData } = processRunner.execute.mock.calls[0]![0] as { stdinData: string };
+    expect(stdinData).toBe("You are the executor agent.\n\n---\n\nImplement the plan.");
+  });
+
+  it("uses the raw prompt as stdin when input.systemPrompt is not set", async () => {
+    const processRunner = makeMockProcessRunner({
+      stdout: JSON.stringify({ type: "result", result: "ok" }),
+      stderr: "",
+      exitCode: 0,
+      durationMs: 10,
+      timedOut: false,
+    });
+    const logger = makeMockLogger();
+    const runner = new CursorRunner(
+      processRunner as never,
+      "cursor",
+      [],
+      "claude-4.6-sonnet",
+      logger as never,
+    );
+
+    await expect(
+      runner.run(
+        { prompt: "just the task", workingDirectory: "/tmp", timeoutMs: 1000 },
+        "planner",
+        echoSchema,
+      ),
+    ).rejects.toThrow();
+
+    const { stdinData } = processRunner.execute.mock.calls[0]![0] as { stdinData: string };
+    expect(stdinData).toBe("just the task");
+  });
+});
+
+describe("CursorRunner — tailSnippet() truncation", () => {
+  it("truncates a long outputSnippet and stderr to a tail with an ellipsis prefix", async () => {
+    const longResult = "R".repeat(900) + "[TAIL_MARKER]";
+    const longStderr = "E".repeat(700) + "[STDERR_TAIL]";
+    const envelope = JSON.stringify({ type: "result", result: longResult });
+
+    const processRunner = makeMockProcessRunner({
+      stdout: envelope,
+      stderr: longStderr,
+      exitCode: 1,
+      durationMs: 100,
+      timedOut: false,
+    });
+    const logger = makeMockLogger();
+    const runner = new CursorRunner(
+      processRunner as never,
+      "cursor",
+      [],
+      "claude-4.6-sonnet",
+      logger as never,
+    );
+
+    await expect(
+      runner.run(
+        { prompt: "x", workingDirectory: "/tmp", timeoutMs: 1000 },
+        "planner",
+        echoSchema,
+      ),
+    ).rejects.toThrow();
+
+    const [logFields] = logger.error.mock.calls[0]!;
+    expect(logFields.outputSnippet.startsWith("…")).toBe(true);
+    expect(logFields.outputSnippet).toContain("[TAIL_MARKER]");
+    expect(logFields.outputSnippet.length).toBeLessThanOrEqual(501);
+    expect(logFields.stderr.startsWith("…")).toBe(true);
+    expect(logFields.stderr).toContain("[STDERR_TAIL]");
+    expect(logFields.stderr.length).toBeLessThanOrEqual(501);
+  });
+});

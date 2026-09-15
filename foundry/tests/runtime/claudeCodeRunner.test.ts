@@ -372,3 +372,152 @@ describe("ClaudeCodeRunner.chatRun() — arg filtering and error surfacing", () 
     expect(logFields).toMatchObject({ upstreamApiError: true });
   });
 });
+
+describe("ClaudeCodeRunner — buildArgs() systemPrompt handling", () => {
+  it("includes --system-prompt in the CLI args when input.systemPrompt is set", async () => {
+    const processRunner = makeMockProcessRunner({
+      stdout: JSON.stringify({ type: "result", result: "ok", is_error: false }),
+      stderr: "",
+      exitCode: 0,
+      durationMs: 10,
+      timedOut: false,
+    });
+    const logger = makeMockLogger();
+    const runner = new ClaudeCodeRunner(
+      processRunner as never,
+      "claude",
+      ["--output-format", "json"],
+      "claude-opus-4-8",
+      logger as never,
+    );
+
+    await runner.chatRun(
+      {
+        prompt: "Hello",
+        systemPrompt: "You are a helpful reviewer.",
+        workingDirectory: "/tmp",
+        timeoutMs: 1000,
+      },
+      "chat",
+    );
+
+    const { args } = processRunner.execute.mock.calls[0]![0] as { args: string[] };
+    const idx = args.indexOf("--system-prompt");
+    expect(idx).toBeGreaterThanOrEqual(0);
+    expect(args[idx + 1]).toBe("You are a helpful reviewer.");
+  });
+
+  it("omits --system-prompt when input.systemPrompt is not set", async () => {
+    const processRunner = makeMockProcessRunner({
+      stdout: JSON.stringify({ type: "result", result: "ok", is_error: false }),
+      stderr: "",
+      exitCode: 0,
+      durationMs: 10,
+      timedOut: false,
+    });
+    const logger = makeMockLogger();
+    const runner = new ClaudeCodeRunner(
+      processRunner as never,
+      "claude",
+      [],
+      "claude-opus-4-8",
+      logger as never,
+    );
+
+    await runner.chatRun({ prompt: "Hello", workingDirectory: "/tmp", timeoutMs: 1000 }, "chat");
+
+    const { args } = processRunner.execute.mock.calls[0]![0] as { args: string[] };
+    expect(args).not.toContain("--system-prompt");
+  });
+});
+
+describe("ClaudeCodeRunner — unwrapClaudeEnvelope() NDJSON and fallback paths", () => {
+  it("parses NDJSON output by scanning backward for the last valid {type:'result'} line, skipping blank/unparseable trailing lines", async () => {
+    const ndjson = [
+      '{"type":"system","text":"boot"}',
+      '{"type":"result","result":"the real result","is_error":true}',
+      "not json at all",
+      "",
+    ].join("\n");
+
+    const processRunner = makeMockProcessRunner({
+      stdout: ndjson,
+      stderr: "",
+      exitCode: 0,
+      durationMs: 20,
+      timedOut: false,
+    });
+    const logger = makeMockLogger();
+    const runner = new ClaudeCodeRunner(
+      processRunner as never,
+      "claude",
+      [],
+      "claude-opus-4-8",
+      logger as never,
+    );
+
+    await expect(
+      runner.chatRun({ prompt: "Hello", workingDirectory: "/tmp", timeoutMs: 1000 }, "chat"),
+    ).rejects.toThrow(/Claude CLI API error/);
+
+    const [logFields] = logger.error.mock.calls[0]!;
+    expect(logFields.outputSnippet).toContain("the real result");
+    expect(logFields.upstreamApiError).toBe(true);
+  });
+
+  it("returns text: undefined is_error as false when the matched NDJSON line has is_error omitted", async () => {
+    const ndjson = ['{"type":"result","result":"all good"}'].join("\n");
+
+    const processRunner = makeMockProcessRunner({
+      stdout: ndjson,
+      stderr: "",
+      exitCode: 0,
+      durationMs: 20,
+      timedOut: false,
+    });
+    const logger = makeMockLogger();
+    const runner = new ClaudeCodeRunner(
+      processRunner as never,
+      "claude",
+      [],
+      "claude-opus-4-8",
+      logger as never,
+    );
+
+    const result = await runner.chatRun(
+      { prompt: "Hello", workingDirectory: "/tmp", timeoutMs: 1000 },
+      "chat",
+    );
+
+    expect(result.text).toBe("all good");
+    expect(logger.error).not.toHaveBeenCalled();
+  });
+
+  it("falls back to the raw text with isApiError:false when output is neither single-JSON nor NDJSON", async () => {
+    const plainText = "Plain non-JSON CLI output with no envelope at all";
+
+    const processRunner = makeMockProcessRunner({
+      stdout: plainText,
+      stderr: "",
+      exitCode: 0,
+      durationMs: 15,
+      timedOut: false,
+    });
+    const logger = makeMockLogger();
+    const runner = new ClaudeCodeRunner(
+      processRunner as never,
+      "claude",
+      [],
+      "claude-opus-4-8",
+      logger as never,
+    );
+
+    const result = await runner.chatRun(
+      { prompt: "Hello", workingDirectory: "/tmp", timeoutMs: 1000 },
+      "chat",
+    );
+
+    expect(result.text).toBe(plainText);
+    expect(logger.error).not.toHaveBeenCalled();
+  });
+});

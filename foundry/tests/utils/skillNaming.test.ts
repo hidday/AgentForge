@@ -21,4 +21,12 @@ describe("skillNaming", () => {
       "dev-env-pause-resume",
     );
   });
+
+  it("normalizeSkillName falls back to the slugified fallback when name is undefined", () => {
+    expect(normalizeSkillName(undefined, "some fallback label")).toBe("some-fallback-label");
+  });
+
+  it("normalizeSkillName falls back when name is only whitespace", () => {
+    expect(normalizeSkillName("   ", "some fallback label")).toBe("some-fallback-label");
+  });
 });
