@@ -232,6 +232,64 @@ describe("buildChatSystemPrompt", () => {
     expect(result).not.toContain("x".repeat(4001));
   });
 
+  it("includes plan review findings when PlanReview artifact present", () => {
+    const artifact = makeArtifact({
+      type: "PlanReview",
+      version: 1,
+      payloadJson: {
+        summary: "Plan review summary text",
+        findings: [
+          { id: "f1", severity: "high", title: "Missing edge case", details: "Handle nulls" },
+        ],
+      },
+    });
+    const result = buildChatSystemPrompt(makeRun(), [artifact]);
+    expect(result).toContain("## Plan Review Findings");
+    expect(result).toContain("Plan review summary text");
+    expect(result).toContain("[high] Missing edge case");
+    expect(result).toContain("(f1): Handle nulls");
+  });
+
+  it("omits plan review section when no PlanReview artifact exists", () => {
+    const result = buildChatSystemPrompt(makeRun(), []);
+    expect(result).not.toContain("## Plan Review Findings");
+  });
+
+  it("omits plan review section when PlanReview artifact has no summary or findings", () => {
+    const artifact = makeArtifact({ type: "PlanReview", version: 1, payloadJson: {} });
+    const result = buildChatSystemPrompt(makeRun(), [artifact]);
+    expect(result).not.toContain("## Plan Review Findings");
+  });
+
+  it("includes code review findings when Review artifact present", () => {
+    const artifact = makeArtifact({
+      type: "Review",
+      version: 1,
+      payloadJson: {
+        summary: "Code review summary text",
+        findings: [
+          { id: "r1", severity: "medium", title: "Unused import", details: "Remove it" },
+        ],
+      },
+    });
+    const result = buildChatSystemPrompt(makeRun(), [artifact]);
+    expect(result).toContain("## Code Review Findings");
+    expect(result).toContain("Code review summary text");
+    expect(result).toContain("[medium] Unused import");
+    expect(result).toContain("(r1): Remove it");
+  });
+
+  it("omits code review section when no Review artifact exists", () => {
+    const result = buildChatSystemPrompt(makeRun(), []);
+    expect(result).not.toContain("## Code Review Findings");
+  });
+
+  it("omits code review section when Review artifact has no summary or findings", () => {
+    const artifact = makeArtifact({ type: "Review", version: 1, payloadJson: {} });
+    const result = buildChatSystemPrompt(makeRun(), [artifact]);
+    expect(result).not.toContain("## Code Review Findings");
+  });
+
   it("uses the Plan artifact with the highest version when multiple exist", () => {
     const planV1 = makeArtifact({
       type: "Plan",
