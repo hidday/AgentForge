@@ -51,11 +51,39 @@ describe("Markdown", () => {
     expect(link.getAttribute("rel")).toBe("noreferrer noopener");
   });
 
-  it("renders a heading", () => {
+  it("renders an h1 heading", () => {
     render(<Markdown>{"# Big Title"}</Markdown>);
     const heading = screen.getByRole("heading", { level: 1, name: "Big Title" });
     expect(heading.tagName).toBe("H1");
     expect(heading.className).toContain("font-semibold");
+  });
+
+  it("renders an h2 heading", () => {
+    render(<Markdown>{"## Section Title"}</Markdown>);
+    const heading = screen.getByRole("heading", { level: 2, name: "Section Title" });
+    expect(heading.tagName).toBe("H2");
+    expect(heading.className).toContain("font-semibold");
+  });
+
+  it("renders an h3 heading", () => {
+    render(<Markdown>{"### Sub Title"}</Markdown>);
+    const heading = screen.getByRole("heading", { level: 3, name: "Sub Title" });
+    expect(heading.tagName).toBe("H3");
+    expect(heading.className).toContain("font-semibold");
+  });
+
+  it("renders an h4 heading", () => {
+    render(<Markdown>{"#### Minor Title"}</Markdown>);
+    const heading = screen.getByRole("heading", { level: 4, name: "Minor Title" });
+    expect(heading.tagName).toBe("H4");
+    expect(heading.className).toContain("font-semibold");
+  });
+
+  it("renders a horizontal rule", () => {
+    const { container } = render(<Markdown>{"above\n\n---\n\nbelow"}</Markdown>);
+    const hr = container.querySelector("hr");
+    expect(hr).not.toBeNull();
+    expect(hr?.className).toContain("border-border-subtle");
   });
 
   it("renders a blockquote", () => {

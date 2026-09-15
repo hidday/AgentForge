@@ -248,14 +248,15 @@ describe("OrchestratorService.runExecution", () => {
     await expect(svc.runExecution("run-1")).rejects.toThrow(PolicyViolationError);
   });
 
-  it("recovers a stranded execution: skips the executor and proceeds straight to review", async () => {
-    const { deps, runRepo, artifactRepo, eventRepo, executorAgent, reviewerAgent } = buildDeps();
+  it("recovers a stranded execution: skips the executor and delegates straight to runReview", async () => {
+    const { deps, runRepo, artifactRepo, eventRepo, executorAgent } = buildDeps();
     const svc = new OrchestratorService(deps as never);
+    const aiReviewRun = makeRun({ state: RunState.AIReview, prNumber: 42 });
+    const runReviewSpy = vi.spyOn(svc, "runReview").mockResolvedValue(aiReviewRun);
 
     const implementingRun = makeRun({ state: RunState.Implementing, prNumber: 42 });
-    const aiReviewRun = makeRun({ state: RunState.AIReview, prNumber: 42 });
 
-    runRepo.findById.mockResolvedValueOnce(implementingRun).mockResolvedValue(aiReviewRun);
+    runRepo.findById.mockResolvedValue(implementingRun);
     runRepo.updateState.mockResolvedValue(aiReviewRun);
 
     const plan = makePlan();
@@ -268,7 +269,6 @@ describe("OrchestratorService.runExecution", () => {
         return Promise.resolve(
           makeArtifact({ type: "ExecutionReport", payloadJson: report, createdAt: reportCreatedAt }),
         );
-      if (type === "Review") return Promise.resolve(null);
       return Promise.resolve(null);
     });
 
@@ -279,11 +279,10 @@ describe("OrchestratorService.runExecution", () => {
       }),
     ]);
 
-    reviewerAgent.run.mockResolvedValue({ overallVerdict: "approved", summary: "OK", findings: [] });
-
     const result = await svc.runExecution("run-1");
 
     expect(executorAgent.run).not.toHaveBeenCalled();
+    expect(runReviewSpy).toHaveBeenCalledWith("run-1");
     const eventTypes = eventRepo.create.mock.calls.map(
       (c: unknown[]) => (c[0] as { eventType: string }).eventType,
     );
@@ -294,17 +293,19 @@ describe("OrchestratorService.runExecution", () => {
     expect((recoveredCall![0] as { payloadJson: { recovered: boolean } }).payloadJson.recovered).toBe(
       true,
     );
-    expect(result).toBeDefined();
+    expect(result).toBe(aiReviewRun);
   });
 
   it("does NOT recover when EXECUTION_FINISHED already fired after the report was created", async () => {
     const { deps, runRepo, artifactRepo, eventRepo, executorAgent } = buildDeps();
     const svc = new OrchestratorService(deps as never);
+    const aiReviewRun = makeRun({ state: RunState.AIReview, prNumber: 99 });
+    vi.spyOn(svc, "runReview").mockResolvedValue(aiReviewRun);
 
     const implementingRun = makeRun({ state: RunState.Implementing, prNumber: 42 });
     runRepo.findById.mockResolvedValue(implementingRun);
     runRepo.update.mockResolvedValue({ ...implementingRun, prNumber: 99 });
-    runRepo.updateState.mockResolvedValue(makeRun({ state: RunState.AIReview }));
+    runRepo.updateState.mockResolvedValue(aiReviewRun);
 
     const plan = makePlan();
     const report = makeExecutionReport();
@@ -339,15 +340,15 @@ describe("OrchestratorService.runExecution", () => {
     expect(executorAgent.run).toHaveBeenCalledTimes(1);
   });
 
-  it("runs the executor, pushes a checkpoint commit, and proceeds to review on success", async () => {
-    const { deps, runRepo, artifactRepo, executorAgent, gitService, reviewerAgent, linearClient } =
-      buildDeps();
+  it("runs the executor, pushes a checkpoint commit, and delegates to runReview on success", async () => {
+    const { deps, runRepo, artifactRepo, executorAgent, gitService, linearClient } = buildDeps();
     const svc = new OrchestratorService(deps as never);
+    const aiReviewRun = makeRun({ state: RunState.AIReview, prNumber: 42 });
+    const runReviewSpy = vi.spyOn(svc, "runReview").mockResolvedValue(aiReviewRun);
 
     const implementingRun = makeRun({ state: RunState.Implementing, prNumber: null });
-    const aiReviewRun = makeRun({ state: RunState.AIReview, prNumber: 42 });
 
-    runRepo.findById.mockResolvedValueOnce(implementingRun).mockResolvedValue(aiReviewRun);
+    runRepo.findById.mockResolvedValue(implementingRun);
     runRepo.update.mockResolvedValue({ ...implementingRun, prNumber: 42 });
     runRepo.updateState.mockResolvedValue(aiReviewRun);
 
@@ -359,7 +360,6 @@ describe("OrchestratorService.runExecution", () => {
 
     const report = makeExecutionReport();
     executorAgent.run.mockResolvedValue({ report, prNumber: 42 });
-    reviewerAgent.run.mockResolvedValue({ overallVerdict: "approved", summary: "OK", findings: [] });
 
     const result = await svc.runExecution("run-1", { note: "focus on perf" });
 
@@ -380,12 +380,14 @@ describe("OrchestratorService.runExecution", () => {
       "LIN-1",
       expect.stringContaining("Execution Report"),
     );
-    expect(result).toBeDefined();
+    expect(runReviewSpy).toHaveBeenCalledWith("run-1");
+    expect(result).toBe(aiReviewRun);
   });
 
   it("skips git checkpointing when the run has no branchName", async () => {
-    const { deps, runRepo, artifactRepo, executorAgent, gitService, reviewerAgent } = buildDeps();
+    const { deps, runRepo, artifactRepo, executorAgent, gitService } = buildDeps();
     const svc = new OrchestratorService(deps as never);
+    vi.spyOn(svc, "runReview").mockResolvedValue(makeRun({ state: RunState.AIReview }));
 
     const implementingRun = makeRun({ state: RunState.Implementing, branchName: null, prNumber: null });
     runRepo.findById.mockResolvedValue(implementingRun);
@@ -398,7 +400,6 @@ describe("OrchestratorService.runExecution", () => {
     });
 
     executorAgent.run.mockResolvedValue({ report: makeExecutionReport(), prNumber: 42 });
-    reviewerAgent.run.mockResolvedValue({ overallVerdict: "approved", summary: "OK", findings: [] });
 
     await svc.runExecution("run-1");
 
@@ -407,9 +408,9 @@ describe("OrchestratorService.runExecution", () => {
   });
 
   it("handles executor timeout: blocks the run, records the timeout event, and stops the flow", async () => {
-    const { deps, runRepo, artifactRepo, eventRepo, executorAgent, reviewerAgent, linearClient } =
-      buildDeps();
+    const { deps, runRepo, artifactRepo, eventRepo, executorAgent, linearClient } = buildDeps();
     const svc = new OrchestratorService(deps as never);
+    const runReviewSpy = vi.spyOn(svc, "runReview");
 
     const implementingRun = makeRun({ state: RunState.Implementing, prNumber: null });
     runRepo.findById.mockResolvedValue(implementingRun);
@@ -424,7 +425,7 @@ describe("OrchestratorService.runExecution", () => {
 
     const result = await svc.runExecution("run-1");
 
-    expect(reviewerAgent.run).not.toHaveBeenCalled();
+    expect(runReviewSpy).not.toHaveBeenCalled();
     expect(runRepo.updateState).toHaveBeenCalledWith("run-1", RunState.AIBlocked);
     const eventTypes = eventRepo.create.mock.calls.map(
       (c: unknown[]) => (c[0] as { eventType: string }).eventType,
@@ -457,15 +458,16 @@ describe("OrchestratorService.runExecution", () => {
 
 describe("OrchestratorService.runReview", () => {
   it("routes to remediation and passes along the posted-comment map when changes are requested", async () => {
-    const { deps, runRepo, artifactRepo, reviewerAgent, githubSync, remediationAgent } = buildDeps();
+    const { deps, runRepo, artifactRepo, reviewerAgent, githubSync } = buildDeps();
     const svc = new OrchestratorService(deps as never);
+    const addressingRun = makeRun({ state: RunState.AddressingReview, prNumber: 42 });
+    const runRemediationSpy = vi.spyOn(svc, "runRemediation").mockResolvedValue(addressingRun);
 
     const aiReviewRun = makeRun({ state: RunState.AIReview, prNumber: 42 });
-    const addressingRun = makeRun({ state: RunState.AddressingReview, prNumber: 42 });
 
-    runRepo.findById.mockResolvedValueOnce(aiReviewRun).mockResolvedValue(addressingRun);
+    runRepo.findById.mockResolvedValue(aiReviewRun);
     runRepo.update.mockResolvedValue(aiReviewRun);
-    runRepo.updateState.mockResolvedValueOnce(addressingRun).mockResolvedValue(makeRun({ state: RunState.ReadyForHumanReview }));
+    runRepo.updateState.mockResolvedValue(addressingRun);
 
     const executionReport = makeExecutionReport();
     const plan = makePlan();
@@ -475,15 +477,10 @@ describe("OrchestratorService.runReview", () => {
       if (type === "ExecutionReport")
         return Promise.resolve(makeArtifact({ type: "ExecutionReport", payloadJson: executionReport }));
       if (type === "Plan") return Promise.resolve(makeArtifact({ type: "Plan", payloadJson: plan }));
-      if (type === "Review") return Promise.resolve(makeArtifact({ type: "Review", payloadJson: review }));
       return Promise.resolve(null);
     });
 
     reviewerAgent.run.mockResolvedValue(review);
-    remediationAgent.run.mockResolvedValue({
-      resolution: [],
-      executionReport: makeExecutionReport({ executionVersion: 2 }),
-    });
 
     const result = await svc.runReview("run-1");
 
@@ -493,19 +490,15 @@ describe("OrchestratorService.runReview", () => {
       review.findings,
       "changes_requested",
     );
-    expect(remediationAgent.run).toHaveBeenCalledWith(
-      review,
-      executionReport,
-      "/tmp/worktree",
-      "run-1",
-    );
-    expect(result).toBeDefined();
+    expect(runRemediationSpy).toHaveBeenCalledWith("run-1", { f1: 123 });
+    expect(result).toBe(addressingRun);
   });
 
   it("marks ready when the review is approved (no remediation, no PR comment map)", async () => {
-    const { deps, runRepo, artifactRepo, reviewerAgent, githubSync, remediationAgent, linearClient } =
-      buildDeps();
+    const { deps, runRepo, artifactRepo, reviewerAgent, githubSync } = buildDeps();
     const svc = new OrchestratorService(deps as never);
+    const markReadySpy = vi.spyOn(svc, "markReady").mockResolvedValue(makeRun({ state: RunState.ReadyForHumanReview }));
+    const runRemediationSpy = vi.spyOn(svc, "runRemediation");
 
     const aiReviewRun = makeRun({ state: RunState.AIReview, prNumber: 42 });
     const readyRun = makeRun({ state: RunState.ReadyForHumanReview, prNumber: 42 });
@@ -522,8 +515,6 @@ describe("OrchestratorService.runReview", () => {
       if (type === "ExecutionReport")
         return Promise.resolve(makeArtifact({ type: "ExecutionReport", payloadJson: executionReport }));
       if (type === "Plan") return Promise.resolve(makeArtifact({ type: "Plan", payloadJson: plan }));
-      if (type === "Review")
-        return Promise.resolve(makeArtifact({ type: "Review", payloadJson: approvedReview }));
       return Promise.resolve(null);
     });
 
@@ -532,17 +523,15 @@ describe("OrchestratorService.runReview", () => {
     const result = await svc.runReview("run-1");
 
     expect(githubSync.postReviewFindings).not.toHaveBeenCalled();
-    expect(remediationAgent.run).not.toHaveBeenCalled();
-    expect(linearClient.postComment).toHaveBeenCalledWith(
-      "LIN-1",
-      expect.stringContaining("Ready for Human Review"),
-    );
+    expect(runRemediationSpy).not.toHaveBeenCalled();
+    expect(markReadySpy).toHaveBeenCalledWith("run-1");
     expect(result.state).toBe(RunState.ReadyForHumanReview);
   });
 
   it("passes an empty diff string when the run has no PR number", async () => {
     const { deps, runRepo, artifactRepo, reviewerAgent, githubClient } = buildDeps();
     const svc = new OrchestratorService(deps as never);
+    vi.spyOn(svc, "markReady").mockResolvedValue(makeRun({ state: RunState.ReadyForHumanReview }));
 
     const aiReviewRun = makeRun({ state: RunState.AIReview, prNumber: null });
     runRepo.findById.mockResolvedValue(aiReviewRun);
@@ -553,10 +542,6 @@ describe("OrchestratorService.runReview", () => {
       if (type === "ExecutionReport")
         return Promise.resolve(makeArtifact({ type: "ExecutionReport", payloadJson: makeExecutionReport() }));
       if (type === "Plan") return Promise.resolve(makeArtifact({ type: "Plan", payloadJson: makePlan() }));
-      if (type === "Review")
-        return Promise.resolve(
-          makeArtifact({ type: "Review", payloadJson: makeReview({ overallVerdict: "approved", findings: [] }) }),
-        );
       return Promise.resolve(null);
     });
 
@@ -601,6 +586,7 @@ describe("OrchestratorService.runRemediation", () => {
   it("skips branch assertion when the run has no branchName, and skips GitHub sync when there is no PR", async () => {
     const { deps, runRepo, artifactRepo, gitService, remediationAgent, githubSync } = buildDeps();
     const svc = new OrchestratorService(deps as never);
+    const markReadySpy = vi.spyOn(svc, "markReady").mockResolvedValue(makeRun({ state: RunState.ReadyForHumanReview }));
 
     const addressingRun = makeRun({
       state: RunState.AddressingReview,
@@ -633,6 +619,7 @@ describe("OrchestratorService.runRemediation", () => {
     expect(gitService.commitAndPush).not.toHaveBeenCalled();
     expect(githubSync.postExecutionReportUpdate).not.toHaveBeenCalled();
     expect(githubSync.postRemediationResolutions).not.toHaveBeenCalled();
+    expect(markReadySpy).toHaveBeenCalledWith("run-1");
     expect(result).toBeDefined();
   });
 });

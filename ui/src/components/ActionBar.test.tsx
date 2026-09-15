@@ -145,6 +145,40 @@ describe("ActionBar", () => {
       expect(reopenedTextarea.value).toBe("");
     });
 
+    it("ConfirmDialog Cancel closes it without calling the API", async () => {
+      const user = userEvent.setup();
+      const onAction = vi.fn();
+      render(<ActionBar runId={RUN_ID} state="AwaitingPlanApproval" onAction={onAction} />);
+
+      await user.click(screen.getByRole("button", { name: "Approve Plan" }));
+      expect(screen.getByRole("heading", { name: "Approve Plan" })).toBeDefined();
+
+      await user.click(screen.getByRole("button", { name: "Cancel" }));
+
+      expect(screen.queryByRole("heading", { name: "Approve Plan" })).toBeNull();
+      expect(mockApi.approvePlan).not.toHaveBeenCalled();
+      expect(onAction).not.toHaveBeenCalled();
+    });
+
+    it("Reject Plan mode toggles back to 'iterate' and sends that mode on confirm", async () => {
+      const user = userEvent.setup();
+      const onAction = vi.fn();
+      render(<ActionBar runId={RUN_ID} state="AwaitingPlanApproval" onAction={onAction} />);
+
+      await user.click(screen.getByRole("button", { name: "Reject Plan" }));
+      // switch to fresh, then explicitly back to iterate
+      await user.click(screen.getByRole("button", { name: /start fresh/i }));
+      await user.click(screen.getByRole("button", { name: /iterate with full context/i }));
+
+      const rejectButtons = screen.getAllByRole("button", { name: "Reject Plan" });
+      await user.click(rejectButtons[rejectButtons.length - 1]);
+
+      await waitFor(() => {
+        expect(mockApi.rejectPlan).toHaveBeenCalledWith(RUN_ID, undefined, "iterate");
+      });
+      expect(onAction).toHaveBeenCalledTimes(1);
+    });
+
     it("Re-review Plan opens its own ConfirmDialog with notes and calls api.reReviewPlan with the note", async () => {
       const user = userEvent.setup();
       const onAction = vi.fn();

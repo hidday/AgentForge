@@ -138,4 +138,28 @@ describe("WorkflowStepper", () => {
     const todoRow = screen.getByText("To Do").closest("div.min-w-0");
     expect(todoRow?.textContent).toBe("To Do");
   });
+
+  it("ignores events whose payload has no 'to' field when building timestamps", () => {
+    const events: RunEventRecord[] = [
+      makeEvent({ id: "e1", payloadJson: { from: "Todo" } }),
+      makeEvent({ id: "e2", payloadJson: null }),
+    ];
+    render(<WorkflowStepper currentState="Implementing" events={events} />);
+
+    const todoRow = screen.getByText("To Do").closest("div.min-w-0");
+    expect(todoRow?.textContent).toBe("To Do");
+  });
+
+  it("keeps only the earliest timestamp when multiple events transition to the same state", () => {
+    const events: RunEventRecord[] = [
+      makeEvent({ id: "e1", payloadJson: { to: "Planning" }, createdAt: "2024-01-01T00:00:00.000Z" }),
+      makeEvent({ id: "e2", payloadJson: { to: "Planning" }, createdAt: "2020-06-15T00:00:00.000Z" }),
+    ];
+    render(<WorkflowStepper currentState="Implementing" events={events} />);
+
+    // Only one timestamp note is rendered for "Planning" (the first event's, not the second's).
+    const planningRow = screen.getByText("Planning").closest("div.min-w-0");
+    const timestampEls = planningRow?.querySelectorAll(".text-\\[10px\\].text-text-muted");
+    expect(timestampEls?.length).toBe(1);
+  });
 });

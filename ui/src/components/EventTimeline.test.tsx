@@ -142,6 +142,16 @@ describe("EventTimeline", () => {
     expect(icon.className).not.toContain("text-state-blocked");
   });
 
+  it("falls back to the Zap icon for an event type with no explicit icon mapping", () => {
+    const events: RunEventRecord[] = [
+      makeEvent({ id: "e1", eventType: "SOME_UNMAPPED_EVENT_TYPE" }),
+    ];
+    render(<EventTimeline events={events} />);
+
+    expect(screen.getByTestId("icon-zap")).toBeDefined();
+    expect(screen.getByText("Some Unmapped Event Type")).toBeDefined();
+  });
+
   it.each(["human", "user-command"])(
     "renders the User source icon for source '%s'",
     (source) => {
