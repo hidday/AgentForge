@@ -116,4 +116,142 @@ END_STRUCTURED_OUTPUT`;
     expect(out.parsed.payload.value).toBe("ok");
     expect(logger.error).not.toHaveBeenCalled();
   });
+
+  it("truncates a very long outputSnippet and stderr to a tail with an ellipsis prefix", async () => {
+    const longResult = "Y".repeat(900) + "[TAIL_MARKER]";
+    const longStderr = "Z".repeat(700) + "[STDERR_TAIL]";
+    const envelope = JSON.stringify({ type: "result", result: longResult });
+
+    const processRunner = makeMockProcessRunner({
+      stdout: envelope,
+      stderr: longStderr,
+      exitCode: 1,
+      durationMs: 100,
+      timedOut: false,
+    });
+    const logger = makeMockLogger();
+    const runner = new CursorRunner(
+      processRunner as never,
+      "cursor",
+      [],
+      "claude-4.6-sonnet",
+      logger as never,
+    );
+
+    await expect(
+      runner.run(
+        { prompt: "x", workingDirectory: "/tmp", timeoutMs: 1000 },
+        "planner",
+        echoSchema,
+      ),
+    ).rejects.toThrow();
+
+    const [logFields] = logger.error.mock.calls[0]!;
+    expect(logFields.outputSnippet.startsWith("…")).toBe(true);
+    expect(logFields.outputSnippet).toContain("[TAIL_MARKER]");
+    expect(logFields.outputSnippet.length).toBeLessThanOrEqual(501);
+    expect(logFields.stderr.startsWith("…")).toBe(true);
+    expect(logFields.stderr).toContain("[STDERR_TAIL]");
+    expect(logFields.stderr.length).toBeLessThanOrEqual(501);
+  });
+});
+
+describe("CursorRunner buildArgs / buildStdinPayload", () => {
+  it("prepends the system prompt to stdin, separated by a divider, when systemPrompt is set", async () => {
+    const validBlock = `BEGIN_STRUCTURED_OUTPUT
+{"success":true,"stage":"planner","payload":{"value":"ok"}}
+END_STRUCTURED_OUTPUT`;
+    const processRunner = makeMockProcessRunner({
+      stdout: JSON.stringify({ type: "result", result: validBlock }),
+      stderr: "",
+      exitCode: 0,
+      durationMs: 10,
+      timedOut: false,
+    });
+    const logger = makeMockLogger();
+    const runner = new CursorRunner(
+      processRunner as never,
+      "cursor",
+      [],
+      "claude-4.6-sonnet",
+      logger as never,
+    );
+
+    await runner.run(
+      {
+        prompt: "Do the task.",
+        systemPrompt: "You are Cursor.",
+        workingDirectory: "/tmp",
+        timeoutMs: 1000,
+      },
+      "planner",
+      echoSchema,
+    );
+
+    const { stdinData } = processRunner.execute.mock.calls[0]![0] as { stdinData: string };
+    expect(stdinData).toBe("You are Cursor.\n\n---\n\nDo the task.");
+  });
+
+  it("uses the raw prompt as stdin when systemPrompt is unset", async () => {
+    const validBlock = `BEGIN_STRUCTURED_OUTPUT
+{"success":true,"stage":"planner","payload":{"value":"ok"}}
+END_STRUCTURED_OUTPUT`;
+    const processRunner = makeMockProcessRunner({
+      stdout: JSON.stringify({ type: "result", result: validBlock }),
+      stderr: "",
+      exitCode: 0,
+      durationMs: 10,
+      timedOut: false,
+    });
+    const logger = makeMockLogger();
+    const runner = new CursorRunner(
+      processRunner as never,
+      "cursor",
+      [],
+      "claude-4.6-sonnet",
+      logger as never,
+    );
+
+    await runner.run(
+      { prompt: "Do the task.", workingDirectory: "/tmp", timeoutMs: 1000 },
+      "planner",
+      echoSchema,
+    );
+
+    const { stdinData } = processRunner.execute.mock.calls[0]![0] as { stdinData: string };
+    expect(stdinData).toBe("Do the task.");
+  });
+
+  it("includes --model and --workspace in the spawned args", async () => {
+    const validBlock = `BEGIN_STRUCTURED_OUTPUT
+{"success":true,"stage":"planner","payload":{"value":"ok"}}
+END_STRUCTURED_OUTPUT`;
+    const processRunner = makeMockProcessRunner({
+      stdout: JSON.stringify({ type: "result", result: validBlock }),
+      stderr: "",
+      exitCode: 0,
+      durationMs: 10,
+      timedOut: false,
+    });
+    const logger = makeMockLogger();
+    const runner = new CursorRunner(
+      processRunner as never,
+      "cursor",
+      ["--flag"],
+      "claude-4.6-sonnet",
+      logger as never,
+    );
+
+    await runner.run(
+      { prompt: "x", workingDirectory: "/repo/checkout", timeoutMs: 1000 },
+      "planner",
+      echoSchema,
+    );
+
+    expect(processRunner.execute).toHaveBeenCalledWith(
+      expect.objectContaining({
+        args: ["--flag", "--model", "claude-4.6-sonnet", "--workspace", "/repo/checkout"],
+      }),
+    );
+  });
 });

@@ -195,6 +195,47 @@ describe("ExecutorAgent.run()", () => {
     expect(githubClient.createDraftPR).not.toHaveBeenCalled();
   });
 
+  it("injects the operator note section into the system prompt when provided", async () => {
+    const { agent, getSystemPrompt } = buildAgent();
+
+    await agent.run(makePlan(), makeTaskBundle(), "run-1", undefined, {
+      operatorNote: "Please prioritize backward compatibility.",
+    });
+
+    const systemPrompt = getSystemPrompt();
+    expect(systemPrompt).toContain("## Operator Note");
+    expect(systemPrompt).toContain("Please prioritize backward compatibility.");
+    expect(systemPrompt).toContain("high-priority clarification");
+  });
+
+  it("omits the operator note section when no operatorNote is provided", async () => {
+    const { agent, getSystemPrompt } = buildAgent();
+
+    await agent.run(makePlan(), makeTaskBundle(), "run-1");
+
+    const systemPrompt = getSystemPrompt();
+    expect(systemPrompt).not.toContain("## Operator Note");
+  });
+
+  it("marks hasOperatorNote true in the start log only when a note is provided", async () => {
+    const { agent, logger } = buildAgent();
+
+    await agent.run(makePlan(), makeTaskBundle(), "run-1", undefined, {
+      operatorNote: "note",
+    });
+    const withNoteLog = logger.info.mock.calls.find(
+      (c: unknown[]) => c[1] === "Starting executor agent",
+    );
+    expect((withNoteLog?.[0] as Record<string, unknown>).hasOperatorNote).toBe(true);
+
+    logger.info.mockClear();
+    await agent.run(makePlan(), makeTaskBundle(), "run-1");
+    const withoutNoteLog = logger.info.mock.calls.find(
+      (c: unknown[]) => c[1] === "Starting executor agent",
+    );
+    expect((withoutNoteLog?.[0] as Record<string, unknown>).hasOperatorNote).toBe(false);
+  });
+
   it("logs the score and executionVersion in the completion event", async () => {
     const { agent, logger } = buildAgent({ score: 0.42 });
 

@@ -32,6 +32,40 @@ const skill: SkillDocument = {
 };
 
 describe("DistilledSkillPanel", () => {
+  it("shows a loading indicator when loading is true", () => {
+    render(
+      <DistilledSkillPanel
+        distilledSkill={null}
+        distillationDecision={null}
+        loading={true}
+      />,
+    );
+
+    expect(screen.getByText(/loading distilled skill/i)).toBeDefined();
+  });
+
+  it("shows the error message and takes precedence over the loading state when both are set", () => {
+    render(
+      <DistilledSkillPanel
+        distilledSkill={null}
+        distillationDecision={null}
+        loading={false}
+        error="Failed to load skill"
+      />,
+    );
+
+    expect(screen.getByText("Failed to load skill")).toBeDefined();
+    expect(screen.queryByText(/loading distilled skill/i)).toBeNull();
+  });
+
+  it("renders nothing when distillationDecision is null", () => {
+    const { container } = render(
+      <DistilledSkillPanel distilledSkill={null} distillationDecision={null} />,
+    );
+
+    expect(container.firstChild).toBeNull();
+  });
+
   it("renders nothing when distillation did not persist a skill", () => {
     const { container } = render(
       <DistilledSkillPanel
@@ -74,5 +108,75 @@ describe("DistilledSkillPanel", () => {
     );
 
     expect(screen.getByText(/content could not be loaded/i)).toBeDefined();
+  });
+
+  it("falls back through the name chain to the decision's taskCategory when no name is set", () => {
+    render(
+      <DistilledSkillPanel
+        distilledSkill={null}
+        distillationDecision={{ ...decision, name: null, taskCategory: "fallback-category" }}
+      />,
+    );
+
+    expect(screen.getAllByText("fallback-category").length).toBeGreaterThan(0);
+  });
+
+  it("falls back to the default 'distilled-skill' name when nothing else is available", () => {
+    render(
+      <DistilledSkillPanel
+        distilledSkill={null}
+        distillationDecision={{ ...decision, name: null, taskCategory: null }}
+      />,
+    );
+
+    expect(screen.getByText("distilled-skill")).toBeDefined();
+  });
+
+  it("uses the skill document's own name/description when the decision omits them", () => {
+    render(
+      <DistilledSkillPanel
+        distilledSkill={skill}
+        distillationDecision={{ ...decision, name: null, description: null }}
+      />,
+    );
+
+    expect(screen.getByText(skill.name)).toBeDefined();
+    expect(screen.getAllByText(skill.description).length).toBeGreaterThan(0);
+  });
+
+  it("renders no description or export preview when neither source provides one", () => {
+    render(
+      <DistilledSkillPanel
+        distilledSkill={{ ...skill, description: null }}
+        distillationDecision={{ ...decision, description: null }}
+      />,
+    );
+
+    expect(screen.queryByText(/SKILL.md export preview/i)).toBeNull();
+  });
+
+  it("shows the displaced skill id when the decision reports one", () => {
+    render(
+      <DistilledSkillPanel
+        distilledSkill={skill}
+        distillationDecision={{ ...decision, displacedSkillId: "old-skill-id-12345" }}
+      />,
+    );
+
+    expect(
+      screen.getByText((_, el) => el?.textContent === "Displaced skill: old-skil"),
+    ).toBeDefined();
+  });
+
+  it("does not render a taskCategory line when neither source provides one", () => {
+    render(
+      <DistilledSkillPanel
+        distilledSkill={{ ...skill, taskCategory: "" }}
+        distillationDecision={{ ...decision, taskCategory: "" }}
+      />,
+    );
+
+    // The heading/name still renders, but no separate taskCategory line.
+    expect(screen.getByText("Distilled Skill")).toBeDefined();
   });
 });
