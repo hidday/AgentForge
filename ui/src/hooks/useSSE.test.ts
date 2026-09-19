@@ -32,16 +32,16 @@ class FakeEventSource {
 }
 
 describe("useSSE", () => {
-  const originalEventSource = global.EventSource;
+  const originalEventSource = globalThis.EventSource;
 
   beforeEach(() => {
     FakeEventSource.instances = [];
-    (global as unknown as { EventSource: typeof EventSource }).EventSource =
+    (globalThis as unknown as { EventSource: typeof EventSource }).EventSource =
       FakeEventSource as unknown as typeof EventSource;
   });
 
   afterEach(() => {
-    (global as unknown as { EventSource: typeof EventSource }).EventSource =
+    (globalThis as unknown as { EventSource: typeof EventSource }).EventSource =
       originalEventSource;
     vi.restoreAllMocks();
   });
