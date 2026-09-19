@@ -140,8 +140,8 @@ describe("DistilledSkillPanel", () => {
       />,
     );
 
-    expect(screen.getByText(skill.name)).toBeDefined();
-    expect(screen.getAllByText(skill.description).length).toBeGreaterThan(0);
+    expect(screen.getByText(skill.name!)).toBeDefined();
+    expect(screen.getAllByText(skill.description!).length).toBeGreaterThan(0);
   });
 
   it("renders no description or export preview when neither source provides one", () => {

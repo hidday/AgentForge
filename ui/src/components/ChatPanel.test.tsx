@@ -214,6 +214,37 @@ describe("ChatPanel", () => {
     expect(screen.queryByText("Failing question")).toBeNull();
   });
 
+  it("shows a generic error message when the API rejects with a non-Error value", async () => {
+    mockApi.sendChatMessage.mockRejectedValue("some non-Error rejection");
+
+    render(<ChatPanel runId={RUN_ID} artifacts={[]} />);
+    const input = screen.getByPlaceholderText(/ask the agent/i);
+    await userEvent.type(input, "Question");
+    await userEvent.click(screen.getByRole("button", { name: /send/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText("Chat request failed")).toBeDefined();
+    });
+  });
+
+  it("defaults content to an empty string when a ChatMessage artifact's payload omits it", () => {
+    const artifacts: Artifact[] = [
+      {
+        id: "a1",
+        runId: RUN_ID,
+        type: "ChatMessage",
+        version: 1,
+        payloadJson: { role: "user" },
+        rawText: "",
+        createdAt: "2024-01-01T00:00:01Z",
+      },
+    ];
+    const { container } = render(<ChatPanel runId={RUN_ID} artifacts={artifacts} />);
+    // The message bubble renders with empty content instead of throwing.
+    const bubble = container.querySelector(".whitespace-pre-wrap");
+    expect(bubble?.textContent).toBe("");
+  });
+
   it("message list does not change from artifact-derived count when only local state changes", async () => {
     let resolveRequest!: (v: { reply: string; durationMs: number }) => void;
     mockApi.sendChatMessage.mockReturnValue(
