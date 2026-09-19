@@ -183,6 +183,29 @@ describe("ExecutorAgent.run()", () => {
     expect(githubClient.createDraftPR).toHaveBeenCalledTimes(1);
   });
 
+  it("marks isRetry true in the start log when only existingBranch is set (no existingPR)", async () => {
+    const { agent, logger } = buildAgent();
+
+    await agent.run(makePlan(), makeTaskBundle(), "run-1", { existingBranch: "ai/lin-1" });
+
+    const startLog = logger.info.mock.calls.find(
+      (c: unknown[]) => c[1] === "Starting executor agent",
+    );
+    expect((startLog?.[0] as Record<string, unknown>).isRetry).toBe(true);
+  });
+
+  it("marks isRetry true in the start log when only existingPR is set (no existingBranch)", async () => {
+    const { agent, logger, githubClient } = buildAgent();
+
+    await agent.run(makePlan(), makeTaskBundle(), "run-1", { existingPR: 42 });
+
+    const startLog = logger.info.mock.calls.find(
+      (c: unknown[]) => c[1] === "Starting executor agent",
+    );
+    expect((startLog?.[0] as Record<string, unknown>).isRetry).toBe(true);
+    expect(githubClient.createDraftPR).not.toHaveBeenCalled();
+  });
+
   it("reuses an existing PR number on retry instead of creating a new draft", async () => {
     const { agent, githubClient } = buildAgent();
 
@@ -195,26 +218,26 @@ describe("ExecutorAgent.run()", () => {
     expect(githubClient.createDraftPR).not.toHaveBeenCalled();
   });
 
-  it("injects the operator note section into the system prompt when provided", async () => {
-    const { agent, getSystemPrompt } = buildAgent();
+  it("injects the operator note section into the user prompt when provided", async () => {
+    const { agent, getUserPrompt } = buildAgent();
 
     await agent.run(makePlan(), makeTaskBundle(), "run-1", undefined, {
       operatorNote: "Please prioritize backward compatibility.",
     });
 
-    const systemPrompt = getSystemPrompt();
-    expect(systemPrompt).toContain("## Operator Note");
-    expect(systemPrompt).toContain("Please prioritize backward compatibility.");
-    expect(systemPrompt).toContain("high-priority clarification");
+    const userPrompt = getUserPrompt();
+    expect(userPrompt).toContain("## Operator Note");
+    expect(userPrompt).toContain("Please prioritize backward compatibility.");
+    expect(userPrompt).toContain("high-priority clarification");
   });
 
   it("omits the operator note section when no operatorNote is provided", async () => {
-    const { agent, getSystemPrompt } = buildAgent();
+    const { agent, getUserPrompt } = buildAgent();
 
     await agent.run(makePlan(), makeTaskBundle(), "run-1");
 
-    const systemPrompt = getSystemPrompt();
-    expect(systemPrompt).not.toContain("## Operator Note");
+    const userPrompt = getUserPrompt();
+    expect(userPrompt).not.toContain("## Operator Note");
   });
 
   it("marks hasOperatorNote true in the start log only when a note is provided", async () => {

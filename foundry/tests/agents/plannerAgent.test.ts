@@ -305,6 +305,67 @@ describe("PlannerAgent.run()", () => {
     });
   });
 
+  describe("planReviewFindings injection", () => {
+    it("renders the '## AI Plan Review Findings' section with summary and findings", async () => {
+      const { agent, getPrompt } = buildPlannerAgent();
+      const bundle = makeTaskBundle();
+
+      await agent.run(bundle, "run-1", {
+        planReviewFindings: {
+          summary: "The plan is missing error handling for malformed input.",
+          findings: [
+            {
+              id: "pf1",
+              severity: "important",
+              title: "No error handling for malformed JSON",
+              details: "Add a step to handle body-parser failures.",
+            },
+          ],
+        },
+      });
+
+      const prompt = getPrompt();
+      expect(prompt).toContain("## AI Plan Review Findings (from previous plan)");
+      expect(prompt).toContain(
+        "**Review Summary:** The plan is missing error handling for malformed input.",
+      );
+      expect(prompt).toContain(
+        "- **[important] No error handling for malformed JSON** (pf1): Add a step to handle body-parser failures.",
+      );
+      expect(prompt).toContain("Incorporate these findings into the revised plan where appropriate.");
+    });
+
+    it("renders multiple findings joined by newlines", async () => {
+      const { agent, getPrompt } = buildPlannerAgent();
+      const bundle = makeTaskBundle();
+
+      await agent.run(bundle, "run-1", {
+        planReviewFindings: {
+          summary: "Two findings.",
+          findings: [
+            { id: "pf1", severity: "blocker", title: "Finding one", details: "Detail one" },
+            { id: "pf2", severity: "nit", title: "Finding two", details: "Detail two" },
+          ],
+        },
+      });
+
+      const prompt = getPrompt();
+      expect(prompt).toContain("- **[blocker] Finding one** (pf1): Detail one");
+      expect(prompt).toContain("- **[nit] Finding two** (pf2): Detail two");
+    });
+
+    it("does NOT include the planReviewSection when planReviewFindings is not provided", async () => {
+      const { agent, getPrompt } = buildPlannerAgent();
+      const bundle = makeTaskBundle();
+
+      await agent.run(bundle, "run-1");
+
+      const prompt = getPrompt();
+      expect(prompt).not.toContain("AI Plan Review Findings");
+      expect(prompt).not.toContain("{{planReviewSection}}");
+    });
+  });
+
   describe("previousPlan injection", () => {
     function makePreviousPlan() {
       return {
@@ -446,9 +507,14 @@ describe("PlannerAgent.run()", () => {
       await agent.run(bundle, "run-1", {
         priorSkills: [
           {
+            id: "skill-3",
+            repoSlug: "test-repo",
             name: "no-description-skill",
+            description: null,
             taskCategory: "misc",
             skillMarkdown: "Just the markdown body.",
+            utilityScore: 1,
+            lastUsedAt: new Date("2026-01-01"),
           },
         ],
       });

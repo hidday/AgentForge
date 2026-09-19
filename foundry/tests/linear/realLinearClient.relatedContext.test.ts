@@ -209,6 +209,46 @@ describe("RealLinearClient.getRelatedContext", () => {
     expect(ctx.blockers[0].id).toBe("blocker-id");
   });
 
+  it("logs a warning and drops a blocker relation whose issue fails to hydrate", async () => {
+    const blocker = makeFakeIssue({ id: "blocker-id", identifier: "PRY-101" });
+    const logger = makeLogger();
+    client = new RealLinearClient("test-key", logger as never);
+    (client as unknown as { sdk: { issue: (id: string) => Promise<FakeIssue> } }).sdk = {
+      issue: (id: string) => {
+        const found = issuesById.get(id);
+        if (!found) throw new Error(`Fake SDK: issue ${id} not seeded`);
+        return Promise.resolve(found);
+      },
+    };
+    const focus = makeFakeIssue({
+      id: "focus-id",
+      parent: Promise.resolve(null),
+      inverseRelations: () =>
+        Promise.resolve({
+          nodes: [
+            {
+              id: "rel-broken",
+              type: "blocks",
+              issue: Promise.reject(new Error("hydration failed")),
+            },
+            { id: "rel-ok", type: "blocks", issue: Promise.resolve(blocker) },
+          ],
+        }),
+    });
+
+    issuesById.set("focus-id", focus);
+    issuesById.set("blocker-id", blocker);
+
+    const ctx = await client.getRelatedContext("focus-id");
+
+    expect(ctx.blockers).toHaveLength(1);
+    expect(ctx.blockers[0]!.id).toBe("blocker-id");
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.objectContaining({ relationId: "rel-broken", focusIssueId: "focus-id" }),
+      "Failed to hydrate blocker issue from relation",
+    );
+  });
+
   it("treats null description as empty string", async () => {
     const parent = makeFakeIssue({
       id: "parent-id",

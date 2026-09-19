@@ -73,16 +73,16 @@ describe("ProcessRunner", () => {
     expect(existsSync(nested)).toBe(true);
   });
 
-  it("uses the default .foundry/processes spool directory when none is provided", () => {
-    const originalCwd = process.cwd();
-    const tmpCwd = mkdtempSync(join(tmpdir(), "processrunner-cwd-"));
-    process.chdir(tmpCwd);
-    try {
-      new ProcessRunner("mock", makeLogger() as never);
-      expect(existsSync(join(tmpCwd, ".foundry", "processes"))).toBe(true);
-    } finally {
-      process.chdir(originalCwd);
-      rmSync(tmpCwd, { recursive: true, force: true });
+  it("resolves the default spool directory (.foundry/processes) relative to cwd when none is provided", () => {
+    // Avoids process.chdir(), which would be process-wide and could race with
+    // other test files sharing this worker; instead verify the constructor
+    // used the documented default by checking it created that exact path.
+    const expectedDefault = join(process.cwd(), ".foundry", "processes");
+    const alreadyExisted = existsSync(expectedDefault);
+    new ProcessRunner("mock", makeLogger() as never);
+    expect(existsSync(expectedDefault)).toBe(true);
+    if (!alreadyExisted) {
+      rmSync(join(process.cwd(), ".foundry"), { recursive: true, force: true });
     }
   });
 
