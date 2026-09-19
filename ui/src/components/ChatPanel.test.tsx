@@ -214,6 +214,37 @@ describe("ChatPanel", () => {
     expect(screen.queryByText("Failing question")).toBeNull();
   });
 
+  it("shows a generic error message when the API rejects with a non-Error value", async () => {
+    mockApi.sendChatMessage.mockRejectedValue("some non-Error rejection");
+
+    render(<ChatPanel runId={RUN_ID} artifacts={[]} />);
+    const input = screen.getByPlaceholderText(/ask the agent/i);
+    await userEvent.type(input, "Question");
+    await userEvent.click(screen.getByRole("button", { name: /send/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText("Chat request failed")).toBeDefined();
+    });
+  });
+
+  it("defaults content to an empty string when a ChatMessage artifact's payload omits it", () => {
+    const artifacts: Artifact[] = [
+      {
+        id: "a1",
+        runId: RUN_ID,
+        type: "ChatMessage",
+        version: 1,
+        payloadJson: { role: "user" },
+        rawText: "",
+        createdAt: "2024-01-01T00:00:01Z",
+      },
+    ];
+    const { container } = render(<ChatPanel runId={RUN_ID} artifacts={artifacts} />);
+    // The message bubble renders with empty content instead of throwing.
+    const bubble = container.querySelector(".whitespace-pre-wrap");
+    expect(bubble?.textContent).toBe("");
+  });
+
   it("message list does not change from artifact-derived count when only local state changes", async () => {
     let resolveRequest!: (v: { reply: string; durationMs: number }) => void;
     mockApi.sendChatMessage.mockReturnValue(
@@ -250,5 +281,71 @@ describe("ChatPanel", () => {
       // "New question" should NOT appear
       expect(screen.queryByText("New question")).toBeNull();
     });
+  });
+
+  it("does not submit when the trimmed input is empty (whitespace-only)", async () => {
+    render(<ChatPanel runId={RUN_ID} artifacts={[]} />);
+    const input = screen.getByPlaceholderText(/ask the agent/i);
+    await userEvent.type(input, "   ");
+
+    // Submit the form directly since the button stays disabled for
+    // whitespace-only input.
+    const form = input.closest("form")!;
+    act(() => {
+      form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    });
+
+    expect(mockApi.sendChatMessage).not.toHaveBeenCalled();
+  });
+
+  it("collapses and re-expands the panel when the header is clicked", async () => {
+    const artifacts: Artifact[] = [
+      makeArtifact("user", "Hello there", "a1", "2024-01-01T00:00:01Z"),
+    ];
+    render(<ChatPanel runId={RUN_ID} artifacts={artifacts} />);
+
+    // Open by default: message and input are visible.
+    expect(screen.getByText("Hello there")).toBeDefined();
+    expect(screen.getByPlaceholderText(/ask the agent/i)).toBeDefined();
+
+    const header = screen.getByRole("button", { name: /chat with agent/i });
+    await userEvent.click(header);
+
+    // Collapsed: body content is no longer rendered.
+    expect(screen.queryByText("Hello there")).toBeNull();
+    expect(screen.queryByPlaceholderText(/ask the agent/i)).toBeNull();
+
+    await userEvent.click(header);
+
+    // Re-expanded.
+    expect(screen.getByText("Hello there")).toBeDefined();
+    expect(screen.getByPlaceholderText(/ask the agent/i)).toBeDefined();
+  });
+
+  it("auto-scrolls the message list into view when scrollIntoView is available", async () => {
+    const scrollIntoViewMock = vi.fn();
+    // jsdom does not implement scrollIntoView; the component feature-detects
+    // it before calling, so we install it to exercise that branch.
+    Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
+      value: scrollIntoViewMock,
+      writable: true,
+      configurable: true,
+    });
+
+    try {
+      const { rerender } = render(<ChatPanel runId={RUN_ID} artifacts={[]} />);
+      expect(scrollIntoViewMock).toHaveBeenCalled();
+
+      scrollIntoViewMock.mockClear();
+      const artifacts: Artifact[] = [
+        makeArtifact("user", "New message", "a1", "2024-01-01T00:00:01Z"),
+      ];
+      rerender(<ChatPanel runId={RUN_ID} artifacts={artifacts} />);
+
+      expect(scrollIntoViewMock).toHaveBeenCalledWith({ behavior: "smooth" });
+    } finally {
+      // @ts-expect-error cleaning up the test-only stub
+      delete HTMLElement.prototype.scrollIntoView;
+    }
   });
 });

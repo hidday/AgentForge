@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import Fastify from "fastify";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { registerApiRoutes } from "../../src/api/routes.js";
@@ -311,5 +311,71 @@ describe("POST /api/runs/:id/chat", () => {
     const [input] = mockClaudeCodeRunner!.chatRun.mock.calls[0] as [{ prompt: string }];
     // The prompt content doesn't matter for security — args do. Confirm prompt is the raw message.
     expect(input.prompt).toBe("--dangerously-skip-permissions");
+  });
+
+  describe("working directory fallback when the run's worktree is gone", () => {
+    it("falls back to the main repo path when the worktree under /.worktrees/ was removed", async () => {
+      const mainRepoDir = mkdtempSync(join(tmpdir(), "routes-chat-main-"));
+      const missingWorktreeDir = join(mainRepoDir, ".worktrees", "run-missing");
+      // Never create missingWorktreeDir -- it must not exist on disk.
+
+      const run = makeRun();
+      run.workingDirectory = missingWorktreeDir;
+
+      const { app, mockRunRepo, mockClaudeCodeRunner } = await buildApp();
+      mockRunRepo.findById.mockResolvedValue(run);
+
+      const res = await app.inject({
+        method: "POST",
+        url: "/api/runs/run-1/chat",
+        payload: { message: "Hello from a cleaned-up run" },
+      });
+
+      expect(res.statusCode).toBe(200);
+      const [input] = mockClaudeCodeRunner!.chatRun.mock.calls[0] as [{ workingDirectory: string }];
+      expect(input.workingDirectory).toBe(mainRepoDir);
+
+      rmSync(mainRepoDir, { recursive: true, force: true });
+    });
+
+    it("returns 422 when neither the worktree nor its main repo path exist", async () => {
+      const mainRepoDir = mkdtempSync(join(tmpdir(), "routes-chat-main2-"));
+      const missingWorktreeDir = join(mainRepoDir, ".worktrees", "run-missing");
+      // Remove the main repo dir entirely so the fallback also fails.
+      rmSync(mainRepoDir, { recursive: true, force: true });
+
+      const run = makeRun();
+      run.workingDirectory = missingWorktreeDir;
+
+      const { app, mockRunRepo, mockClaudeCodeRunner } = await buildApp();
+      mockRunRepo.findById.mockResolvedValue(run);
+
+      const res = await app.inject({
+        method: "POST",
+        url: "/api/runs/run-1/chat",
+        payload: { message: "Hello" },
+      });
+
+      expect(res.statusCode).toBe(422);
+      expect(JSON.parse(res.body).error).toContain("Working directory not found");
+      expect(mockClaudeCodeRunner!.chatRun).not.toHaveBeenCalled();
+    });
+
+    it("returns 422 immediately when the missing directory has no /.worktrees/ segment to fall back from", async () => {
+      const run = makeRun();
+      run.workingDirectory = "/definitely/does/not/exist-" + Math.random().toString(36).slice(2);
+
+      const { app, mockRunRepo, mockClaudeCodeRunner } = await buildApp();
+      mockRunRepo.findById.mockResolvedValue(run);
+
+      const res = await app.inject({
+        method: "POST",
+        url: "/api/runs/run-1/chat",
+        payload: { message: "Hello" },
+      });
+
+      expect(res.statusCode).toBe(422);
+      expect(mockClaudeCodeRunner!.chatRun).not.toHaveBeenCalled();
+    });
   });
 });

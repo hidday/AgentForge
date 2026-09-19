@@ -114,6 +114,31 @@ describe("OpenQuestionsPanel", () => {
     });
   });
 
+  it("filters out questions with no answer entered from the submitted payload", async () => {
+    mockApi.answerQuestions.mockResolvedValue({ ok: true, run: {} });
+
+    render(
+      <OpenQuestionsPanel
+        questions={[requiredQuestion, optionalQuestion]}
+        runId="run-1"
+      />,
+    );
+
+    // Only fill the required question; leave the optional one untouched
+    // (answers["q2"] stays undefined, exercising the `?? ""` fallback).
+    const textareas = screen.getAllByRole("textbox") as HTMLTextAreaElement[];
+    await userEvent.type(textareas[0], "Prod target");
+
+    const submitBtn = screen.getByRole("button", { name: /submit answers/i });
+    await userEvent.click(submitBtn);
+
+    await waitFor(() => {
+      expect(mockApi.answerQuestions).toHaveBeenCalledWith("run-1", [
+        { questionId: "q1", answer: "Prod target" },
+      ]);
+    });
+  });
+
   it("calls onSubmitted callback on successful submission", async () => {
     mockApi.answerQuestions.mockResolvedValue({ ok: true, run: {} });
     const onSubmitted = vi.fn();
