@@ -32,9 +32,8 @@ describe("ExecutionReportView", () => {
     expect(
       screen.getByText("Solid coverage of the acceptance criteria."),
     ).toBeDefined();
-    expect(screen.getByTestId("markdown-content").textContent).toContain(
-      "Implemented the feature end to end.",
-    );
+    const markdownBlocks = screen.getAllByTestId("markdown-content");
+    expect(markdownBlocks.some((el) => el.textContent === "Implemented the feature end to end.")).toBe(true);
 
     expect(screen.getByText("Checks")).toBeDefined();
     expect(screen.getByText("lint")).toBeDefined();

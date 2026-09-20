@@ -86,6 +86,31 @@ describe("buildChatSystemPrompt", () => {
     expect(result).toContain("Plan summary");
   });
 
+  it("includes plan open questions when present, stringifying non-string entries", () => {
+    const planArtifact = makeArtifact({
+      type: "Plan",
+      version: 1,
+      payloadJson: {
+        summary: "Plan summary",
+        openQuestions: ["Should we use Postgres?", { id: "q2", question: "Object-shaped one" }],
+      },
+    });
+    const result = buildChatSystemPrompt(makeRun(), [planArtifact]);
+    expect(result).toContain("**Open Questions:**");
+    expect(result).toContain("Should we use Postgres?");
+    expect(result).toContain(JSON.stringify({ id: "q2", question: "Object-shaped one" }));
+  });
+
+  it("omits the Open Questions sub-section when the plan has none", () => {
+    const planArtifact = makeArtifact({
+      type: "Plan",
+      version: 1,
+      payloadJson: { summary: "Plan summary", openQuestions: [] },
+    });
+    const result = buildChatSystemPrompt(makeRun(), [planArtifact]);
+    expect(result).not.toContain("**Open Questions:**");
+  });
+
   it("includes human answers section when HumanAnswers artifact present", () => {
     const artifact = makeArtifact({
       type: "HumanAnswers",
@@ -232,6 +257,91 @@ describe("buildChatSystemPrompt", () => {
     expect(result).not.toContain("x".repeat(4001));
   });
 
+  it("includes plan review findings when PlanReview artifact present", () => {
+    const artifact = makeArtifact({
+      type: "PlanReview",
+      version: 1,
+      payloadJson: {
+        summary: "Plan mostly sound, one gap.",
+        findings: [
+          {
+            id: "f1",
+            severity: "important",
+            title: "Missing rollback plan",
+            details: "No rollback step if migration fails.",
+          },
+        ],
+      },
+    });
+    const result = buildChatSystemPrompt(makeRun(), [artifact]);
+    expect(result).toContain("## Plan Review Findings");
+    expect(result).toContain("**Summary:** Plan mostly sound, one gap.");
+    expect(result).toContain("**[important] Missing rollback plan** (f1): No rollback step if migration fails.");
+  });
+
+  it("renders a PlanReview section from summary alone when findings are absent", () => {
+    const artifact = makeArtifact({
+      type: "PlanReview",
+      version: 1,
+      payloadJson: {
+        summary: "Approved with no findings.",
+      },
+    });
+    const result = buildChatSystemPrompt(makeRun(), [artifact]);
+    expect(result).toContain("## Plan Review Findings");
+    expect(result).toContain("**Summary:** Approved with no findings.");
+  });
+
+  it("omits the Plan Review Findings section when the PlanReview payload has neither summary nor findings", () => {
+    const artifact = makeArtifact({
+      type: "PlanReview",
+      version: 1,
+      payloadJson: { findings: [] },
+    });
+    const result = buildChatSystemPrompt(makeRun(), [artifact]);
+    expect(result).not.toContain("## Plan Review Findings");
+  });
+
+  it("omits the Plan Review Findings section when no PlanReview artifact exists", () => {
+    const result = buildChatSystemPrompt(makeRun(), []);
+    expect(result).not.toContain("## Plan Review Findings");
+  });
+
+  it("includes code review findings when Review artifact present, defaulting missing finding fields to empty", () => {
+    const artifact = makeArtifact({
+      type: "Review",
+      version: 1,
+      payloadJson: {
+        summary: "Code review complete.",
+        findings: [
+          { id: "f1", severity: "nit", title: "Long line" },
+          {},
+        ],
+      },
+    });
+    const result = buildChatSystemPrompt(makeRun(), [artifact]);
+    expect(result).toContain("## Code Review Findings");
+    expect(result).toContain("**Summary:** Code review complete.");
+    expect(result).toContain("**[nit] Long line** (f1): ");
+    // second finding has no fields at all -- should still render with empty placeholders
+    expect(result).toContain("**[] ** (): ");
+  });
+
+  it("omits the Code Review Findings section when the Review payload has neither summary nor findings", () => {
+    const artifact = makeArtifact({
+      type: "Review",
+      version: 1,
+      payloadJson: {},
+    });
+    const result = buildChatSystemPrompt(makeRun(), [artifact]);
+    expect(result).not.toContain("## Code Review Findings");
+  });
+
+  it("omits the Code Review Findings section when no Review artifact exists", () => {
+    const result = buildChatSystemPrompt(makeRun(), []);
+    expect(result).not.toContain("## Code Review Findings");
+  });
+
   it("uses the Plan artifact with the highest version when multiple exist", () => {
     const planV1 = makeArtifact({
       type: "Plan",
@@ -246,5 +356,92 @@ describe("buildChatSystemPrompt", () => {
     const result = buildChatSystemPrompt(makeRun(), [planV1, planV2]);
     expect(result).toContain("New summary");
     expect(result).not.toContain("Old summary");
+  });
+
+  it("keeps the earlier artifact when later artifacts of the same type do not have a higher version", () => {
+    const planV2First = makeArtifact({
+      type: "Plan",
+      version: 2,
+      payloadJson: { summary: "Higher version, listed first" },
+    });
+    const planV1Second = makeArtifact({
+      type: "Plan",
+      version: 1,
+      payloadJson: { summary: "Lower version, listed second" },
+    });
+    const result = buildChatSystemPrompt(makeRun(), [planV2First, planV1Second]);
+    expect(result).toContain("Higher version, listed first");
+    expect(result).not.toContain("Lower version, listed second");
+  });
+
+  it("falls back to placeholder run metadata when branchName and prNumber are absent", () => {
+    const run = makeRun({ branchName: null, prNumber: null });
+    const result = buildChatSystemPrompt(run, []);
+    expect(result).toContain("**Branch:** (none)");
+    expect(result).toContain("**PR Number:** (none)");
+  });
+
+  it("renders check status as '?' and omits the details suffix when a check entry is missing", () => {
+    const artifact = makeArtifact({
+      type: "ExecutionReport",
+      version: 1,
+      payloadJson: {
+        executionVersion: 1,
+        checks: {},
+        score: 0.5,
+      },
+    });
+    const result = buildChatSystemPrompt(makeRun(), [artifact]);
+    expect(result).toContain("**Lint:** ?");
+    expect(result).toContain("**Typecheck:** ?");
+    expect(result).toContain("**Tests:** ?");
+    expect(result).not.toContain(" — ");
+  });
+
+  it("stringifies non-string filesChanged and notes entries in the execution report", () => {
+    const artifact = makeArtifact({
+      type: "ExecutionReport",
+      version: 1,
+      payloadJson: {
+        executionVersion: 1,
+        score: 0.5,
+        filesChanged: [{ path: "src/foo.ts" }],
+        notes: [{ note: "structured note" }],
+      },
+    });
+    const result = buildChatSystemPrompt(makeRun(), [artifact]);
+    expect(result).toContain(JSON.stringify({ path: "src/foo.ts" }));
+    expect(result).toContain(JSON.stringify({ note: "structured note" }));
+  });
+
+  it("defaults RejectionContext fields to placeholders when the payload is empty", () => {
+    const artifact = makeArtifact({
+      type: "RejectionContext",
+      version: 1,
+      payloadJson: {},
+    });
+    const result = buildChatSystemPrompt(makeRun(), [artifact]);
+    expect(result).toContain("## Rejection Context(s)");
+    expect(result).toContain("**Plan v?** (, ):");
+  });
+
+  it("defaults HumanAnswers entry fields to empty strings when missing", () => {
+    const artifact = makeArtifact({
+      type: "HumanAnswers",
+      version: 1,
+      payloadJson: { answers: [{}] },
+    });
+    const result = buildChatSystemPrompt(makeRun(), [artifact]);
+    expect(result).toContain("**[]:** ");
+  });
+
+  it("defaults ResearchedAnswers entry fields to empty strings when missing", () => {
+    const artifact = makeArtifact({
+      type: "ResearchedAnswers",
+      version: 1,
+      payloadJson: { answers: [{}] },
+    });
+    const result = buildChatSystemPrompt(makeRun(), [artifact]);
+    expect(result).toContain("**[] ():** ");
   });
 });

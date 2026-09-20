@@ -320,6 +320,51 @@ describe("PlannerAgent.run()", () => {
     });
   });
 
+  describe("planReviewFindings injection", () => {
+    it("renders the AI Plan Review Findings section with summary and each finding", async () => {
+      const { agent, getPrompt } = buildPlannerAgent();
+      const bundle = makeTaskBundle();
+
+      await agent.run(bundle, "run-1", {
+        planReviewFindings: {
+          summary: "Plan had a gap in error handling.",
+          findings: [
+            {
+              id: "f1",
+              severity: "important",
+              title: "Missing retry logic",
+              details: "Network calls should retry on failure.",
+            },
+            {
+              id: "f2",
+              severity: "nit",
+              title: "Naming",
+              details: "Prefer camelCase.",
+            },
+          ],
+        },
+      });
+
+      const prompt = getPrompt();
+      expect(prompt).toContain("## AI Plan Review Findings (from previous plan)");
+      expect(prompt).toContain("**Review Summary:** Plan had a gap in error handling.");
+      expect(prompt).toContain("- **[important] Missing retry logic** (f1): Network calls should retry on failure.");
+      expect(prompt).toContain("- **[nit] Naming** (f2): Prefer camelCase.");
+      expect(prompt).toContain("Incorporate these findings into the revised plan where appropriate.");
+    });
+
+    it("omits the AI Plan Review Findings section when planReviewFindings is absent", async () => {
+      const { agent, getPrompt } = buildPlannerAgent();
+      const bundle = makeTaskBundle();
+
+      await agent.run(bundle, "run-1");
+
+      const prompt = getPrompt();
+      expect(prompt).not.toContain("## AI Plan Review Findings");
+      expect(prompt).not.toContain("{{planReviewSection}}");
+    });
+  });
+
   describe("previousPlan injection", () => {
     it("renders the previously rejected plan with steps, assumptions, risks and open questions", async () => {
       const { agent, getPrompt } = buildPlannerAgent();
@@ -446,8 +491,8 @@ describe("PlannerAgent.run()", () => {
 
       await agent.run(bundle, "run-1", {
         priorSkills: [
-          { taskCategory: "auth", skillMarkdown: "Skill one body" },
-          { taskCategory: "billing", skillMarkdown: "Skill two body" },
+          makeSkill({ id: "s1", taskCategory: "auth", skillMarkdown: "Skill one body" }),
+          makeSkill({ id: "s2", taskCategory: "billing", skillMarkdown: "Skill two body" }),
         ],
       });
 
