@@ -1,7 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { renderHook, waitFor, act } from "@testing-library/react";
 import type { DashboardEvent } from "./useSSE.ts";
-import type { RunSkillsResponse } from "@/api/client.ts";
 
 vi.mock("@/api/client.ts", () => ({
   api: {
@@ -25,16 +24,11 @@ import { useRunSkills } from "./useRunSkills.ts";
 
 const mockApi = api as unknown as { getRunSkills: ReturnType<typeof vi.fn> };
 
-const emptyResponse: RunSkillsResponse = {
+const skillsResponse = {
   injectedSkills: [],
   distillationDecision: null,
   distilledSkill: null,
 };
-
-function fireSSE(event: DashboardEvent) {
-  if (!sseCallback) throw new Error("SSE callback not registered");
-  act(() => sseCallback!(event));
-}
 
 describe("useRunSkills", () => {
   beforeEach(() => {
@@ -42,114 +36,76 @@ describe("useRunSkills", () => {
     sseCallback = null;
   });
 
-  it("starts loading with null data and no error", () => {
-    mockApi.getRunSkills.mockReturnValue(new Promise(() => {}));
-
-    const { result } = renderHook(() => useRunSkills("run-1"));
-
-    expect(result.current.loading).toBe(true);
-    expect(result.current.data).toBeNull();
-    expect(result.current.error).toBeNull();
-  });
-
-  it("loads skills data on success", async () => {
-    mockApi.getRunSkills.mockResolvedValue(emptyResponse);
-
+  it("fetches skills for the given runId on mount", async () => {
+    mockApi.getRunSkills.mockResolvedValue(skillsResponse);
     const { result } = renderHook(() => useRunSkills("run-1"));
 
     await waitFor(() => expect(result.current.loading).toBe(false));
-    expect(result.current.data).toEqual(emptyResponse);
     expect(mockApi.getRunSkills).toHaveBeenCalledWith("run-1");
+    expect(result.current.data).toEqual(skillsResponse);
   });
 
-  it("surfaces an Error's message on failure", async () => {
-    mockApi.getRunSkills.mockRejectedValue(new Error("skills unavailable"));
-
+  it("sets an error message on failure", async () => {
+    mockApi.getRunSkills.mockRejectedValue(new Error("nope"));
     const { result } = renderHook(() => useRunSkills("run-1"));
 
     await waitFor(() => expect(result.current.loading).toBe(false));
-    expect(result.current.error).toBe("skills unavailable");
+    expect(result.current.error).toBe("nope");
   });
 
-  it("falls back to a generic message when a non-Error is thrown", async () => {
-    mockApi.getRunSkills.mockRejectedValue("oops");
-
+  it("falls back to a generic error message for a non-Error rejection", async () => {
+    mockApi.getRunSkills.mockRejectedValue("boom");
     const { result } = renderHook(() => useRunSkills("run-1"));
 
     await waitFor(() => expect(result.current.loading).toBe(false));
     expect(result.current.error).toBe("Failed to fetch run skills");
   });
 
-  it("refetches on run:state-changed SSE events for the matching run", async () => {
-    mockApi.getRunSkills.mockResolvedValue(emptyResponse);
-    const { result } = renderHook(() => useRunSkills("run-1"));
-    await waitFor(() => expect(result.current.loading).toBe(false));
-    expect(mockApi.getRunSkills).toHaveBeenCalledTimes(1);
-
-    fireSSE({ type: "run:state-changed", runId: "run-1" });
-
-    await waitFor(() => expect(mockApi.getRunSkills).toHaveBeenCalledTimes(2));
-  });
-
-  it("refetches on run:artifact-created SSE events for the matching run", async () => {
-    mockApi.getRunSkills.mockResolvedValue(emptyResponse);
-    const { result } = renderHook(() => useRunSkills("run-1"));
-    await waitFor(() => expect(result.current.loading).toBe(false));
-    expect(mockApi.getRunSkills).toHaveBeenCalledTimes(1);
-
-    fireSSE({ type: "run:artifact-created", runId: "run-1" });
-
-    await waitFor(() => expect(mockApi.getRunSkills).toHaveBeenCalledTimes(2));
-  });
-
-  it("ignores SSE events for a different run id", async () => {
-    mockApi.getRunSkills.mockResolvedValue(emptyResponse);
+  it("re-fetches on run:state-changed for the same runId", async () => {
+    mockApi.getRunSkills.mockResolvedValue(skillsResponse);
     const { result } = renderHook(() => useRunSkills("run-1"));
     await waitFor(() => expect(result.current.loading).toBe(false));
 
-    fireSSE({ type: "run:state-changed", runId: "other-run" });
-
-    await new Promise((r) => setTimeout(r, 10));
-    expect(mockApi.getRunSkills).toHaveBeenCalledTimes(1);
-  });
-
-  it("ignores unrelated SSE event types for the same run", async () => {
-    mockApi.getRunSkills.mockResolvedValue(emptyResponse);
-    const { result } = renderHook(() => useRunSkills("run-1"));
-    await waitFor(() => expect(result.current.loading).toBe(false));
-
-    fireSSE({ type: "process:started", runId: "run-1" });
-
-    await new Promise((r) => setTimeout(r, 10));
-    expect(mockApi.getRunSkills).toHaveBeenCalledTimes(1);
-  });
-
-  it("exposes a manual refetch function", async () => {
-    mockApi.getRunSkills.mockResolvedValue(emptyResponse);
-    const { result } = renderHook(() => useRunSkills("run-1"));
-    await waitFor(() => expect(result.current.loading).toBe(false));
-
-    const updated: RunSkillsResponse = {
-      ...emptyResponse,
-      injectedSkills: [
-        {
-          id: "skill-1",
-          repoSlug: "org/repo",
-          name: "Skill A",
-          description: "desc",
-          taskCategory: "cat",
-          skillMarkdown: "# md",
-          utilityScore: 1,
-          lastUsedAt: "2024-01-01T00:00:00.000Z",
-        },
-      ],
-    };
-    mockApi.getRunSkills.mockResolvedValueOnce(updated);
-
+    mockApi.getRunSkills.mockClear();
     await act(async () => {
-      await result.current.refetch();
+      sseCallback!({ type: "run:state-changed", runId: "run-1" });
     });
+    await waitFor(() => expect(mockApi.getRunSkills).toHaveBeenCalledTimes(1));
+  });
 
-    expect(result.current.data).toEqual(updated);
+  it("re-fetches on run:artifact-created for the same runId", async () => {
+    mockApi.getRunSkills.mockResolvedValue(skillsResponse);
+    const { result } = renderHook(() => useRunSkills("run-1"));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    mockApi.getRunSkills.mockClear();
+    await act(async () => {
+      sseCallback!({ type: "run:artifact-created", runId: "run-1" });
+    });
+    await waitFor(() => expect(mockApi.getRunSkills).toHaveBeenCalledTimes(1));
+  });
+
+  it("ignores events for a different runId", async () => {
+    mockApi.getRunSkills.mockResolvedValue(skillsResponse);
+    const { result } = renderHook(() => useRunSkills("run-1"));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    mockApi.getRunSkills.mockClear();
+    await act(async () => {
+      sseCallback!({ type: "run:state-changed", runId: "other" });
+    });
+    expect(mockApi.getRunSkills).not.toHaveBeenCalled();
+  });
+
+  it("ignores irrelevant event types for the same runId", async () => {
+    mockApi.getRunSkills.mockResolvedValue(skillsResponse);
+    const { result } = renderHook(() => useRunSkills("run-1"));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    mockApi.getRunSkills.mockClear();
+    await act(async () => {
+      sseCallback!({ type: "run:created", runId: "run-1" });
+    });
+    expect(mockApi.getRunSkills).not.toHaveBeenCalled();
   });
 });

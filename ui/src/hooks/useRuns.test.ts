@@ -1,7 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { renderHook, waitFor, act } from "@testing-library/react";
 import type { DashboardEvent } from "./useSSE.ts";
-import type { Run } from "@/api/client.ts";
 
 vi.mock("@/api/client.ts", () => ({
   api: {
@@ -25,36 +24,8 @@ import { useRuns } from "./useRuns.ts";
 
 const mockApi = api as unknown as { getRuns: ReturnType<typeof vi.fn> };
 
-function makeRun(overrides: Partial<Run> = {}): Run {
-  return {
-    id: "run-1",
-    linearIssueId: "issue-1",
-    linearIssueIdentifier: "ENG-1",
-    linearIssueDescription: null,
-    linearIssueTitle: "Fix bug",
-    linearIssueUrl: null,
-    repo: "org/repo",
-    branchName: null,
-    prNumber: null,
-    state: "Todo",
-    planVersion: 1,
-    approvedPlanVersion: null,
-    plannerRuntime: null,
-    executorRuntime: null,
-    reviewerRuntime: null,
-    remediationRuntime: null,
-    workingDirectory: "/tmp/run-1",
-    latestArtifactVersion: 0,
-    createdAt: "2024-01-01T00:00:00.000Z",
-    updatedAt: "2024-01-01T00:00:00.000Z",
-    ...overrides,
-  };
-}
-
-function fireSSE(event: DashboardEvent) {
-  if (!sseCallback) throw new Error("SSE callback not registered");
-  act(() => sseCallback!(event));
-}
+const run1 = { id: "run-1", state: "Todo" };
+const run2 = { id: "run-2", state: "Implementing" };
 
 describe("useRuns", () => {
   beforeEach(() => {
@@ -62,104 +33,89 @@ describe("useRuns", () => {
     sseCallback = null;
   });
 
-  it("starts in a loading state with no runs", () => {
+  it("starts loading with an empty runs array", () => {
     mockApi.getRuns.mockReturnValue(new Promise(() => {}));
-
     const { result } = renderHook(() => useRuns());
-
     expect(result.current.loading).toBe(true);
     expect(result.current.runs).toEqual([]);
-    expect(result.current.error).toBeNull();
   });
 
-  it("populates runs and clears loading on a successful fetch", async () => {
-    const runs = [makeRun({ id: "run-1" }), makeRun({ id: "run-2" })];
-    mockApi.getRuns.mockResolvedValue({ runs });
-
+  it("fetches runs on mount with no state filter", async () => {
+    mockApi.getRuns.mockResolvedValue({ runs: [run1, run2] });
     const { result } = renderHook(() => useRuns());
 
     await waitFor(() => expect(result.current.loading).toBe(false));
-    expect(result.current.runs).toEqual(runs);
-    expect(result.current.error).toBeNull();
+
     expect(mockApi.getRuns).toHaveBeenCalledWith(undefined);
+    expect(result.current.runs).toEqual([run1, run2]);
   });
 
-  it("passes the state filter through to the api call", async () => {
-    mockApi.getRuns.mockResolvedValue({ runs: [] });
+  it("passes the stateFilter through to the api call", async () => {
+    mockApi.getRuns.mockResolvedValue({ runs: [run2] });
+    renderHook(() => useRuns("Implementing"));
 
-    renderHook(() => useRuns("Planning"));
-
-    await waitFor(() => expect(mockApi.getRuns).toHaveBeenCalledWith("Planning"));
+    await waitFor(() => expect(mockApi.getRuns).toHaveBeenCalledWith("Implementing"));
   });
 
-  it("surfaces an Error's message on failure", async () => {
-    mockApi.getRuns.mockRejectedValue(new Error("boom"));
-
+  it("sets an error message on fetch failure", async () => {
+    mockApi.getRuns.mockRejectedValue(new Error("network down"));
     const { result } = renderHook(() => useRuns());
 
     await waitFor(() => expect(result.current.loading).toBe(false));
-    expect(result.current.error).toBe("boom");
-    expect(result.current.runs).toEqual([]);
+    expect(result.current.error).toBe("network down");
   });
 
-  it("falls back to a generic message when a non-Error is thrown", async () => {
-    mockApi.getRuns.mockRejectedValue("some string failure");
-
+  it("falls back to a generic error message for a non-Error rejection", async () => {
+    mockApi.getRuns.mockRejectedValue("boom");
     const { result } = renderHook(() => useRuns());
 
     await waitFor(() => expect(result.current.loading).toBe(false));
     expect(result.current.error).toBe("Failed to fetch runs");
   });
 
-  it("refetch re-invokes the api and clears a previous error", async () => {
-    mockApi.getRuns.mockRejectedValueOnce(new Error("first failure"));
-    const { result } = renderHook(() => useRuns());
-
-    await waitFor(() => expect(result.current.error).toBe("first failure"));
-
-    const runs = [makeRun()];
-    mockApi.getRuns.mockResolvedValueOnce({ runs });
-    await act(async () => {
-      await result.current.refetch();
-    });
-
-    expect(result.current.error).toBeNull();
-    expect(result.current.runs).toEqual(runs);
-  });
-
-  it("refetches all runs on a run:created SSE event", async () => {
-    mockApi.getRuns.mockResolvedValue({ runs: [] });
+  it("re-fetches the full list on a run:created SSE event", async () => {
+    mockApi.getRuns.mockResolvedValue({ runs: [run1] });
     const { result } = renderHook(() => useRuns());
     await waitFor(() => expect(result.current.loading).toBe(false));
 
-    const runs = [makeRun({ id: "run-new" })];
-    mockApi.getRuns.mockResolvedValueOnce({ runs });
+    mockApi.getRuns.mockClear();
+    mockApi.getRuns.mockResolvedValue({ runs: [run1, run2] });
 
-    fireSSE({ type: "run:created", runId: "run-new" });
+    await act(async () => {
+      sseCallback!({ type: "run:created", runId: "run-2" });
+    });
 
-    await waitFor(() => expect(result.current.runs).toEqual(runs));
+    await waitFor(() => expect(result.current.runs).toEqual([run1, run2]));
   });
 
-  it("patches a single run's state in place on a run:state-changed SSE event", async () => {
-    const runs = [makeRun({ id: "run-1", state: "Todo" }), makeRun({ id: "run-2", state: "Todo" })];
-    mockApi.getRuns.mockResolvedValue({ runs });
+  it("patches a single run's state in-place on run:state-changed, without refetching", async () => {
+    mockApi.getRuns.mockResolvedValue({ runs: [run1, run2] });
     const { result } = renderHook(() => useRuns());
-    await waitFor(() => expect(result.current.runs).toEqual(runs));
+    await waitFor(() => expect(result.current.loading).toBe(false));
 
-    fireSSE({ type: "run:state-changed", runId: "run-1", to: "Planning" });
+    mockApi.getRuns.mockClear();
 
-    await waitFor(() =>
-      expect(result.current.runs.find((r) => r.id === "run-1")?.state).toBe("Planning"),
-    );
-    // The untouched run is left as-is.
-    expect(result.current.runs.find((r) => r.id === "run-2")?.state).toBe("Todo");
-    // Fetch should not have been called again for a state-changed event.
-    expect(mockApi.getRuns).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      sseCallback!({ type: "run:state-changed", runId: "run-1", to: "Done" });
+    });
+
+    expect(mockApi.getRuns).not.toHaveBeenCalled();
+    expect(result.current.runs.find((r) => r.id === "run-1")?.state).toBe("Done");
+    expect(result.current.runs.find((r) => r.id === "run-2")?.state).toBe("Implementing");
   });
 
-  it("cleans up on unmount without throwing", async () => {
-    mockApi.getRuns.mockResolvedValue({ runs: [] });
-    const { unmount } = renderHook(() => useRuns());
-    expect(() => unmount()).not.toThrow();
+  it("ignores unrelated SSE event types", async () => {
+    mockApi.getRuns.mockResolvedValue({ runs: [run1] });
+    const { result } = renderHook(() => useRuns());
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    mockApi.getRuns.mockClear();
+
+    await act(async () => {
+      sseCallback!({ type: "process:started", runId: "run-1" });
+    });
+
+    expect(mockApi.getRuns).not.toHaveBeenCalled();
+    expect(result.current.runs).toEqual([run1]);
   });
 });

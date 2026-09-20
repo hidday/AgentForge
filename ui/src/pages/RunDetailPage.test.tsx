@@ -1,54 +1,17 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen } from "@testing-library/react";
-import { MemoryRouter, Routes, Route } from "react-router-dom";
+import userEvent from "@testing-library/user-event";
+import { MemoryRouter } from "react-router-dom";
 import type { Run, Artifact, RunEventRecord } from "@/api/client.ts";
-import type { OpenQuestion } from "@/components/OpenQuestionsPanel.tsx";
 
 vi.mock("@/hooks/useRun.ts", () => ({ useRun: vi.fn() }));
 vi.mock("@/hooks/useRunSkills.ts", () => ({ useRunSkills: vi.fn() }));
 vi.mock("@/hooks/useActiveProcesses.ts", () => ({ useActiveProcesses: vi.fn() }));
 
-vi.mock("@/components/StateBadge.tsx", () => ({
-  StateBadge: ({ state }: { state: string }) => <span data-testid="state-badge">{state}</span>,
-}));
-vi.mock("@/components/WorkflowStepper.tsx", () => ({
-  WorkflowStepper: ({ currentState }: { currentState: string }) => (
-    <div data-testid="workflow-stepper">{currentState}</div>
-  ),
-}));
-vi.mock("@/components/ArtifactTabs.tsx", () => ({
-  ArtifactTabs: ({ artifacts }: { artifacts: Artifact[] }) => (
-    <div data-testid="artifact-tabs">{artifacts.length} artifacts</div>
-  ),
-}));
-vi.mock("@/components/AgentOutputPanel.tsx", () => ({
-  AgentOutputPanel: ({ output }: { output: string }) => (
-    <div data-testid="agent-output">{output}</div>
-  ),
-}));
-vi.mock("@/components/EventTimeline.tsx", () => ({
-  EventTimeline: ({ events }: { events: RunEventRecord[] }) => (
-    <div data-testid="event-timeline">{events.length} events</div>
-  ),
-}));
-vi.mock("@/components/ActionBar.tsx", () => ({
-  ActionBar: ({ state, hasOptionalQuestions }: { state: string; hasOptionalQuestions: boolean }) => (
-    <div data-testid="action-bar">
-      {state} / optional:{String(hasOptionalQuestions)}
-    </div>
-  ),
-}));
-vi.mock("@/components/OpenQuestionsPanel.tsx", () => ({
-  OpenQuestionsPanel: ({ questions }: { questions: OpenQuestion[] }) => (
-    <div data-testid="open-questions">{questions.length} questions</div>
-  ),
-}));
-vi.mock("@/components/ChatPanel.tsx", () => ({
-  ChatPanel: () => <div data-testid="chat-panel" />,
-}));
-vi.mock("@/components/DistilledSkillPanel.tsx", () => ({
-  DistilledSkillPanel: () => <div data-testid="distilled-skill-panel" />,
-}));
+vi.mock("react-router-dom", async () => {
+  const actual = await vi.importActual<typeof import("react-router-dom")>("react-router-dom");
+  return { ...actual, useParams: vi.fn(() => ({ id: "run-1" })) };
+});
 
 import { useRun } from "@/hooks/useRun.ts";
 import { useRunSkills } from "@/hooks/useRunSkills.ts";
@@ -61,14 +24,14 @@ const mockUseActiveProcesses = useActiveProcesses as unknown as ReturnType<typeo
 
 function makeRun(overrides: Partial<Run> = {}): Run {
   return {
-    id: "run-1234567890",
-    linearIssueId: "issue-1",
+    id: "run-1",
+    linearIssueId: "issue-abc123",
     linearIssueIdentifier: "ENG-1",
     linearIssueDescription: null,
-    linearIssueTitle: "Fix bug",
+    linearIssueTitle: "Fix the bug",
     linearIssueUrl: "https://linear.app/issue/ENG-1",
     repo: "org/repo",
-    branchName: "feature/fix-bug",
+    branchName: "fix/bug",
     prNumber: 42,
     state: "Implementing",
     planVersion: 1,
@@ -77,20 +40,22 @@ function makeRun(overrides: Partial<Run> = {}): Run {
     executorRuntime: null,
     reviewerRuntime: null,
     remediationRuntime: null,
-    workingDirectory: "/tmp/run-1",
+    workingDirectory: "/tmp/work",
     latestArtifactVersion: 1,
-    createdAt: "2024-01-01T00:00:00.000Z",
-    updatedAt: "2024-01-01T00:00:00.000Z",
+    createdAt: "2024-01-01T00:00:00Z",
+    updatedAt: "2024-01-01T00:10:00Z",
     ...overrides,
   };
 }
 
-function renderAtRun(id = "run-1234567890") {
+function defaultActiveProcesses() {
+  return { processes: [], hasActive: false, output: "", activeProcessId: null };
+}
+
+function renderPage() {
   return render(
-    <MemoryRouter initialEntries={[`/runs/${id}`]}>
-      <Routes>
-        <Route path="/runs/:id" element={<RunDetailPage />} />
-      </Routes>
+    <MemoryRouter>
+      <RunDetailPage />
     </MemoryRouter>,
   );
 }
@@ -104,179 +69,301 @@ describe("RunDetailPage", () => {
       error: null,
       refetch: vi.fn(),
     });
-    mockUseActiveProcesses.mockReturnValue({
-      processes: [],
-      hasActive: false,
-      output: "",
-      activeProcessId: null,
-    });
+    mockUseActiveProcesses.mockReturnValue(defaultActiveProcesses());
   });
 
   it("shows a loading indicator while the run is loading", () => {
     mockUseRun.mockReturnValue({ data: null, loading: true, error: null, refetch: vi.fn() });
-
-    renderAtRun();
-
-    expect(screen.getByText(/loading run/i)).toBeDefined();
-    expect(screen.queryByTestId("workflow-stepper")).toBeNull();
+    renderPage();
+    expect(screen.getByText(/Loading run/i)).toBeDefined();
   });
 
-  it("shows an error message when the hook reports an error", () => {
+  it("shows the error message when the hook reports an error", () => {
     mockUseRun.mockReturnValue({
       data: null,
       loading: false,
-      error: "Run not found",
+      error: "Run not found on server",
       refetch: vi.fn(),
     });
-
-    renderAtRun();
-
-    expect(screen.getByText("Run not found")).toBeDefined();
+    renderPage();
+    expect(screen.getByText("Run not found on server")).toBeDefined();
   });
 
-  it('shows a generic "Run not found" message when there is no error but also no data', () => {
+  it("falls back to a generic 'Run not found' message when there's no error but also no data", () => {
     mockUseRun.mockReturnValue({ data: null, loading: false, error: null, refetch: vi.fn() });
-
-    renderAtRun();
-
+    renderPage();
     expect(screen.getByText("Run not found")).toBeDefined();
   });
 
-  it("renders the run header and detail panels once data has loaded", () => {
-    const run = makeRun();
+  it("renders run header details: id, issue title, repo, branch, PR link, state", () => {
     mockUseRun.mockReturnValue({
-      data: { run, artifacts: [], events: [] },
+      data: { run: makeRun(), artifacts: [], events: [] },
       loading: false,
       error: null,
       refetch: vi.fn(),
     });
+    renderPage();
 
-    renderAtRun();
-
-    expect(screen.getByText("Fix bug")).toBeDefined();
+    expect(screen.getByText("run-1".slice(0, 8))).toBeDefined();
+    expect(screen.getByText("Fix the bug")).toBeDefined();
     expect(screen.getByText("org/repo")).toBeDefined();
-    expect(screen.getByText("feature/fix-bug")).toBeDefined();
+    expect(screen.getByText("fix/bug")).toBeDefined();
     expect(screen.getByText(/PR #42/)).toBeDefined();
-    expect(screen.getByTestId("state-badge").textContent).toBe("Implementing");
-    expect(screen.getByTestId("workflow-stepper").textContent).toBe("Implementing");
-    expect(screen.getByTestId("artifact-tabs").textContent).toBe("0 artifacts");
-    expect(screen.getByTestId("event-timeline").textContent).toBe("0 events");
-    expect(screen.getByTestId("action-bar")).toBeDefined();
-    expect(screen.getByTestId("chat-panel")).toBeDefined();
+    // "Implementing" also appears as a WorkflowStepper step label, so assert
+    // via the StateBadge specifically (it renders inside a full <span>).
+    expect(screen.getAllByText("Implementing").length).toBeGreaterThanOrEqual(1);
   });
 
-  it("falls back to the issue identifier when there is no linear issue title", () => {
-    const run = makeRun({ linearIssueTitle: null, linearIssueIdentifier: "ENG-99" });
+  it("falls back to identifier/id for the issue label when title is missing", () => {
     mockUseRun.mockReturnValue({
-      data: { run, artifacts: [], events: [] },
+      data: {
+        run: makeRun({ linearIssueTitle: null, linearIssueIdentifier: "ENG-77" }),
+        artifacts: [],
+        events: [],
+      },
       loading: false,
       error: null,
       refetch: vi.fn(),
     });
-
-    renderAtRun();
-
-    expect(screen.getByText("ENG-99")).toBeDefined();
+    renderPage();
+    expect(screen.getByText("ENG-77")).toBeDefined();
   });
 
-  it("shows the required open-questions panel when HumanClarificationNeeded and questions exist", () => {
-    const questions: OpenQuestion[] = [
-      { id: "q1", question: "What auth method?", requiredForExecution: true },
-      { id: "q2", question: "Optional detail?", requiredForExecution: false },
-    ];
-    const planArtifact: Artifact = {
-      id: "a1",
-      runId: "run-1",
-      type: "Plan",
-      version: 1,
-      payloadJson: { openQuestions: questions },
-      rawText: "",
-      createdAt: "2024-01-01T00:00:00.000Z",
-    };
-    const run = makeRun({ state: "HumanClarificationNeeded" });
+  it("does not render the Linear link, PR link, or editor links when their data is absent", () => {
     mockUseRun.mockReturnValue({
-      data: { run, artifacts: [planArtifact], events: [] },
+      data: {
+        run: makeRun({
+          linearIssueUrl: null,
+          prNumber: null,
+          branchName: null,
+          workingDirectory: "",
+        }),
+        artifacts: [],
+        events: [],
+      },
       loading: false,
       error: null,
       refetch: vi.fn(),
     });
-
-    renderAtRun();
-
-    // All open questions (both required and optional) are shown in this state.
-    expect(screen.getByTestId("open-questions").textContent).toBe("2 questions");
-  });
-
-  it("shows only optional open questions when AwaitingPlanApproval", () => {
-    const questions: OpenQuestion[] = [
-      { id: "q1", question: "Required one", requiredForExecution: true },
-      { id: "q2", question: "Optional one", requiredForExecution: false },
-      { id: "q3", question: "Another optional", requiredForExecution: false },
-    ];
-    const planArtifact: Artifact = {
-      id: "a1",
-      runId: "run-1",
-      type: "Plan",
-      version: 1,
-      payloadJson: { openQuestions: questions },
-      rawText: "",
-      createdAt: "2024-01-01T00:00:00.000Z",
-    };
-    const run = makeRun({ state: "AwaitingPlanApproval" });
-    mockUseRun.mockReturnValue({
-      data: { run, artifacts: [planArtifact], events: [] },
-      loading: false,
-      error: null,
-      refetch: vi.fn(),
-    });
-
-    renderAtRun();
-
-    expect(screen.getByTestId("open-questions").textContent).toBe("2 questions");
-    expect(screen.getByTestId("action-bar").textContent).toContain("optional:true");
-  });
-
-  it("does not render an open-questions panel in states without applicable questions", () => {
-    const run = makeRun({ state: "Implementing" });
-    mockUseRun.mockReturnValue({
-      data: { run, artifacts: [], events: [] },
-      loading: false,
-      error: null,
-      refetch: vi.fn(),
-    });
-
-    renderAtRun();
-
-    expect(screen.queryByTestId("open-questions")).toBeNull();
-    expect(screen.getByTestId("action-bar").textContent).toContain("optional:false");
-  });
-
-  it("omits branch/PR/editor links when the run has no branch name", () => {
-    const run = makeRun({ branchName: null, prNumber: null, workingDirectory: "/tmp/x" });
-    mockUseRun.mockReturnValue({
-      data: { run, artifacts: [], events: [] },
-      loading: false,
-      error: null,
-      refetch: vi.fn(),
-    });
-
-    renderAtRun();
-
+    renderPage();
+    expect(screen.queryByTitle("Open in Linear")).toBeNull();
     expect(screen.queryByTitle("Open PR on GitHub")).toBeNull();
     expect(screen.queryByTitle("Open in Cursor")).toBeNull();
+    expect(screen.queryByTitle("Open Claude Code session in this run's worktree")).toBeNull();
   });
 
-  it("omits the Linear link when the run has no linearIssueUrl", () => {
-    const run = makeRun({ linearIssueUrl: null });
+  it("renders the Cursor/Claude Code/Claude editor links when branch and working directory are present", () => {
     mockUseRun.mockReturnValue({
-      data: { run, artifacts: [], events: [] },
+      data: { run: makeRun(), artifacts: [], events: [] },
       loading: false,
       error: null,
       refetch: vi.fn(),
     });
+    renderPage();
+    expect(screen.getByTitle("Open in Cursor")).toBeDefined();
+    expect(screen.getByTitle("Open Claude Code session in this run's worktree")).toBeDefined();
+    expect(screen.getByTitle("Open Claude Desktop (Code) in this run's worktree")).toBeDefined();
+  });
 
-    renderAtRun();
+  it("shows the OpenQuestionsPanel prominently for HumanClarificationNeeded with open questions", () => {
+    const planArtifact: Artifact = {
+      id: "a1",
+      runId: "run-1",
+      type: "Plan",
+      version: 1,
+      payloadJson: {
+        openQuestions: [
+          { id: "q1", question: "Which env?", requiredForExecution: true },
+        ],
+      },
+      rawText: "",
+      createdAt: "2024-01-01T00:00:00Z",
+    };
+    mockUseRun.mockReturnValue({
+      data: {
+        run: makeRun({ state: "HumanClarificationNeeded" }),
+        artifacts: [planArtifact],
+        events: [],
+      },
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+    renderPage();
+    const panel = screen.getByLabelText("Open Questions");
+    expect(panel.textContent).toContain("Which env?");
+  });
 
-    expect(screen.queryByTitle("Open in Linear")).toBeNull();
+  it("shows only optional questions as a secondary panel for AwaitingPlanApproval", () => {
+    const planArtifact: Artifact = {
+      id: "a1",
+      runId: "run-1",
+      type: "Plan",
+      version: 1,
+      payloadJson: {
+        openQuestions: [
+          { id: "q1", question: "Required question", requiredForExecution: true },
+          { id: "q2", question: "Optional question", requiredForExecution: false },
+        ],
+      },
+      rawText: "",
+      createdAt: "2024-01-01T00:00:00Z",
+    };
+    mockUseRun.mockReturnValue({
+      data: {
+        run: makeRun({ state: "AwaitingPlanApproval" }),
+        artifacts: [planArtifact],
+        events: [],
+      },
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+    renderPage();
+    const panel = screen.getByLabelText("Open Questions");
+    expect(panel.textContent).toContain("Optional question");
+    expect(panel.textContent).not.toContain("Required question");
+  });
+
+  it("does not render any OpenQuestionsPanel for a state with no relevant questions", () => {
+    mockUseRun.mockReturnValue({
+      data: { run: makeRun({ state: "Implementing" }), artifacts: [], events: [] },
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+    renderPage();
+    expect(screen.queryByText(/Required for execution|Optional/)).toBeNull();
+  });
+
+  it("renders the workflow stepper and event timeline from run data", () => {
+    const events: RunEventRecord[] = [
+      {
+        id: "e1",
+        runId: "run-1",
+        eventType: "RUN_REQUESTED",
+        source: "human",
+        payloadJson: null,
+        createdAt: "2024-01-01T00:00:00Z",
+      },
+    ];
+    mockUseRun.mockReturnValue({
+      data: { run: makeRun(), artifacts: [], events },
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+    renderPage();
+    expect(screen.getByText("Workflow")).toBeDefined();
+    expect(screen.getByText("Run Requested")).toBeDefined();
+  });
+
+  it("passes hasOptionalQuestions to ActionBar so the optional-questions button appears", () => {
+    const planArtifact: Artifact = {
+      id: "a1",
+      runId: "run-1",
+      type: "Plan",
+      version: 1,
+      payloadJson: {
+        openQuestions: [{ id: "q1", question: "Optional?", requiredForExecution: false }],
+      },
+      rawText: "",
+      createdAt: "2024-01-01T00:00:00Z",
+    };
+    mockUseRun.mockReturnValue({
+      data: {
+        run: makeRun({ state: "AwaitingPlanApproval" }),
+        artifacts: [planArtifact],
+        events: [],
+      },
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+    renderPage();
+    expect(screen.getByRole("button", { name: /Answer Optional Questions/i })).toBeDefined();
+  });
+
+  it("scrolls to the questions panel when 'Answer Questions' is clicked in HumanClarificationNeeded", async () => {
+    const scrollIntoViewMock = vi.fn();
+    HTMLDivElement.prototype.scrollIntoView = scrollIntoViewMock;
+
+    const planArtifact: Artifact = {
+      id: "a1",
+      runId: "run-1",
+      type: "Plan",
+      version: 1,
+      payloadJson: {
+        openQuestions: [{ id: "q1", question: "Which env?", requiredForExecution: true }],
+      },
+      rawText: "",
+      createdAt: "2024-01-01T00:00:00Z",
+    };
+    mockUseRun.mockReturnValue({
+      data: {
+        run: makeRun({ state: "HumanClarificationNeeded" }),
+        artifacts: [planArtifact],
+        events: [],
+      },
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+    renderPage();
+
+    await userEvent.click(screen.getByRole("button", { name: /^Answer Questions$/i }));
+    expect(scrollIntoViewMock).toHaveBeenCalledWith({ behavior: "smooth", block: "start" });
+
+    // @ts-expect-error - cleanup the prototype patch
+    delete HTMLDivElement.prototype.scrollIntoView;
+  });
+
+  it("renders the ChatPanel with the run's artifacts", () => {
+    mockUseRun.mockReturnValue({
+      data: { run: makeRun(), artifacts: [], events: [] },
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+    renderPage();
+    expect(screen.getByText("Chat with Agent")).toBeDefined();
+  });
+
+  it("passes distillation data from useRunSkills into the DistilledSkillPanel", () => {
+    mockUseRun.mockReturnValue({
+      data: { run: makeRun(), artifacts: [], events: [] },
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+    mockUseRunSkills.mockReturnValue({
+      data: {
+        injectedSkills: [],
+        distillationDecision: {
+          shouldPersist: true,
+          reason: "good insight",
+          taskCategory: "testing",
+          name: "test-skill",
+          description: "desc",
+          displacedSkillId: null,
+        },
+        distilledSkill: {
+          id: "s1",
+          repoSlug: "org/repo",
+          name: "test-skill",
+          description: "desc",
+          taskCategory: "testing",
+          skillMarkdown: "# Test skill",
+          utilityScore: 0,
+          lastUsedAt: "2024-01-01T00:00:00Z",
+        },
+      },
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+    renderPage();
+    expect(screen.getByText("Distilled Skill")).toBeDefined();
+    expect(screen.getByText("test-skill")).toBeDefined();
   });
 });

@@ -3,108 +3,88 @@ import { render, screen } from "@testing-library/react";
 import { EventTimeline } from "./EventTimeline.tsx";
 import type { RunEventRecord } from "@/api/client.ts";
 
-function makeEvent(overrides: Partial<RunEventRecord>): RunEventRecord {
-  return {
-    id: "evt-1",
-    runId: "run-1",
-    eventType: "RUN_REQUESTED",
-    source: "human",
-    payloadJson: null,
-    createdAt: "2026-06-08T16:26:58.000Z",
-    ...overrides,
-  };
+function makeEvent(
+  id: string,
+  eventType: string,
+  source: string,
+  payloadJson: unknown,
+  createdAt = "2024-01-01T00:00:00Z",
+): RunEventRecord {
+  return { id, runId: "run-1", eventType, source, payloadJson, createdAt };
 }
 
 describe("EventTimeline", () => {
-  it("renders an empty state when there are no events", () => {
+  it("shows an empty state when there are no events", () => {
     render(<EventTimeline events={[]} />);
-
     expect(screen.getByText("No events yet")).toBeDefined();
-    expect(screen.queryByText("Events")).toBeNull();
   });
 
-  it("renders each event's formatted type", () => {
+  it("renders events in reverse (most recent first)", () => {
     const events = [
-      makeEvent({ id: "evt-1", eventType: "RUN_REQUESTED" }),
-      makeEvent({ id: "evt-2", eventType: "PLAN_CREATED" }),
+      makeEvent("e1", "RUN_REQUESTED", "human", null, "2024-01-01T00:00:00Z"),
+      makeEvent("e2", "PLAN_CREATED", "ai", null, "2024-01-01T00:01:00Z"),
     ];
-
     render(<EventTimeline events={events} />);
-
-    expect(screen.getByText("Events")).toBeDefined();
-    expect(screen.getByText("Run Requested")).toBeDefined();
-    expect(screen.getByText("Plan Created")).toBeDefined();
+    const headings = screen.getAllByText(/Run Requested|Plan Created/);
+    expect(headings[0].textContent).toBe("Plan Created");
+    expect(headings[1].textContent).toBe("Run Requested");
   });
 
-  it("renders events in reverse-chronological (newest first) order", () => {
-    const events = [
-      makeEvent({ id: "evt-1", eventType: "RUN_REQUESTED" }),
-      makeEvent({ id: "evt-2", eventType: "PLAN_CREATED" }),
-      makeEvent({ id: "evt-3", eventType: "PLAN_APPROVED" }),
-    ];
-
-    render(<EventTimeline events={events} />);
-
-    const labels = screen
-      .getAllByText(/Run Requested|Plan Created|Plan Approved/)
-      .map((el) => el.textContent);
-
-    expect(labels).toEqual(["Plan Approved", "Plan Created", "Run Requested"]);
+  it("formats the event type by replacing underscores and title-casing", () => {
+    render(<EventTimeline events={[makeEvent("e1", "PLAN_REVIEW_APPROVED", "ai", null)]} />);
+    expect(screen.getByText("Plan Review Approved")).toBeDefined();
   });
 
-  it("renders a from/to transition when present in the payload", () => {
-    const events = [
-      makeEvent({
-        eventType: "RESET_TO_TODO",
-        payloadJson: { from: "Failed", to: "Todo" },
-      }),
-    ];
-
-    render(<EventTimeline events={events} />);
-
-    expect(screen.getByText("Failed")).toBeDefined();
-    expect(screen.getByText("Todo")).toBeDefined();
+  it("shows from -> to transition when payload has both fields", () => {
+    render(
+      <EventTimeline
+        events={[
+          makeEvent("e1", "PLAN_APPROVED", "human", { from: "PlanReview", to: "Implementing" }),
+        ]}
+      />,
+    );
+    expect(screen.getByText("PlanReview")).toBeDefined();
+    expect(screen.getByText("Implementing")).toBeDefined();
   });
 
-  it("renders rejection feedback text for PLAN_REJECTED events", () => {
-    const events = [
-      makeEvent({
-        eventType: "PLAN_REJECTED",
-        payloadJson: { feedback: "Please tighten the rollout plan." },
-      }),
-    ];
-
-    render(<EventTimeline events={events} />);
-
-    expect(screen.getByText("Please tighten the rollout plan.")).toBeDefined();
+  it("does not render a transition row when payload lacks from/to", () => {
+    const { container } = render(
+      <EventTimeline events={[makeEvent("e1", "BLOCKED", "ai", null)]} />,
+    );
+    expect(container.querySelector(".font-mono")).toBeNull();
   });
 
-  it("does not render feedback text for non-PLAN_REJECTED events even if present", () => {
-    const events = [
-      makeEvent({
-        eventType: "PLAN_CREATED",
-        payloadJson: { feedback: "should not show" },
-      }),
-    ];
+  it("shows feedback text for PLAN_REJECTED events with feedback", () => {
+    render(
+      <EventTimeline
+        events={[makeEvent("e1", "PLAN_REJECTED", "human", { feedback: "Needs more detail" })]}
+      />,
+    );
+    expect(screen.getByText("Needs more detail")).toBeDefined();
+  });
 
-    render(<EventTimeline events={events} />);
-
+  it("does not show feedback text for non-PLAN_REJECTED events even if payload has feedback", () => {
+    render(
+      <EventTimeline
+        events={[makeEvent("e1", "PLAN_APPROVED", "human", { feedback: "should not show" })]}
+      />,
+    );
     expect(screen.queryByText("should not show")).toBeNull();
   });
 
-  it("renders the event source", () => {
-    const events = [makeEvent({ source: "user-command" })];
-
-    render(<EventTimeline events={events} />);
-
-    expect(screen.getByText("user-command")).toBeDefined();
+  it("renders the event source label", () => {
+    render(<EventTimeline events={[makeEvent("e1", "RUN_REQUESTED", "human", null)]} />);
+    expect(screen.getByText("human")).toBeDefined();
   });
 
-  it("falls back to a title-cased label for an unrecognized event type", () => {
-    const events = [makeEvent({ eventType: "SOME_CUSTOM_EVENT" })];
+  it("renders a relative timestamp for each event", () => {
+    render(<EventTimeline events={[makeEvent("e1", "RUN_REQUESTED", "human", null)]} />);
+    expect(screen.getByText(/ago|just now/i)).toBeDefined();
+  });
 
-    render(<EventTimeline events={events} />);
-
-    expect(screen.getByText("Some Custom Event")).toBeDefined();
+  it("falls back to a default icon for an unrecognized event type", () => {
+    // Just verify it renders without crashing for an unmapped eventType.
+    render(<EventTimeline events={[makeEvent("e1", "SOME_UNKNOWN_EVENT", "system", null)]} />);
+    expect(screen.getByText("Some Unknown Event")).toBeDefined();
   });
 });

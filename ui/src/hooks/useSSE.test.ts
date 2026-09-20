@@ -2,95 +2,90 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { renderHook } from "@testing-library/react";
 import { useSSE, type DashboardEvent } from "./useSSE.ts";
 
-// jsdom does not implement EventSource, so we provide a minimal fake that
-// records instances and lets tests drive onmessage/onerror manually.
-class FakeEventSource {
-  static instances: FakeEventSource[] = [];
+class MockEventSource {
+  static instances: MockEventSource[] = [];
   url: string;
-  onmessage: ((ev: { data: string }) => void) | null = null;
-  onerror: ((ev: unknown) => void) | null = null;
-  close = vi.fn();
+  onmessage: ((msg: { data: string }) => void) | null = null;
+  onerror: (() => void) | null = null;
+  closed = false;
 
   constructor(url: string) {
     this.url = url;
-    FakeEventSource.instances.push(this);
+    MockEventSource.instances.push(this);
+  }
+
+  close() {
+    this.closed = true;
   }
 }
 
 describe("useSSE", () => {
   beforeEach(() => {
-    FakeEventSource.instances = [];
-    vi.stubGlobal("EventSource", FakeEventSource as unknown as typeof EventSource);
+    MockEventSource.instances = [];
+    vi.stubGlobal("EventSource", MockEventSource);
   });
 
   afterEach(() => {
     vi.unstubAllGlobals();
   });
 
-  it("connects to the events stream endpoint on mount", () => {
-    renderHook(() => useSSE(vi.fn()));
-
-    expect(FakeEventSource.instances).toHaveLength(1);
-    expect(FakeEventSource.instances[0]!.url).toBe("/api/events/stream");
+  it("opens a connection to /api/events/stream on mount", () => {
+    renderHook(() => useSSE(() => {}));
+    expect(MockEventSource.instances).toHaveLength(1);
+    expect(MockEventSource.instances[0]!.url).toBe("/api/events/stream");
   });
 
   it("invokes the callback with the parsed event on message", () => {
     const onEvent = vi.fn();
     renderHook(() => useSSE(onEvent));
 
-    const source = FakeEventSource.instances[0]!;
+    const source = MockEventSource.instances[0]!;
     const event: DashboardEvent = { type: "run:created", runId: "run-1" };
     source.onmessage!({ data: JSON.stringify(event) });
 
     expect(onEvent).toHaveBeenCalledWith(event);
   });
 
-  it("silently ignores malformed message payloads", () => {
+  it("silently ignores malformed event data instead of throwing", () => {
     const onEvent = vi.fn();
     renderHook(() => useSSE(onEvent));
 
-    const source = FakeEventSource.instances[0]!;
+    const source = MockEventSource.instances[0]!;
     expect(() => source.onmessage!({ data: "{not valid json" })).not.toThrow();
     expect(onEvent).not.toHaveBeenCalled();
   });
 
-  it("does not throw when the underlying source errors", () => {
-    renderHook(() => useSSE(vi.fn()));
-
-    const source = FakeEventSource.instances[0]!;
-    expect(() => source.onerror!(new Event("error"))).not.toThrow();
+  it("does not throw when onerror fires (auto-reconnect is left to the browser)", () => {
+    renderHook(() => useSSE(() => {}));
+    const source = MockEventSource.instances[0]!;
+    expect(() => source.onerror!()).not.toThrow();
   });
 
-  it("always calls the latest callback without reconnecting on re-render", () => {
+  it("closes the EventSource on unmount", () => {
+    const { unmount } = renderHook(() => useSSE(() => {}));
+    const source = MockEventSource.instances[0]!;
+    expect(source.closed).toBe(false);
+    unmount();
+    expect(source.closed).toBe(true);
+  });
+
+  it("always calls the latest callback even if it changes between renders, without reopening the connection", () => {
     const first = vi.fn();
     const second = vi.fn();
     const { rerender } = renderHook(({ cb }) => useSSE(cb), {
       initialProps: { cb: first },
     });
 
-    expect(FakeEventSource.instances).toHaveLength(1);
-
     rerender({ cb: second });
-    // Still only one EventSource — the effect that creates it has an empty
-    // dependency array, so it should not reconnect on every render.
-    expect(FakeEventSource.instances).toHaveLength(1);
 
-    const source = FakeEventSource.instances[0]!;
+    // Only one EventSource should have been created despite the callback change.
+    expect(MockEventSource.instances).toHaveLength(1);
+
+    const source = MockEventSource.instances[0]!;
     const event: DashboardEvent = { type: "run:created", runId: "run-2" };
     source.onmessage!({ data: JSON.stringify(event) });
 
     expect(first).not.toHaveBeenCalled();
     expect(second).toHaveBeenCalledWith(event);
-  });
-
-  it("closes the EventSource connection on unmount", () => {
-    const { unmount } = renderHook(() => useSSE(vi.fn()));
-
-    const source = FakeEventSource.instances[0]!;
-    expect(source.close).not.toHaveBeenCalled();
-
-    unmount();
-
-    expect(source.close).toHaveBeenCalledOnce();
   });
 });

@@ -1,29 +1,67 @@
 import { describe, it, expect, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
+import type { Run } from "@/api/client.ts";
+
+vi.mock("@/hooks/useSSE.ts", () => ({ useSSE: () => {} }));
+vi.mock("@/hooks/useRuns.ts", () => ({
+  useRuns: () => ({ runs: [], loading: false, error: null, refetch: vi.fn() }),
+}));
+vi.mock("@/hooks/useRun.ts", () => ({
+  useRun: () => ({
+    data: {
+      run: {
+        id: "run-1",
+        linearIssueId: "issue-1",
+        linearIssueIdentifier: "ENG-1",
+        linearIssueDescription: null,
+        linearIssueTitle: "Fix the bug",
+        linearIssueUrl: null,
+        repo: "org/repo",
+        branchName: null,
+        prNumber: null,
+        state: "Implementing",
+        planVersion: 1,
+        approvedPlanVersion: 1,
+        plannerRuntime: null,
+        executorRuntime: null,
+        reviewerRuntime: null,
+        remediationRuntime: null,
+        workingDirectory: "/tmp",
+        latestArtifactVersion: 1,
+        createdAt: "2024-01-01T00:00:00Z",
+        updatedAt: "2024-01-01T00:00:00Z",
+      } satisfies Run,
+      artifacts: [],
+      events: [],
+    },
+    loading: false,
+    error: null,
+    refetch: vi.fn(),
+  }),
+}));
+vi.mock("@/hooks/useRunSkills.ts", () => ({
+  useRunSkills: () => ({ data: null, loading: false, error: null, refetch: vi.fn() }),
+}));
+vi.mock("@/hooks/useActiveProcesses.ts", () => ({
+  useActiveProcesses: () => ({ processes: [], hasActive: false, output: "", activeProcessId: null }),
+}));
+
 import App from "./App.tsx";
 
-vi.mock("@/pages/DashboardPage.tsx", () => ({
-  DashboardPage: () => <div data-testid="dashboard-page" />,
-}));
-
-vi.mock("@/pages/RunDetailPage.tsx", () => ({
-  RunDetailPage: () => <div data-testid="run-detail-page" />,
-}));
-
 describe("App", () => {
-  it("renders the dashboard page at the root route", () => {
+  it("renders the DashboardPage at the root route", async () => {
     window.history.pushState({}, "", "/");
     render(<App />);
-
-    expect(screen.getByTestId("dashboard-page")).toBeDefined();
-    expect(screen.queryByTestId("run-detail-page")).toBeNull();
+    await waitFor(() => {
+      expect(screen.getByText("Agent Runs")).toBeDefined();
+    });
   });
 
-  it("renders the run detail page at /runs/:id", () => {
-    window.history.pushState({}, "", "/runs/run-123");
+  it("renders the RunDetailPage at /runs/:id", async () => {
+    window.history.pushState({}, "", "/runs/run-1");
     render(<App />);
-
-    expect(screen.getByTestId("run-detail-page")).toBeDefined();
-    expect(screen.queryByTestId("dashboard-page")).toBeNull();
+    await waitFor(() => {
+      expect(screen.getByText("Run Detail")).toBeDefined();
+    });
   });
 });

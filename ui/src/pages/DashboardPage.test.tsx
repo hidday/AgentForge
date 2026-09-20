@@ -1,33 +1,40 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { render, screen, act } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { MemoryRouter } from "react-router-dom";
 import type { Run } from "@/api/client.ts";
+import type { IngestSummary } from "@/components/LinearSyncDialog.tsx";
 
 vi.mock("@/hooks/useRuns.ts", () => ({
   useRuns: vi.fn(),
 }));
 
-vi.mock("@/components/RunsTable.tsx", () => ({
-  RunsTable: ({ runs }: { runs: Run[] }) => (
-    <div data-testid="runs-table">
-      {runs.map((r) => (
-        <div key={r.id} data-testid="run-row">
-          {r.id}:{r.state}
-        </div>
-      ))}
+vi.mock("@/components/LinearSyncDialog.tsx", () => ({
+  LinearSyncDialog: (props: {
+    open: boolean;
+    onClose: () => void;
+    onIngested: () => void;
+    onIngestComplete?: (s: IngestSummary) => void;
+  }) => (
+    <div data-testid="linear-sync-dialog" data-open={props.open}>
+      <button onClick={props.onClose}>mock-close-dialog</button>
+      <button onClick={props.onIngested}>mock-on-ingested</button>
+      <button onClick={() => props.onIngestComplete?.({ started: 2, skipped: 1 })}>
+        mock-ingest-complete
+      </button>
     </div>
   ),
 }));
 
-vi.mock("@/components/LinearSyncDialog.tsx", () => ({
-  LinearSyncDialog: ({ open }: { open: boolean }) =>
-    open ? <div data-testid="sync-dialog">sync dialog open</div> : null,
-}));
-
 vi.mock("@/components/IngestSummaryBanner.tsx", () => ({
-  IngestSummaryBanner: ({ started, skipped }: { started: number; skipped: number }) => (
-    <div data-testid="ingest-banner">
-      started {started}, skipped {skipped}
+  IngestSummaryBanner: (props: {
+    started: number;
+    skipped: number;
+    onDismiss: () => void;
+  }) => (
+    <div data-testid="ingest-summary-banner">
+      Started {props.started}, Skipped {props.skipped}
+      <button onClick={props.onDismiss}>mock-dismiss-banner</button>
     </div>
   ),
 }));
@@ -43,24 +50,32 @@ function makeRun(overrides: Partial<Run> = {}): Run {
     linearIssueId: "issue-1",
     linearIssueIdentifier: "ENG-1",
     linearIssueDescription: null,
-    linearIssueTitle: "Fix bug",
+    linearIssueTitle: "Fix the bug",
     linearIssueUrl: null,
     repo: "org/repo",
     branchName: null,
     prNumber: null,
-    state: "Todo",
+    state: "Implementing",
     planVersion: 1,
-    approvedPlanVersion: null,
+    approvedPlanVersion: 1,
     plannerRuntime: null,
     executorRuntime: null,
     reviewerRuntime: null,
     remediationRuntime: null,
-    workingDirectory: "/tmp/run-1",
-    latestArtifactVersion: 0,
-    createdAt: "2024-01-01T00:00:00.000Z",
-    updatedAt: "2024-01-01T00:00:00.000Z",
+    workingDirectory: "/tmp",
+    latestArtifactVersion: 1,
+    createdAt: "2024-01-01T00:00:00Z",
+    updatedAt: "2024-01-01T00:10:00Z",
     ...overrides,
   };
+}
+
+function renderPage() {
+  return render(
+    <MemoryRouter>
+      <DashboardPage />
+    </MemoryRouter>,
+  );
 }
 
 describe("DashboardPage", () => {
@@ -68,13 +83,14 @@ describe("DashboardPage", () => {
     vi.clearAllMocks();
   });
 
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("shows a loading indicator while runs are loading", () => {
     mockUseRuns.mockReturnValue({ runs: [], loading: true, error: null, refetch: vi.fn() });
-
-    render(<DashboardPage />);
-
-    expect(screen.getByText(/loading runs/i)).toBeDefined();
-    expect(screen.queryByTestId("runs-table")).toBeNull();
+    renderPage();
+    expect(screen.getByText(/Loading runs/i)).toBeDefined();
   });
 
   it("shows an error message when the hook reports an error", () => {
@@ -84,100 +100,126 @@ describe("DashboardPage", () => {
       error: "Failed to fetch runs",
       refetch: vi.fn(),
     });
-
-    render(<DashboardPage />);
-
+    renderPage();
     expect(screen.getByText("Failed to fetch runs")).toBeDefined();
-    expect(screen.queryByTestId("runs-table")).toBeNull();
   });
 
-  it("renders the runs table with all runs when loaded", () => {
-    const runs = [makeRun({ id: "run-1" }), makeRun({ id: "run-2", state: "Done" })];
-    mockUseRuns.mockReturnValue({ runs, loading: false, error: null, refetch: vi.fn() });
-
-    render(<DashboardPage />);
-
-    const rows = screen.getAllByTestId("run-row");
-    expect(rows).toHaveLength(2);
-    expect(screen.getByText("Total")).toBeDefined();
+  it("renders the runs table with fetched runs", () => {
+    mockUseRuns.mockReturnValue({
+      runs: [makeRun()],
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+    renderPage();
+    expect(screen.getByText("Fix the bug")).toBeDefined();
   });
 
-  it("renders an empty runs table (no crash) when there are zero runs", () => {
-    mockUseRuns.mockReturnValue({ runs: [], loading: false, error: null, refetch: vi.fn() });
+  it("computes and displays stats counts by category", () => {
+    mockUseRuns.mockReturnValue({
+      runs: [
+        makeRun({ id: "r1", state: "Implementing" }), // active
+        makeRun({ id: "r2", state: "AwaitingPlanApproval" }), // waiting
+        makeRun({ id: "r3", state: "AIBlocked" }), // blocked
+        makeRun({ id: "r4", state: "Done" }), // done
+      ],
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+    renderPage();
 
-    render(<DashboardPage />);
-
-    expect(screen.getByTestId("runs-table")).toBeDefined();
-    expect(screen.queryAllByTestId("run-row")).toHaveLength(0);
-  });
-
-  it("computes per-category stat counts from run states", () => {
-    const runs = [
-      makeRun({ id: "r1", state: "Planning" }), // active
-      makeRun({ id: "r2", state: "Implementing" }), // active
-      makeRun({ id: "r3", state: "AwaitingPlanApproval" }), // waiting
-      makeRun({ id: "r4", state: "AIBlocked" }), // blocked
-      makeRun({ id: "r5", state: "Done" }), // done
-    ];
-    mockUseRuns.mockReturnValue({ runs, loading: false, error: null, refetch: vi.fn() });
-
-    render(<DashboardPage />);
-
-    // Total count; active has 2 runs (Planning + Implementing), the other
-    // three categories (waiting/blocked/done) have exactly 1 run each.
-    expect(screen.getByText("5")).toBeDefined();
-    expect(screen.getByText("2")).toBeDefined();
-    expect(screen.getAllByText("1")).toHaveLength(3);
+    // "Active", "Blocked", and "Done" labels are shared with the filter
+    // buttons below, so scope assertions to the stats grid specifically.
+    const statsGrid = screen.getByText("Total").closest(".grid")!;
+    expect(statsGrid.textContent).toContain("4Total");
+    expect(statsGrid.textContent).toContain("1Active");
+    expect(statsGrid.textContent).toContain("1Awaiting");
+    expect(statsGrid.textContent).toContain("1Blocked");
+    expect(statsGrid.textContent).toContain("1Done");
   });
 
   it("filters the visible runs when a filter button is clicked", async () => {
-    const user = userEvent.setup();
-    const runs = [
-      makeRun({ id: "r1", state: "Planning" }), // active
-      makeRun({ id: "r2", state: "Done" }), // done
-    ];
-    mockUseRuns.mockReturnValue({ runs, loading: false, error: null, refetch: vi.fn() });
+    mockUseRuns.mockReturnValue({
+      runs: [
+        makeRun({ id: "r1", state: "Implementing", linearIssueTitle: "Active issue" }),
+        makeRun({ id: "r2", state: "Done", linearIssueTitle: "Done issue" }),
+      ],
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+    renderPage();
 
-    render(<DashboardPage />);
+    expect(screen.getByText("Active issue")).toBeDefined();
+    expect(screen.getByText("Done issue")).toBeDefined();
 
-    expect(screen.getAllByTestId("run-row")).toHaveLength(2);
+    await userEvent.click(screen.getByRole("button", { name: "Done" }));
 
-    await user.click(screen.getByRole("button", { name: "Done" }));
+    expect(screen.queryByText("Active issue")).toBeNull();
+    expect(screen.getByText("Done issue")).toBeDefined();
 
-    const rows = screen.getAllByTestId("run-row");
-    expect(rows).toHaveLength(1);
-    expect(rows[0]!.textContent).toContain("r2");
+    await userEvent.click(screen.getByRole("button", { name: "All" }));
+    expect(screen.getByText("Active issue")).toBeDefined();
   });
 
-  it("returns to showing all runs when the All filter is re-selected", async () => {
-    const user = userEvent.setup();
-    const runs = [makeRun({ id: "r1", state: "Planning" }), makeRun({ id: "r2", state: "Done" })];
-    mockUseRuns.mockReturnValue({ runs, loading: false, error: null, refetch: vi.fn() });
-
-    render(<DashboardPage />);
-    await user.click(screen.getByRole("button", { name: "Done" }));
-    expect(screen.getAllByTestId("run-row")).toHaveLength(1);
-
-    await user.click(screen.getByRole("button", { name: "All" }));
-    expect(screen.getAllByTestId("run-row")).toHaveLength(2);
-  });
-
-  it("opens the Linear sync dialog when 'Sync from Linear' is clicked", async () => {
-    const user = userEvent.setup();
+  it("opens the LinearSyncDialog when 'Sync from Linear' is clicked", async () => {
     mockUseRuns.mockReturnValue({ runs: [], loading: false, error: null, refetch: vi.fn() });
+    renderPage();
 
-    render(<DashboardPage />);
-
-    expect(screen.queryByTestId("sync-dialog")).toBeNull();
-    await user.click(screen.getByRole("button", { name: /sync from linear/i }));
-    expect(screen.getByTestId("sync-dialog")).toBeDefined();
+    expect(screen.getByTestId("linear-sync-dialog").dataset.open).toBe("false");
+    await userEvent.click(screen.getByRole("button", { name: /Sync from Linear/i }));
+    expect(screen.getByTestId("linear-sync-dialog").dataset.open).toBe("true");
   });
 
-  it("does not show the ingest summary banner until an ingest completes", () => {
+  it("closes the dialog when its onClose is invoked", async () => {
     mockUseRuns.mockReturnValue({ runs: [], loading: false, error: null, refetch: vi.fn() });
+    renderPage();
 
-    render(<DashboardPage />);
+    await userEvent.click(screen.getByRole("button", { name: /Sync from Linear/i }));
+    expect(screen.getByTestId("linear-sync-dialog").dataset.open).toBe("true");
 
-    expect(screen.queryByTestId("ingest-banner")).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "mock-close-dialog" }));
+    expect(screen.getByTestId("linear-sync-dialog").dataset.open).toBe("false");
+  });
+
+  it("calls refetch when the dialog reports onIngested", async () => {
+    const refetch = vi.fn();
+    mockUseRuns.mockReturnValue({ runs: [], loading: false, error: null, refetch });
+    renderPage();
+
+    await userEvent.click(screen.getByRole("button", { name: "mock-on-ingested" }));
+    expect(refetch).toHaveBeenCalledOnce();
+  });
+
+  it("shows the ingest summary banner after onIngestComplete, then auto-dismisses it", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    mockUseRuns.mockReturnValue({ runs: [], loading: false, error: null, refetch: vi.fn() });
+    renderPage();
+
+    expect(screen.queryByTestId("ingest-summary-banner")).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: "mock-ingest-complete" }));
+
+    expect(screen.getByTestId("ingest-summary-banner").textContent).toContain("Started 2");
+    expect(screen.getByTestId("ingest-summary-banner").textContent).toContain("Skipped 1");
+
+    await act(async () => {
+      vi.advanceTimersByTime(5000);
+    });
+
+    expect(screen.queryByTestId("ingest-summary-banner")).toBeNull();
+  });
+
+  it("dismisses the ingest summary banner immediately when its onDismiss fires", async () => {
+    mockUseRuns.mockReturnValue({ runs: [], loading: false, error: null, refetch: vi.fn() });
+    renderPage();
+
+    await userEvent.click(screen.getByRole("button", { name: "mock-ingest-complete" }));
+    expect(screen.getByTestId("ingest-summary-banner")).toBeDefined();
+
+    await userEvent.click(screen.getByRole("button", { name: "mock-dismiss-banner" }));
+    expect(screen.queryByTestId("ingest-summary-banner")).toBeNull();
   });
 });

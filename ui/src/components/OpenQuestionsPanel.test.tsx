@@ -245,6 +245,47 @@ describe("OpenQuestionsPanel", () => {
     expect(screen.queryByRole("textbox")).toBeNull();
   });
 
+  it("omits unanswered optional questions from the submitted payload", async () => {
+    mockApi.answerQuestions.mockResolvedValue({ ok: true, run: {} });
+
+    render(
+      <OpenQuestionsPanel
+        questions={[requiredQuestion, optionalQuestion]}
+        runId="run-1"
+      />,
+    );
+
+    const textareas = screen.getAllByRole("textbox") as HTMLTextAreaElement[];
+    await userEvent.type(textareas[0], "Only required answered");
+
+    await userEvent.click(screen.getByRole("button", { name: /submit answers/i }));
+
+    await waitFor(() => {
+      expect(mockApi.answerQuestions).toHaveBeenCalledWith("run-1", [
+        { questionId: "q1", answer: "Only required answered" },
+      ]);
+    });
+  });
+
+  it("falls back to a generic error message for a non-Error rejection", async () => {
+    mockApi.answerQuestions.mockRejectedValue("network exploded");
+
+    render(
+      <OpenQuestionsPanel
+        questions={[requiredQuestion]}
+        runId="run-1"
+      />,
+    );
+
+    const textarea = screen.getAllByRole("textbox")[0] as HTMLTextAreaElement;
+    await userEvent.type(textarea, "My answer");
+    await userEvent.click(screen.getByRole("button", { name: /submit answers/i }));
+
+    await waitFor(() => {
+      expect(screen.getByRole("alert").textContent).toBe("Failed to submit answers");
+    });
+  });
+
   it("returns null when questions array is empty", () => {
     const { container } = render(
       <OpenQuestionsPanel questions={[]} runId="run-1" />,

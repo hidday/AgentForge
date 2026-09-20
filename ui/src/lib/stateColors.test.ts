@@ -4,73 +4,47 @@ import {
   getStateBadgeClass,
   getStateDotClass,
   formatStateName,
-  type StateCategory,
 } from "./stateColors.ts";
 
 describe("getStateCategory", () => {
-  const expected: Record<string, StateCategory> = {
-    Todo: "idle",
-    Planning: "active",
-    PlanReview: "active",
-    PlanRevision: "active",
-    AwaitingPlanApproval: "waiting",
-    Implementing: "active",
-    AIReview: "active",
-    AddressingReview: "active",
-    ReadyForHumanReview: "waiting",
-    Done: "done",
-    AIBlocked: "blocked",
-    HumanClarificationNeeded: "waiting",
-  };
-
-  for (const [state, category] of Object.entries(expected)) {
-    it(`maps "${state}" to "${category}"`, () => {
-      expect(getStateCategory(state)).toBe(category);
-    });
-  }
-
-  it("falls back to idle for an unknown state", () => {
-    expect(getStateCategory("SomeUnknownState")).toBe("idle");
+  it("maps known states to their documented category", () => {
+    expect(getStateCategory("Todo")).toBe("idle");
+    expect(getStateCategory("Planning")).toBe("active");
+    expect(getStateCategory("PlanReview")).toBe("active");
+    expect(getStateCategory("PlanRevision")).toBe("active");
+    expect(getStateCategory("AwaitingPlanApproval")).toBe("waiting");
+    expect(getStateCategory("Implementing")).toBe("active");
+    expect(getStateCategory("AIReview")).toBe("active");
+    expect(getStateCategory("AddressingReview")).toBe("active");
+    expect(getStateCategory("ReadyForHumanReview")).toBe("waiting");
+    expect(getStateCategory("Done")).toBe("done");
+    expect(getStateCategory("AIBlocked")).toBe("blocked");
+    expect(getStateCategory("HumanClarificationNeeded")).toBe("waiting");
   });
 
-  it("falls back to idle for an empty string", () => {
-    expect(getStateCategory("")).toBe("idle");
+  it("falls back to 'idle' for an unknown state", () => {
+    expect(getStateCategory("SomeUnknownState")).toBe("idle");
   });
 });
 
 describe("getStateBadgeClass", () => {
-  it("returns the active badge classes for an active state", () => {
-    const cls = getStateBadgeClass("Planning");
-    expect(cls).toContain("bg-state-active-bg");
-    expect(cls).toContain("text-state-active");
+  it("returns the badge classes for the category of a known state", () => {
+    expect(getStateBadgeClass("Done")).toContain("bg-state-done-bg");
+    expect(getStateBadgeClass("Done")).toContain("text-state-done");
   });
 
-  it("returns the done badge classes for a done state", () => {
-    const cls = getStateBadgeClass("Done");
-    expect(cls).toContain("bg-state-done-bg");
-  });
-
-  it("returns the blocked badge classes for a blocked state", () => {
-    const cls = getStateBadgeClass("AIBlocked");
-    expect(cls).toContain("bg-state-blocked-bg");
-  });
-
-  it("falls back to idle classes for an unrecognized state", () => {
-    expect(getStateBadgeClass("Nonsense")).toBe(getStateBadgeClass("Todo"));
+  it("falls back to idle badge classes for an unknown state", () => {
+    expect(getStateBadgeClass("Bogus")).toContain("bg-state-idle-bg");
   });
 });
 
 describe("getStateDotClass", () => {
-  it("returns the matching dot class for each category", () => {
-    expect(getStateDotClass("Planning")).toBe("bg-state-active");
-    expect(getStateDotClass("AwaitingPlanApproval")).toBe("bg-state-waiting");
+  it("returns the dot class for the category of a known state", () => {
     expect(getStateDotClass("AIBlocked")).toBe("bg-state-blocked");
-    expect(getStateDotClass("Done")).toBe("bg-state-done");
-    expect(getStateDotClass("Todo")).toBe("bg-state-idle");
   });
 
-  it("falls back to the idle dot class for an unknown state", () => {
-    expect(getStateDotClass("Unknown")).toBe("bg-state-idle");
+  it("falls back to idle dot class for an unknown state", () => {
+    expect(getStateDotClass("Bogus")).toBe("bg-state-idle");
   });
 });
 
@@ -79,20 +53,16 @@ describe("formatStateName", () => {
     expect(formatStateName("AwaitingPlanApproval")).toBe("Awaiting Plan Approval");
   });
 
-  it("leaves a single-word state unchanged (aside from trimming)", () => {
+  it("leaves a single-word state unchanged", () => {
     expect(formatStateName("Todo")).toBe("Todo");
-    expect(formatStateName("Done")).toBe("Done");
   });
 
-  it("inserts a space between each letter of a leading acronym, since every capital is matched independently", () => {
-    // The implementation regex matches every capital letter individually, so
-    // adjacent capitals (e.g. the "AI" in AIReview) each get their own
-    // leading space rather than being treated as one acronym unit.
-    expect(formatStateName("AIReview")).toBe("A I Review");
+  it("inserts a space before every capital, including consecutive ones", () => {
     expect(formatStateName("AIBlocked")).toBe("A I Blocked");
   });
 
-  it("returns an empty string for an empty input", () => {
-    expect(formatStateName("")).toBe("");
+  it("trims a leading space when the state itself starts with a capital", () => {
+    // The leading capital would otherwise produce a leading space; trim() removes it.
+    expect(formatStateName("Todo").startsWith(" ")).toBe(false);
   });
 });

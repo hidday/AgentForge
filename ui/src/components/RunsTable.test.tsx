@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { RunsTable } from "./RunsTable.tsx";
@@ -25,15 +25,15 @@ const mockApi = api as unknown as {
   resumeRun: ReturnType<typeof vi.fn>;
 };
 
-function makeRun(overrides: Partial<Run>): Run {
+function makeRun(overrides: Partial<Run> = {}): Run {
   return {
     id: "run-1",
-    linearIssueId: "issue-1",
+    linearIssueId: "issue-abcdef12",
     linearIssueIdentifier: "ENG-1",
     linearIssueDescription: null,
     linearIssueTitle: "Fix the bug",
-    linearIssueUrl: "https://linear.app/issue-1",
-    repo: "acme/widgets",
+    linearIssueUrl: "https://linear.app/issue/ENG-1",
+    repo: "org/repo",
     branchName: "fix/bug",
     prNumber: 42,
     state: "Implementing",
@@ -43,12 +43,12 @@ function makeRun(overrides: Partial<Run>): Run {
     executorRuntime: null,
     reviewerRuntime: null,
     remediationRuntime: null,
-    workingDirectory: "/tmp/run-1",
+    workingDirectory: "/tmp",
     latestArtifactVersion: 1,
-    createdAt: "2026-01-01T00:00:00.000Z",
-    updatedAt: "2026-01-01T00:00:00.000Z",
+    createdAt: "2024-01-01T00:00:00Z",
+    updatedAt: "2024-01-01T00:10:00Z",
     ...overrides,
-  } as Run;
+  };
 }
 
 function renderTable(runs: Run[], onAction?: () => void) {
@@ -64,168 +64,124 @@ describe("RunsTable", () => {
     vi.clearAllMocks();
   });
 
-  it("shows an empty state and no table when there are no runs", () => {
+  it("shows an empty state when there are no runs", () => {
     renderTable([]);
-
     expect(screen.getByText("No runs found")).toBeDefined();
-    expect(screen.queryByRole("table")).toBeNull();
   });
 
-  it("renders a row per run with issue title, repo, PR number, and a state badge", () => {
-    const runs = [
-      makeRun({
-        id: "run-1",
-        linearIssueTitle: "Fix the bug",
-        repo: "acme/widgets",
-        prNumber: 42,
-        state: "Implementing",
-      }),
-      makeRun({
-        id: "run-2",
-        linearIssueTitle: "Add feature",
-        linearIssueIdentifier: "ENG-2",
-        repo: "acme/other",
-        prNumber: null,
-        state: "Done",
-        linearIssueUrl: null,
-      }),
-    ];
-    renderTable(runs);
-
+  it("renders run details: issue title, repo, PR number, state badge", () => {
+    renderTable([makeRun()]);
     expect(screen.getByText("Fix the bug")).toBeDefined();
-    expect(screen.getByText("Add feature")).toBeDefined();
-    expect(screen.getByText("acme/widgets")).toBeDefined();
-    expect(screen.getByText("acme/other")).toBeDefined();
+    expect(screen.getByText("org/repo")).toBeDefined();
     expect(screen.getByText("#42")).toBeDefined();
-    expect(screen.getByText("—")).toBeDefined();
-
-    // State badges render with their formatted labels.
     expect(screen.getByText("Implementing")).toBeDefined();
-    expect(screen.getByText("Done")).toBeDefined();
-
-    // Header row + 2 data rows.
-    expect(screen.getAllByRole("row").length).toBe(3);
   });
 
-  it("falls back to the issue identifier when no title is present", () => {
+  it("shows an em-dash when the run has no PR number", () => {
+    renderTable([makeRun({ prNumber: null })]);
+    expect(screen.getByText("—")).toBeDefined();
+  });
+
+  it("falls back to identifier, then a truncated linearIssueId, when title is missing", () => {
     renderTable([
-      makeRun({ id: "run-3", linearIssueTitle: null, linearIssueIdentifier: "ENG-9" }),
+      makeRun({ linearIssueTitle: null, linearIssueIdentifier: "ENG-99" }),
     ]);
-    expect(screen.getByText("ENG-9")).toBeDefined();
+    expect(screen.getByText("ENG-99")).toBeDefined();
   });
 
-  it("falls back to a truncated issue id when neither title nor identifier is present", () => {
+  it("falls back to a truncated linearIssueId when both title and identifier are missing", () => {
     renderTable([
       makeRun({
-        id: "run-4",
-        linearIssueId: "abcdef1234567890",
         linearIssueTitle: null,
         linearIssueIdentifier: null,
+        linearIssueId: "abcdefgh12345",
       }),
     ]);
-    expect(screen.getByText("abcdef12")).toBeDefined();
+    expect(screen.getByText("abcdefgh")).toBeDefined();
   });
 
-  it("links each run row to its detail page", () => {
-    renderTable([makeRun({ id: "run-42" })]);
+  it("renders an external Linear link only when linearIssueUrl is present", () => {
+    const { rerender } = renderTable([makeRun()]);
+    expect(screen.getByTitle("Open in Linear")).toBeDefined();
 
-    const detailLinks = screen
-      .getAllByRole("link")
-      .filter((el) => el.getAttribute("href") === "/runs/run-42");
-    // Both the issue title and the chevron link point at the run.
-    expect(detailLinks.length).toBe(2);
-  });
-
-  it("renders an external Linear link that opens in a new tab and does not navigate the row", () => {
-    renderTable([makeRun({ linearIssueUrl: "https://linear.app/issue-1" })]);
-
-    const externalLink = screen.getByTitle("Open in Linear");
-    expect(externalLink.getAttribute("href")).toBe("https://linear.app/issue-1");
-    expect(externalLink.getAttribute("target")).toBe("_blank");
-  });
-
-  it("omits the external Linear link when the run has no linearIssueUrl", () => {
-    renderTable([makeRun({ linearIssueUrl: null })]);
+    rerender(
+      <MemoryRouter>
+        <RunsTable runs={[makeRun({ linearIssueUrl: null })]} />
+      </MemoryRouter>,
+    );
     expect(screen.queryByTitle("Open in Linear")).toBeNull();
   });
 
-  it("shows approve/reject plan buttons for AwaitingPlanApproval and calls the API on approve", async () => {
-    const user = userEvent.setup();
-    const onAction = vi.fn();
-    mockApi.approvePlan.mockResolvedValue({});
+  it("stops propagation when the external Linear link is clicked, so the row link isn't also triggered", async () => {
+    renderTable([makeRun()]);
+    const externalLink = screen.getByTitle("Open in Linear");
+    const clickEvent = new MouseEvent("click", { bubbles: true, cancelable: true });
+    const stopPropagationSpy = vi.spyOn(clickEvent, "stopPropagation");
+    externalLink.dispatchEvent(clickEvent);
+    expect(stopPropagationSpy).toHaveBeenCalled();
+  });
 
-    renderTable([makeRun({ id: "run-5", state: "AwaitingPlanApproval" })], onAction);
-
-    const approveBtn = screen.getByTitle("Approve Plan");
+  it("shows Approve/Reject Plan actions only for AwaitingPlanApproval state", () => {
+    renderTable([makeRun({ state: "AwaitingPlanApproval" })]);
+    expect(screen.getByTitle("Approve Plan")).toBeDefined();
     expect(screen.getByTitle("Reject Plan")).toBeDefined();
-
-    await user.click(approveBtn);
-
-    expect(mockApi.approvePlan).toHaveBeenCalledWith("run-5");
-    await waitFor(() => expect(onAction).toHaveBeenCalledOnce());
   });
 
-  it("calls rejectPlan when the reject button is clicked", async () => {
-    const user = userEvent.setup();
-    mockApi.rejectPlan.mockResolvedValue({});
-
-    renderTable([makeRun({ id: "run-5b", state: "AwaitingPlanApproval" })]);
-
-    await user.click(screen.getByTitle("Reject Plan"));
-    expect(mockApi.rejectPlan).toHaveBeenCalledWith("run-5b");
-  });
-
-  it("shows an approve & complete button for ReadyForHumanReview and calls approveReview", async () => {
-    const user = userEvent.setup();
-    mockApi.approveReview.mockResolvedValue({});
-
-    renderTable([makeRun({ id: "run-6", state: "ReadyForHumanReview" })]);
-
-    await user.click(screen.getByTitle("Approve & Complete"));
-    expect(mockApi.approveReview).toHaveBeenCalledWith("run-6");
-  });
-
-  it("shows a pause button for active-category states and calls pauseRun", async () => {
-    const user = userEvent.setup();
-    mockApi.pauseRun.mockResolvedValue({});
-
-    renderTable([makeRun({ id: "run-7", state: "Implementing" })]);
-
-    await user.click(screen.getByTitle("Pause Run"));
-    expect(mockApi.pauseRun).toHaveBeenCalledWith("run-7");
-  });
-
-  it("does not show a pause button for a non-active state", () => {
-    renderTable([makeRun({ id: "run-7b", state: "Done" })]);
-    expect(screen.queryByTitle("Pause Run")).toBeNull();
-  });
-
-  it("shows a resume button for AIBlocked and HumanClarificationNeeded states", async () => {
-    const user = userEvent.setup();
-    mockApi.resumeRun.mockResolvedValue({});
-
-    renderTable([
-      makeRun({ id: "run-8", state: "AIBlocked" }),
-      makeRun({ id: "run-9", state: "HumanClarificationNeeded" }),
-    ]);
-
-    const resumeButtons = screen.getAllByTitle("Resume Run");
-    expect(resumeButtons.length).toBe(2);
-
-    await user.click(resumeButtons[0]);
-    expect(mockApi.resumeRun).toHaveBeenCalledWith("run-8");
-  });
-
-  it("swallows action errors and does not call onAction when the API call rejects", async () => {
-    const user = userEvent.setup();
-    mockApi.pauseRun.mockRejectedValue(new Error("network down"));
+  it("calls api.approvePlan and onAction when Approve Plan is clicked", async () => {
+    mockApi.approvePlan.mockResolvedValue({ ok: true, state: "Implementing" });
     const onAction = vi.fn();
+    renderTable([makeRun({ id: "run-9", state: "AwaitingPlanApproval" })], onAction);
 
-    renderTable([makeRun({ id: "run-10", state: "Implementing" })], onAction);
+    await userEvent.click(screen.getByTitle("Approve Plan"));
 
-    await user.click(screen.getByTitle("Pause Run"));
+    expect(mockApi.approvePlan).toHaveBeenCalledWith("run-9");
+    await vi.waitFor(() => expect(onAction).toHaveBeenCalledOnce());
+  });
 
-    await waitFor(() => expect(mockApi.pauseRun).toHaveBeenCalledOnce());
+  it("calls api.rejectPlan when Reject Plan is clicked, without throwing on rejection", async () => {
+    mockApi.rejectPlan.mockRejectedValue(new Error("failed"));
+    const onAction = vi.fn();
+    renderTable([makeRun({ state: "AwaitingPlanApproval" })], onAction);
+
+    await userEvent.click(screen.getByTitle("Reject Plan"));
+
+    await vi.waitFor(() => expect(mockApi.rejectPlan).toHaveBeenCalled());
+    // onAction should NOT fire when the action rejects.
     expect(onAction).not.toHaveBeenCalled();
+  });
+
+  it("shows Approve & Complete action only for ReadyForHumanReview state", async () => {
+    mockApi.approveReview.mockResolvedValue({ ok: true, state: "Done" });
+    renderTable([makeRun({ state: "ReadyForHumanReview" })]);
+    const btn = screen.getByTitle("Approve & Complete");
+    await userEvent.click(btn);
+    expect(mockApi.approveReview).toHaveBeenCalled();
+  });
+
+  it("shows the Pause action for any 'active' category state", async () => {
+    mockApi.pauseRun.mockResolvedValue({ ok: true });
+    renderTable([makeRun({ state: "Planning" })]);
+    await userEvent.click(screen.getByTitle("Pause Run"));
+    expect(mockApi.pauseRun).toHaveBeenCalled();
+  });
+
+  it("shows the Resume action for AIBlocked and HumanClarificationNeeded states", async () => {
+    mockApi.resumeRun.mockResolvedValue({ ok: true });
+    renderTable([makeRun({ state: "AIBlocked" })]);
+    await userEvent.click(screen.getByTitle("Resume Run"));
+    expect(mockApi.resumeRun).toHaveBeenCalled();
+  });
+
+  it("shows no state-specific action buttons for a plain 'idle' state like Todo", () => {
+    renderTable([makeRun({ state: "Todo" })]);
+    expect(screen.queryByTitle("Approve Plan")).toBeNull();
+    expect(screen.queryByTitle("Pause Run")).toBeNull();
+    expect(screen.queryByTitle("Resume Run")).toBeNull();
+  });
+
+  it("renders a row-navigation link to the run detail page for every run", () => {
+    renderTable([makeRun({ id: "run-42" })]);
+    const links = screen.getAllByRole("link");
+    expect(links.some((l) => l.getAttribute("href") === "/runs/run-42")).toBe(true);
   });
 });

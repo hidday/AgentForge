@@ -1,96 +1,98 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { ExecutionReportView } from "./ExecutionReportView.tsx";
 
-vi.mock("@/components/Markdown.tsx", () => ({
-  Markdown: ({ children }: { children: string }) => (
-    <div data-testid="markdown-content">{children}</div>
-  ),
-}));
-
 describe("ExecutionReportView", () => {
-  it("renders a fully populated report", () => {
-    const report = {
-      executionVersion: 3,
-      summary: "Implemented the feature end to end.",
-      filesChanged: ["src/foo.ts", "src/bar.ts"],
-      checks: {
-        lint: { status: "pass", details: "0 problems" },
-        typecheck: { status: "fail", details: "2 errors" },
-        tests: { status: "skipped", details: "not run" },
-      },
-      notes: ["Watch out for the retry logic.", "Follow-up needed on caching."],
-      prDraftCreated: true,
-      score: 0.85,
-      scoreRationale: "Solid coverage of the acceptance criteria.",
-    };
-
-    render(<ExecutionReportView report={report} />);
-
-    expect(screen.getByText("v3")).toBeDefined();
-    expect(screen.getByText("Score: 85%")).toBeDefined();
-    expect(
-      screen.getByText("Solid coverage of the acceptance criteria."),
-    ).toBeDefined();
-    const markdownBlocks = screen.getAllByTestId("markdown-content");
-    expect(markdownBlocks.some((el) => el.textContent === "Implemented the feature end to end.")).toBe(true);
-
-    expect(screen.getByText("Checks")).toBeDefined();
-    expect(screen.getByText("lint")).toBeDefined();
-    expect(screen.getByText("0 problems")).toBeDefined();
-    expect(screen.getByText("typecheck")).toBeDefined();
-    expect(screen.getByText("2 errors")).toBeDefined();
-    expect(screen.getByText("tests")).toBeDefined();
-    expect(screen.getByText("not run")).toBeDefined();
-
-    expect(screen.getByText("Files Changed (2)")).toBeDefined();
-    expect(screen.getByText("src/foo.ts")).toBeDefined();
-    expect(screen.getByText("src/bar.ts")).toBeDefined();
-
-    expect(screen.getByText("Notes")).toBeDefined();
-    expect(screen.getByText("Watch out for the retry logic.")).toBeDefined();
-    expect(screen.getByText("Follow-up needed on caching.")).toBeDefined();
-
-    expect(screen.getByText(/PR Draft: Created/)).toBeDefined();
-  });
-
-  it("defaults to version 1 and omits optional sections when the report is minimal", () => {
+  it("defaults executionVersion to 1 and renders no optional sections for an empty report", () => {
     render(<ExecutionReportView report={{}} />);
-
     expect(screen.getByText("v1")).toBeDefined();
-    expect(screen.queryByText(/Score:/)).toBeNull();
     expect(screen.queryByText("Checks")).toBeNull();
     expect(screen.queryByText(/Files Changed/)).toBeNull();
     expect(screen.queryByText("Notes")).toBeNull();
-    expect(screen.queryByText(/PR Draft:/)).toBeNull();
-    expect(screen.queryByTestId("markdown-content")).toBeNull();
+    expect(screen.queryByText(/PR Draft/)).toBeNull();
   });
 
-  it("shows 'PR Draft: Not created' when prDraftCreated is false", () => {
-    render(<ExecutionReportView report={{ prDraftCreated: false }} />);
-
-    expect(screen.getByText(/PR Draft: Not created/)).toBeDefined();
+  it("renders a custom executionVersion", () => {
+    render(<ExecutionReportView report={{ executionVersion: 2 }} />);
+    expect(screen.getByText("v2")).toBeDefined();
   });
 
-  it("does not render the score rationale block when score is missing even if rationale text is present", () => {
-    render(
+  it("renders the score bar and percentage, colored by threshold", () => {
+    const { container } = render(<ExecutionReportView report={{ score: 0.85 }} />);
+    expect(screen.getByText("Score: 85%")).toBeDefined();
+    expect(container.querySelector(".bg-state-done")).not.toBeNull();
+  });
+
+  it("renders a medium score in the waiting color", () => {
+    const { container } = render(<ExecutionReportView report={{ score: 0.5 }} />);
+    expect(container.querySelector(".bg-state-waiting")).not.toBeNull();
+  });
+
+  it("renders a low score in the blocked color", () => {
+    const { container } = render(<ExecutionReportView report={{ score: 0.2 }} />);
+    expect(container.querySelector(".bg-state-blocked")).not.toBeNull();
+  });
+
+  it("shows score rationale only when a score is also present", () => {
+    render(<ExecutionReportView report={{ scoreRationale: "orphan rationale" }} />);
+    expect(screen.queryByText("orphan rationale")).toBeNull();
+
+    render(<ExecutionReportView report={{ score: 0.6, scoreRationale: "solid coverage" }} />);
+    expect(screen.getByText("solid coverage")).toBeDefined();
+  });
+
+  it("renders the summary as markdown", () => {
+    render(<ExecutionReportView report={{ summary: "Implemented the **feature**." }} />);
+    expect(screen.getByText(/feature/)).toBeDefined();
+  });
+
+  it("renders checks with pass/fail/other icons and status-based styling", () => {
+    const { container } = render(
       <ExecutionReportView
-        report={{ scoreRationale: "orphaned rationale with no score" }}
+        report={{
+          checks: {
+            lint: { status: "pass", details: "No issues" },
+            typecheck: { status: "fail", details: "2 errors" },
+            build: { status: "skipped", details: "Not run" },
+          },
+        }}
       />,
     );
-
-    expect(screen.queryByText("orphaned rationale with no score")).toBeNull();
+    expect(screen.getByText("Checks")).toBeDefined();
+    expect(screen.getByText("lint")).toBeDefined();
+    expect(screen.getByText("No issues")).toBeDefined();
+    expect(screen.getByText("typecheck")).toBeDefined();
+    expect(screen.getByText("2 errors")).toBeDefined();
+    expect(screen.getByText("build")).toBeDefined();
+    expect(container.querySelector(".border-state-done\\/30")).not.toBeNull();
+    expect(container.querySelector(".border-state-blocked\\/30")).not.toBeNull();
   });
 
-  it("colors a low score as blocked and a mid score as waiting", () => {
-    const { container: lowContainer } = render(
-      <ExecutionReportView report={{ score: 0.2 }} />,
+  it("renders the files changed list with count", () => {
+    render(
+      <ExecutionReportView
+        report={{ filesChanged: ["src/a.ts", "src/b.ts"] }}
+      />,
     );
-    expect(lowContainer.querySelector(".bg-state-blocked")).not.toBeNull();
+    expect(screen.getByText("Files Changed (2)")).toBeDefined();
+    expect(screen.getByText("src/a.ts")).toBeDefined();
+    expect(screen.getByText("src/b.ts")).toBeDefined();
+  });
 
-    const { container: midContainer } = render(
-      <ExecutionReportView report={{ score: 0.5 }} />,
-    );
-    expect(midContainer.querySelector(".bg-state-waiting")).not.toBeNull();
+  it("renders notes as a bulleted markdown list", () => {
+    render(<ExecutionReportView report={{ notes: ["Follow-up needed for X"] }} />);
+    expect(screen.getByText("Notes")).toBeDefined();
+    expect(screen.getByText("Follow-up needed for X")).toBeDefined();
+  });
+
+  it("shows 'Created' when prDraftCreated is true", () => {
+    render(<ExecutionReportView report={{ prDraftCreated: true }} />);
+    expect(screen.getByText(/PR Draft:/)).toBeDefined();
+    expect(screen.getByText(/Created/)).toBeDefined();
+  });
+
+  it("shows 'Not created' when prDraftCreated is false", () => {
+    render(<ExecutionReportView report={{ prDraftCreated: false }} />);
+    expect(screen.getByText(/Not created/)).toBeDefined();
   });
 });

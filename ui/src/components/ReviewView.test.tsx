@@ -3,92 +3,118 @@ import { render, screen } from "@testing-library/react";
 import { ReviewView } from "./ReviewView.tsx";
 
 describe("ReviewView", () => {
-  it("renders an approved verdict with done styling and no findings section", () => {
-    render(
-      <ReviewView
-        review={{
-          overallVerdict: "approved",
-          summary: "Looks solid.",
-          findings: [],
-        }}
-      />,
-    );
-
-    const badge = screen.getByText("Approved");
-    expect(badge.className).toContain("state-done");
-    expect(screen.getByText("Looks solid.")).toBeDefined();
-    expect(screen.queryByText(/^Findings/)).toBeNull();
+  it("renders nothing extra when review is an empty object", () => {
+    const { container } = render(<ReviewView review={{}} />);
+    // Root div renders but with no children content.
+    expect(container.textContent).toBe("");
   });
 
-  it("renders a changes-requested verdict with blocked styling and findings", () => {
+  it("shows 'Approved' badge with done styling when verdict is approved", () => {
+    render(<ReviewView review={{ overallVerdict: "approved" }} />);
+    const badge = screen.getByText("Approved");
+    expect(badge.className).toContain("bg-state-done-bg");
+  });
+
+  it("shows 'Changes Requested' badge with blocked styling for any non-approved verdict", () => {
+    render(<ReviewView review={{ overallVerdict: "changes_requested" }} />);
+    const badge = screen.getByText("Changes Requested");
+    expect(badge.className).toContain("bg-state-blocked-bg");
+  });
+
+  it("renders the summary text when present", () => {
+    render(<ReviewView review={{ summary: "Looks solid overall." }} />);
+    expect(screen.getByText("Looks solid overall.")).toBeDefined();
+  });
+
+  it("renders findings with severity badge, title, and details", () => {
     render(
       <ReviewView
         review={{
-          overallVerdict: "changes_requested",
-          summary: "Needs work.",
           findings: [
             {
               id: "f1",
               severity: "blocker",
-              file: "src/foo.ts",
-              lineHint: 42,
-              title: "Missing null check",
-              details: "This can throw at runtime.",
-            },
-            {
-              id: "f2",
-              severity: "nit",
-              affectedStepId: "step-2",
-              title: "Style nit",
-              details: "Rename variable.",
+              title: "SQL injection risk",
+              details: "User input is concatenated directly into the query.",
             },
           ],
         }}
       />,
     );
-
-    const badge = screen.getByText("Changes Requested");
-    expect(badge.className).toContain("state-blocked");
-    expect(screen.getByText("Needs work.")).toBeDefined();
-
-    expect(screen.getByText("Findings (2)")).toBeDefined();
-    expect(screen.getByText("Missing null check")).toBeDefined();
-    expect(screen.getByText("src/foo.ts:42")).toBeDefined();
-    expect(screen.getByText("This can throw at runtime.")).toBeDefined();
-
-    expect(screen.getByText("Style nit")).toBeDefined();
-    expect(screen.getByText("Step: step-2")).toBeDefined();
-
+    expect(screen.getByText("Findings (1)")).toBeDefined();
     expect(screen.getByText("blocker")).toBeDefined();
-    expect(screen.getByText("nit")).toBeDefined();
+    expect(screen.getByText("SQL injection risk")).toBeDefined();
+    expect(
+      screen.getByText("User input is concatenated directly into the query."),
+    ).toBeDefined();
   });
 
-  it("falls back to nit severity styling for an unrecognized severity value", () => {
+  it("falls back to the 'nit' severity style for an unrecognized severity value", () => {
+    render(
+      <ReviewView
+        review={{
+          findings: [
+            { id: "f1", severity: "weird-severity", title: "T", details: "D" },
+          ],
+        }}
+      />,
+    );
+    const badge = screen.getByText("weird-severity");
+    expect(badge.className).toContain("severity-nit");
+  });
+
+  it("shows the file path and line hint when present", () => {
     render(
       <ReviewView
         review={{
           findings: [
             {
               id: "f1",
-              severity: "mystery",
-              title: "Odd finding",
-              details: "n/a",
+              severity: "important",
+              title: "T",
+              details: "D",
+              file: "src/foo.ts",
+              lineHint: 42,
             },
           ],
         }}
       />,
     );
-
-    const severityBadge = screen.getByText("mystery");
-    expect(severityBadge.className).toContain("severity-nit");
+    expect(screen.getByText("src/foo.ts:42")).toBeDefined();
   });
 
-  it("renders nothing meaningful for an empty/missing review", () => {
-    const { container } = render(<ReviewView review={{}} />);
+  it("shows the affected step id when present", () => {
+    render(
+      <ReviewView
+        review={{
+          findings: [
+            {
+              id: "f1",
+              severity: "suggestion",
+              title: "T",
+              details: "D",
+              affectedStepId: "step-3",
+            },
+          ],
+        }}
+      />,
+    );
+    expect(screen.getByText("Step: step-3")).toBeDefined();
+  });
 
-    expect(screen.queryByText(/Verdict/)).toBeNull();
-    expect(screen.queryByText(/^Findings/)).toBeNull();
-    expect(container.querySelector(".space-y-4")).not.toBeNull();
-    expect(container.textContent).toBe("");
+  it("does not render the file/step metadata row when neither is present", () => {
+    const { container } = render(
+      <ReviewView
+        review={{
+          findings: [{ id: "f1", severity: "nit", title: "T", details: "D" }],
+        }}
+      />,
+    );
+    expect(container.querySelector(".font-mono.text-text-muted")).toBeNull();
+  });
+
+  it("does not render the findings section when findings is empty or absent", () => {
+    render(<ReviewView review={{ summary: "ok" }} />);
+    expect(screen.queryByText(/Findings/)).toBeNull();
   });
 });
