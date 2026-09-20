@@ -151,3 +151,28 @@ describe("PlanReviserAgent.run() relatedContext rendering", () => {
     expect(prompt).not.toContain("{{relatedContextSection}}");
   });
 });
+
+describe("PlanReviserAgent.run() operator note rendering", () => {
+  it("injects the Operator Note section into the user prompt when provided", async () => {
+    const { agent, getPrompt } = buildPlanReviserAgent();
+
+    await agent.run(makePlan(), makePlanReview(), makeTaskBundle(), "run-1", {
+      operatorNote: "Prioritize the security finding.",
+    });
+
+    const prompt = getPrompt();
+    expect(prompt).toContain("## Operator Note");
+    expect(prompt).toContain("Prioritize the security finding.");
+    expect(prompt).toContain("do not drop the findings");
+  });
+
+  it("omits the Operator Note section from the user prompt when not provided", async () => {
+    const { agent, getPrompt } = buildPlanReviserAgent();
+
+    await agent.run(makePlan(), makePlanReview(), makeTaskBundle(), "run-1");
+
+    const prompt = getPrompt();
+    expect(prompt).not.toContain("## Operator Note");
+    expect(prompt).not.toContain("{{operatorNoteSection}}");
+  });
+});

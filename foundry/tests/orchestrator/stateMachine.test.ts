@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { transition, getValidEvents } from "../../src/orchestrator/stateMachine.js";
 import { RunState } from "../../src/domain/runState.js";
 import { RunEvent } from "../../src/domain/runEvent.js";
+import { StateTransitionError } from "../../src/utils/errors.js";
 
 describe("stateMachine - clarification transitions", () => {
   it("HumanClarificationNeeded + CLARIFICATION_PROVIDED → Planning", () => {
@@ -39,5 +40,42 @@ describe("stateMachine - clarification transitions", () => {
     const validEvents = getValidEvents(RunState.Failed);
     expect(validEvents).toHaveLength(1);
     expect(validEvents).toContain(RunEvent.RESET_TO_TODO);
+  });
+});
+
+describe("stateMachine - invalid transition guards", () => {
+  it("throws StateTransitionError when the current state has no entries in the transition table at all", () => {
+    // RunState.Done is a terminal state that is never registered as a "from"
+    // state, so the table lookup itself misses (covers the `!stateMap` guard).
+    expect(() => transition(RunState.Done, RunEvent.RESET_TO_TODO)).toThrow(StateTransitionError);
+    try {
+      transition(RunState.Done, RunEvent.RESET_TO_TODO);
+      expect.unreachable("should have thrown");
+    } catch (err) {
+      expect(err).toBeInstanceOf(StateTransitionError);
+      expect((err as StateTransitionError).fromState).toBe(RunState.Done);
+      expect((err as StateTransitionError).event).toBe(RunEvent.RESET_TO_TODO);
+      expect((err as StateTransitionError).message).toContain(RunState.Done);
+      expect((err as StateTransitionError).message).toContain(RunEvent.RESET_TO_TODO);
+    }
+  });
+
+  it("throws StateTransitionError when the state exists in the table but the event is not valid for it", () => {
+    // RunState.Todo IS registered (has RUN_REQUESTED/BLOCKED/etc.), but
+    // PLAN_APPROVED is not one of its valid events -- covers the
+    // `nextState === undefined` guard distinct from the missing-stateMap case.
+    expect(() => transition(RunState.Todo, RunEvent.PLAN_APPROVED)).toThrow(StateTransitionError);
+    try {
+      transition(RunState.Todo, RunEvent.PLAN_APPROVED);
+      expect.unreachable("should have thrown");
+    } catch (err) {
+      expect(err).toBeInstanceOf(StateTransitionError);
+      expect((err as StateTransitionError).fromState).toBe(RunState.Todo);
+      expect((err as StateTransitionError).event).toBe(RunEvent.PLAN_APPROVED);
+    }
+  });
+
+  it("getValidEvents returns an empty array for a state absent from the transition table", () => {
+    expect(getValidEvents(RunState.Done)).toEqual([]);
   });
 });
