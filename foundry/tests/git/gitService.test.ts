@@ -431,6 +431,29 @@ describe("GitService", () => {
       );
       expect(buildWorktreeDirName("abcdefgh", "")).toBe("run-abcdefgh");
     });
+
+    it("stops adding slug parts once the cumulative length would exceed 30 characters", () => {
+      const word1 = "a".repeat(20);
+      const word2 = "b".repeat(15);
+      // word1 alone fits (20 chars); word1 + "-" + word2 would be 36 chars, over
+      // the 30-char cap, so shortenSlug should stop after word1.
+      expect(buildWorktreeDirName("abcdefgh", `pry-1-${word1}-${word2}`)).toBe(
+        `run-abcdefgh-pry-1-${word1}`,
+      );
+    });
+  });
+
+  describe("GitError", () => {
+    it("stringifies a non-Error cause via String() instead of reading .message", () => {
+      const err = new GitError("test-op", "/tmp/somewhere", "a plain string reason");
+      expect(err.name).toBe("GitError");
+      expect(err.message).toBe("git test-op failed in /tmp/somewhere: a plain string reason");
+    });
+
+    it("uses an Error cause's message directly", () => {
+      const err = new GitError("test-op", "/tmp/somewhere", new Error("underlying failure"));
+      expect(err.message).toBe("git test-op failed in /tmp/somewhere: underlying failure");
+    });
   });
 
   describe("resolveMainRepoPath", () => {
