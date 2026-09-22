@@ -192,6 +192,44 @@ describe("RunDetailPage", () => {
     expect(screen.getByTestId("workflow-stepper").textContent).toBe("Implementing");
   });
 
+  it("falls back to the Linear issue identifier when no issue title is set", () => {
+    mockUseRun.mockReturnValue({
+      data: {
+        run: makeRun({ linearIssueTitle: null, linearIssueIdentifier: "ENG-42" }),
+        artifacts: [],
+        events: [],
+      },
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+
+    renderAt("run-1");
+
+    expect(screen.getByText("ENG-42")).toBeDefined();
+  });
+
+  it("falls back to a slice of the raw Linear issue id when neither title nor identifier is set", () => {
+    mockUseRun.mockReturnValue({
+      data: {
+        run: makeRun({
+          linearIssueTitle: null,
+          linearIssueIdentifier: null,
+          linearIssueId: "abcdefgh-1234",
+        }),
+        artifacts: [],
+        events: [],
+      },
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+
+    renderAt("run-1");
+
+    expect(screen.getByText("abcdefgh")).toBeDefined();
+  });
+
   it("does not render optional link buttons when branchName/prNumber/workingDirectory link fields are absent", () => {
     mockUseRun.mockReturnValue({
       data: { run: makeRun(), artifacts: [], events: [] },

@@ -116,6 +116,23 @@ describe("RunsTable", () => {
     expect(screen.getByTitle("Open in Linear")).toBeDefined();
   });
 
+  it("stops the click on the external Linear link from bubbling up to the row", () => {
+    const { container } = renderTable([makeRun()]);
+
+    const row = container.querySelector("tr") as HTMLTableRowElement;
+    const rowClickSpy = vi.fn();
+    row.addEventListener("click", rowClickSpy);
+
+    const linearLink = screen.getByTitle("Open in Linear");
+    linearLink.dispatchEvent(
+      new MouseEvent("click", { bubbles: true, cancelable: true }),
+    );
+
+    // stopPropagation() on the link's own onClick handler must prevent the
+    // click from reaching the row-level listener.
+    expect(rowClickSpy).not.toHaveBeenCalled();
+  });
+
   it("omits the external Linear link when linearIssueUrl is not set", () => {
     renderTable([makeRun({ linearIssueUrl: null })]);
     expect(screen.queryByTitle("Open in Linear")).toBeNull();

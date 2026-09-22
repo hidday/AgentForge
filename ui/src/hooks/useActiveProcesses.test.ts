@@ -108,6 +108,33 @@ describe("useActiveProcesses", () => {
     });
   });
 
+  it("does not apply output after unmount when the inner getProcessOutput resolves post-cancel", async () => {
+    const proc = makeProcess("p1");
+    mockApi.getActiveProcesses.mockResolvedValue({ processes: [proc] });
+
+    let resolveOutput!: (v: { processId: string; output: string }) => void;
+    mockApi.getProcessOutput.mockReturnValue(
+      new Promise((res) => {
+        resolveOutput = res;
+      }),
+    );
+
+    const { result, unmount } = renderHook(() => useActiveProcesses("r1"));
+
+    // Wait until the processes list has loaded and getProcessOutput has been
+    // kicked off, i.e. we're inside the nested await.
+    await waitFor(() => expect(result.current.processes).toEqual([proc]));
+    expect(mockApi.getProcessOutput).toHaveBeenCalledWith("p1");
+
+    unmount();
+
+    // Resolving now must not throw or attempt to update state on the
+    // unmounted component — this exercises the inner `if (cancelled) return;`.
+    await act(async () => {
+      resolveOutput({ processId: "p1", output: "late output" });
+    });
+  });
+
   it("adds a process on a process:started SSE event and resets output", async () => {
     mockApi.getActiveProcesses.mockResolvedValue({ processes: [] });
     const { result } = renderHook(() => useActiveProcesses("r1"));

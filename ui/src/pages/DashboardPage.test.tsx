@@ -156,6 +156,34 @@ describe("DashboardPage", () => {
     expect(within(doneCard as HTMLElement).getByText("1")).toBeDefined();
   });
 
+  it("falls back to the 'idle' category (uncounted in the stat cards) for an unrecognized run state", () => {
+    mockUseRuns.mockReturnValue({
+      runs: [
+        makeRun({ id: "r1", linearIssueTitle: "Known state", state: "Implementing" }),
+        makeRun({ id: "r2", linearIssueTitle: "Mystery state", state: "SomeFutureState" }),
+      ],
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+
+    renderPage();
+
+    // Total counts both runs...
+    const totalCard = screen.getByText("Total").closest(".rounded-lg");
+    expect(within(totalCard as HTMLElement).getByText("2")).toBeDefined();
+    // ...but the unrecognized state doesn't bump Active/Awaiting/Blocked/Done,
+    // since it falls back to the uncounted "idle" category.
+    const activeCard = screen.getAllByText("Active")[0]!.closest(".rounded-lg");
+    expect(within(activeCard as HTMLElement).getByText("1")).toBeDefined();
+    const doneCard = screen.getAllByText("Done")[0]!.closest(".rounded-lg");
+    expect(within(doneCard as HTMLElement).getByText("0")).toBeDefined();
+
+    // Both rows still render in the table regardless of category.
+    expect(screen.getByText("Known state")).toBeDefined();
+    expect(screen.getByText("Mystery state")).toBeDefined();
+  });
+
   it("filters the runs table when a category filter button is clicked", async () => {
     const user = userEvent.setup();
     mockUseRuns.mockReturnValue({
