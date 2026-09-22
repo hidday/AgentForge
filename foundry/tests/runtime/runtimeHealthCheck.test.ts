@@ -283,6 +283,23 @@ describe("RuntimeHealthCheck.runPreflight", () => {
     expect(result.authCheck.error).toContain("not logged in");
   });
 
+  it("falls back to stdout in the exitCodeOnly failure message when stderr is empty", async () => {
+    const processRunner = {
+      execute: vi.fn().mockImplementation((opts: { args: string[] }) => {
+        if (opts.args.includes("--version")) return Promise.resolve(ok({ stdout: "v1" }));
+        return Promise.resolve(ok({ exitCode: 2, stderr: "", stdout: "cursor: not authenticated" }));
+      }),
+    };
+    const check = new RuntimeHealthCheck(processRunner as never, configs, makeMockLogger() as never);
+    const probeRuntime = (check as unknown as {
+      probeRuntime: (r: "cursor") => Promise<{ authCheck: { ok: boolean; error?: string } }>;
+    }).probeRuntime.bind(check);
+
+    const result = await probeRuntime("cursor");
+    expect(result.authCheck.ok).toBe(false);
+    expect(result.authCheck.error).toContain("cursor: not authenticated");
+  });
+
   it("passes the exitCodeOnly auth check (cursor) on exit code 0", async () => {
     const processRunner = {
       execute: vi.fn().mockImplementation((opts: { args: string[] }) => {

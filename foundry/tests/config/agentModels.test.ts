@@ -1,6 +1,7 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 import { resolveAgentModel, tierForStage } from "../../src/config/agentModels.js";
 import type { Env } from "../../src/config/env.js";
+import type { Stage } from "../../src/schemas/cliProtocol.js";
 
 const env = {
   CLAUDE_CODE_MODEL: "claude-fable-5",
@@ -30,5 +31,22 @@ describe("agentModels", () => {
     expect(tierForStage("reviewer")).toBe("review");
     expect(resolveAgentModel("plan-reviewer", env)).toBe("gpt-5.6-sol");
     expect(resolveAgentModel("reviewer", env)).toBe("gpt-5.6-sol");
+  });
+
+  describe("unknown tier (defensive exhaustiveness check)", () => {
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    it("throws a descriptive error when a stage maps to an unrecognized tier", () => {
+      // STAGE_TIERS covers every known Stage; a stage outside that set makes
+      // tierForStage() return undefined, which resolveAgentModel()'s switch
+      // cannot match, exercising the `default` exhaustiveness-guard branch.
+      const bogusStage = "not-a-real-stage" as Stage;
+      expect(tierForStage(bogusStage)).toBeUndefined();
+      expect(() => resolveAgentModel(bogusStage, env)).toThrow(
+        "Unknown agent model tier: undefined",
+      );
+    });
   });
 });

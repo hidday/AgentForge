@@ -150,6 +150,36 @@ describe("POST /api/runs/:id/actions/approve-plan", () => {
     await flush();
     // No unhandled rejection — the route's .catch() swallowed and logged it.
   });
+
+  it("logs but does not fail the request when the background execution rejects with a non-Error", async () => {
+    const run = makeRun(RunState.Implementing);
+    const { app, mockOrchestrator } = await buildApp();
+    mockOrchestrator.approvePlan.mockResolvedValue(run);
+    mockOrchestrator.runExecution.mockRejectedValue("execution boom (string)");
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/actions/approve-plan",
+      payload: {},
+    });
+
+    expect(response.statusCode).toBe(200);
+    await flush();
+  });
+
+  it("returns 400 with a stringified message when approvePlan rejects with a non-Error", async () => {
+    const { app, mockOrchestrator } = await buildApp();
+    mockOrchestrator.approvePlan.mockRejectedValue("plain string failure");
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/actions/approve-plan",
+      payload: {},
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toEqual({ error: "plain string failure" });
+  });
 });
 
 describe("POST /api/runs/:id/actions/re-review-plan", () => {
@@ -186,6 +216,55 @@ describe("POST /api/runs/:id/actions/re-review-plan", () => {
 
     expect(response.statusCode).toBe(200);
     await flush();
+  });
+
+  it("logs but does not fail the request when the background re-review rejects with a non-Error", async () => {
+    const { app, mockOrchestrator } = await buildApp();
+    mockOrchestrator.runManualReReview.mockRejectedValue("re-review boom (string)");
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/actions/re-review-plan",
+      payload: {},
+    });
+
+    expect(response.statusCode).toBe(200);
+    await flush();
+  });
+
+  it("returns 400 when runManualReReview throws synchronously", async () => {
+    const { app, mockOrchestrator } = await buildApp({
+      runManualReReview: vi.fn(() => {
+        throw new Error("sync re-review boom");
+      }),
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/actions/re-review-plan",
+      payload: {},
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toEqual({ error: "sync re-review boom" });
+  });
+
+  it("returns 400 with a stringified message when runManualReReview throws a non-Error synchronously", async () => {
+    const { app, mockOrchestrator } = await buildApp({
+      runManualReReview: vi.fn(() => {
+        // eslint-disable-next-line @typescript-eslint/no-throw-literal
+        throw "sync string failure";
+      }),
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/actions/re-review-plan",
+      payload: {},
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toEqual({ error: "sync string failure" });
   });
 });
 
@@ -224,6 +303,55 @@ describe("POST /api/runs/:id/actions/revise-plan", () => {
     expect(response.statusCode).toBe(200);
     await flush();
   });
+
+  it("logs but does not fail the request when the background revision rejects with a non-Error", async () => {
+    const { app, mockOrchestrator } = await buildApp();
+    mockOrchestrator.runManualPlanRevision.mockRejectedValue("revision boom (string)");
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/actions/revise-plan",
+      payload: {},
+    });
+
+    expect(response.statusCode).toBe(200);
+    await flush();
+  });
+
+  it("returns 400 when runManualPlanRevision throws synchronously", async () => {
+    const { app, mockOrchestrator } = await buildApp({
+      runManualPlanRevision: vi.fn(() => {
+        throw new Error("sync revision boom");
+      }),
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/actions/revise-plan",
+      payload: {},
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toEqual({ error: "sync revision boom" });
+  });
+
+  it("returns 400 with a stringified message when runManualPlanRevision throws a non-Error synchronously", async () => {
+    const { app, mockOrchestrator } = await buildApp({
+      runManualPlanRevision: vi.fn(() => {
+        // eslint-disable-next-line @typescript-eslint/no-throw-literal
+        throw "sync string failure";
+      }),
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/actions/revise-plan",
+      payload: {},
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toEqual({ error: "sync string failure" });
+  });
 });
 
 describe("POST /api/runs/:id/actions/approve-review", () => {
@@ -257,6 +385,19 @@ describe("POST /api/runs/:id/actions/approve-review", () => {
 
     expect(response.statusCode).toBe(400);
     expect(response.json()).toEqual({ error: "Not ready for review" });
+  });
+
+  it("returns 400 with a stringified message when approveHumanReview rejects with a non-Error", async () => {
+    const { app, mockOrchestrator } = await buildApp();
+    mockOrchestrator.approveHumanReview.mockRejectedValue("plain string failure");
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/actions/approve-review",
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toEqual({ error: "plain string failure" });
   });
 });
 
@@ -308,6 +449,21 @@ describe("POST /api/runs/:id/actions/pause", () => {
     expect(response.statusCode).toBe(400);
     expect(response.json()).toEqual({ error: "Cannot pause" });
   });
+
+  it("returns 400 with a stringified message when handleCommand rejects with a non-Error", async () => {
+    const run = makeRun(RunState.Implementing);
+    const { app, mockRunRepo, mockOrchestrator } = await buildApp();
+    mockRunRepo.findById.mockResolvedValue(run);
+    mockOrchestrator.handleCommand.mockRejectedValue("plain string failure");
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/actions/pause",
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toEqual({ error: "plain string failure" });
+  });
 });
 
 describe("POST /api/runs/:id/actions/resume", () => {
@@ -357,6 +513,21 @@ describe("POST /api/runs/:id/actions/resume", () => {
 
     expect(response.statusCode).toBe(400);
     expect(response.json()).toEqual({ error: "Cannot resume" });
+  });
+
+  it("returns 400 with a stringified message when handleCommand rejects with a non-Error", async () => {
+    const run = makeRun(RunState.Implementing);
+    const { app, mockRunRepo, mockOrchestrator } = await buildApp();
+    mockRunRepo.findById.mockResolvedValue(run);
+    mockOrchestrator.handleCommand.mockRejectedValue("plain string failure");
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/actions/resume",
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toEqual({ error: "plain string failure" });
   });
 });
 
@@ -429,6 +600,21 @@ describe("POST /api/runs/:id/actions/retry", () => {
     const { app, mockRunRepo, mockOrchestrator } = await buildApp();
     mockRunRepo.findById.mockResolvedValue(run);
     mockOrchestrator.retryRun.mockRejectedValue(new Error("retry boom"));
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/actions/retry",
+    });
+
+    expect(response.statusCode).toBe(200);
+    await flush();
+  });
+
+  it("logs but does not fail the request when the retried background call rejects with a non-Error", async () => {
+    const run = makeRun(RunState.Todo);
+    const { app, mockRunRepo, mockOrchestrator } = await buildApp();
+    mockRunRepo.findById.mockResolvedValue(run);
+    mockOrchestrator.retryRun.mockRejectedValue("retry boom (string)");
 
     const response = await app.inject({
       method: "POST",

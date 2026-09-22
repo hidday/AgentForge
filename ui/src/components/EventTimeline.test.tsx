@@ -94,6 +94,15 @@ describe("EventTimeline", () => {
     expect(screen.getByText("user-command")).toBeDefined();
   });
 
+  it("falls back to the default icon set for an unrecognized event type and source", () => {
+    const events = [
+      makeEvent({ eventType: "SOME_FUTURE_EVENT", source: "webhook" }),
+    ];
+    render(<EventTimeline events={events} />);
+    expect(screen.getByText("Some Future Event")).toBeDefined();
+    expect(screen.getByText("webhook")).toBeDefined();
+  });
+
   it("renders a relative timestamp with the full timestamp as a title attribute", () => {
     const events = [makeEvent({ createdAt: "2024-01-01T00:00:00Z" })];
     const { container } = render(<EventTimeline events={events} />);

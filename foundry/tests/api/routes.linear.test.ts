@@ -74,6 +74,19 @@ describe("GET /api/linear/pending", () => {
     expect(response.statusCode).toBe(500);
     expect(response.json()).toEqual({ error: "Linear API down" });
   });
+
+  it("returns 500 with a stringified message when discoverPendingIssues rejects with a non-Error", async () => {
+    const linearPollService = {
+      discoverPendingIssues: vi.fn().mockRejectedValue("plain string failure"),
+      startRunsForIssues: vi.fn(),
+    };
+    const { app } = await buildApp(linearPollService);
+
+    const response = await app.inject({ method: "GET", url: "/api/linear/pending" });
+
+    expect(response.statusCode).toBe(500);
+    expect(response.json()).toEqual({ error: "plain string failure" });
+  });
 });
 
 describe("POST /api/linear/ingest", () => {
@@ -179,5 +192,22 @@ describe("POST /api/linear/ingest", () => {
 
     expect(response.statusCode).toBe(500);
     expect(response.json()).toEqual({ error: "DB write failed" });
+  });
+
+  it("returns 500 with a stringified message when startRunsForIssues rejects with a non-Error", async () => {
+    const linearPollService = {
+      discoverPendingIssues: vi.fn(),
+      startRunsForIssues: vi.fn().mockRejectedValue("plain string failure"),
+    };
+    const { app } = await buildApp(linearPollService);
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/linear/ingest",
+      payload: { issueIds: ["a"] },
+    });
+
+    expect(response.statusCode).toBe(500);
+    expect(response.json()).toEqual({ error: "plain string failure" });
   });
 });
