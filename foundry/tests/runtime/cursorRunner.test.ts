@@ -237,4 +237,56 @@ describe("CursorRunner arg/stdin building", () => {
     const { stdinData } = processRunner.execute.mock.calls[0]![0] as { stdinData: string };
     expect(stdinData).toBe("just the task");
   });
+
+  it("omits the process context when input.runId is not set", async () => {
+    const processRunner = makeMockProcessRunner({
+      stdout: JSON.stringify({
+        type: "result",
+        result:
+          "BEGIN_STRUCTURED_OUTPUT\n" +
+          '{"success":true,"stage":"planner","payload":{"value":"ok"}}\n' +
+          "END_STRUCTURED_OUTPUT",
+      }),
+      stderr: "",
+      exitCode: 0,
+      durationMs: 10,
+      timedOut: false,
+    });
+    const logger = makeMockLogger();
+    const runner = new CursorRunner(processRunner as never, "cursor", [], "m", logger as never);
+
+    await runner.run({ prompt: "x", workingDirectory: "/tmp", timeoutMs: 1000 }, "planner", echoSchema);
+
+    const { context } = processRunner.execute.mock.calls[0]![0] as { context?: unknown };
+    expect(context).toBeUndefined();
+  });
+
+  it("builds a process context keyed by runtime 'cursor' when input.runId is set", async () => {
+    const processRunner = makeMockProcessRunner({
+      stdout: JSON.stringify({
+        type: "result",
+        result:
+          "BEGIN_STRUCTURED_OUTPUT\n" +
+          '{"success":true,"stage":"planner","payload":{"value":"ok"}}\n' +
+          "END_STRUCTURED_OUTPUT",
+      }),
+      stderr: "",
+      exitCode: 0,
+      durationMs: 10,
+      timedOut: false,
+    });
+    const logger = makeMockLogger();
+    const runner = new CursorRunner(processRunner as never, "cursor", [], "m", logger as never);
+
+    await runner.run(
+      { prompt: "x", workingDirectory: "/tmp", timeoutMs: 1000, runId: "run-cursor-1" },
+      "planner",
+      echoSchema,
+    );
+
+    const { context } = processRunner.execute.mock.calls[0]![0] as {
+      context?: { runId: string; stage: string; runtime: string };
+    };
+    expect(context).toEqual({ runId: "run-cursor-1", stage: "planner", runtime: "cursor" });
+  });
 });

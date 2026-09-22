@@ -126,6 +126,17 @@ describe("ProcessRunner construction", () => {
     expect(mkdirSync).toHaveBeenCalledWith(nested, { recursive: true });
     expect(actualFs.existsSync(nested)).toBe(true);
   });
+
+  it("defaults the spool directory to '.foundry/processes' resolved from the cwd when none is given", () => {
+    // Stub mkdirSync for this one call so we only assert the resolved path, without
+    // actually creating a ".foundry/processes" directory under the repo's cwd.
+    (mkdirSync as unknown as Mock).mockImplementationOnce(() => undefined);
+    new ProcessRunner("real", makeLogger() as never);
+    expect(mkdirSync).toHaveBeenCalledWith(
+      join(process.cwd(), ".foundry/processes"),
+      { recursive: true },
+    );
+  });
 });
 
 describe("ProcessRunner.execute — mock mode", () => {
@@ -617,6 +628,23 @@ describe("ProcessRunner.rehydrateOrphans", () => {
     expect(() => runner.rehydrateOrphans()).not.toThrow();
     expect(logger.warn).toHaveBeenCalledWith(
       expect.objectContaining({ file: "corrupt-proc.json" }),
+      "Failed to process manifest",
+    );
+  });
+
+  it("stringifies a non-Error thrown value when logging a manifest processing failure", () => {
+    const logger = makeLogger();
+    const runner = new ProcessRunner("real", logger as never, undefined, spoolDir);
+    actualFs.writeFileSync(join(spoolDir, "weird-proc.json"), JSON.stringify({ id: "weird-proc" }));
+
+    (readFileSync as unknown as Mock).mockImplementationOnce(() => {
+      // eslint-disable-next-line @typescript-eslint/no-throw-literal
+      throw "not an Error instance";
+    });
+
+    expect(() => runner.rehydrateOrphans()).not.toThrow();
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.objectContaining({ file: "weird-proc.json", error: "not an Error instance" }),
       "Failed to process manifest",
     );
   });

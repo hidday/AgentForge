@@ -163,4 +163,44 @@ describe("CodexRunner arg/stdin building", () => {
     const { stdinData } = processRunner.execute.mock.calls[0]![0] as { stdinData: string };
     expect(stdinData).toBe("just the task");
   });
+
+  it("omits the process context when input.runId is not set", async () => {
+    const processRunner = makeMockProcessRunner({
+      stdout,
+      stderr: "",
+      exitCode: 0,
+      durationMs: 10,
+      timedOut: false,
+    });
+    const logger = makeMockLogger();
+    const runner = new CodexRunner(processRunner as never, "codex", ["exec", "-"], "m", logger as never);
+
+    await runner.run({ prompt: "x", workingDirectory: "/tmp", timeoutMs: 1000 }, "planner", echoSchema);
+
+    const { context } = processRunner.execute.mock.calls[0]![0] as { context?: unknown };
+    expect(context).toBeUndefined();
+  });
+
+  it("builds a process context keyed by runtime 'codex' when input.runId is set", async () => {
+    const processRunner = makeMockProcessRunner({
+      stdout,
+      stderr: "",
+      exitCode: 0,
+      durationMs: 10,
+      timedOut: false,
+    });
+    const logger = makeMockLogger();
+    const runner = new CodexRunner(processRunner as never, "codex", ["exec", "-"], "m", logger as never);
+
+    await runner.run(
+      { prompt: "x", workingDirectory: "/tmp", timeoutMs: 1000, runId: "run-codex-1" },
+      "planner",
+      echoSchema,
+    );
+
+    const { context } = processRunner.execute.mock.calls[0]![0] as {
+      context?: { runId: string; stage: string; runtime: string };
+    };
+    expect(context).toEqual({ runId: "run-codex-1", stage: "planner", runtime: "codex" });
+  });
 });
