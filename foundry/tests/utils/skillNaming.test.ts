@@ -8,6 +8,11 @@ describe("skillNaming", () => {
     );
   });
 
+  it("slugifySkillName falls back to 'distilled-skill' when nothing kebab-case-able remains", () => {
+    expect(slugifySkillName("!!!")).toBe("distilled-skill");
+    expect(slugifySkillName("")).toBe("distilled-skill");
+  });
+
   it("isValidSkillName accepts kebab-case slugs", () => {
     expect(isValidSkillName("dev-env-pause-resume-footguns")).toBe(true);
     expect(isValidSkillName("Dev Env")).toBe(false);

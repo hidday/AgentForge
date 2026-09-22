@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { transition, getValidEvents } from "../../src/orchestrator/stateMachine.js";
 import { RunState } from "../../src/domain/runState.js";
 import { RunEvent } from "../../src/domain/runEvent.js";
+import { StateTransitionError } from "../../src/utils/errors.js";
 
 describe("stateMachine - clarification transitions", () => {
   it("HumanClarificationNeeded + CLARIFICATION_PROVIDED → Planning", () => {
@@ -39,5 +40,47 @@ describe("stateMachine - clarification transitions", () => {
     const validEvents = getValidEvents(RunState.Failed);
     expect(validEvents).toHaveLength(1);
     expect(validEvents).toContain(RunEvent.RESET_TO_TODO);
+  });
+});
+
+describe("stateMachine - invalid transitions", () => {
+  it("throws StateTransitionError when the current state has no entries in the table at all", () => {
+    // Done is a terminal state with no outgoing transitions registered.
+    expect(() => transition(RunState.Done, RunEvent.RESET_TO_TODO)).toThrow(StateTransitionError);
+  });
+
+  it("StateTransitionError from a state with no table entry carries the state and event", () => {
+    try {
+      transition(RunState.Done, RunEvent.RESET_TO_TODO);
+      expect.unreachable();
+    } catch (err) {
+      expect(err).toBeInstanceOf(StateTransitionError);
+      const e = err as StateTransitionError;
+      expect(e.fromState).toBe(RunState.Done);
+      expect(e.event).toBe(RunEvent.RESET_TO_TODO);
+      expect(e.message).toContain(RunState.Done);
+      expect(e.message).toContain(RunEvent.RESET_TO_TODO);
+    }
+  });
+
+  it("throws StateTransitionError when the state exists in the table but the event is not registered for it", () => {
+    // Todo has entries (RUN_REQUESTED, BLOCKED, NEEDS_HUMAN_CLARIFICATION) but not PLAN_CREATED.
+    expect(() => transition(RunState.Todo, RunEvent.PLAN_CREATED)).toThrow(StateTransitionError);
+  });
+
+  it("StateTransitionError from an unregistered event on a known state carries the state and event", () => {
+    try {
+      transition(RunState.Todo, RunEvent.PLAN_CREATED);
+      expect.unreachable();
+    } catch (err) {
+      expect(err).toBeInstanceOf(StateTransitionError);
+      const e = err as StateTransitionError;
+      expect(e.fromState).toBe(RunState.Todo);
+      expect(e.event).toBe(RunEvent.PLAN_CREATED);
+    }
+  });
+
+  it("getValidEvents returns an empty array for a state with no table entry", () => {
+    expect(getValidEvents(RunState.Done)).toEqual([]);
   });
 });
