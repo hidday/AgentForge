@@ -16,6 +16,10 @@ export default defineConfig({
         // it is generated code, not hand-written logic, and is regenerated
         // verbatim from prisma/schema.prisma on every install.
         "src/generated/**",
+        // runnerTypes.ts contains only `export interface` declarations, which
+        // TypeScript erases entirely at compile time; there is no executable
+        // statement in this file to ever cover.
+        "src/runtime/runnerTypes.ts",
       ],
       reporter: ["text", "json-summary", "html"],
       reportsDirectory: "coverage",

@@ -1,13 +1,16 @@
 import { describe, it, expect, vi } from "vitest";
 import { OrchestratorService } from "../../src/orchestrator/orchestratorService.js";
 import { RunState } from "../../src/domain/runState.js";
+import { RunEvent } from "../../src/domain/runEvent.js";
 import {
   buildDeps,
   createStore,
   makeArtifact,
+  makeExecutionReport,
   makePlan,
   makePlanReview,
   makeRun,
+  makeTaskBundle,
   pushEvent,
 } from "./testSupport.js";
 
@@ -140,6 +143,59 @@ describe("OrchestratorService.maybeResearchAndReplan humanAnswers injection", ()
   });
 });
 
+describe("OrchestratorService.formatPlanComment with risks and open questions", () => {
+  it("includes the Risks section when the approved plan has risks", async () => {
+    const run = makeRun({ state: RunState.PlanReview, planVersion: 1 });
+    const store = createStore(run, [
+      makeArtifact({
+        type: "Plan",
+        version: 1,
+        payloadJson: makePlan({
+          planVersion: 1,
+          risks: ["Rate limits may be hit", "Third-party API instability"],
+        }),
+      }),
+    ]);
+    const { deps, planReviewerAgent, linearClient } = buildDeps(store);
+    planReviewerAgent.run.mockResolvedValue(makePlanReview({ overallVerdict: "approved" }));
+
+    const svc = new OrchestratorService(deps as never);
+    await svc.runPlanReview("run-1");
+
+    const comment = linearClient.postComment.mock.calls[0][1] as string;
+    expect(comment).toContain("**Risks:**");
+    expect(comment).toContain("Rate limits may be hit");
+  });
+});
+
+describe("OrchestratorService.formatExecutionReportComment 'skip' check status icon", () => {
+  it("renders the neutral icon for a 'skip' check status", async () => {
+    const run = makeRun({ state: RunState.Implementing, approvedPlanVersion: 1, branchName: null });
+    const store = createStore(run, [
+      makeArtifact({ type: "Plan", version: 1, payloadJson: makePlan({ planVersion: 1 }) }),
+    ]);
+    const { deps, executorAgent, linearClient } = buildDeps(store);
+    executorAgent.run.mockResolvedValue({
+      report: makeExecutionReport({
+        checks: {
+          lint: { status: "fail", details: "eslint errors" },
+          typecheck: { status: "skip", details: "not configured" },
+          tests: { status: "pass", details: "ok" },
+        },
+      }),
+      prNumber: 1,
+    });
+    const svc = new OrchestratorService(deps as never);
+    vi.spyOn(svc, "runReview").mockResolvedValue(makeRun());
+
+    await svc.runExecution("run-1");
+
+    const comment = linearClient.postComment.mock.calls[0][1] as string;
+    expect(comment).toContain(":heavy_minus_sign: **Typecheck** -- not configured");
+    expect(comment).toContain(":x: **Lint** -- eslint errors");
+  });
+});
+
 describe("OrchestratorService.updateSkillMetrics edge cases", () => {
   it("treats a missing skillIds array on an injection event as empty (no crash, no metric calls for it)", async () => {
     const run = makeRun({ state: RunState.ReadyForHumanReview });
@@ -163,6 +219,55 @@ describe("OrchestratorService.updateSkillMetrics edge cases", () => {
 
     expect(result.state).toBe(RunState.Done);
     expect(skillRepo.incrementSuccess).not.toHaveBeenCalled();
+  });
+
+  it("increments failure and archives normally (no throw) when a run reaches Failed", async () => {
+    const run = makeRun({ state: RunState.HumanClarificationNeeded, planVersion: 1 });
+    const store = createStore(run, [
+      makeArtifact({
+        type: "Plan",
+        version: 1,
+        payloadJson: makePlan({
+          openQuestions: [{ id: "q1", question: "Which env?", requiredForExecution: true }],
+        }),
+      }),
+      makeArtifact({ type: "TaskBundle", version: 1, payloadJson: makeTaskBundle() }),
+    ]);
+    pushEvent(store, {
+      eventType: "SKILL_INJECTION",
+      source: "orchestrator",
+      createdAt: new Date("2026-01-01T00:00:01Z"),
+      payloadJson: { skillIds: ["skill-1"] },
+    });
+    for (let i = 0; i < 3; i++) {
+      pushEvent(store, {
+        eventType: RunEvent.NEEDS_HUMAN_CLARIFICATION,
+        source: "planner-agent",
+        createdAt: new Date(`2026-01-01T00:00:0${i + 2}Z`),
+        payloadJson: {},
+      });
+    }
+
+    const { deps, plannerAgent } = buildDeps(store);
+    plannerAgent.run.mockResolvedValue(
+      makePlan({
+        planVersion: 2,
+        openQuestions: [{ id: "q1", question: "Still which env?", requiredForExecution: true }],
+      }),
+    );
+    const skillRepo = {
+      findTopKByRelevance: vi.fn(),
+      incrementSuccess: vi.fn(),
+      incrementFailure: vi.fn().mockResolvedValue({ id: "skill-1", utilityScore: 0.4 }),
+      archiveIfLowUtility: vi.fn().mockResolvedValue(undefined),
+    };
+
+    const svc = new OrchestratorService({ ...deps, agentSkillRepo: skillRepo } as never);
+    const result = await svc.answerQuestions("run-1", [{ questionId: "q1", answer: "prod" }]);
+
+    expect(result.state).toBe(RunState.Failed);
+    expect(skillRepo.incrementFailure).toHaveBeenCalledWith("skill-1");
+    expect(skillRepo.archiveIfLowUtility).toHaveBeenCalledWith({ id: "skill-1", utilityScore: 0.4 });
   });
 
   it("stringifies a non-Error thrown while updating a skill metric", async () => {
@@ -211,6 +316,24 @@ describe("OrchestratorService.buildTaskBundle error-normalization branches", () 
     );
     const bundleArg = planReviewerAgent.run.mock.calls[0][1] as { repo: { defaultBranch: string } };
     expect(bundleArg.repo.defaultBranch).toBe("main");
+  });
+
+  it("stringifies a non-Error thrown by getDefaultBranch", async () => {
+    const run = makeRun({ state: RunState.PlanReview, planVersion: 1 });
+    const store = createStore(run, [
+      makeArtifact({ type: "Plan", version: 1, payloadJson: makePlan({ planVersion: 1 }) }),
+    ]);
+    const { deps, githubClient, planReviewerAgent, logger } = buildDeps(store);
+    githubClient.getDefaultBranch.mockRejectedValue("not-an-error-either");
+    planReviewerAgent.run.mockResolvedValue(makePlanReview());
+
+    const svc = new OrchestratorService(deps as never);
+    await svc.runPlanReview("run-1");
+
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.objectContaining({ error: "not-an-error-either" }),
+      "Failed to resolve default branch from GitHub, falling back to config value",
+    );
   });
 
   it("stringifies a non-Error thrown by getRelatedContext", async () => {
