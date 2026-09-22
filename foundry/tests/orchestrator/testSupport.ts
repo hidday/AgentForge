@@ -143,6 +143,7 @@ export function makeArtifact(params: {
   version: number;
   payloadJson: unknown;
   runId?: string;
+  createdAt?: Date;
 }): Artifact {
   artifactCounter += 1;
   return {
@@ -152,7 +153,7 @@ export function makeArtifact(params: {
     version: params.version,
     payloadJson: params.payloadJson,
     rawText: JSON.stringify(params.payloadJson),
-    createdAt: new Date("2026-01-01T00:00:00Z"),
+    createdAt: params.createdAt ?? new Date("2026-01-01T00:00:00Z"),
   };
 }
 
@@ -160,6 +161,68 @@ export interface TestStore {
   run: Run;
   artifacts: Artifact[];
   events: RunEventRecord[];
+}
+
+/**
+ * In production, plannerAgent.run() persists the Plan artifact itself
+ * (out of scope of OrchestratorService). Since the agent is mocked here,
+ * wire its resolved value to also push a matching Plan artifact into the
+ * store, so a subsequent findLatestByType(runId, "Plan") call (e.g. inside
+ * runPlanReview) sees it -- exactly as it would against the real agent.
+ */
+export function mockPlannerPersists(
+  plannerAgent: { run: ReturnType<typeof vi.fn> },
+  store: TestStore,
+  plan: Plan,
+): void {
+  plannerAgent.run.mockImplementation(() => {
+    store.artifacts.push(
+      makeArtifact({ runId: store.run.id, type: "Plan", version: plan.planVersion, payloadJson: plan }),
+    );
+    return Promise.resolve(plan);
+  });
+}
+
+/**
+ * Analogous to mockPlannerPersists: in production the ExecutorAgent persists
+ * the ExecutionReport artifact itself. Wire the mock to do the same so a
+ * subsequent findLatestByType(runId, "ExecutionReport") (e.g. inside
+ * runReview) sees it.
+ */
+export function mockExecutorPersists(
+  executorAgent: { run: ReturnType<typeof vi.fn> },
+  store: TestStore,
+  report: ExecutionReport,
+  prNumber: number,
+): void {
+  executorAgent.run.mockImplementation(() => {
+    store.artifacts.push(
+      makeArtifact({
+        runId: store.run.id,
+        type: "ExecutionReport",
+        version: report.executionVersion,
+        payloadJson: report,
+      }),
+    );
+    return Promise.resolve({ report, prNumber });
+  });
+}
+
+/** Push a pre-baked event straight into the store, bypassing eventRepo.create's
+ * auto-incrementing createdAt, for tests that need precise event ordering. */
+export function pushEvent(
+  store: TestStore,
+  params: { eventType: string; source: string; createdAt: Date; payloadJson?: unknown },
+): void {
+  eventCounter += 1;
+  store.events.push({
+    id: `event-${eventCounter}`,
+    runId: store.run.id,
+    eventType: params.eventType,
+    source: params.source,
+    payloadJson: params.payloadJson ?? null,
+    createdAt: params.createdAt,
+  });
 }
 
 export function createStore(initialRun: Run, artifacts: Artifact[] = []): TestStore {
