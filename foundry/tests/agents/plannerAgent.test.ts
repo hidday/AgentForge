@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { PlannerAgent } from "../../src/agents/plannerAgent.js";
 import type { TaskBundle } from "../../src/schemas/taskBundle.js";
+import type { Plan } from "../../src/schemas/plan.js";
 
 function makeTaskBundle(): TaskBundle {
   return {
@@ -302,6 +303,222 @@ describe("PlannerAgent.run()", () => {
       expect(prompt).not.toContain("BEGIN BACKGROUND CONTEXT");
       expect(prompt).not.toContain("Background: Related Linear Context");
       expect(prompt).not.toContain("{{relatedContextSection}}");
+    });
+  });
+
+  describe("planReviewFindings injection", () => {
+    it("renders '## AI Plan Review Findings' section with summary and findings when provided", async () => {
+      const { agent, getPrompt } = buildPlannerAgent();
+      const bundle = makeTaskBundle();
+
+      await agent.run(bundle, "run-1", {
+        planReviewFindings: {
+          summary: "Missing error handling for malformed input.",
+          findings: [
+            {
+              id: "pf1",
+              severity: "important",
+              title: "No error handling",
+              details: "Add a step for malformed JSON.",
+            },
+            {
+              id: "pf2",
+              severity: "suggestion",
+              title: "Consider OpenAPI docs",
+              details: "Nice to have.",
+            },
+          ],
+        },
+      });
+
+      const prompt = getPrompt();
+      expect(prompt).toContain("## AI Plan Review Findings (from previous plan)");
+      expect(prompt).toContain("Missing error handling for malformed input.");
+      expect(prompt).toContain("- **[important] No error handling** (pf1): Add a step for malformed JSON.");
+      expect(prompt).toContain("- **[suggestion] Consider OpenAPI docs** (pf2): Nice to have.");
+      expect(prompt).toContain("Incorporate these findings into the revised plan where appropriate.");
+    });
+
+    it("omits the AI Plan Review Findings section when planReviewFindings is absent", async () => {
+      const { agent, getPrompt } = buildPlannerAgent();
+      const bundle = makeTaskBundle();
+
+      await agent.run(bundle, "run-1");
+
+      const prompt = getPrompt();
+      expect(prompt).not.toContain("## AI Plan Review Findings");
+    });
+  });
+
+  describe("previousPlan injection", () => {
+    it("renders the previous plan with steps, risks, assumptions, and required/optional open questions", async () => {
+      const { agent, getPrompt } = buildPlannerAgent();
+      const bundle = makeTaskBundle();
+
+      const previousPlan: Plan = {
+        planVersion: 3,
+        summary: "Old plan summary",
+        requirementsTraceability: "",
+        assumptions: ["Assumption A"],
+        openQuestions: [
+          { id: "q1", question: "Blocking question?", requiredForExecution: true },
+          { id: "q2", question: "Optional question?", requiredForExecution: false },
+        ],
+        risks: ["Risk A"],
+        steps: [
+          { id: "s1", title: "Step One", description: "Do the first thing" },
+          { id: "s2", title: "Step Two", description: "Do the second thing" },
+        ],
+        testPlan: "Run the old test plan",
+        confidence: 0.75,
+      };
+
+      await agent.run(bundle, "run-1", { previousPlan });
+
+      const prompt = getPrompt();
+      expect(prompt).toContain("## Previously Rejected Plan (v3)");
+      expect(prompt).toContain("**Summary:** Old plan summary");
+      expect(prompt).toContain("**Confidence:** 75%");
+      expect(prompt).toContain("1. **Step One** (s1): Do the first thing");
+      expect(prompt).toContain("2. **Step Two** (s2): Do the second thing");
+      expect(prompt).toContain("**Risks:**\n- Risk A");
+      expect(prompt).toContain("**Assumptions:**\n- Assumption A");
+      expect(prompt).toContain("**Open Questions:**");
+      expect(prompt).toContain("[q1] Blocking question? *(blocks execution)*");
+      expect(prompt).toContain("[q2] Optional question?");
+      expect(prompt).not.toContain("[q2] Optional question? *(blocks execution)*");
+      expect(prompt).toContain("**Test Plan:** Run the old test plan");
+      expect(prompt).toContain("Use this as the starting point for the new plan.");
+    });
+
+    it("omits risks/assumptions/open-questions sub-sections when the previous plan has none", async () => {
+      const { agent, getPrompt } = buildPlannerAgent();
+      const bundle = makeTaskBundle();
+
+      const previousPlan: Plan = {
+        planVersion: 1,
+        summary: "Minimal old plan",
+        requirementsTraceability: "",
+        assumptions: [],
+        openQuestions: [],
+        risks: [],
+        steps: [{ id: "s1", title: "Only step", description: "Do it" }],
+        testPlan: "Run tests",
+        confidence: 0.5,
+      };
+
+      await agent.run(bundle, "run-1", { previousPlan });
+
+      const prompt = getPrompt();
+      expect(prompt).toContain("## Previously Rejected Plan (v1)");
+      expect(prompt).not.toContain("**Risks:**");
+      expect(prompt).not.toContain("**Assumptions:**");
+      expect(prompt).not.toContain("**Open Questions:**");
+    });
+
+    it("omits the Previously Rejected Plan section when previousPlan is absent", async () => {
+      const { agent, getPrompt } = buildPlannerAgent();
+      const bundle = makeTaskBundle();
+
+      await agent.run(bundle, "run-1");
+
+      const prompt = getPrompt();
+      expect(prompt).not.toContain("Previously Rejected Plan");
+    });
+  });
+
+  describe("priorSkills injection", () => {
+    it("renders skill headings with name+taskCategory and a description when both are present", async () => {
+      const { agent, getPrompt } = buildPlannerAgent();
+      const bundle = makeTaskBundle();
+
+      await agent.run(bundle, "run-1", {
+        priorSkills: [
+          {
+            id: "skill-1",
+            repoSlug: "acme/backend",
+            name: "zod-validation-middleware",
+            description: "How to wire up Zod validation middleware.",
+            taskCategory: "validation",
+            skillMarkdown: "## Steps\n1. Do X\n2. Do Y",
+            utilityScore: 0.9,
+            lastUsedAt: new Date("2024-01-01"),
+          },
+        ],
+      });
+
+      const prompt = getPrompt();
+      expect(prompt).toContain("## Prior Skills from Similar Tasks");
+      expect(prompt).toContain("### zod-validation-middleware (validation)");
+      expect(prompt).toContain("How to wire up Zod validation middleware.");
+      expect(prompt).toContain("## Steps\n1. Do X\n2. Do Y");
+    });
+
+    it("falls back to taskCategory as the heading and omits the intro when name/description are absent", async () => {
+      const { agent, getPrompt } = buildPlannerAgent();
+      const bundle = makeTaskBundle();
+
+      await agent.run(bundle, "run-1", {
+        priorSkills: [
+          {
+            id: "skill-2",
+            repoSlug: "acme/backend",
+            name: null,
+            description: null,
+            taskCategory: "auth",
+            skillMarkdown: "## Steps\n1. Configure auth",
+            utilityScore: 0.5,
+            lastUsedAt: new Date("2024-01-01"),
+          },
+        ],
+      });
+
+      const prompt = getPrompt();
+      expect(prompt).toContain("## Prior Skills from Similar Tasks");
+      expect(prompt).toContain("### auth\n\n## Steps\n1. Configure auth");
+    });
+
+    it("joins multiple prior skills with a blank line between them", async () => {
+      const { agent, getPrompt } = buildPlannerAgent();
+      const bundle = makeTaskBundle();
+
+      await agent.run(bundle, "run-1", {
+        priorSkills: [
+          {
+            id: "skill-1",
+            repoSlug: "acme/backend",
+            name: "skill-one",
+            description: null,
+            taskCategory: "cat-one",
+            skillMarkdown: "Body one",
+            utilityScore: 0.9,
+            lastUsedAt: new Date("2024-01-01"),
+          },
+          {
+            id: "skill-2",
+            repoSlug: "acme/backend",
+            name: "skill-two",
+            description: null,
+            taskCategory: "cat-two",
+            skillMarkdown: "Body two",
+            utilityScore: 0.8,
+            lastUsedAt: new Date("2024-01-01"),
+          },
+        ],
+      });
+
+      const prompt = getPrompt();
+      expect(prompt).toContain("### skill-one (cat-one)\n\nBody one\n\n### skill-two (cat-two)\n\nBody two");
+    });
+
+    it("omits the Prior Skills section when priorSkills is absent or empty", async () => {
+      const { agent, getPrompt } = buildPlannerAgent();
+      const bundle = makeTaskBundle();
+
+      await agent.run(bundle, "run-1", { priorSkills: [] });
+
+      const prompt = getPrompt();
+      expect(prompt).not.toContain("## Prior Skills from Similar Tasks");
     });
   });
 });
