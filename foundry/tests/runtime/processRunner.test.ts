@@ -116,6 +116,16 @@ describe("ProcessRunner constructor", () => {
     new ProcessRunner("mock", makeMockLogger() as never, undefined, nested);
     expect(existsSync(nested)).toBe(true);
   });
+
+  it("defaults the spool directory to .foundry/processes (relative to cwd) when none is given", () => {
+    const cwdSpy = vi.spyOn(process, "cwd").mockReturnValue(spoolDir);
+    try {
+      new ProcessRunner("mock", makeMockLogger() as never);
+      expect(existsSync(join(spoolDir, ".foundry", "processes"))).toBe(true);
+    } finally {
+      cwdSpy.mockRestore();
+    }
+  });
 });
 
 describe("ProcessRunner.execute() — mock mode", () => {
@@ -258,6 +268,38 @@ describe("ProcessRunner.execute() — real mode, basic exit handling", () => {
     child.emit("error", spawnError);
 
     await expect(resultPromise).rejects.toBe(spawnError);
+  });
+
+  it("cleans up the tracked process entry and manifest when the child errors and context is set", async () => {
+    const child = new FakeChildProcess({ pid: 6161 });
+    vi.mocked(spawn).mockReturnValue(child as never);
+    const emitter = makeEmitter();
+    const runner = new ProcessRunner(
+      "real",
+      makeMockLogger() as never,
+      emitter as never,
+      spoolDir,
+    );
+
+    const resultPromise = runner.execute({
+      ...baseOptions,
+      context: { runId: "run-err", stage: "planner", runtime: "claude-code" },
+    });
+    const processId = runner.getActiveProcesses()[0]!.id;
+
+    const spawnError = new Error("EACCES: permission denied");
+    child.emit("error", spawnError);
+
+    await expect(resultPromise).rejects.toBe(spawnError);
+    expect(runner.getActiveProcesses()).toHaveLength(0);
+    expect(emitter.emitProcessCompleted).toHaveBeenCalledWith(
+      "run-err",
+      processId,
+      "planner",
+      "claude-code",
+      -1,
+      expect.any(Number),
+    );
   });
 });
 
@@ -686,6 +728,27 @@ describe("ProcessRunner.rehydrateOrphans()", () => {
     );
   });
 
+  it("stringifies a non-Error value thrown while processing a manifest", () => {
+    const logger = makeMockLogger();
+    const runner = new ProcessRunner("real", logger as never, undefined, spoolDir);
+    writeFileSync(join(spoolDir, "weird.json"), JSON.stringify({ id: "weird" }));
+
+    const parseSpy = vi.spyOn(JSON, "parse").mockImplementationOnce(() => {
+      // eslint-disable-next-line @typescript-eslint/no-throw-literal
+      throw "not an Error instance";
+    });
+    try {
+      runner.rehydrateOrphans();
+    } finally {
+      parseSpy.mockRestore();
+    }
+
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.objectContaining({ file: "weird.json", error: "not an Error instance" }),
+      "Failed to process manifest",
+    );
+  });
+
   it("marks a dead orphan (process.kill throws) as crashed and updates its manifest", () => {
     const logger = makeMockLogger();
     const runner = new ProcessRunner("real", logger as never, undefined, spoolDir);
@@ -986,5 +1049,50 @@ describe("ProcessRunner tailLogForOrphan() watch callback and poll interval", ()
     vi.advanceTimersByTime(20_000);
     killSpy.mockRestore();
     expect(emitter.emitProcessCompleted).not.toHaveBeenCalled();
+  });
+
+  it("falls back to pid 0 in the liveness poll when the tracked entry has already been removed", () => {
+    const logger = makeMockLogger();
+    const emitter = makeEmitter();
+    const runner = new ProcessRunner("real", logger as never, emitter as never, spoolDir);
+    rehydrateLiveOrphan(runner, logger);
+
+    // Directly remove the tracked entry (white-box) to force the poll's
+    // `?.pid ?? 0` fallback branch, without going through a second finalize.
+    (
+      runner as unknown as { activeProcesses: Map<string, unknown> }
+    ).activeProcesses.delete("tail-target");
+
+    const killSpy = vi.spyOn(process, "kill").mockReturnValue(true as never);
+    let calls: unknown[][] = [];
+    try {
+      vi.advanceTimersByTime(5000);
+      // Capture calls before mockRestore(), which clears recorded call history.
+      calls = killSpy.mock.calls;
+    } finally {
+      killSpy.mockRestore();
+    }
+
+    expect(calls).toContainEqual([0, 0]);
+  });
+});
+
+describe("ProcessRunner private finalizeOrphan() — direct no-op branch", () => {
+  it("does nothing when called for a processId that has no active entry", () => {
+    const logger = makeMockLogger();
+    const emitter = makeEmitter();
+    const runner = new ProcessRunner("real", logger as never, emitter as never, spoolDir);
+
+    expect(() =>
+      (runner as unknown as { finalizeOrphan: (id: string) => void }).finalizeOrphan(
+        "never-existed",
+      ),
+    ).not.toThrow();
+
+    expect(emitter.emitProcessCompleted).not.toHaveBeenCalled();
+    expect(logger.info).not.toHaveBeenCalledWith(
+      expect.anything(),
+      "Orphaned process has exited",
+    );
   });
 });
