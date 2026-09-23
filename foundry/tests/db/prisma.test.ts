@@ -36,9 +36,12 @@ describe("prisma client singleton", () => {
     disconnectMock.mockClear();
   });
 
-  afterEach(() => {
-    vi.doUnmock("../../src/config/env.js");
-  });
+  // No afterEach(vi.doUnmock(...)) here: this block relies on the top-level
+  // vi.mock("../../src/config/env.js", ...) staying in effect for every test
+  // in this describe block. Calling vi.doUnmock removes that hoisted mock
+  // registration entirely (not just per-test state), so any test after the
+  // first would fall through to the real env.js and read the actual
+  // process.env.DATABASE_URL instead of the mocked value.
 
   it("returns the same instance across repeated calls (singleton)", async () => {
     const { getPrismaClient } = await import("../../src/db/prisma.js");
