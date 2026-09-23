@@ -114,6 +114,15 @@ describe("RunsTable", () => {
     expect(screen.queryByTitle("Open in Linear")).toBeNull();
   });
 
+  it("stops click propagation on the external Linear link so the row link isn't also triggered", async () => {
+    renderTable([makeRun({ linearIssueUrl: "https://linear.app/issue/1" })]);
+    const link = screen.getByTitle("Open in Linear");
+    const stopPropagation = vi.spyOn(MouseEvent.prototype, "stopPropagation");
+    await userEvent.click(link);
+    expect(stopPropagation).toHaveBeenCalled();
+    stopPropagation.mockRestore();
+  });
+
   it("shows Approve/Reject actions for AwaitingPlanApproval and calls the API with the run id", async () => {
     mockApi.approvePlan.mockResolvedValue({ ok: true, state: "Implementing" });
     const onAction = vi.fn();

@@ -135,6 +135,14 @@ describe("ArtifactTabs", () => {
     expect(screen.getByText("No dispositions recorded")).toBeDefined();
   });
 
+  it("shows 'No dispositions recorded' when the dispositions field is missing entirely", () => {
+    const artifacts = [
+      makeArtifact({ id: "pv1", type: "PlanRevision", payloadJson: {} }),
+    ];
+    render(<ArtifactTabs artifacts={artifacts} />);
+    expect(screen.getByText("No dispositions recorded")).toBeDefined();
+  });
+
   it("renders a Remediation artifact's resolutions with status styling and executionVersion fallback", () => {
     const artifacts = [
       makeArtifact({
@@ -157,6 +165,13 @@ describe("ArtifactTabs", () => {
     expect(screen.getByText("deferred")).toBeDefined();
     expect(screen.getByText("Fixed it")).toBeDefined();
     // Falls back to v2 when the remediation payload has no executionReport.executionVersion
+    expect(screen.getByText(/v2/)).toBeDefined();
+  });
+
+  it("renders no resolution rows (without crashing) when the resolution field is missing entirely", () => {
+    const artifacts = [makeArtifact({ id: "rem1", type: "Remediation", payloadJson: {} })];
+    render(<ArtifactTabs artifacts={artifacts} />);
+    expect(screen.getByText("Resolutions")).toBeDefined();
     expect(screen.getByText(/v2/)).toBeDefined();
   });
 

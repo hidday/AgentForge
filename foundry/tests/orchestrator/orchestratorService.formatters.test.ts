@@ -101,6 +101,47 @@ describe("formatExecutionReportComment 'skip' check icon via runExecution", () =
   });
 });
 
+describe("formatExecutionReportComment 'fail' check icon via runExecution timeout-free path", () => {
+  it("renders the :x: icon for a 'fail' status check", async () => {
+    const run = makeRun({
+      id: "run-1",
+      state: RunState.Implementing,
+      approvedPlanVersion: 1,
+      branchName: null,
+    });
+    const { deps, artifactRepo, executorAgent, reviewerAgent, linearClient } = buildFullDeps(run);
+    artifactRepo.seed("Plan", makePlan({ planVersion: 1 }));
+    const report = makeExecutionReport({
+      checks: {
+        lint: { status: "pass", details: "ok" },
+        typecheck: { status: "pass", details: "ok" },
+        tests: { status: "fail", details: "1 test failing" },
+      },
+    });
+    executorAgent.run.mockResolvedValue({ report, prNumber: 202 });
+    artifactRepo.seed("ExecutionReport", report);
+    // assertCanExecute/assertExecutorPaths don't care about check status; the
+    // policy that *rejects* failing checks (assertCanMarkReady) is exercised
+    // separately in orchestratorService.runReview.test.ts. Here we only need
+    // runReview to be reachable up to posting the comment, so make the review
+    // path approved (checks failing doesn't block AI code review itself).
+    const review = makeReview({ overallVerdict: "approved" });
+    reviewerAgent.run.mockResolvedValue(review);
+
+    const svc = new OrchestratorService(deps as never);
+    // markReady will reject (failing checks), but the execution-report comment
+    // is posted before that, which is what this test targets.
+    await svc.runExecution("run-1").catch(() => undefined);
+
+    const commentCall = (linearClient.postComment as ReturnType<typeof vi.fn>).mock.calls.find(
+      (call) => typeof call[1] === "string" && (call[1] as string).includes("Execution Report"),
+    );
+    const body = commentCall![1] as string;
+    expect(body).toContain(":x:");
+    expect(body).toContain("1 test failing");
+  });
+});
+
 describe("formatPlanReviewComment affectedStepId branch via runPlanReview (changes_requested)", () => {
   it("omits the '(step ...)' suffix when a finding has no affectedStepId", async () => {
     const run = makeRun({ id: "run-1", state: RunState.PlanReview, planVersion: 1 });

@@ -377,4 +377,195 @@ describe("LinearSyncDialog", () => {
       expect(screen.getByText("Failed to fetch issues")).toBeDefined();
     });
   });
+
+  it("shows the Error instance's message when fetching issues rejects with an Error", async () => {
+    mockApi.fetchPendingIssues.mockRejectedValue(new Error("Linear API down"));
+
+    render(
+      <LinearSyncDialog
+        open={true}
+        onClose={vi.fn()}
+        onIngested={vi.fn()}
+        onIngestComplete={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("Linear API down")).toBeDefined();
+    });
+  });
+
+  it("clears a scheduled min-delay timer on unmount without throwing", async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    mockApi.ingestIssues.mockReturnValue(new Promise(() => {}));
+
+    const { unmount } = render(
+      <LinearSyncDialog
+        open={true}
+        onClose={vi.fn()}
+        onIngested={vi.fn()}
+        onIngestComplete={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => expect(screen.getByText(issueA.title)).toBeDefined());
+    await user.click(screen.getByRole("button", { name: /start 2 runs/i }));
+
+    // Schedule (but don't let fire) the min-delay auto-close timer.
+    fireSSE({ type: "run:created", runId: "run-a", issueId: issueA.id });
+    fireSSE({ type: "run:created", runId: "run-b", issueId: issueB.id });
+
+    expect(() => unmount()).not.toThrow();
+
+    // Advancing timers after unmount must not throw or act on a stale ref.
+    await act(async () => {
+      vi.advanceTimersByTime(700);
+    });
+  });
+
+  it("ignores a duplicate SSE event that arrives after the auto-close timer is already scheduled", async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    const onClose = vi.fn();
+    mockApi.ingestIssues.mockReturnValue(new Promise(() => {}));
+
+    render(
+      <LinearSyncDialog
+        open={true}
+        onClose={onClose}
+        onIngested={vi.fn()}
+        onIngestComplete={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => expect(screen.getByText(issueA.title)).toBeDefined());
+    await user.click(screen.getByRole("button", { name: /start 2 runs/i }));
+
+    fireSSE({ type: "run:created", runId: "run-a", issueId: issueA.id });
+    fireSSE({ type: "run:created", runId: "run-b", issueId: issueB.id });
+    // A duplicate delivery for an already-seen issue, while the min-delay
+    // timer is already scheduled — should be a no-op, not a second timer.
+    fireSSE({ type: "run:created", runId: "run-a-dup", issueId: issueA.id });
+
+    expect(onClose).not.toHaveBeenCalled();
+
+    await act(async () => {
+      vi.advanceTimersByTime(700);
+    });
+
+    await waitFor(() => {
+      expect(onClose).toHaveBeenCalledOnce();
+    });
+  });
+
+  it("ignores irrelevant SSE events (wrong type, missing issueId, or unrelated issue) during an active ingest", async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    const onClose = vi.fn();
+    mockApi.ingestIssues.mockReturnValue(new Promise(() => {}));
+
+    render(
+      <LinearSyncDialog
+        open={true}
+        onClose={onClose}
+        onIngested={vi.fn()}
+        onIngestComplete={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => expect(screen.getByText(issueA.title)).toBeDefined());
+    await user.click(screen.getByRole("button", { name: /start 2 runs/i }));
+
+    // Wrong event type — ignored.
+    fireSSE({ type: "process:started", runId: "run-x" });
+    // run:created with no issueId — ignored.
+    fireSSE({ type: "run:created", runId: "run-y" });
+    // run:created for an issue we didn't start — ignored.
+    fireSSE({ type: "run:created", runId: "run-z", issueId: "some-other-issue" });
+
+    await act(async () => {
+      vi.advanceTimersByTime(700);
+    });
+    // None of the above should have advanced us toward auto-close.
+    expect(onClose).not.toHaveBeenCalled();
+
+    // Now complete normally with the real issues.
+    fireSSE({ type: "run:created", runId: "run-a", issueId: issueA.id });
+    fireSSE({ type: "run:created", runId: "run-b", issueId: issueB.id });
+    await act(async () => {
+      vi.advanceTimersByTime(700);
+    });
+    await waitFor(() => {
+      expect(onClose).toHaveBeenCalledOnce();
+    });
+  });
+
+  it("does not call onIngested when ingestIssues resolves with zero started runs", async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    const onIngested = vi.fn();
+    const onIngestComplete = vi.fn();
+    mockApi.ingestIssues.mockResolvedValue({
+      ok: true,
+      started: [],
+      skipped: [issueA.id, issueB.id],
+    });
+
+    render(
+      <LinearSyncDialog
+        open={true}
+        onClose={vi.fn()}
+        onIngested={onIngested}
+        onIngestComplete={onIngestComplete}
+      />,
+    );
+
+    await waitFor(() => expect(screen.getByText(issueA.title)).toBeDefined());
+    await user.click(screen.getByRole("button", { name: /start 2 runs/i }));
+
+    await act(async () => {
+      vi.advanceTimersByTime(700);
+    });
+
+    await waitFor(() => {
+      expect(onIngestComplete).toHaveBeenCalledWith({ started: 0, skipped: 2 });
+    });
+    expect(onIngested).not.toHaveBeenCalled();
+  });
+
+  it("shows a generic error when ingestIssues rejects with a non-Error value", async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    mockApi.ingestIssues.mockRejectedValue("boom, not an Error instance");
+
+    render(
+      <LinearSyncDialog
+        open={true}
+        onClose={vi.fn()}
+        onIngested={vi.fn()}
+        onIngestComplete={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => expect(screen.getByText(issueA.title)).toBeDefined());
+    await user.click(screen.getByRole("button", { name: /start 2 runs/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText("Failed to ingest issues")).toBeDefined();
+    });
+  });
+
+  it("falls back to the 'None' priority styling for an issue with an unmapped priority", async () => {
+    mockApi.fetchPendingIssues.mockResolvedValue({
+      issues: [{ ...issueA, priority: 99 }],
+    });
+
+    render(
+      <LinearSyncDialog
+        open={true}
+        onClose={vi.fn()}
+        onIngested={vi.fn()}
+        onIngestComplete={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => expect(screen.getByText(issueA.title)).toBeDefined());
+    expect(screen.getByText("None")).toBeDefined();
+  });
 });
