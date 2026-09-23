@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor, act } from "@testing-library/react";
+import { render, screen, waitFor, act, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { Artifact } from "@/api/client.ts";
 
@@ -212,6 +212,101 @@ describe("ChatPanel", () => {
 
     // No message should have been added to the list
     expect(screen.queryByText("Failing question")).toBeNull();
+  });
+
+  it("falls back to an empty string when a ChatMessage artifact has no content field", () => {
+    const artifacts: Artifact[] = [
+      {
+        id: "a1",
+        runId: "run-1",
+        type: "ChatMessage",
+        version: 1,
+        payloadJson: { role: "user" },
+        rawText: "",
+        createdAt: "2024-01-01T00:00:01Z",
+      },
+    ];
+    render(<ChatPanel runId={RUN_ID} artifacts={artifacts} />);
+
+    // The message row renders with empty content and does not throw; the
+    // "No messages yet" empty state must not show since one message exists.
+    expect(screen.queryByText(/No messages yet/i)).toBeNull();
+  });
+
+  it("collapses and re-expands the panel when the header is clicked", async () => {
+    const artifacts: Artifact[] = [
+      makeArtifact("user", "Visible message", "a1", "2024-01-01T00:00:01Z"),
+    ];
+    render(<ChatPanel runId={RUN_ID} artifacts={artifacts} />);
+
+    expect(screen.getByText("Visible message")).toBeDefined();
+
+    const header = screen.getByRole("button", { name: /chat with agent/i });
+    await userEvent.click(header);
+    expect(screen.queryByText("Visible message")).toBeNull();
+
+    await userEvent.click(header);
+    expect(screen.getByText("Visible message")).toBeDefined();
+  });
+
+  it("ignores a form submit that arrives while a request is already in flight", async () => {
+    let resolveRequest!: (v: { reply: string; durationMs: number }) => void;
+    mockApi.sendChatMessage.mockReturnValue(
+      new Promise<{ reply: string; durationMs: number }>((res) => {
+        resolveRequest = res;
+      }),
+    );
+
+    render(<ChatPanel runId={RUN_ID} artifacts={[]} />);
+    const input = screen.getByPlaceholderText(/ask the agent/i);
+    await userEvent.type(input, "First question");
+    const form = input.closest("form") as HTMLFormElement;
+    fireEvent.submit(form);
+
+    expect(mockApi.sendChatMessage).toHaveBeenCalledTimes(1);
+
+    // Fire submit again directly on the form (bypassing the disabled Send
+    // button) while the first request is still pending: isLoading is true,
+    // so handleSubmit's early-return guard must prevent a second call.
+    fireEvent.submit(form);
+    expect(mockApi.sendChatMessage).toHaveBeenCalledTimes(1);
+
+    act(() => {
+      resolveRequest({ reply: "Done", durationMs: 100 });
+    });
+    await waitFor(() => {
+      expect(screen.queryByText(/agent is thinking/i)).toBeNull();
+    });
+  });
+
+  it("calls scrollIntoView on the bottom sentinel when it supports the API", () => {
+    const scrollIntoViewMock = vi.fn();
+    // jsdom does not implement scrollIntoView; the component guards for its
+    // presence, so we polyfill it to exercise that branch.
+    Element.prototype.scrollIntoView = scrollIntoViewMock;
+
+    const artifacts: Artifact[] = [
+      makeArtifact("user", "Triggers scroll", "a1", "2024-01-01T00:00:01Z"),
+    ];
+    render(<ChatPanel runId={RUN_ID} artifacts={artifacts} />);
+
+    expect(scrollIntoViewMock).toHaveBeenCalledWith({ behavior: "smooth" });
+
+    // @ts-expect-error -- cleaning up the polyfill for other tests
+    delete Element.prototype.scrollIntoView;
+  });
+
+  it("shows a generic error message when the rejection is not an Error instance", async () => {
+    mockApi.sendChatMessage.mockRejectedValue("a plain string rejection");
+
+    render(<ChatPanel runId={RUN_ID} artifacts={[]} />);
+    const input = screen.getByPlaceholderText(/ask the agent/i);
+    await userEvent.type(input, "Failing question");
+    await userEvent.click(screen.getByRole("button", { name: /send/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/chat request failed/i)).toBeDefined();
+    });
   });
 
   it("message list does not change from artifact-derived count when only local state changes", async () => {
