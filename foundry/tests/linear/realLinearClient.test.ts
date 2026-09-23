@@ -200,6 +200,16 @@ describe("RealLinearClient", () => {
 
       expect(result).toEqual([]);
     });
+
+    it("defaults a null description to an empty string", async () => {
+      const { client } = makeClient();
+      const issue = makeFakeIssue({ id: "issue-3", description: null });
+      injectSdk(client, { issues: vi.fn().mockResolvedValue({ nodes: [issue] }) });
+
+      const result = await client.searchIssues({ state: "Todo" });
+
+      expect(result[0].description).toBe("");
+    });
   });
 
   describe("postComment", () => {
@@ -266,6 +276,22 @@ describe("RealLinearClient", () => {
       // Same teamId -> the state map is cached, so `team()` is only called once.
       expect(team).toHaveBeenCalledTimes(1);
       expect(logger.debug).toHaveBeenCalled();
+    });
+
+    it("treats a missing states connection (no nodes) as an empty workflow state list", async () => {
+      const { client, logger } = makeClient();
+      const issue = makeFakeIssue({ id: "issue-1", team: Promise.resolve({ id: "team-1", key: "PRY" }) });
+      const updateIssue = vi.fn();
+      const team = vi.fn().mockResolvedValue({ states: () => Promise.resolve({ nodes: undefined }) });
+      injectSdk(client, { issue: vi.fn().mockResolvedValue(issue), updateIssue, team });
+
+      await client.updateIssueState("issue-1", "Todo");
+
+      expect(updateIssue).not.toHaveBeenCalled();
+      expect(logger.warn).toHaveBeenCalledWith(
+        { issueId: "issue-1", stateName: "Todo", teamId: "team-1" },
+        "Could not find workflow state by name",
+      );
     });
   });
 

@@ -56,6 +56,12 @@ function httpError(status: number, message = "boom"): Error & { status: number }
   return err;
 }
 
+/** A non-Error rejection carrying an HTTP-style status, to exercise the
+ * `err instanceof Error ? ... : String(err)` false branches. */
+function nonErrorHttpFailure(status: number): { status: number; toString(): string } {
+  return { status, toString: () => `NonError(status=${String(status)})` };
+}
+
 describe("RealGitHubClient", () => {
   describe("splitRepo validation", () => {
     it("rejects when repo is not in owner/repo format", async () => {
@@ -162,6 +168,16 @@ describe("RealGitHubClient", () => {
         /GitHub createBranch failed for "owner\/repo"/,
       );
     });
+
+    it("wrapError stringifies a non-Error rejection", async () => {
+      const { client, octokit } = makeClient();
+      octokit.repos.get.mockResolvedValue({ data: { default_branch: "main" } });
+      octokit.git.getRef.mockRejectedValue("plain string failure");
+
+      await expect(client.createBranch("owner/repo", "ai/issue-1")).rejects.toThrow(
+        /plain string failure/,
+      );
+    });
   });
 
   describe("createDraftPR", () => {
@@ -243,6 +259,16 @@ describe("RealGitHubClient", () => {
       await expect(
         client.createDraftPR("owner/repo", "head", "main", "T", "B"),
       ).rejects.toThrow(/GitHub createDraftPR failed for "owner\/repo"/);
+    });
+
+    it("treats a non-Error 422 rejection as not-field-validation and looks up the existing PR", async () => {
+      const { client, octokit } = makeClient();
+      octokit.pulls.create.mockRejectedValue(nonErrorHttpFailure(422));
+      octokit.pulls.list.mockResolvedValue({ data: [{ number: 88 }] });
+
+      const result = await client.createDraftPR("owner/repo", "head", "main", "T", "B");
+
+      expect(result).toBe(88);
     });
   });
 
@@ -491,6 +517,19 @@ describe("RealGitHubClient", () => {
       ).resolves.toBeUndefined();
       expect(logger.warn).toHaveBeenCalled();
     });
+
+    it("stringifies a non-Error rejection in the warning log", async () => {
+      const { client, octokit, logger } = makeClient();
+      octokit.pulls.createReplyForReviewComment.mockRejectedValue(nonErrorHttpFailure(500));
+
+      await expect(
+        client.replyToReviewComment("owner/repo", 1, 555, "thanks"),
+      ).resolves.toBeUndefined();
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.objectContaining({ error: "NonError(status=500)" }),
+        "Failed to reply to PR review comment, skipping",
+      );
+    });
   });
 
   describe("submitPRReview", () => {
@@ -555,6 +594,15 @@ describe("RealGitHubClient", () => {
     it("throws a wrapped error for an unrelated failure message", async () => {
       const { client, octokit } = makeClient();
       octokit.pulls.createReview.mockRejectedValue(new Error("rate limited"));
+
+      await expect(
+        client.submitPRReview("owner/repo", 1, "please fix", "REQUEST_CHANGES"),
+      ).rejects.toThrow(/GitHub submitPRReview failed for "owner\/repo"/);
+    });
+
+    it("stringifies a non-Error rejection when checking for the own-PR message", async () => {
+      const { client, octokit } = makeClient();
+      octokit.pulls.createReview.mockRejectedValue(nonErrorHttpFailure(500));
 
       await expect(
         client.submitPRReview("owner/repo", 1, "please fix", "REQUEST_CHANGES"),

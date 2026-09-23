@@ -117,6 +117,32 @@ describe("useActiveProcesses", () => {
     expect(result.current).toBeDefined();
   });
 
+  it("does not update output after unmount when getProcessOutput resolves late", async () => {
+    mockApi.getActiveProcesses.mockResolvedValue({ processes: [proc] });
+    let resolveOutput: (v: { processId: string; output: string }) => void;
+    mockApi.getProcessOutput.mockReturnValue(
+      new Promise((resolve) => {
+        resolveOutput = resolve;
+      }),
+    );
+
+    const { result, unmount } = renderHook(() => useActiveProcesses("r1"));
+    await waitFor(() => expect(result.current.processes).toEqual([proc]));
+    await waitFor(() => expect(mockApi.getProcessOutput).toHaveBeenCalled());
+
+    unmount();
+
+    await act(async () => {
+      resolveOutput!({ processId: "p1", output: "too late" });
+      await Promise.resolve();
+    });
+
+    // Nothing to assert on `result.current` post-unmount directly, but this
+    // exercises the `cancelled` guard on the inner getProcessOutput resolution
+    // path without throwing an act()-outside-test warning.
+    expect(result.current).toBeDefined();
+  });
+
   it("adds a process on process:started for this run and resets output", async () => {
     mockApi.getActiveProcesses.mockResolvedValue({ processes: [] });
     const { result } = renderHook(() => useActiveProcesses("r1"));

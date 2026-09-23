@@ -198,6 +198,13 @@ describe("api client", () => {
       expect(url).toBe("/api/runs/r1/actions/revise-plan");
       expect(JSON.parse(init.body as string)).toEqual({ note: "please revise" });
     });
+
+    it("omits the note when not provided", async () => {
+      fetchMock.mockResolvedValue(jsonResponse({ ok: true, runId: "r1" }));
+      await api.revisePlan("r1");
+      const [, init] = fetchMock.mock.calls[0]!;
+      expect(JSON.parse(init.body as string)).toEqual({});
+    });
   });
 
   describe("approveReview", () => {

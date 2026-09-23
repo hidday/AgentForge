@@ -227,4 +227,73 @@ describe("RealLinearClient.getRelatedContext", () => {
 
     expect(ctx.parent?.description).toBe("");
   });
+
+  it("treats a missing inverseRelations connection (no nodes) as having no blockers", async () => {
+    const focus = makeFakeIssue({
+      id: "focus-id",
+      parent: Promise.resolve(null),
+      inverseRelations: () => Promise.resolve({ nodes: undefined } as never),
+    });
+
+    issuesById.set("focus-id", focus);
+
+    const ctx = await client.getRelatedContext("focus-id");
+
+    expect(ctx.blockers).toEqual([]);
+  });
+
+  it("defaults a related issue's labels/state when their connections are null", async () => {
+    const parent = makeFakeIssue({
+      id: "parent-id",
+      identifier: "PRY-100",
+      labels: () => Promise.resolve(null as never),
+      state: Promise.resolve(null as never),
+    });
+    const focus = makeFakeIssue({
+      id: "focus-id",
+      parent: Promise.resolve(parent),
+    });
+
+    issuesById.set("focus-id", focus);
+    issuesById.set("parent-id", parent);
+
+    const ctx = await client.getRelatedContext("focus-id");
+
+    expect(ctx.parent?.labels).toEqual([]);
+    expect(ctx.parent?.state).toBe("Unknown");
+  });
+
+  it("skips a blocker relation whose issue fails to hydrate, logging a warning", async () => {
+    const goodBlocker = makeFakeIssue({ id: "blocker-good", identifier: "PRY-101" });
+    const focus = makeFakeIssue({
+      id: "focus-id",
+      parent: Promise.resolve(null),
+      inverseRelations: () =>
+        Promise.resolve({
+          nodes: [
+            {
+              id: "rel-bad",
+              type: "blocks",
+              issue: Promise.reject(new Error("issue fetch failed")),
+            },
+            { id: "rel-good", type: "blocks", issue: Promise.resolve(goodBlocker) },
+          ],
+        }),
+    });
+
+    issuesById.set("focus-id", focus);
+    issuesById.set("blocker-good", goodBlocker);
+
+    const logger = makeLogger();
+    (client as unknown as { logger: unknown }).logger = logger;
+
+    const ctx = await client.getRelatedContext("focus-id");
+
+    expect(ctx.blockers).toHaveLength(1);
+    expect(ctx.blockers[0].id).toBe("blocker-good");
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.objectContaining({ relationId: "rel-bad", focusIssueId: "focus-id" }) as unknown,
+      "Failed to hydrate blocker issue from relation",
+    );
+  });
 });

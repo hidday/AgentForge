@@ -30,10 +30,10 @@ function fireSSE(event: DashboardEvent) {
 }
 
 const skillsResponse = {
-  injectedSkills: [],
-  distillationDecision: null,
-  distilledSkill: null,
-} as never;
+  injectedSkills: [] as unknown[],
+  distillationDecision: null as unknown,
+  distilledSkill: null as unknown,
+};
 
 describe("useRunSkills", () => {
   beforeEach(() => {

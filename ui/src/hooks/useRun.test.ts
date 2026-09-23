@@ -31,9 +31,9 @@ function fireSSE(event: DashboardEvent) {
 
 const runDetail = {
   run: { id: "r1", state: "Todo" },
-  artifacts: [],
-  events: [],
-} as never;
+  artifacts: [] as unknown[],
+  events: [] as unknown[],
+};
 
 describe("useRun", () => {
   beforeEach(() => {
