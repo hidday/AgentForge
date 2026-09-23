@@ -18,9 +18,39 @@ import type { ProcessSpawnOptions } from "../../src/runtime/runnerTypes.js";
 
 vi.mock("node:child_process", () => ({ spawn: vi.fn() }));
 
+// `watch` is replaced with a controllable mock. `createWriteStream` is
+// replaced with a synchronous fake: the real WriteStream opens and writes
+// asynchronously, which races with a test's tmp-dir cleanup (afterEach) and
+// produces flaky/uncaught ENOENT errors when a write lands after its
+// directory has already been removed. The fake appends synchronously via the
+// *real* fs so log-file reads in assertions are deterministic.
 vi.mock("node:fs", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:fs")>();
-  return { ...actual, watch: vi.fn() };
+  const { EventEmitter: FakeEventEmitter } = await import("node:events");
+
+  class FakeWriteStream extends FakeEventEmitter {
+    constructor(private readonly path: string) {
+      super();
+    }
+    write(chunk: unknown) {
+      try {
+        actual.appendFileSync(this.path, chunk as never);
+      } catch {
+        // best-effort, mirrors real stream swallowing post-close writes
+      }
+      return true;
+    }
+    end() {
+      this.emit("finish");
+      this.emit("close");
+    }
+  }
+
+  return {
+    ...actual,
+    watch: vi.fn(),
+    createWriteStream: vi.fn((path: string) => new FakeWriteStream(path)),
+  };
 });
 
 function makeMockLogger() {
