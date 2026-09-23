@@ -146,4 +146,15 @@ describe("POST /api/runs/:id/actions/retry", () => {
     expect(res.statusCode).toBe(200);
     await flush();
   });
+
+  it("does not throw when the fired-and-forgotten retry method rejects with a non-Error", async () => {
+    const { app, mockRunRepo, mockOrchestrator } = await buildApp();
+    mockRunRepo.findById.mockResolvedValue(makeRun({ state: RunState.Todo }));
+    mockOrchestrator.retryRun.mockRejectedValue("non-error rejection");
+
+    const res = await app.inject({ method: "POST", url: "/api/runs/run-1/actions/retry" });
+
+    expect(res.statusCode).toBe(200);
+    await flush();
+  });
 });
