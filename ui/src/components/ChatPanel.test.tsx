@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor, act } from "@testing-library/react";
+import { render, screen, waitFor, act, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { Artifact } from "@/api/client.ts";
 
@@ -250,5 +250,99 @@ describe("ChatPanel", () => {
       // "New question" should NOT appear
       expect(screen.queryByText("New question")).toBeNull();
     });
+  });
+
+  it("falls back to an empty string when an artifact's payload has no content field", () => {
+    const artifacts: Artifact[] = [
+      {
+        id: "a1",
+        runId: "run-1",
+        type: "ChatMessage",
+        version: 1,
+        payloadJson: { role: "user" },
+        rawText: "",
+        createdAt: "2024-01-01T00:00:01Z",
+      },
+    ];
+    render(<ChatPanel runId={RUN_ID} artifacts={artifacts} />);
+
+    // The message bubble renders, just with empty content — no crash, and
+    // the empty-state text is not shown since a message exists.
+    expect(screen.queryByText(/No messages yet/i)).toBeNull();
+  });
+
+  it("does not call the API when the form is submitted with only whitespace input", () => {
+    const { container } = render(<ChatPanel runId={RUN_ID} artifacts={[]} />);
+    const input = screen.getByPlaceholderText(/ask the agent/i) as HTMLInputElement;
+    fireEvent.change(input, { target: { value: "   " } });
+
+    const form = container.querySelector("form");
+    expect(form).not.toBeNull();
+    fireEvent.submit(form!);
+
+    expect(mockApi.sendChatMessage).not.toHaveBeenCalled();
+  });
+
+  it("shows a generic error message when the rejection is not an Error instance", async () => {
+    mockApi.sendChatMessage.mockRejectedValue("some non-Error rejection");
+
+    render(<ChatPanel runId={RUN_ID} artifacts={[]} />);
+    const input = screen.getByPlaceholderText(/ask the agent/i);
+    await userEvent.type(input, "Failing question");
+    await userEvent.click(screen.getByRole("button", { name: /send/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/chat request failed/i)).toBeDefined();
+    });
+  });
+
+  it("collapses and re-expands the panel when the header is clicked", async () => {
+    const artifacts: Artifact[] = [
+      makeArtifact("user", "Existing message", "a1", "2024-01-01T00:00:01Z"),
+    ];
+    render(<ChatPanel runId={RUN_ID} artifacts={artifacts} />);
+
+    // Open by default: message list and input are visible
+    expect(screen.getByText("Existing message")).toBeDefined();
+    expect(screen.getByPlaceholderText(/ask the agent/i)).toBeDefined();
+
+    const headerBtn = screen.getByRole("button", { name: /chat with agent/i });
+    await userEvent.click(headerBtn);
+
+    // Collapsed: body content is no longer rendered
+    expect(screen.queryByText("Existing message")).toBeNull();
+    expect(screen.queryByPlaceholderText(/ask the agent/i)).toBeNull();
+
+    await userEvent.click(headerBtn);
+
+    // Expanded again
+    expect(screen.getByText("Existing message")).toBeDefined();
+    expect(screen.getByPlaceholderText(/ask the agent/i)).toBeDefined();
+  });
+
+  it("auto-scrolls the anchor into view when scrollIntoView is available (jsdom stub)", async () => {
+    const scrollIntoViewMock = vi.fn();
+    // jsdom's HTMLElement doesn't implement scrollIntoView by default; the
+    // component guards on `typeof ... === "function"` before calling it.
+    Element.prototype.scrollIntoView = scrollIntoViewMock;
+
+    mockApi.sendChatMessage.mockResolvedValue({ reply: "Response", durationMs: 100 });
+
+    const { rerender } = render(<ChatPanel runId={RUN_ID} artifacts={[]} />);
+    scrollIntoViewMock.mockClear();
+
+    // Re-render with an added message so `messages.length` changes, which
+    // re-triggers the auto-scroll effect.
+    const artifacts: Artifact[] = [
+      makeArtifact("user", "New incoming message", "a1", "2024-01-01T00:00:01Z"),
+    ];
+    rerender(<ChatPanel runId={RUN_ID} artifacts={artifacts} />);
+
+    await waitFor(() => {
+      expect(scrollIntoViewMock).toHaveBeenCalledWith({ behavior: "smooth" });
+    });
+
+    // @ts-expect-error -- cleanup the global stub after the test
+    delete Element.prototype.scrollIntoView;
   });
 });
