@@ -242,6 +242,226 @@ describe("PlannerAgent.run()", () => {
     });
   });
 
+  describe("planReviewFindings injection", () => {
+    it("renders '## AI Plan Review Findings' section with summary and findings", async () => {
+      const { agent, getPrompt } = buildPlannerAgent();
+      const bundle = makeTaskBundle();
+
+      await agent.run(bundle, "run-1", {
+        planReviewFindings: {
+          summary: "Overall solid, a couple of gaps.",
+          findings: [
+            {
+              id: "f1",
+              severity: "blocker",
+              title: "Missing rollback plan",
+              details: "No rollback strategy described.",
+            },
+            {
+              id: "f2",
+              severity: "nit",
+              title: "Typo in step 2",
+              details: "Minor wording issue.",
+            },
+          ],
+        },
+      });
+
+      const prompt = getPrompt();
+      expect(prompt).toContain("## AI Plan Review Findings (from previous plan)");
+      expect(prompt).toContain("**Review Summary:** Overall solid, a couple of gaps.");
+      expect(prompt).toContain("- **[blocker] Missing rollback plan** (f1): No rollback strategy described.");
+      expect(prompt).toContain("- **[nit] Typo in step 2** (f2): Minor wording issue.");
+      expect(prompt).toContain("Incorporate these findings into the revised plan where appropriate.");
+    });
+
+    it("does NOT include '## AI Plan Review Findings' when planReviewFindings is absent", async () => {
+      const { agent, getPrompt } = buildPlannerAgent();
+      const bundle = makeTaskBundle();
+
+      await agent.run(bundle, "run-1");
+
+      const prompt = getPrompt();
+      expect(prompt).not.toContain("## AI Plan Review Findings");
+      expect(prompt).not.toContain("{{planReviewSection}}");
+    });
+  });
+
+  describe("previousPlan injection", () => {
+    it("renders '## Previously Rejected Plan' section with steps, confidence, and test plan", async () => {
+      const { agent, getPrompt } = buildPlannerAgent();
+      const bundle = makeTaskBundle();
+
+      await agent.run(bundle, "run-1", {
+        previousPlan: {
+          planVersion: 4,
+          summary: "Old approach using REST polling.",
+          assumptions: [],
+          openQuestions: [],
+          risks: [],
+          steps: [
+            { id: "s1", title: "Add polling loop", description: "Poll every 5s" },
+            { id: "s2", title: "Add cache", description: "Cache results" },
+          ],
+          testPlan: "Run integration tests",
+          confidence: 0.75,
+        },
+      });
+
+      const prompt = getPrompt();
+      expect(prompt).toContain("## Previously Rejected Plan (v4)");
+      expect(prompt).toContain("**Summary:** Old approach using REST polling.");
+      expect(prompt).toContain("**Confidence:** 75%");
+      expect(prompt).toContain("1. **Add polling loop** (s1): Poll every 5s");
+      expect(prompt).toContain("2. **Add cache** (s2): Cache results");
+      expect(prompt).toContain("**Test Plan:** Run integration tests");
+      expect(prompt).toContain("Use this as the starting point for the new plan.");
+      // No risks/assumptions/openQuestions provided, so those sub-sections are omitted
+      expect(prompt).not.toContain("**Risks:**");
+      expect(prompt).not.toContain("**Assumptions:**");
+      expect(prompt).not.toContain("**Open Questions:**");
+    });
+
+    it("renders assumptions, risks, and open questions sub-sections when present on the previous plan", async () => {
+      const { agent, getPrompt } = buildPlannerAgent();
+      const bundle = makeTaskBundle();
+
+      await agent.run(bundle, "run-1", {
+        previousPlan: {
+          planVersion: 2,
+          summary: "Old plan",
+          assumptions: ["Assumes Postgres is available"],
+          openQuestions: [
+            { id: "q1", question: "Blocking one?", requiredForExecution: true },
+            { id: "q2", question: "Optional one?", requiredForExecution: false },
+          ],
+          risks: ["Might break the migration"],
+          steps: [{ id: "s1", title: "Step 1", description: "Do the thing" }],
+          testPlan: "Run tests",
+          confidence: 0.5,
+        },
+      });
+
+      const prompt = getPrompt();
+      expect(prompt).toContain("**Assumptions:**\n- Assumes Postgres is available");
+      expect(prompt).toContain("**Risks:**\n- Might break the migration");
+      expect(prompt).toContain("**Open Questions:**");
+      expect(prompt).toContain("- [q1] Blocking one? *(blocks execution)*");
+      expect(prompt).toContain("- [q2] Optional one?");
+      expect(prompt).not.toContain("Optional one? *(blocks execution)*");
+    });
+
+    it("does NOT include '## Previously Rejected Plan' when previousPlan is absent", async () => {
+      const { agent, getPrompt } = buildPlannerAgent();
+      const bundle = makeTaskBundle();
+
+      await agent.run(bundle, "run-1");
+
+      const prompt = getPrompt();
+      expect(prompt).not.toContain("## Previously Rejected Plan");
+      expect(prompt).not.toContain("{{previousPlanSection}}");
+    });
+  });
+
+  describe("priorSkills injection", () => {
+    it("renders '## Prior Skills from Similar Tasks' with named skill headings and descriptions", async () => {
+      const { agent, getPrompt } = buildPlannerAgent();
+      const bundle = makeTaskBundle();
+
+      await agent.run(bundle, "run-1", {
+        priorSkills: [
+          {
+            id: "skill-1",
+            repoSlug: "test-repo",
+            name: "auth-middleware",
+            description: "Use when adding auth middleware.",
+            taskCategory: "auth middleware",
+            skillMarkdown: "Use JWT tokens with RS256.",
+            utilityScore: 0.8,
+            lastUsedAt: new Date(),
+          },
+        ],
+      });
+
+      const prompt = getPrompt();
+      expect(prompt).toContain("## Prior Skills from Similar Tasks");
+      expect(prompt).toContain("### auth-middleware (auth middleware)");
+      expect(prompt).toContain("Use when adding auth middleware.");
+      expect(prompt).toContain("Use JWT tokens with RS256.");
+    });
+
+    it("falls back to taskCategory as the heading when skill has no name, and omits description when absent", async () => {
+      const { agent, getPrompt } = buildPlannerAgent();
+      const bundle = makeTaskBundle();
+
+      await agent.run(bundle, "run-1", {
+        priorSkills: [
+          {
+            id: "skill-2",
+            repoSlug: "test-repo",
+            name: null,
+            description: null,
+            taskCategory: "database migration",
+            skillMarkdown: "Run migrations in a transaction.",
+            utilityScore: 0.4,
+            lastUsedAt: new Date(),
+          },
+        ],
+      });
+
+      const prompt = getPrompt();
+      expect(prompt).toContain("### database migration");
+      expect(prompt).not.toContain("### database migration (database migration)");
+      expect(prompt).toContain("Run migrations in a transaction.");
+    });
+
+    it("renders multiple skill blocks joined together", async () => {
+      const { agent, getPrompt } = buildPlannerAgent();
+      const bundle = makeTaskBundle();
+
+      await agent.run(bundle, "run-1", {
+        priorSkills: [
+          {
+            id: "skill-1",
+            repoSlug: "test-repo",
+            name: "skill-one",
+            description: "First skill",
+            taskCategory: "cat-1",
+            skillMarkdown: "Do X.",
+            utilityScore: 0.6,
+            lastUsedAt: new Date(),
+          },
+          {
+            id: "skill-2",
+            repoSlug: "test-repo",
+            name: "skill-two",
+            description: "Second skill",
+            taskCategory: "cat-2",
+            skillMarkdown: "Do Y.",
+            utilityScore: 0.7,
+            lastUsedAt: new Date(),
+          },
+        ],
+      });
+
+      const prompt = getPrompt();
+      expect(prompt).toContain("### skill-one (cat-1)");
+      expect(prompt).toContain("### skill-two (cat-2)");
+      expect(prompt).toContain("Do X.");
+      expect(prompt).toContain("Do Y.");
+    });
+
+    it("does NOT include '## Prior Skills from Similar Tasks' when priorSkills is undefined", async () => {
+      const { agent, getPrompt } = buildPlannerAgent();
+      const bundle = makeTaskBundle();
+
+      await agent.run(bundle, "run-1");
+
+      const prompt = getPrompt();
+      expect(prompt).not.toContain("## Prior Skills from Similar Tasks");
+    });
+  });
+
   describe("relatedContext rendering", () => {
     it("renders the Related Linear Context section when bundle has parent and blockers", async () => {
       const { agent, getPrompt } = buildPlannerAgent();

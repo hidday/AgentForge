@@ -75,4 +75,78 @@ describe("DistilledSkillPanel", () => {
 
     expect(screen.getByText(/content could not be loaded/i)).toBeDefined();
   });
+
+  it("shows a loading indicator when loading is true, before considering distillationDecision", () => {
+    render(
+      <DistilledSkillPanel
+        distilledSkill={null}
+        distillationDecision={null}
+        loading={true}
+      />,
+    );
+
+    expect(screen.getByText(/Loading distilled skill/i)).toBeDefined();
+    expect(screen.queryByText("Distilled Skill")).toBeNull();
+  });
+
+  it("shows an error message when error is set, taking precedence over the loading/decision state", () => {
+    render(
+      <DistilledSkillPanel
+        distilledSkill={null}
+        distillationDecision={decision}
+        error="Failed to load distilled skill"
+      />,
+    );
+
+    expect(screen.getByText("Failed to load distilled skill")).toBeDefined();
+    expect(screen.queryByText("Distilled Skill")).toBeNull();
+  });
+
+  it("shows the displaced skill id, truncated to 8 characters, when present", () => {
+    render(
+      <DistilledSkillPanel
+        distilledSkill={skill}
+        distillationDecision={{
+          ...decision,
+          displacedSkillId: "displaced-skill-uuid-1234",
+        }}
+      />,
+    );
+
+    const el = screen.getByText(/Displaced skill:/);
+    expect(el.textContent).toContain("displace");
+    expect(el.textContent).not.toContain("displaced-skill-uuid-1234");
+  });
+
+  it("does not show a displaced skill line when displacedSkillId is null", () => {
+    render(
+      <DistilledSkillPanel distilledSkill={skill} distillationDecision={decision} />,
+    );
+
+    expect(screen.queryByText(/Displaced skill:/)).toBeNull();
+  });
+
+  it("falls all the way through the name/description fallback chain to 'distilled-skill' and no description", () => {
+    render(
+      <DistilledSkillPanel
+        distilledSkill={null}
+        distillationDecision={{
+          shouldPersist: true,
+          reason: "reason",
+          taskCategory: null,
+          name: null,
+          description: null,
+          displacedSkillId: null,
+        }}
+      />,
+    );
+
+    // distilledSkill?.name, distillationDecision.name,
+    // distilledSkill?.taskCategory, and distillationDecision.taskCategory are
+    // all unavailable, so the header falls back to the final literal.
+    expect(screen.getByText("distilled-skill")).toBeDefined();
+    // skillDescription is also null all the way through its chain, so no
+    // description paragraph and no export preview should render.
+    expect(screen.queryByText(/SKILL.md export preview/i)).toBeNull();
+  });
 });
