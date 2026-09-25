@@ -438,6 +438,35 @@ describe("parseClaudeOutput – edge cases", () => {
     expect(parseClaudeOutput(line)).toEqual([]);
   });
 
+  it("produces no block for a bare JSON primitive value (not an array or object)", () => {
+    expect(parseClaudeOutput("42")).toEqual([]);
+    expect(parseClaudeOutput("true")).toEqual([]);
+  });
+
+  it("produces no block when tool_use_result is neither a string nor an object", () => {
+    const line = JSON.stringify({ tool_use_result: 42 });
+    expect(parseClaudeOutput(line)).toEqual([]);
+  });
+
+  it("ignores content_block_start events whose content_block is not a tool_use", () => {
+    const line = JSON.stringify({
+      type: "content_block_start",
+      content_block: { type: "text", text: "" },
+    });
+    expect(parseClaudeOutput(line)).toEqual([]);
+  });
+
+  it("ignores unrecognized entry types within a content array", () => {
+    const line = JSON.stringify({
+      content: [
+        { type: "thinking", text: "internal reasoning" },
+        { type: "text", text: "kept" },
+      ],
+    });
+    const result = parseClaudeOutput(line);
+    expect(result).toEqual<ParsedBlock[]>([{ type: "text", content: "kept" }]);
+  });
+
   it("skips a null entry within a content array without throwing", () => {
     const line = JSON.stringify({
       content: [null, { type: "text", text: "still works" }],

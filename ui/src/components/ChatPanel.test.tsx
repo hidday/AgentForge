@@ -295,4 +295,56 @@ describe("ChatPanel", () => {
     // @ts-expect-error -- clean up the global stub after this test
     delete Element.prototype.scrollIntoView;
   });
+
+  it("renders an empty string when a ChatMessage artifact has no content field", () => {
+    const artifacts: Artifact[] = [
+      {
+        id: "a1",
+        runId: RUN_ID,
+        type: "ChatMessage",
+        version: 1,
+        payloadJson: { role: "user" },
+        rawText: "",
+        createdAt: "2024-01-01T00:00:01Z",
+      },
+    ];
+    const { container } = render(<ChatPanel runId={RUN_ID} artifacts={artifacts} />);
+
+    // "No messages yet" must not show since a message artifact exists, and
+    // the (single) user bubble renders with empty content (falls back to "").
+    expect(screen.queryByText(/No messages yet/i)).toBeNull();
+    expect(screen.getByText("1")).toBeDefined(); // message count badge
+    // eslint-disable-next-line testing-library/no-node-access
+    const bubble = container.querySelector("span.whitespace-pre-wrap");
+    expect(bubble).not.toBeNull();
+    expect(bubble!.textContent).toBe("");
+  });
+
+  it("does not submit when the trimmed input is empty (whitespace-only), even if the form is submitted directly", async () => {
+    render(<ChatPanel runId={RUN_ID} artifacts={[]} />);
+    const input = screen.getByPlaceholderText(/ask the agent/i) as HTMLInputElement;
+    await userEvent.type(input, "   ");
+
+    const form = input.closest("form");
+    expect(form).not.toBeNull();
+    // Submit the form directly (bypassing the disabled Send button) to
+    // exercise the handleSubmit guard clause for whitespace-only input.
+    // eslint-disable-next-line testing-library/no-node-access
+    form!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+
+    expect(mockApi.sendChatMessage).not.toHaveBeenCalled();
+  });
+
+  it("shows a generic error message when sendChatMessage rejects with a non-Error value", async () => {
+    mockApi.sendChatMessage.mockRejectedValue("network exploded");
+
+    render(<ChatPanel runId={RUN_ID} artifacts={[]} />);
+    const input = screen.getByPlaceholderText(/ask the agent/i);
+    await userEvent.type(input, "Hello");
+    await userEvent.click(screen.getByRole("button", { name: /send/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText("Chat request failed")).toBeDefined();
+    });
+  });
 });
