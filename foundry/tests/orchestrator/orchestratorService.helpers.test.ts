@@ -354,6 +354,55 @@ describe("OrchestratorService -- updateSkillMetrics (via terminal transitions)",
     expect(agentSkillRepo.incrementFailure).toHaveBeenCalledWith("skill-x");
     expect(agentSkillRepo.archiveIfLowUtility).not.toHaveBeenCalled();
   });
+
+  it("increments failure metrics and archives the updated skill when incrementFailure succeeds", async () => {
+    const { deps, runRepo, artifactRepo, eventRepo, agentSkillRepo } = buildDeps();
+    const svc = new OrchestratorService(deps as never);
+
+    const run = makeRun({ id: "run-1", state: RunState.HumanClarificationNeeded, planVersion: 1 });
+    runRepo.findById.mockResolvedValue(run);
+
+    const plan = makePlan({
+      openQuestions: [{ id: "q1", question: "Required?", requiredForExecution: true }],
+    });
+    artifactRepo.findLatestByType.mockImplementation((_r: string, type: string) => {
+      if (type === "Plan") return Promise.resolve(makeArtifact("Plan", plan));
+      if (type === "TaskBundle")
+        return Promise.resolve(
+          makeArtifact("TaskBundle", {
+            issue: { id: "LIN-1", title: "t", description: "d", labels: [], priority: 0 },
+            repo: defaultRepoEntry,
+            constraints: defaultRepoEntry.constraints,
+            definitionOfDone: [],
+          }),
+        );
+      return Promise.resolve(null);
+    });
+
+    (deps.plannerAgent as { run: ReturnType<typeof vi.fn> }).run.mockResolvedValue(plan);
+
+    runRepo.update.mockResolvedValue(makeRun({ id: "run-1", state: RunState.Planning, planVersion: 2 }));
+    runRepo.updateState
+      .mockResolvedValueOnce(makeRun({ id: "run-1", state: RunState.Planning })) // CLARIFICATION_PROVIDED
+      .mockResolvedValueOnce(makeRun({ id: "run-1", state: RunState.PlanReview, planVersion: 2 })) // PLAN_CREATED
+      .mockResolvedValueOnce(makeRun({ id: "run-1", state: RunState.Failed, planVersion: 2 })); // CLARIFICATION_EXHAUSTED
+
+    eventRepo.findByRunId.mockResolvedValue([
+      { id: "e1", runId: "run-1", eventType: RunEvent.NEEDS_HUMAN_CLARIFICATION, source: "planner-agent", payloadJson: {}, createdAt: new Date() },
+      { id: "e2", runId: "run-1", eventType: RunEvent.NEEDS_HUMAN_CLARIFICATION, source: "planner-agent", payloadJson: {}, createdAt: new Date() },
+      { id: "e3", runId: "run-1", eventType: RunEvent.NEEDS_HUMAN_CLARIFICATION, source: "planner-agent", payloadJson: {}, createdAt: new Date() },
+      { id: "e4", runId: "run-1", eventType: "SKILL_INJECTION", source: "orchestrator", payloadJson: { skillIds: ["skill-x"] }, createdAt: new Date() },
+    ]);
+
+    const updatedSkill = { id: "skill-x", utilityScore: 0.1 };
+    agentSkillRepo.incrementFailure.mockResolvedValue(updatedSkill);
+
+    const result = await svc.answerQuestions("run-1", [{ questionId: "q1", answer: "still unclear" }]);
+
+    expect(result.state).toBe(RunState.Failed);
+    expect(agentSkillRepo.incrementFailure).toHaveBeenCalledWith("skill-x");
+    expect(agentSkillRepo.archiveIfLowUtility).toHaveBeenCalledWith(updatedSkill);
+  });
 });
 
 describe("OrchestratorService -- buildTaskBundle (via runPlanReview)", () => {
