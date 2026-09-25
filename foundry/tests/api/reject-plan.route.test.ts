@@ -185,4 +185,19 @@ describe("POST /api/runs/:id/actions/reject-plan", () => {
     const body = JSON.parse(response.body) as { error: string };
     expect(body.error).toBe("Invalid state transition");
   });
+
+  it("returns 400 with String(err) when orchestrator rejects with a non-Error value", async () => {
+    const { app, mockOrchestrator } = await buildApp();
+    mockOrchestrator.rejectPlan.mockRejectedValue("invalid state transition (string)");
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/actions/reject-plan",
+      payload: { context: "Some feedback" },
+    });
+
+    expect(response.statusCode).toBe(400);
+    const body = JSON.parse(response.body) as { error: string };
+    expect(body.error).toBe("invalid state transition (string)");
+  });
 });

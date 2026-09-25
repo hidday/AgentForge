@@ -137,6 +137,40 @@ describe("POST /api/runs/:id/actions/approve-plan", () => {
     // allow the fire-and-forget rejection handler (logError) to run
     await new Promise((resolve) => setTimeout(resolve, 10));
   });
+
+  it("does not fail the request when the background runExecution rejects with a non-Error value", async () => {
+    const run = makeRun(RunState.Implementing);
+    const { app, mockOrchestrator } = await buildApp();
+    mockOrchestrator.approvePlan.mockResolvedValue(run);
+    mockOrchestrator.runExecution.mockRejectedValue("plain-string-rejection");
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/actions/approve-plan",
+      payload: {},
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({ ok: true });
+    // allow the fire-and-forget rejection handler (logError) to run, exercising the
+    // `err instanceof Error ? ... : String(err)` non-Error branch
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  });
+
+  it("returns 400 with String(err) when approvePlan rejects with a non-Error value", async () => {
+    const { app, mockOrchestrator } = await buildApp();
+    mockOrchestrator.approvePlan.mockRejectedValue("plan cannot be approved right now");
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/actions/approve-plan",
+      payload: {},
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toEqual({ error: "plan cannot be approved right now" });
+    expect(mockOrchestrator.runExecution).not.toHaveBeenCalled();
+  });
 });
 
 describe("POST /api/runs/:id/actions/re-review-plan", () => {
@@ -189,6 +223,38 @@ describe("POST /api/runs/:id/actions/re-review-plan", () => {
 
     expect(res.statusCode).toBe(200);
     await new Promise((resolve) => setTimeout(resolve, 10));
+  });
+
+  it("does not fail the request when the background call rejects with a non-Error value", async () => {
+    const { app, mockOrchestrator } = await buildApp();
+    mockOrchestrator.runManualReReview.mockRejectedValue("boom-string");
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/actions/re-review-plan",
+      payload: {},
+    });
+
+    expect(res.statusCode).toBe(200);
+    // allow the fire-and-forget catch handler to run, exercising the non-Error branch
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  });
+
+  it("returns 400 with String(err) when the synchronous call throws a non-Error value", async () => {
+    const { app, mockOrchestrator } = await buildApp();
+    mockOrchestrator.runManualReReview.mockImplementation(() => {
+      // eslint-disable-next-line @typescript-eslint/only-throw-error
+      throw "cannot start re-review (string)";
+    });
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/actions/re-review-plan",
+      payload: {},
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toEqual({ error: "cannot start re-review (string)" });
   });
 });
 
@@ -243,6 +309,38 @@ describe("POST /api/runs/:id/actions/revise-plan", () => {
     expect(res.statusCode).toBe(200);
     await new Promise((resolve) => setTimeout(resolve, 10));
   });
+
+  it("does not fail the request when the background call rejects with a non-Error value", async () => {
+    const { app, mockOrchestrator } = await buildApp();
+    mockOrchestrator.runManualPlanRevision.mockRejectedValue("boom-string");
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/actions/revise-plan",
+      payload: {},
+    });
+
+    expect(res.statusCode).toBe(200);
+    // allow the fire-and-forget catch handler to run, exercising the non-Error branch
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  });
+
+  it("returns 400 with String(err) when the synchronous call throws a non-Error value", async () => {
+    const { app, mockOrchestrator } = await buildApp();
+    mockOrchestrator.runManualPlanRevision.mockImplementation(() => {
+      // eslint-disable-next-line @typescript-eslint/only-throw-error
+      throw "cannot revise (string)";
+    });
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/actions/revise-plan",
+      payload: {},
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toEqual({ error: "cannot revise (string)" });
+  });
 });
 
 describe("POST /api/runs/:id/actions/approve-review", () => {
@@ -276,5 +374,18 @@ describe("POST /api/runs/:id/actions/approve-review", () => {
 
     expect(res.statusCode).toBe(400);
     expect(res.json()).toEqual({ error: "Wrong state" });
+  });
+
+  it("returns 400 with String(err) when approveHumanReview rejects with a non-Error value", async () => {
+    const { app, mockOrchestrator } = await buildApp();
+    mockOrchestrator.approveHumanReview.mockRejectedValue("wrong state (string)");
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/actions/approve-review",
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toEqual({ error: "wrong state (string)" });
   });
 });

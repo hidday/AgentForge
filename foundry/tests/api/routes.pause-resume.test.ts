@@ -94,6 +94,18 @@ describe("POST /api/runs/:id/actions/pause", () => {
     expect(res.statusCode).toBe(400);
     expect(res.json()).toEqual({ error: "cannot pause" });
   });
+
+  it("returns 400 with String(err) when handleCommand rejects with a non-Error value", async () => {
+    const run = makeRun();
+    const { app, mockRunRepo, mockOrchestrator } = await buildApp();
+    mockRunRepo.findById.mockResolvedValue(run);
+    mockOrchestrator.handleCommand.mockRejectedValue("cannot pause (string)");
+
+    const res = await app.inject({ method: "POST", url: "/api/runs/run-1/actions/pause" });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toEqual({ error: "cannot pause (string)" });
+  });
 });
 
 describe("POST /api/runs/:id/actions/resume", () => {
@@ -134,5 +146,17 @@ describe("POST /api/runs/:id/actions/resume", () => {
 
     expect(res.statusCode).toBe(400);
     expect(res.json()).toEqual({ error: "cannot resume" });
+  });
+
+  it("returns 400 with String(err) when handleCommand rejects with a non-Error value", async () => {
+    const run = makeRun();
+    const { app, mockRunRepo, mockOrchestrator } = await buildApp();
+    mockRunRepo.findById.mockResolvedValue(run);
+    mockOrchestrator.handleCommand.mockRejectedValue("cannot resume (string)");
+
+    const res = await app.inject({ method: "POST", url: "/api/runs/run-1/actions/resume" });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toEqual({ error: "cannot resume (string)" });
   });
 });

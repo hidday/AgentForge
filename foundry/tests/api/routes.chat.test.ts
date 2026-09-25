@@ -313,6 +313,26 @@ describe("POST /api/runs/:id/chat", () => {
     expect(input.prompt).toBe("--dangerously-skip-permissions");
   });
 
+  it("returns 500 when chatRun rejects with a non-Error value", async () => {
+    const run = makeRun();
+    const { app, mockRunRepo, mockArtifactRepo } = await buildApp({
+      runnerOverride: {
+        chatRun: vi.fn().mockRejectedValue("boom-string-rejection"),
+      },
+    });
+    mockRunRepo.findById.mockResolvedValue(run);
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/chat",
+      payload: { message: "Hello?" },
+    });
+
+    expect(res.statusCode).toBe(500);
+    expect(res.json()).toEqual({ error: "Chat request failed" });
+    expect(mockArtifactRepo.create).not.toHaveBeenCalled();
+  });
+
   it("returns 422 when workingDirectory doesn't exist and stripping a trailing .worktrees segment still doesn't resolve", async () => {
     const run = makeRun();
     run.workingDirectory = "/nonexistent/.worktrees/run-1";

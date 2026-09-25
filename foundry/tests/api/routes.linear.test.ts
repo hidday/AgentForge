@@ -77,6 +77,16 @@ describe("GET /api/linear/pending", () => {
     expect(res.statusCode).toBe(500);
     expect(res.json()).toEqual({ error: "Linear API unavailable" });
   });
+
+  it("returns 500 with String(err) when discoverPendingIssues rejects with a non-Error value", async () => {
+    const { app, mockLinearPollService } = await buildApp();
+    mockLinearPollService!.discoverPendingIssues.mockRejectedValue(503);
+
+    const res = await app.inject({ method: "GET", url: "/api/linear/pending" });
+
+    expect(res.statusCode).toBe(500);
+    expect(res.json()).toEqual({ error: "503" });
+  });
 });
 
 describe("POST /api/linear/ingest", () => {
@@ -162,5 +172,19 @@ describe("POST /api/linear/ingest", () => {
 
     expect(res.statusCode).toBe(500);
     expect(res.json()).toEqual({ error: "DB write failed" });
+  });
+
+  it("returns 500 with String(err) when startRunsForIssues rejects with a non-Error value", async () => {
+    const { app, mockLinearPollService } = await buildApp();
+    mockLinearPollService!.startRunsForIssues.mockRejectedValue({ code: "ECONNRESET" });
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/linear/ingest",
+      payload: { issueIds: ["LIN-1"] },
+    });
+
+    expect(res.statusCode).toBe(500);
+    expect(res.json()).toEqual({ error: String({ code: "ECONNRESET" }) });
   });
 });

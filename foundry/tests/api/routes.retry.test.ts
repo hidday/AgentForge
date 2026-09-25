@@ -124,4 +124,17 @@ describe("POST /api/runs/:id/actions/retry", () => {
     expect(res.statusCode).toBe(200);
     await new Promise((resolve) => setTimeout(resolve, 10));
   });
+
+  it("does not fail the request when the background trigger rejects with a non-Error value", async () => {
+    const run = makeRun(RunState.Todo);
+    const { app, mockRunRepo, mockOrchestrator } = await buildApp();
+    mockRunRepo.findById.mockResolvedValue(run);
+    mockOrchestrator.retryRun.mockRejectedValue("boom-string");
+
+    const res = await app.inject({ method: "POST", url: "/api/runs/run-1/actions/retry" });
+
+    expect(res.statusCode).toBe(200);
+    // allow the fire-and-forget logError handler to run, exercising the non-Error branch
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  });
 });
