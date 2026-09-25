@@ -487,6 +487,35 @@ describe("RealLinearClient.listLabels", () => {
   });
 });
 
+describe("RealLinearClient.getRelatedContext blocker hydration failure", () => {
+  it("logs a warning and drops a blocker whose relation.issue rejects", async () => {
+    const logger = makeLogger();
+    const client = new RealLinearClient("test-key", logger as never);
+    const focusIssue = {
+      id: "focus-id",
+      parent: Promise.resolve(null),
+      inverseRelations: () =>
+        Promise.resolve({
+          nodes: [
+            { id: "rel-1", type: "blocks", issue: Promise.reject(new Error("hydrate failed")) },
+          ],
+        }),
+    };
+    (client as unknown as { sdk: { issue: (id: string) => Promise<unknown> } }).sdk = {
+      issue: (id: string) =>
+        id === "focus-id" ? Promise.resolve(focusIssue) : Promise.reject(new Error("not seeded")),
+    };
+
+    const ctx = await client.getRelatedContext("focus-id");
+
+    expect(ctx.blockers).toEqual([]);
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.objectContaining({ relationId: "rel-1", focusIssueId: "focus-id" }),
+      "Failed to hydrate blocker issue from relation",
+    );
+  });
+});
+
 describe("RealLinearClient constructor", () => {
   it("constructs without throwing given an api key and logger", () => {
     expect(() => new RealLinearClient("test-key", makeLogger() as never)).not.toThrow();

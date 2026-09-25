@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, act } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { Run } from "@/api/client.ts";
 
@@ -193,13 +193,13 @@ describe("DashboardPage", () => {
     const { onIngestComplete } = linearSyncDialogMock.mock.calls[0]![0] as {
       onIngestComplete: (s: { started: number; skipped: number }) => void;
     };
-    onIngestComplete({ started: 2, skipped: 0 });
+    act(() => onIngestComplete({ started: 2, skipped: 0 }));
     await screen.findByTestId("ingest-summary-banner-marker");
 
     const { onDismiss } = ingestSummaryBannerMock.mock.calls[0]![0] as {
       onDismiss: () => void;
     };
-    onDismiss();
+    act(() => onDismiss());
 
     expect(screen.queryByTestId("ingest-summary-banner-marker")).toBeNull();
   });
@@ -212,10 +212,10 @@ describe("DashboardPage", () => {
     const { onIngestComplete } = linearSyncDialogMock.mock.calls[0]![0] as {
       onIngestComplete: (s: { started: number; skipped: number }) => void;
     };
-    onIngestComplete({ started: 1, skipped: 0 });
+    act(() => onIngestComplete({ started: 1, skipped: 0 }));
     expect(screen.getByTestId("ingest-summary-banner-marker")).toBeDefined();
 
-    vi.advanceTimersByTime(5000);
+    act(() => vi.advanceTimersByTime(5000));
 
     expect(screen.queryByTestId("ingest-summary-banner-marker")).toBeNull();
   });
@@ -229,7 +229,7 @@ describe("DashboardPage", () => {
       onIngested: () => void;
       onClose: () => void;
     };
-    props.onIngested();
+    act(() => props.onIngested());
     expect(refetch).toHaveBeenCalledTimes(1);
 
     await userEvent.click(screen.getByRole("button", { name: /sync from linear/i }));
@@ -239,7 +239,7 @@ describe("DashboardPage", () => {
     const latestProps = linearSyncDialogMock.mock.calls[
       linearSyncDialogMock.mock.calls.length - 1
     ]![0] as { onClose: () => void };
-    latestProps.onClose();
+    act(() => latestProps.onClose());
     expect(linearSyncDialogMock).toHaveBeenLastCalledWith(
       expect.objectContaining({ open: false }),
     );

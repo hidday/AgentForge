@@ -453,6 +453,30 @@ describe("NotificationService", () => {
       const result = await svc.sendHumanRequest(makePayload());
       expect(result.email).toEqual({ attempted: true, ok: false, error: "dns failure" });
     });
+
+    it("stringifies a non-Error throw from the Resend call", async () => {
+      fetchMock.mockRejectedValueOnce("resend outage");
+      const svc = new NotificationService(config, makeMockLogger() as unknown as Logger);
+
+      const result = await svc.sendHumanRequest(makePayload());
+      expect(result.email.error).toBe("resend outage");
+    });
+
+    it("falls back to the raw linearIssue.id and '(untitled)' in the subject, html, and text when identifier/title are missing", async () => {
+      fetchMock.mockResolvedValueOnce(jsonResponse(true));
+      const svc = new NotificationService(config, makeMockLogger() as unknown as Logger);
+      const payload = makePayload({
+        linearIssue: { id: "raw-id-77", title: null, url: null },
+      });
+
+      await svc.sendHumanRequest(payload);
+
+      const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+      const body = JSON.parse(init.body as string) as { subject: string; html: string; text: string };
+      expect(body.subject).toBe("[AgentForge] Plan needs review (ambiguous) — raw-id-77: (untitled)");
+      expect(body.html).toContain("<strong>raw-id-77:</strong> (untitled)");
+      expect(body.text).toContain("raw-id-77: (untitled)");
+    });
   });
 
   describe("both channels configured", () => {

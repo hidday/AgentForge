@@ -67,7 +67,7 @@ describe("GET /api/runs", () => {
     const res = await app.inject({ method: "GET", url: "/api/runs" });
 
     expect(res.statusCode).toBe(200);
-    expect(res.json()).toEqual({ runs });
+    expect(res.json()).toEqual({ runs: JSON.parse(JSON.stringify(runs)) });
     expect(mockRunRepo.findAll).toHaveBeenCalledWith(undefined);
   });
 

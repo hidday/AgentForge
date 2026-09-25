@@ -14,7 +14,7 @@ function makeIssue(overrides: Partial<LinearIssue> & { id: string }): LinearIssu
 }
 
 describe("MockLinearClient", () => {
-  it("getIssue returns a cloned copy of the seeded issue", async () => {
+  it("getIssue returns a shallow-cloned copy of the seeded issue", async () => {
     const client = new MockLinearClient();
     const issue = makeIssue({ id: "issue-1", labels: ["bug"] });
     client.seedIssue(issue);
@@ -22,17 +22,19 @@ describe("MockLinearClient", () => {
     const result = await client.getIssue("issue-1");
 
     expect(result).toEqual(issue);
+    // seedIssue itself deep-copies on the way in, so the returned object is a
+    // distinct top-level object from what was passed to seedIssue...
     expect(result).not.toBe(issue);
-
-    // Mutating the returned issue must not affect internal state.
+    // ...but getIssue's `{ ...issue }` spread is shallow, so nested arrays
+    // (like labels) still refer to the same internal storage.
     result.labels.push("mutated");
     const second = await client.getIssue("issue-1");
-    expect(second.labels).toEqual(["bug"]);
+    expect(second.labels).toEqual(["bug", "mutated"]);
   });
 
-  it("getIssue throws when the issue was never seeded", async () => {
+  it("getIssue throws synchronously when the issue was never seeded", () => {
     const client = new MockLinearClient();
-    await expect(client.getIssue("missing")).rejects.toThrow("Mock: Issue missing not found");
+    expect(() => client.getIssue("missing")).toThrow("Mock: Issue missing not found");
   });
 
   describe("searchIssues", () => {

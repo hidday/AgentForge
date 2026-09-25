@@ -191,7 +191,7 @@ describe("RunDetailPage", () => {
     render(<RunDetailPage />);
 
     // Header content derived from run fields
-    expect(screen.getByText("run-abc12")).toBeDefined(); // id.slice(0,8)
+    expect(screen.getByText(run.id.slice(0, 8))).toBeDefined();
     expect(screen.getByText("Fix the thing")).toBeDefined();
     expect(screen.getByText("org/repo")).toBeDefined();
     expect(screen.getByText("feature/fix")).toBeDefined();
