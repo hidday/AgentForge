@@ -205,7 +205,9 @@ function buildDeps(overrides: Record<string, unknown> = {}) {
     artifactRepo,
     eventRepo,
     linearClient,
+    githubClient,
     plannerAgent,
+    planReviewerAgent,
     executorAgent,
     reviewerAgent,
     answerResearcherAgent,
@@ -543,6 +545,267 @@ describe("OrchestratorService -- formatExecutionReportComment branches (via runE
 
     expect(comment).toContain(":x:");
     expect(comment).toContain(":heavy_minus_sign:");
+  });
+});
+
+describe("OrchestratorService.retryRun -- repo registry fallback", () => {
+  it("falls back to the registry default repo when getRepoByName returns undefined", async () => {
+    const { deps, runRepo, plannerAgent } = buildDeps();
+    const svc = new OrchestratorService(deps as never);
+    (deps.repoRegistry as { getRepoByName: ReturnType<typeof vi.fn> }).getRepoByName.mockReturnValue(undefined);
+
+    const run = makeRun({ id: "run-1", state: RunState.Todo, branchName: null, workingDirectory: "/main" });
+    runRepo.findById.mockResolvedValue(run);
+    runRepo.update
+      .mockResolvedValueOnce(makeRun({ id: "run-1", state: RunState.Todo, workingDirectory: "/tmp/worktree", branchName: "ai/run-1" }))
+      .mockResolvedValue(makeRun({ id: "run-1", state: RunState.Planning, planVersion: 3 }));
+    runRepo.updateState
+      .mockResolvedValueOnce(makeRun({ id: "run-1", state: RunState.Planning }))
+      .mockResolvedValueOnce(makeRun({ id: "run-1", state: RunState.PlanReview, planVersion: 3 }));
+
+    plannerAgent.run.mockResolvedValue(makePlan({ planVersion: 3, openQuestions: [] }));
+    vi.spyOn(svc, "runPlanReview").mockResolvedValue(makeRun({ state: RunState.PlanReview }));
+
+    await svc.retryRun("run-1");
+
+    expect((deps.repoRegistry as { getDefaultRepo: ReturnType<typeof vi.fn> }).getDefaultRepo).toHaveBeenCalled();
+  });
+});
+
+describe("OrchestratorService.answerQuestions -- preserves prior researched answers on re-plan", () => {
+  it("includes previously researched answers alongside the new human answers", async () => {
+    const { deps, runRepo, artifactRepo, plannerAgent } = buildDeps();
+    const svc = new OrchestratorService(deps as never);
+
+    const run = makeRun({ state: RunState.HumanClarificationNeeded, planVersion: 1 });
+    runRepo.findById.mockResolvedValue(run);
+
+    const plan = makePlan({
+      openQuestions: [{ id: "q1", question: "Which env?", requiredForExecution: true }],
+    });
+    const taskBundle = {
+      issue: { id: "LIN-1", title: "t", description: "d", labels: [], priority: 0 },
+      repo: defaultRepoEntry,
+      constraints: defaultRepoEntry.constraints,
+      definitionOfDone: [],
+    };
+    const priorResearched = {
+      summary: "prior research",
+      answers: [{ questionId: "q0", question: "Old?", answer: "Old answer", confidence: "high" as const }],
+      completedAt: new Date().toISOString(),
+    };
+
+    artifactRepo.findLatestByType.mockImplementation((_r: string, type: string) => {
+      if (type === "Plan") return Promise.resolve(makeArtifact("Plan", plan));
+      if (type === "TaskBundle") return Promise.resolve(makeArtifact("TaskBundle", taskBundle));
+      if (type === "ResearchedAnswers") return Promise.resolve(makeArtifact("ResearchedAnswers", priorResearched));
+      return Promise.resolve(null);
+    });
+
+    const newPlan = makePlan({ planVersion: 2, openQuestions: [] });
+    plannerAgent.run.mockResolvedValue(newPlan);
+    runRepo.update.mockResolvedValue(makeRun({ state: RunState.Planning, planVersion: 2 }));
+    runRepo.updateState
+      .mockResolvedValueOnce(makeRun({ state: RunState.Planning }))
+      .mockResolvedValueOnce(makeRun({ state: RunState.PlanReview, planVersion: 2 }));
+    vi.spyOn(svc, "runPlanReview").mockResolvedValue(makeRun({ state: RunState.PlanReview }));
+
+    await svc.answerQuestions("run-1", [{ questionId: "q1", answer: "staging" }]);
+
+    expect(plannerAgent.run).toHaveBeenCalledWith(
+      taskBundle,
+      "run-1",
+      expect.objectContaining({
+        humanAnswers: [{ questionId: "q1", answer: "staging" }],
+        researchedAnswers: priorResearched.answers,
+      }),
+    );
+  });
+});
+
+describe("OrchestratorService.runManualPlanRevision -- delegates without a note", () => {
+  it("passes undefined (not an object) to runPlanRevision when changes are requested with no operator note", async () => {
+    const { deps, runRepo, artifactRepo, planReviewerAgent } = buildDeps();
+    const svc = new OrchestratorService(deps as never);
+
+    runRepo.findById.mockResolvedValue(makeRun({ state: RunState.AwaitingPlanApproval }));
+    artifactRepo.findLatestByType.mockImplementation((_r: string, type: string) =>
+      type === "Plan" ? Promise.resolve(makeArtifact("Plan", makePlan())) : Promise.resolve(null),
+    );
+    planReviewerAgent.run.mockResolvedValue({
+      reviewId: "r1",
+      summary: "needs fixes",
+      overallVerdict: "changes_requested",
+      findings: [{ id: "f1", severity: "important", type: "x", title: "t", details: "d" }],
+    });
+    runRepo.updateState.mockResolvedValueOnce(makeRun({ state: RunState.PlanReview }));
+
+    const runPlanRevisionSpy = vi
+      .spyOn(svc, "runPlanRevision")
+      .mockResolvedValue(makeRun({ state: RunState.AwaitingPlanApproval }));
+
+    await svc.runManualPlanRevision("run-1");
+
+    expect(runPlanRevisionSpy).toHaveBeenCalledWith("run-1", undefined);
+  });
+});
+
+describe("OrchestratorService.approveHumanReview -- non-Error rejection from distillation", () => {
+  it("stringifies a non-Error value thrown by the distillation agent", async () => {
+    const distillationAgent = { run: vi.fn().mockRejectedValue("plain string failure") };
+    const { deps, runRepo, logger } = buildDeps({ distillationAgent });
+    const svc = new OrchestratorService(deps as never);
+
+    const run = makeRun({ id: "run-1", state: RunState.ReadyForHumanReview });
+    runRepo.findById.mockResolvedValue(run);
+    runRepo.updateState.mockResolvedValue(makeRun({ id: "run-1", state: RunState.Done }));
+
+    await svc.approveHumanReview("run-1");
+
+    const warnCall = (logger.warn as ReturnType<typeof vi.fn>).mock.calls.find(
+      (call: unknown[]) =>
+        typeof call[1] === "string" && (call[1] as string).includes("Distillation agent failed"),
+    );
+    expect(warnCall).toBeDefined();
+    expect((warnCall![0] as { error: string }).error).toBe("plain string failure");
+  });
+});
+
+describe("OrchestratorService.buildTaskBundle -- non-Error rejections (via runPlanReview)", () => {
+  it("stringifies a non-Error thrown by githubClient.getDefaultBranch", async () => {
+    const { deps, runRepo, artifactRepo, githubClient, planReviewerAgent, logger } = buildDeps();
+    const svc = new OrchestratorService(deps as never);
+
+    runRepo.findById.mockResolvedValue(makeRun({ state: RunState.PlanReview }));
+    artifactRepo.findLatestByType.mockImplementation((_r: string, type: string) =>
+      type === "Plan" ? Promise.resolve(makeArtifact("Plan", makePlan())) : Promise.resolve(null),
+    );
+    githubClient.getDefaultBranch.mockRejectedValue("network blip");
+    planReviewerAgent.run.mockResolvedValue({
+      reviewId: "r1",
+      summary: "ok",
+      findings: [],
+      overallVerdict: "approved",
+    });
+    runRepo.updateState.mockResolvedValue(makeRun({ state: RunState.AwaitingPlanApproval }));
+
+    await svc.runPlanReview("run-1");
+
+    const warnCall = (logger.warn as ReturnType<typeof vi.fn>).mock.calls.find(
+      (call: unknown[]) =>
+        typeof call[1] === "string" && (call[1] as string).includes("Failed to resolve default branch"),
+    );
+    expect(warnCall).toBeDefined();
+    expect((warnCall![0] as { error: string }).error).toBe("network blip");
+  });
+
+  it("stringifies a non-Error thrown by linearClient.getRelatedContext", async () => {
+    const { deps, runRepo, artifactRepo, linearClient, planReviewerAgent, logger } = buildDeps();
+    const svc = new OrchestratorService(deps as never);
+
+    runRepo.findById.mockResolvedValue(makeRun({ state: RunState.PlanReview }));
+    artifactRepo.findLatestByType.mockImplementation((_r: string, type: string) =>
+      type === "Plan" ? Promise.resolve(makeArtifact("Plan", makePlan())) : Promise.resolve(null),
+    );
+    linearClient.getRelatedContext.mockRejectedValue(42);
+    planReviewerAgent.run.mockResolvedValue({
+      reviewId: "r1",
+      summary: "ok",
+      findings: [],
+      overallVerdict: "approved",
+    });
+    runRepo.updateState.mockResolvedValue(makeRun({ state: RunState.AwaitingPlanApproval }));
+
+    await svc.runPlanReview("run-1");
+
+    const warnCall = (logger.warn as ReturnType<typeof vi.fn>).mock.calls.find(
+      (call: unknown[]) =>
+        typeof call[1] === "string" && (call[1] as string).includes("Failed to fetch related Linear context"),
+    );
+    expect(warnCall).toBeDefined();
+    expect((warnCall![0] as { error: string }).error).toBe("42");
+  });
+});
+
+describe("OrchestratorService.updateSkillMetrics -- missing skillIds on an injection event", () => {
+  it("treats a SKILL_INJECTION event with no skillIds as contributing no ids", async () => {
+    const agentSkillRepo = {
+      findTopKByRelevance: vi.fn().mockResolvedValue([]),
+      incrementSuccess: vi.fn(),
+      incrementFailure: vi.fn(),
+      archiveIfLowUtility: vi.fn(),
+    };
+    const { deps, runRepo, eventRepo } = buildDeps({ agentSkillRepo });
+    const svc = new OrchestratorService(deps as never);
+
+    const run = makeRun({ id: "run-1", state: RunState.ReadyForHumanReview });
+    runRepo.findById.mockResolvedValue(run);
+    runRepo.updateState.mockResolvedValue(makeRun({ id: "run-1", state: RunState.Done }));
+
+    eventRepo.findByRunId.mockResolvedValue([
+      { id: "e1", runId: "run-1", eventType: "SKILL_INJECTION", source: "orchestrator", payloadJson: {}, createdAt: new Date() },
+    ]);
+
+    await svc.approveHumanReview("run-1");
+
+    expect(agentSkillRepo.incrementSuccess).not.toHaveBeenCalled();
+  });
+});
+
+describe("OrchestratorService.updateSkillMetrics -- non-Error rejection on the failure path", () => {
+  it("stringifies a non-Error value thrown by agentSkillRepo.incrementFailure", async () => {
+    const agentSkillRepo = {
+      findTopKByRelevance: vi.fn().mockResolvedValue([]),
+      incrementSuccess: vi.fn(),
+      incrementFailure: vi.fn().mockRejectedValue("skill store unavailable"),
+      archiveIfLowUtility: vi.fn(),
+    };
+    const { deps, runRepo, artifactRepo, eventRepo, plannerAgent, logger } = buildDeps({ agentSkillRepo });
+    const svc = new OrchestratorService(deps as never);
+
+    const run = makeRun({ state: RunState.HumanClarificationNeeded, planVersion: 1 });
+    runRepo.findById.mockResolvedValue(run);
+
+    const plan = makePlan({
+      openQuestions: [{ id: "q1", question: "Required?", requiredForExecution: true }],
+    });
+    artifactRepo.findLatestByType.mockImplementation((_r: string, type: string) => {
+      if (type === "Plan") return Promise.resolve(makeArtifact("Plan", plan));
+      if (type === "TaskBundle")
+        return Promise.resolve(
+          makeArtifact("TaskBundle", {
+            issue: { id: "LIN-1", title: "t", description: "d", labels: [], priority: 0 },
+            repo: defaultRepoEntry,
+            constraints: defaultRepoEntry.constraints,
+            definitionOfDone: [],
+          }),
+        );
+      return Promise.resolve(null);
+    });
+    plannerAgent.run.mockResolvedValue(plan);
+
+    runRepo.update.mockResolvedValue(makeRun({ state: RunState.Planning, planVersion: 2 }));
+    runRepo.updateState
+      .mockResolvedValueOnce(makeRun({ state: RunState.Planning }))
+      .mockResolvedValueOnce(makeRun({ state: RunState.PlanReview, planVersion: 2 }))
+      .mockResolvedValueOnce(makeRun({ state: RunState.Failed, planVersion: 2 }));
+
+    eventRepo.findByRunId.mockResolvedValue([
+      { id: "e1", runId: "run-1", eventType: RunEvent.NEEDS_HUMAN_CLARIFICATION, source: "planner-agent", payloadJson: {}, createdAt: new Date() },
+      { id: "e2", runId: "run-1", eventType: RunEvent.NEEDS_HUMAN_CLARIFICATION, source: "planner-agent", payloadJson: {}, createdAt: new Date() },
+      { id: "e3", runId: "run-1", eventType: RunEvent.NEEDS_HUMAN_CLARIFICATION, source: "planner-agent", payloadJson: {}, createdAt: new Date() },
+      { id: "e4", runId: "run-1", eventType: "SKILL_INJECTION", source: "orchestrator", payloadJson: { skillIds: ["skill-y"] }, createdAt: new Date() },
+    ]);
+
+    const result = await svc.answerQuestions("run-1", [{ questionId: "q1", answer: "still unsure" }]);
+
+    expect(result.state).toBe(RunState.Failed);
+    const warnCall = (logger.warn as ReturnType<typeof vi.fn>).mock.calls.find(
+      (call: unknown[]) =>
+        typeof call[1] === "string" && (call[1] as string).includes("Failed to update skill metric"),
+    );
+    expect(warnCall).toBeDefined();
+    expect((warnCall![0] as { error: string }).error).toBe("skill store unavailable");
   });
 });
 
