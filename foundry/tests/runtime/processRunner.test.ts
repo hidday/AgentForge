@@ -310,6 +310,45 @@ describe("ProcessRunner", () => {
       );
     });
 
+    it("swallows a manifest write/read failure during cleanup and still resolves normally", async () => {
+      const child = makeFakeChild();
+      vi.mocked(spawn).mockReturnValue(child as never);
+      const emitter = makeMockEmitter();
+      const logger = makeMockLogger();
+      const runner = new ProcessRunner("real", logger as never, emitter as never, spoolDir);
+      const context: ProcessContext = { runId: "run-corrupt", stage: "executor", runtime: "codex" };
+
+      const promise = runner.execute({
+        command: "codex",
+        args: [],
+        cwd: "/tmp",
+        timeoutMs: 60_000,
+        context,
+      });
+
+      const entry = runner.getActiveProcesses()[0]!;
+      // Corrupt the manifest so cleanupProcess's best-effort JSON.parse/write throws internally.
+      writeFileSync(join(spoolDir, `${entry.id}.json`), "{ not valid json");
+
+      child.emit("close", 0);
+      const out = await promise;
+
+      expect(out.exitCode).toBe(0);
+      expect(runner.getActiveProcesses()).toHaveLength(0);
+      expect(logger.info).toHaveBeenCalledWith(
+        expect.objectContaining({ processId: entry.id, exitCode: 0 }),
+        "Agent process completed",
+      );
+      expect(emitter.emitProcessCompleted).toHaveBeenCalledWith(
+        "run-corrupt",
+        entry.id,
+        "executor",
+        "codex",
+        0,
+        expect.any(Number),
+      );
+    });
+
     it("does not register a tracked entry when the process has no context", async () => {
       const child = makeFakeChild();
       vi.mocked(spawn).mockReturnValue(child as never);
@@ -719,6 +758,63 @@ describe("ProcessRunner", () => {
       expect(manifest.completedAt).toEqual(expect.any(String));
       expect(manifest.exitCode).toBe(-1);
       expect(manifest.crashed).toBeUndefined();
+    });
+
+    it("swallows a manifest read failure during finalize and still cleans up tracking state", async () => {
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] });
+
+      const logPath = join(spoolDir, "alive-3.log");
+      const manifestPath = join(spoolDir, "alive-3.json");
+      writeFileSync(
+        manifestPath,
+        JSON.stringify({
+          id: "alive-3",
+          pid: 6543,
+          command: "claude",
+          args: [],
+          runId: "run-alive-3",
+          stage: "executor",
+          runtime: "claude-code",
+          startedAt: new Date().toISOString(),
+          logFile: logPath,
+        }),
+      );
+
+      vi.spyOn(process, "kill")
+        .mockImplementationOnce(() => true) // rehydrate: alive
+        .mockImplementationOnce(() => {
+          throw new Error("ESRCH"); // first poll tick: already gone
+        });
+
+      vi.mocked(watch).mockImplementation(() => ({ close: vi.fn() }) as never);
+
+      const emitter = makeMockEmitter();
+      const logger = makeMockLogger();
+      const runner = new ProcessRunner("real", logger as never, emitter as never, spoolDir);
+      runner.rehydrateOrphans();
+      expect(runner.getActiveProcesses()).toHaveLength(1);
+
+      // Corrupt the manifest before the poll tick fires, so finalizeOrphan's
+      // best-effort JSON.parse/write throws internally and is swallowed.
+      writeFileSync(manifestPath, "not valid json at all");
+
+      await vi.advanceTimersByTimeAsync(5_000);
+
+      expect(runner.getActiveProcesses()).toHaveLength(0);
+      expect(emitter.emitProcessCompleted).toHaveBeenCalledWith(
+        "run-alive-3",
+        "alive-3",
+        "executor",
+        "claude-code",
+        -1,
+        expect.any(Number),
+      );
+      expect(logger.info).toHaveBeenCalledWith(
+        { processId: "alive-3", pid: 6543 },
+        "Orphaned process has exited",
+      );
+      // Manifest was left corrupted -- the best-effort write inside the catch never ran.
+      expect(readFileSync(manifestPath, "utf-8")).toBe("not valid json at all");
     });
 
     it("ignores unreadable log files and closes the watcher once the tracked entry is gone", () => {

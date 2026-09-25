@@ -222,6 +222,32 @@ describe("ActionBar", () => {
       expect(onAction).toHaveBeenCalledOnce();
     });
 
+    it("switches back to iterate mode when Revise plan is re-selected after Start fresh", async () => {
+      const user = userEvent.setup();
+      const { container } = render(
+        <ActionBar runId={RUN_ID} state="AwaitingPlanApproval" onAction={vi.fn()} />,
+      );
+
+      await user.click(screen.getByRole("button", { name: /^Reject Plan$/ }));
+      const freshBtn = screen.getByText("Start fresh").closest("button")!;
+      const iterateBtn = screen.getByText("Revise plan").closest("button")!;
+
+      await user.click(freshBtn);
+      expect(freshBtn.className).toContain("bg-accent");
+      expect(iterateBtn.className).not.toContain("bg-accent");
+
+      await user.click(iterateBtn);
+      expect(iterateBtn.className).toContain("bg-accent");
+      expect(freshBtn.className).not.toContain("bg-accent");
+
+      const dialog = within(container.querySelector(".relative.z-10")!);
+      await user.click(dialog.getByRole("button", { name: "Reject Plan" }));
+
+      await waitFor(() => {
+        expect(mockApi.rejectPlan).toHaveBeenCalledWith(RUN_ID, undefined, "iterate");
+      });
+    });
+
     it("switches to fresh mode when Start fresh is selected and submits mode='fresh'", async () => {
       const user = userEvent.setup();
       const { container } = render(

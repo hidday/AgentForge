@@ -218,6 +218,28 @@ describe("RuntimeHealthCheck.runPreflight() — binary check failures", () => {
     const claudeResult = check.getLastResult()?.results.find((r) => r.runtime === "claude-code")!;
     expect(claudeResult.binaryCheck).toMatchObject({ ok: false, error: "ENOENT: spawn claude" });
   });
+
+  it("stringifies a non-Error thrown value from a rejected binary check", async () => {
+    const execute = vi.fn(async (opts: { command: string; args: string[] }): Promise<ProcessResult> => {
+      if (opts.command === "claude" && opts.args.includes("--version")) {
+        // eslint-disable-next-line @typescript-eslint/no-throw-literal
+        throw "raw binary failure";
+      }
+      if (opts.args.includes("--version")) {
+        return result({ stdout: "codex v1.0.0", exitCode: 0 });
+      }
+      return result({ stdout: "PONG", exitCode: 0 });
+    });
+    const check = new RuntimeHealthCheck(
+      { execute } as never,
+      baseConfigs(),
+      makeMockLogger() as never,
+    );
+
+    await expect(check.runPreflight()).rejects.toBeInstanceOf(PreflightError);
+    const claudeResult = check.getLastResult()?.results.find((r) => r.runtime === "claude-code")!;
+    expect(claudeResult.binaryCheck).toMatchObject({ ok: false, error: "raw binary failure" });
+  });
 });
 
 describe("RuntimeHealthCheck.runPreflight() — auth check branches", () => {
@@ -285,6 +307,27 @@ describe("RuntimeHealthCheck.runPreflight() — auth check branches", () => {
     expect(claudeResult.authCheck).toMatchObject({ ok: false, error: "socket hang up" });
   });
 
+  it("stringifies a non-Error thrown value from a rejected auth probe", async () => {
+    const execute = vi.fn(async (opts: { command: string; args: string[] }): Promise<ProcessResult> => {
+      const binary = passingBinary(opts);
+      if (binary) return binary;
+      if (opts.command === "claude") {
+        // eslint-disable-next-line @typescript-eslint/no-throw-literal
+        throw "raw auth failure";
+      }
+      return result({ stdout: "PONG", exitCode: 0 });
+    });
+    const check = new RuntimeHealthCheck(
+      { execute } as never,
+      baseConfigs(),
+      makeMockLogger() as never,
+    );
+
+    await expect(check.runPreflight()).rejects.toBeInstanceOf(PreflightError);
+    const claudeResult = check.getLastResult()?.results.find((r) => r.runtime === "claude-code")!;
+    expect(claudeResult.authCheck).toMatchObject({ ok: false, error: "raw auth failure" });
+  });
+
   it("passes exitCodeOnly checks on exit code 0 regardless of output", async () => {
     const configs = baseConfigs({
       codex: { command: "codex", versionArgs: ["--version"], probeArgs: ["status"], exitCodeOnly: true },
@@ -318,6 +361,26 @@ describe("RuntimeHealthCheck.runPreflight() — auth check branches", () => {
     expect(codexResult.authCheck).toMatchObject({
       ok: false,
       error: "Exit code 2: no active session",
+    });
+  });
+
+  it("falls back to stdout in the exitCodeOnly error message when stderr is empty", async () => {
+    const configs = baseConfigs({
+      codex: { command: "codex", versionArgs: ["--version"], probeArgs: ["status"], exitCodeOnly: true },
+    });
+    const execute = vi.fn(async (opts: { command: string; args: string[] }): Promise<ProcessResult> => {
+      const binary = passingBinary(opts);
+      if (binary) return binary;
+      if (opts.command === "claude") return result({ stdout: '{"loggedIn": true}', exitCode: 0 });
+      return result({ stdout: "denied on stdout", stderr: "", exitCode: 3 });
+    });
+    const check = new RuntimeHealthCheck({ execute } as never, configs, makeMockLogger() as never);
+
+    await expect(check.runPreflight()).rejects.toBeInstanceOf(PreflightError);
+    const codexResult = check.getLastResult()?.results.find((r) => r.runtime === "codex")!;
+    expect(codexResult.authCheck).toMatchObject({
+      ok: false,
+      error: "Exit code 3: denied on stdout",
     });
   });
 
