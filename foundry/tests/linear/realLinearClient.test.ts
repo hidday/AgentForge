@@ -194,6 +194,33 @@ describe("RealLinearClient.searchIssues", () => {
     expect(results).toEqual([]);
   });
 
+  it("falls back to an empty labels array when labels() itself resolves to a nullish connection", async () => {
+    const sdk = makeFakeSdk({
+      issues: vi.fn().mockResolvedValue({
+        nodes: [
+          {
+            id: "1",
+            identifier: "PRY-1",
+            title: "Title",
+            description: "Desc",
+            branchName: "ai/1",
+            priority: 0,
+            url: "url",
+            labels: () => Promise.resolve(undefined),
+            project: Promise.resolve(undefined),
+            cycle: Promise.resolve(undefined),
+            team: Promise.resolve(undefined),
+          },
+        ],
+      }),
+    });
+    const client = makeClient(sdk);
+
+    const [result] = await client.searchIssues({ state: "Todo" });
+
+    expect(result.labels).toEqual([]);
+  });
+
   it("falls back to undefined project/team/cycle when absent", async () => {
     const sdk = makeFakeSdk({
       issues: vi.fn().mockResolvedValue({
@@ -484,6 +511,60 @@ describe("RealLinearClient.listLabels", () => {
     const client = makeClient(sdk);
 
     await expect(client.listLabels("issue-1")).resolves.toEqual([]);
+  });
+});
+
+describe("RealLinearClient.getRelatedContext nullish connections", () => {
+  it("treats an inverseRelations() result with no nodes property as having no relations", async () => {
+    const client = new RealLinearClient("test-key", makeLogger() as never);
+    const focusIssue = {
+      id: "focus-id",
+      parent: Promise.resolve(null),
+      inverseRelations: () => Promise.resolve(undefined),
+    };
+    (client as unknown as { sdk: { issue: (id: string) => Promise<unknown> } }).sdk = {
+      issue: () => Promise.resolve(focusIssue),
+    };
+
+    const ctx = await client.getRelatedContext("focus-id");
+
+    expect(ctx.blockers).toEqual([]);
+  });
+
+  it("falls back to an empty labels array and 'Unknown' state for a parent with nullish connections", async () => {
+    const client = new RealLinearClient("test-key", makeLogger() as never);
+    const parent = {
+      id: "parent-id",
+      identifier: "PRY-100",
+      title: "Parent",
+      description: "Desc",
+      priority: 0,
+      url: "url",
+      labels: () => Promise.resolve(undefined),
+      state: Promise.resolve(undefined),
+    };
+    const focusIssue = {
+      id: "focus-id",
+      parent: Promise.resolve(parent),
+      inverseRelations: () => Promise.resolve({ nodes: [] }),
+    };
+    (client as unknown as { sdk: { issue: (id: string) => Promise<unknown> } }).sdk = {
+      issue: (id: string) =>
+        id === "parent-id" ? Promise.resolve(parent) : Promise.resolve(focusIssue),
+    };
+
+    const ctx = await client.getRelatedContext("focus-id");
+
+    expect(ctx.parent).toEqual({
+      id: "parent-id",
+      identifier: "PRY-100",
+      title: "Parent",
+      description: "Desc",
+      state: "Unknown",
+      labels: [],
+      priority: 0,
+      url: "url",
+    });
   });
 });
 
