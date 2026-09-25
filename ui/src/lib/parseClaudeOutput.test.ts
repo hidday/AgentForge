@@ -219,6 +219,20 @@ describe("parseClaudeOutput – tool_result extraction", () => {
     const line = JSON.stringify([{ type: "tool_result", content: "boom", is_error: true }]);
     expect(parseClaudeOutput(line)[0].isError).toBe(true);
   });
+
+  it("stringifies an object tool_result content field", () => {
+    const line = JSON.stringify([
+      { type: "tool_result", content: { code: 1, message: "bad" }, is_error: true },
+    ]);
+    const result = parseClaudeOutput(line);
+    expect(result[0].content).toBe(JSON.stringify({ code: 1, message: "bad" }));
+  });
+
+  it("falls back to an empty string when tool_result has no content field", () => {
+    const line = JSON.stringify([{ type: "tool_result", is_error: false }]);
+    const result = parseClaudeOutput(line);
+    expect(result[0].content).toBe("");
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -422,6 +436,14 @@ describe("parseClaudeOutput – edge cases", () => {
   it("handles a JSON object with no recognised fields gracefully (produces no block)", () => {
     const line = JSON.stringify({ unknown_field: 42 });
     expect(parseClaudeOutput(line)).toEqual([]);
+  });
+
+  it("skips a null entry within a content array without throwing", () => {
+    const line = JSON.stringify({
+      content: [null, { type: "text", text: "still works" }],
+    });
+    const result = parseClaudeOutput(line);
+    expect(result).toEqual<ParsedBlock[]>([{ type: "text", content: "still works" }]);
   });
 
   it("filters metadata from a mixed stream of content and noise", () => {

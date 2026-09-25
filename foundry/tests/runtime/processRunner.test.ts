@@ -65,7 +65,12 @@ describe("ProcessRunner", () => {
     vi.useRealTimers();
     vi.mocked(spawn).mockReset();
     vi.mocked(watch).mockReset();
-    rmSync(spoolDir, { recursive: true, force: true });
+    // Deliberately not rmSync-ing spoolDir here: ProcessRunner opens log files via
+    // createWriteStream, whose underlying fs.open() completes asynchronously (with no
+    // 'error' listener attached in the source). Removing the directory immediately after
+    // a test would race that pending open and surface as an unhandled 'error' event on a
+    // later test. These per-test mkdtempSync() directories are tiny and left for the OS
+    // temp cleanup instead.
   });
 
   describe("mock mode", () => {
@@ -393,8 +398,9 @@ describe("ProcessRunner", () => {
       });
 
       const entry = runner.getActiveProcesses()[0]!;
-      const chunkA = "A".repeat(5000);
-      const chunkB = "B".repeat(5000) + "[END]";
+      const chunkA = "A".repeat(100);
+      // Alone longer than the 8KB rolling buffer, so after truncation nothing from chunkA survives.
+      const chunkB = "B".repeat(8_200) + "[END]";
       child.stdout.emit("data", Buffer.from(chunkA));
       child.stdout.emit("data", Buffer.from(chunkB));
 

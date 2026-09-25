@@ -223,7 +223,14 @@ describe("OrchestratorService -- retrieveSkillsForPlanning (via startRun)", () =
       .mockResolvedValueOnce(created)
       .mockResolvedValue(makeRun({ id: "run-1", state: RunState.Planning, planVersion: 2 }));
     runRepo.updateState
-      .mockResolvedValueOnce(makeRun({ id: "run-1", state: RunState.Planning }))
+      .mockResolvedValueOnce(
+        makeRun({
+          id: "run-1",
+          state: RunState.Planning,
+          linearIssueTitle: "Fix the bug",
+          linearIssueDescription: "It crashes on save",
+        }),
+      )
       .mockResolvedValueOnce(makeRun({ id: "run-1", state: RunState.PlanReview, planVersion: 2 }));
 
     agentSkillRepo.findTopKByRelevance.mockResolvedValue([
@@ -250,7 +257,7 @@ describe("OrchestratorService -- retrieveSkillsForPlanning (via startRun)", () =
     expect(plannerAgent.run).toHaveBeenCalledWith(
       expect.anything(),
       "run-1",
-      { priorSkills: agentSkillRepo.findTopKByRelevance.mock.results[0].value ? expect.anything() : undefined },
+      { priorSkills: [expect.objectContaining({ id: "skill-1" })] },
     );
   });
 
@@ -323,8 +330,6 @@ describe("OrchestratorService -- updateSkillMetrics (via terminal transitions)",
     });
 
     // Re-plan still has the same blocking question.
-    const { plannerAgent } = buildDeps();
-    void plannerAgent;
     (deps.plannerAgent as { run: ReturnType<typeof vi.fn> }).run.mockResolvedValue(plan);
 
     runRepo.update.mockResolvedValue(makeRun({ id: "run-1", state: RunState.Planning, planVersion: 2 }));
