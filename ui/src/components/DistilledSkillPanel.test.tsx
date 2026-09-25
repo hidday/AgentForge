@@ -75,4 +75,34 @@ describe("DistilledSkillPanel", () => {
 
     expect(screen.getByText(/content could not be loaded/i)).toBeDefined();
   });
+
+  it("shows a loading spinner and does not render skill content while loading", () => {
+    render(
+      <DistilledSkillPanel
+        distilledSkill={skill}
+        distillationDecision={decision}
+        loading={true}
+      />,
+    );
+
+    expect(screen.getByText(/Loading distilled skill/i)).toBeDefined();
+    // Skill content must not render while the loading state takes priority.
+    expect(screen.queryByText("Distilled Skill")).toBeNull();
+    expect(screen.queryByTestId("markdown-content")).toBeNull();
+  });
+
+  it("shows the error message and does not render skill content when error is set", () => {
+    render(
+      <DistilledSkillPanel
+        distilledSkill={skill}
+        distillationDecision={decision}
+        error="Failed to load distilled skill"
+      />,
+    );
+
+    expect(screen.getByText("Failed to load distilled skill")).toBeDefined();
+    // Error state must take priority over rendering the skill content.
+    expect(screen.queryByText("Distilled Skill")).toBeNull();
+    expect(screen.queryByTestId("markdown-content")).toBeNull();
+  });
 });

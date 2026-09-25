@@ -251,4 +251,48 @@ describe("ChatPanel", () => {
       expect(screen.queryByText("New question")).toBeNull();
     });
   });
+
+  it("collapses the message list when the header is clicked, and expands it again on a second click", async () => {
+    const artifacts: Artifact[] = [
+      makeArtifact("user", "Existing message", "a1", "2024-01-01T00:00:01Z"),
+    ];
+    render(<ChatPanel runId={RUN_ID} artifacts={artifacts} />);
+
+    // Open by default: message and input are visible.
+    expect(screen.getByText("Existing message")).toBeDefined();
+    expect(screen.getByPlaceholderText(/ask the agent/i)).toBeDefined();
+
+    const headerBtn = screen.getByRole("button", { name: /chat with agent/i });
+    await userEvent.click(headerBtn);
+
+    // Collapsed: body content (messages + input form) is no longer rendered.
+    expect(screen.queryByText("Existing message")).toBeNull();
+    expect(screen.queryByPlaceholderText(/ask the agent/i)).toBeNull();
+
+    await userEvent.click(headerBtn);
+
+    // Expanded again: body content is back.
+    expect(screen.getByText("Existing message")).toBeDefined();
+    expect(screen.getByPlaceholderText(/ask the agent/i)).toBeDefined();
+  });
+
+  it("auto-scrolls the message anchor into view when a new message arrives", () => {
+    const scrollIntoViewMock = vi.fn();
+    // jsdom does not implement scrollIntoView; ChatPanel guards for that,
+    // so we install a mock to exercise the guarded call path.
+    Element.prototype.scrollIntoView = scrollIntoViewMock;
+
+    const { rerender } = render(<ChatPanel runId={RUN_ID} artifacts={[]} />);
+    scrollIntoViewMock.mockClear();
+
+    const artifacts: Artifact[] = [
+      makeArtifact("user", "A new message", "a1", "2024-01-01T00:00:01Z"),
+    ];
+    rerender(<ChatPanel runId={RUN_ID} artifacts={artifacts} />);
+
+    expect(scrollIntoViewMock).toHaveBeenCalledWith({ behavior: "smooth" });
+
+    // @ts-expect-error -- clean up the global stub after this test
+    delete Element.prototype.scrollIntoView;
+  });
 });

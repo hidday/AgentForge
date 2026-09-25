@@ -187,6 +187,23 @@ describe("api client", () => {
       );
       expect(result).toEqual(payload);
     });
+
+    it("sends undefined note when omitted", async () => {
+      (fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
+        jsonResponse({ ok: true, runId: "r1" }),
+      );
+
+      await api.reReviewPlan("r1");
+
+      expect(fetch).toHaveBeenCalledWith(
+        "/api/runs/r1/actions/re-review-plan",
+        {
+          headers: { "Content-Type": "application/json" },
+          method: "POST",
+          body: JSON.stringify({ note: undefined }),
+        },
+      );
+    });
   });
 
   describe("revisePlan", () => {
@@ -204,6 +221,20 @@ describe("api client", () => {
         body: JSON.stringify({ note: "revise please" }),
       });
       expect(result).toEqual(payload);
+    });
+
+    it("sends undefined note when omitted", async () => {
+      (fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
+        jsonResponse({ ok: true, runId: "r1" }),
+      );
+
+      await api.revisePlan("r1");
+
+      expect(fetch).toHaveBeenCalledWith("/api/runs/r1/actions/revise-plan", {
+        headers: { "Content-Type": "application/json" },
+        method: "POST",
+        body: JSON.stringify({ note: undefined }),
+      });
     });
   });
 

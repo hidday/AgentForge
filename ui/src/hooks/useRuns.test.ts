@@ -147,6 +147,20 @@ describe("useRuns", () => {
     expect(result.current.runs).toEqual([run]);
   });
 
+  it("ignores SSE event types it does not handle", async () => {
+    const run = makeRun({ id: "r1" });
+    mockedGetRuns.mockResolvedValueOnce({ runs: [run] });
+    const { result } = renderHook(() => useRuns());
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    act(() => {
+      sseHandler!({ type: "process:started", runId: "r1" });
+    });
+
+    expect(result.current.runs).toEqual([run]);
+    expect(mockedGetRuns).toHaveBeenCalledTimes(1);
+  });
+
   it("exposes a refetch function that re-runs the fetch", async () => {
     mockedGetRuns.mockResolvedValueOnce({ runs: [] });
     const { result } = renderHook(() => useRuns());

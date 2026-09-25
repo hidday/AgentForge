@@ -112,6 +112,48 @@ describe("useActiveProcesses", () => {
     expect(result.current.processes).toEqual([]);
   });
 
+  it("does not apply process output fetched after unmount", async () => {
+    const proc = makeProcess();
+    mockedGetActiveProcesses.mockResolvedValueOnce({ processes: [proc] });
+    let resolveOutput!: (value: { processId: string; output: string }) => void;
+    mockedGetProcessOutput.mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveOutput = resolve;
+      }),
+    );
+
+    const { result, unmount } = renderHook(() => useActiveProcesses("r1"));
+    await waitFor(() => expect(result.current.processes).toEqual([proc]));
+
+    unmount();
+    resolveOutput({ processId: proc.id, output: "late output" });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(result.current.output).toBe("");
+  });
+
+  it("fills in defaults for a process:started SSE event missing optional fields", async () => {
+    mockedGetActiveProcesses.mockResolvedValueOnce({ processes: [] });
+    const { result } = renderHook(() => useActiveProcesses("r1"));
+    await waitFor(() => expect(mockedGetActiveProcesses).toHaveBeenCalled());
+
+    const before = Date.now();
+    act(() => {
+      sseHandler!({ type: "process:started", runId: "r1" });
+    });
+    const after = Date.now();
+
+    const entry = result.current.processes[0]!;
+    expect(entry.id).toBe("");
+    expect(entry.command).toBe("");
+    expect(entry.stage).toBe("");
+    expect(entry.runtime).toBe("");
+    const startedAtMs = new Date(entry.startedAt).getTime();
+    expect(startedAtMs).toBeGreaterThanOrEqual(before);
+    expect(startedAtMs).toBeLessThanOrEqual(after);
+  });
+
   it("adds a process on a process:started SSE event and resets output", async () => {
     mockedGetActiveProcesses.mockResolvedValueOnce({ processes: [] });
     const { result } = renderHook(() => useActiveProcesses("r1"));
