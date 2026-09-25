@@ -99,7 +99,6 @@ describe("DistilledSkillPanel", () => {
       />,
     );
 
-    // eslint-disable-next-line testing-library/no-node-access
     const nameEl = container.querySelector("p.text-accent");
     expect(nameEl?.textContent).toBe("skill-own-category");
   });
@@ -116,7 +115,6 @@ describe("DistilledSkillPanel", () => {
       />,
     );
 
-    // eslint-disable-next-line testing-library/no-node-access
     const nameEl = container.querySelector("p.text-accent");
     expect(nameEl?.textContent).toBe("decision-task-category");
   });

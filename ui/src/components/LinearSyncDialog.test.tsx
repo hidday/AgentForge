@@ -336,7 +336,7 @@ describe("LinearSyncDialog", () => {
     });
     expect(screen.getByRole("button", { name: /starting/i })).toBeDefined();
 
-    const clearTimeoutSpy = vi.spyOn(global, "clearTimeout");
+    const clearTimeoutSpy = vi.spyOn(globalThis, "clearTimeout");
     unmount();
     expect(clearTimeoutSpy).toHaveBeenCalled();
     clearTimeoutSpy.mockRestore();
