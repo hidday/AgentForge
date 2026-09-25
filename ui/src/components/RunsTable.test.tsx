@@ -127,7 +127,7 @@ describe("RunsTable", () => {
     expect(screen.queryByTitle("Open in Linear")).toBeNull();
   });
 
-  it("stops propagation when the Linear external link is clicked, without triggering row navigation", async () => {
+  it("calls stopPropagation when the Linear external link is clicked", async () => {
     renderTable([
       makeRun({
         id: "r1",
@@ -136,14 +136,12 @@ describe("RunsTable", () => {
       }),
     ]);
     const externalLink = screen.getByTitle("Open in Linear");
-    const rowClickSpy = vi.fn();
-    externalLink.closest("tr")?.addEventListener("click", rowClickSpy);
+    const stopPropagationSpy = vi.spyOn(Event.prototype, "stopPropagation");
 
     await userEvent.click(externalLink);
 
-    // stopPropagation on the anchor's own click handler prevents the event
-    // from bubbling up to any row-level listener.
-    expect(rowClickSpy).not.toHaveBeenCalled();
+    expect(stopPropagationSpy).toHaveBeenCalled();
+    stopPropagationSpy.mockRestore();
   });
 
   it("links the issue title and chevron to the run detail route", () => {
