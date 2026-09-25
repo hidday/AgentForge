@@ -73,6 +73,21 @@ describe("ProcessRunner", () => {
     // temp cleanup instead.
   });
 
+  describe("constructor", () => {
+    it("defaults the spool directory to .foundry/processes under the current working directory", () => {
+      const cwdTemp = mkdtempSync(join(tmpdir(), "processrunner-cwd-"));
+      const originalCwd = process.cwd();
+      process.chdir(cwdTemp);
+      try {
+        // eslint-disable-next-line no-new
+        new ProcessRunner("mock", makeMockLogger() as never);
+        expect(existsSync(join(cwdTemp, ".foundry", "processes"))).toBe(true);
+      } finally {
+        process.chdir(originalCwd);
+      }
+    });
+  });
+
   describe("mock mode", () => {
     it("throws when no mock handler has been configured", async () => {
       const logger = makeMockLogger();
@@ -150,6 +165,19 @@ describe("ProcessRunner", () => {
         expect.objectContaining({ command: "claude", exitCode: 0 }),
         "Process completed",
       );
+    });
+
+    it("falls back to exit code 1 when the process closes with a null code (killed by signal)", async () => {
+      const child = makeFakeChild();
+      vi.mocked(spawn).mockReturnValue(child as never);
+      const runner = new ProcessRunner("real", makeMockLogger() as never, undefined, spoolDir);
+
+      const promise = runner.execute({ command: "codex", args: [], cwd: "/tmp", timeoutMs: 60_000 });
+      child.emit("close", null);
+
+      const result = await promise;
+      expect(result.exitCode).toBe(1);
+      expect(result.timedOut).toBe(false);
     });
 
     it("resolves (does not reject) on a non-zero exit code", async () => {
@@ -634,6 +662,27 @@ describe("ProcessRunner", () => {
       expect(runner.getActiveProcesses()).toHaveLength(0);
     });
 
+    it("stringifies a non-Error thrown value when manifest processing fails", () => {
+      writeFileSync(join(spoolDir, "broken-2.json"), JSON.stringify({ id: "broken-2" }));
+      const parseSpy = vi.spyOn(JSON, "parse").mockImplementationOnce(() => {
+        // eslint-disable-next-line @typescript-eslint/no-throw-literal
+        throw "raw manifest failure";
+      });
+      const logger = makeMockLogger();
+      const runner = new ProcessRunner("real", logger as never, undefined, spoolDir);
+
+      try {
+        runner.rehydrateOrphans();
+      } finally {
+        parseSpy.mockRestore();
+      }
+
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.objectContaining({ file: "broken-2.json", error: "raw manifest failure" }),
+        "Failed to process manifest",
+      );
+    });
+
     it("marks the manifest crashed when the orphan's pid is no longer alive", () => {
       writeFileSync(
         join(spoolDir, "dead-1.json"),
@@ -863,6 +912,74 @@ describe("ProcessRunner", () => {
       );
       capturedWatchCb!();
       expect(closeMock).toHaveBeenCalledTimes(1);
+    });
+
+    it("falls back to pid 0 on the poll tick once the tracked entry is already gone, without finalizing", async () => {
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] });
+
+      const logPath = join(spoolDir, "alive-4.log");
+      writeFileSync(
+        join(spoolDir, "alive-4.json"),
+        JSON.stringify({
+          id: "alive-4",
+          pid: 4321,
+          command: "claude",
+          args: [],
+          runId: "run-alive-4",
+          stage: "executor",
+          runtime: "claude-code",
+          startedAt: new Date().toISOString(),
+          logFile: logPath,
+        }),
+      );
+
+      const killSpy = vi.spyOn(process, "kill").mockImplementation(() => true);
+      const closeMock = vi.fn();
+      vi.mocked(watch).mockImplementation(() => ({ close: closeMock }) as never);
+
+      const emitter = makeMockEmitter();
+      const runner = new ProcessRunner("real", makeMockLogger() as never, emitter as never, spoolDir);
+      runner.rehydrateOrphans();
+
+      // Simulate the entry being cleaned up through another path (e.g. a concurrent
+      // finalize) right before the poll tick fires.
+      (runner as unknown as { activeProcesses: Map<string, unknown> }).activeProcesses.delete(
+        "alive-4",
+      );
+
+      await vi.advanceTimersByTimeAsync(5_000);
+
+      // process.kill was invoked with pid 0 (the `?? 0` fallback) and did not throw,
+      // so the watcher was never closed and finalize never ran.
+      expect(killSpy).toHaveBeenLastCalledWith(0, 0);
+      expect(closeMock).not.toHaveBeenCalled();
+      expect(emitter.emitProcessCompleted).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("cleanupProcess / finalizeOrphan — missing-entry guard", () => {
+    it("cleanupProcess is a no-op when the processId is not tracked", () => {
+      const emitter = makeMockEmitter();
+      const runner = new ProcessRunner("real", makeMockLogger() as never, emitter as never, spoolDir);
+
+      expect(() =>
+        (runner as unknown as { cleanupProcess(id: string, code: number, ms: number): void }).cleanupProcess(
+          "never-tracked",
+          0,
+          10,
+        ),
+      ).not.toThrow();
+      expect(emitter.emitProcessCompleted).not.toHaveBeenCalled();
+    });
+
+    it("finalizeOrphan is a no-op when the processId is not tracked", () => {
+      const emitter = makeMockEmitter();
+      const runner = new ProcessRunner("real", makeMockLogger() as never, emitter as never, spoolDir);
+
+      expect(() =>
+        (runner as unknown as { finalizeOrphan(id: string): void }).finalizeOrphan("never-tracked"),
+      ).not.toThrow();
+      expect(emitter.emitProcessCompleted).not.toHaveBeenCalled();
     });
   });
 });
