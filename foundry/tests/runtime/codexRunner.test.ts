@@ -99,3 +99,99 @@ END_STRUCTURED_OUTPUT`;
     expect(logger.error).not.toHaveBeenCalled();
   });
 });
+
+describe("CodexRunner.run() argument, stdin, and context building", () => {
+  it("prepends --model before baseArgs (without an 'exec' prefix) when baseArgs[0] isn't 'exec'", async () => {
+    const processRunner = makeMockProcessRunner({
+      stdout: `BEGIN_STRUCTURED_OUTPUT\n${JSON.stringify({ success: true, stage: "planner", payload: { value: "ok" } })}\nEND_STRUCTURED_OUTPUT`,
+      stderr: "",
+      exitCode: 0,
+      durationMs: 10,
+      timedOut: false,
+    });
+    const logger = makeMockLogger();
+    const runner = new CodexRunner(
+      processRunner as never,
+      "codex",
+      ["--yolo"],
+      "gpt-5.6-sol",
+      logger as never,
+    );
+
+    await runner.run(
+      { prompt: "x", workingDirectory: "/tmp", timeoutMs: 1000 },
+      "planner",
+      echoSchema,
+    );
+
+    expect(processRunner.execute).toHaveBeenCalledWith(
+      expect.objectContaining({
+        args: ["--model", "gpt-5.6-sol", "--yolo"],
+      }),
+    );
+  });
+
+  it("prepends the systemPrompt onto stdin, separated by a '---' divider, when provided", async () => {
+    const processRunner = makeMockProcessRunner({
+      stdout: `BEGIN_STRUCTURED_OUTPUT\n${JSON.stringify({ success: true, stage: "planner", payload: { value: "ok" } })}\nEND_STRUCTURED_OUTPUT`,
+      stderr: "",
+      exitCode: 0,
+      durationMs: 10,
+      timedOut: false,
+    });
+    const logger = makeMockLogger();
+    const runner = new CodexRunner(
+      processRunner as never,
+      "codex",
+      ["exec", "-"],
+      "gpt-5.6-sol",
+      logger as never,
+    );
+
+    await runner.run(
+      {
+        prompt: "Do the task",
+        systemPrompt: "You are a reviewer.",
+        workingDirectory: "/tmp",
+        timeoutMs: 1000,
+      },
+      "planner",
+      echoSchema,
+    );
+
+    expect(processRunner.execute).toHaveBeenCalledWith(
+      expect.objectContaining({
+        stdinData: "You are a reviewer.\n\n---\n\nDo the task",
+      }),
+    );
+  });
+
+  it("passes a context object with runId/stage/runtime to the process runner when input.runId is provided", async () => {
+    const processRunner = makeMockProcessRunner({
+      stdout: `BEGIN_STRUCTURED_OUTPUT\n${JSON.stringify({ success: true, stage: "planner", payload: { value: "ok" } })}\nEND_STRUCTURED_OUTPUT`,
+      stderr: "",
+      exitCode: 0,
+      durationMs: 10,
+      timedOut: false,
+    });
+    const logger = makeMockLogger();
+    const runner = new CodexRunner(
+      processRunner as never,
+      "codex",
+      ["exec", "-"],
+      "gpt-5.6-sol",
+      logger as never,
+    );
+
+    await runner.run(
+      { prompt: "x", workingDirectory: "/tmp", timeoutMs: 1000, runId: "run-7" },
+      "planner",
+      echoSchema,
+    );
+
+    const { context } = processRunner.execute.mock.calls[0]![0] as {
+      context: { runId: string; stage: string; runtime: string } | undefined;
+    };
+    expect(context).toEqual({ runId: "run-7", stage: "planner", runtime: "codex" });
+  });
+});

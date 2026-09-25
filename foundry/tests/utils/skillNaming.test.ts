@@ -8,6 +8,13 @@ describe("skillNaming", () => {
     );
   });
 
+  it("slugifySkillName falls back to 'distilled-skill' when the input has no alphanumeric characters", () => {
+    // "!!!" -> replace non-alnum runs with "-" -> "-" -> strip leading/trailing
+    // dashes -> "" (falsy), so the || fallback branch must kick in.
+    expect(slugifySkillName("!!!")).toBe("distilled-skill");
+    expect(slugifySkillName("")).toBe("distilled-skill");
+  });
+
   it("isValidSkillName accepts kebab-case slugs", () => {
     expect(isValidSkillName("dev-env-pause-resume-footguns")).toBe(true);
     expect(isValidSkillName("Dev Env")).toBe(false);

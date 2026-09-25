@@ -75,4 +75,96 @@ describe("DistilledSkillPanel", () => {
 
     expect(screen.getByText(/content could not be loaded/i)).toBeDefined();
   });
+
+  it("shows a loading spinner and does not render skill content while loading", () => {
+    render(
+      <DistilledSkillPanel
+        distilledSkill={skill}
+        distillationDecision={decision}
+        loading={true}
+      />,
+    );
+
+    expect(screen.getByText(/Loading distilled skill/i)).toBeDefined();
+    // Skill content must not render while the loading state takes priority.
+    expect(screen.queryByText("Distilled Skill")).toBeNull();
+    expect(screen.queryByTestId("markdown-content")).toBeNull();
+  });
+
+  it("falls back to the distilled skill's own taskCategory when both name fields are null", () => {
+    const { container } = render(
+      <DistilledSkillPanel
+        distilledSkill={{ ...skill, name: null, taskCategory: "skill-own-category" }}
+        distillationDecision={{ ...decision, name: null }}
+      />,
+    );
+
+    const nameEl = container.querySelector("p.text-accent");
+    expect(nameEl?.textContent).toBe("skill-own-category");
+  });
+
+  it("falls back to the decision's taskCategory when the skill has no name or taskCategory to offer", () => {
+    const { container } = render(
+      <DistilledSkillPanel
+        distilledSkill={null}
+        distillationDecision={{
+          ...decision,
+          name: null,
+          taskCategory: "decision-task-category",
+        }}
+      />,
+    );
+
+    const nameEl = container.querySelector("p.text-accent");
+    expect(nameEl?.textContent).toBe("decision-task-category");
+  });
+
+  it("falls back to the literal default name, and hides the description/export preview, when nothing is available", () => {
+    render(
+      <DistilledSkillPanel
+        distilledSkill={null}
+        distillationDecision={{
+          ...decision,
+          name: null,
+          taskCategory: null,
+          description: null,
+        }}
+      />,
+    );
+
+    expect(screen.getByText("distilled-skill")).toBeDefined();
+    expect(screen.queryByText(/SKILL.md export preview/i)).toBeNull();
+    // Fallback message for missing skill content still shows.
+    expect(screen.getByText(/content could not be loaded/i)).toBeDefined();
+  });
+
+  it("shows the displaced skill id (truncated) when a previous skill was displaced", () => {
+    render(
+      <DistilledSkillPanel
+        distilledSkill={skill}
+        distillationDecision={{
+          ...decision,
+          displacedSkillId: "abcdef1234567890",
+        }}
+      />,
+    );
+
+    expect(screen.getByText(/Displaced skill:/)).toBeDefined();
+    expect(screen.getByText(/abcdef12$/)).toBeDefined();
+  });
+
+  it("shows the error message and does not render skill content when error is set", () => {
+    render(
+      <DistilledSkillPanel
+        distilledSkill={skill}
+        distillationDecision={decision}
+        error="Failed to load distilled skill"
+      />,
+    );
+
+    expect(screen.getByText("Failed to load distilled skill")).toBeDefined();
+    // Error state must take priority over rendering the skill content.
+    expect(screen.queryByText("Distilled Skill")).toBeNull();
+    expect(screen.queryByTestId("markdown-content")).toBeNull();
+  });
 });

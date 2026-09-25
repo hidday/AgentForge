@@ -124,6 +124,85 @@ describe("GET /api/runs/:id/skills", () => {
     vi.clearAllMocks();
   });
 
+  it("returns 400 when the :id path segment is empty", async () => {
+    const { app } = await buildApp();
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/api/runs//skills",
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toEqual({ error: "runId is required" });
+  });
+
+  it("treats a SKILL_INJECTION event with no skillIds field as an empty array (no lookups, no injected skills)", async () => {
+    const events = [
+      {
+        id: "event-1",
+        runId: "run-1",
+        eventType: "SKILL_INJECTION",
+        source: "orchestrator",
+        payloadJson: {},
+        createdAt: new Date(),
+      },
+    ];
+
+    const { app, mockAgentSkillRepo } = await buildApp({ events });
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/api/runs/run-1/skills",
+    });
+
+    expect(response.statusCode).toBe(200);
+    const body = response.json() as { injectedSkills: unknown[] };
+    expect(body.injectedSkills).toEqual([]);
+    expect(mockAgentSkillRepo.findById).not.toHaveBeenCalled();
+  });
+
+  it("defaults shouldPersist to false and reason to empty string when the distillation payload omits them", async () => {
+    const events = [
+      {
+        id: "event-1",
+        runId: "run-1",
+        eventType: "SKILL_DISTILLATION",
+        source: "distillation-agent",
+        payloadJson: {},
+        createdAt: new Date(),
+      },
+    ];
+
+    const { app } = await buildApp({ events });
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/api/runs/run-1/skills",
+    });
+
+    expect(response.statusCode).toBe(200);
+    const body = response.json() as {
+      distillationDecision: {
+        shouldPersist: boolean;
+        reason: string;
+        taskCategory: string | null;
+        name: string | null;
+        description: string | null;
+        displacedSkillId: string | null;
+      } | null;
+      distilledSkill: unknown;
+    };
+    expect(body.distillationDecision).toEqual({
+      shouldPersist: false,
+      reason: "",
+      taskCategory: null,
+      name: null,
+      description: null,
+      displacedSkillId: null,
+    });
+    expect(body.distilledSkill).toBeNull();
+  });
+
   describe("(j) Nominal case: SKILL_INJECTION and SKILL_DISTILLATION events present", () => {
     it("returns correct injectedSkills array and full distillationDecision", async () => {
       const skill1 = makeSkill("skill-id-1");

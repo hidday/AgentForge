@@ -141,6 +141,36 @@ describe("POST /api/runs/:id/actions/reject-plan", () => {
     expect(body.error).toContain("context must be a string");
   });
 
+  it("returns 400 when mode is not one of the valid modes", async () => {
+    const { app, mockOrchestrator } = await buildApp();
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/actions/reject-plan",
+      payload: { mode: "bogus" },
+    });
+
+    expect(response.statusCode).toBe(400);
+    const body = JSON.parse(response.body) as { error: string };
+    expect(body.error).toBe("mode must be one of: iterate, fresh");
+    expect(mockOrchestrator.rejectPlan).not.toHaveBeenCalled();
+  });
+
+  it("returns 200 and passes mode: 'fresh' through to rejectPlan when explicitly requested", async () => {
+    const run = makeRun();
+    const { app, mockOrchestrator } = await buildApp();
+    mockOrchestrator.rejectPlan.mockResolvedValue(run);
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/actions/reject-plan",
+      payload: { mode: "fresh" },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(mockOrchestrator.rejectPlan).toHaveBeenCalledWith("run-1", undefined, "api", "fresh");
+  });
+
   it("returns 400 when orchestrator throws an error", async () => {
     const { app, mockOrchestrator } = await buildApp();
     mockOrchestrator.rejectPlan.mockRejectedValue(new Error("Invalid state transition"));
@@ -154,5 +184,20 @@ describe("POST /api/runs/:id/actions/reject-plan", () => {
     expect(response.statusCode).toBe(400);
     const body = JSON.parse(response.body) as { error: string };
     expect(body.error).toBe("Invalid state transition");
+  });
+
+  it("returns 400 with String(err) when orchestrator rejects with a non-Error value", async () => {
+    const { app, mockOrchestrator } = await buildApp();
+    mockOrchestrator.rejectPlan.mockRejectedValue("invalid state transition (string)");
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/actions/reject-plan",
+      payload: { context: "Some feedback" },
+    });
+
+    expect(response.statusCode).toBe(400);
+    const body = JSON.parse(response.body) as { error: string };
+    expect(body.error).toBe("invalid state transition (string)");
   });
 });

@@ -37,10 +37,19 @@ interface BuildAppOptions {
     slack: { attempted: boolean; ok: boolean; error?: string };
     email: { attempted: boolean; ok: boolean; error?: string };
   }>;
+  /** Overrides merged onto the default run fixture (e.g. `{ linearIssueIdentifier: null }`). */
+  runOverrides?: Record<string, unknown>;
+  /**
+   * When true, `registerApiRoutes` is called with its `options` argument entirely
+   * omitted, so the route falls back to its internal defaults for `debounceHours`
+   * (6) and `uiBaseUrl` ("http://localhost:5173") instead of the values this
+   * helper otherwise passes explicitly. No notificationService is wired either.
+   */
+  omitOptions?: boolean;
 }
 
 async function buildApp(opts: BuildAppOptions = {}) {
-  const run = makeRun();
+  const run = { ...makeRun(), ...opts.runOverrides };
 
   const mockRunRepo = {
     findById: vi.fn().mockResolvedValue(run),
@@ -95,21 +104,31 @@ async function buildApp(opts: BuildAppOptions = {}) {
   };
 
   const app = Fastify({ logger: false });
-  registerApiRoutes(
-    app,
-    mockOrchestrator as never,
-    mockEmitter as never,
-    mockProcessRunner as never,
-    undefined,
-    {
-      notificationService: notificationService as never,
-      uiBaseUrl: "http://localhost:5173",
-      debounceHours: 6,
-    },
-  );
+  if (opts.omitOptions) {
+    registerApiRoutes(
+      app,
+      mockOrchestrator as never,
+      mockEmitter as never,
+      mockProcessRunner as never,
+      undefined,
+    );
+  } else {
+    registerApiRoutes(
+      app,
+      mockOrchestrator as never,
+      mockEmitter as never,
+      mockProcessRunner as never,
+      undefined,
+      {
+        notificationService: notificationService as never,
+        uiBaseUrl: "http://localhost:5173",
+        debounceHours: 6,
+      },
+    );
+  }
   await app.ready();
 
-  return { app, mockEventRepo, sendHumanRequest };
+  return { app, mockEventRepo, sendHumanRequest, mockRunRepo };
 }
 
 describe("POST /api/runs/:id/actions/request-human", () => {
@@ -216,6 +235,112 @@ describe("POST /api/runs/:id/actions/request-human", () => {
     expect(response.statusCode).toBe(200);
     expect(JSON.parse(response.body).debounced).toBe(false);
     expect(sendHumanRequest).toHaveBeenCalledTimes(1);
+  });
+
+  it("returns 404 when the run is not found", async () => {
+    const { app, mockRunRepo } = await buildApp();
+    mockRunRepo.findById.mockResolvedValue(null);
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/actions/request-human",
+      payload: { reason: "plan_ambiguous", summary: "Something" },
+    });
+
+    expect(response.statusCode).toBe(404);
+    expect(JSON.parse(response.body)).toEqual({ error: "Run not found" });
+  });
+
+  it("falls back to the default debounceHours (6) and uiBaseUrl when options are omitted entirely", async () => {
+    const { app, mockEventRepo, sendHumanRequest } = await buildApp({ omitOptions: true });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/actions/request-human",
+      payload: { reason: "plan_ambiguous", summary: "Needs a human" },
+    });
+
+    expect(response.statusCode).toBe(200);
+    const body = JSON.parse(response.body);
+    expect(body.ok).toBe(true);
+    expect(body.debounced).toBe(false);
+    // No notificationService configured in this mode -> no channels notified
+    expect(body.notified).toEqual({ slack: false, email: false });
+    expect(sendHumanRequest).not.toHaveBeenCalled();
+    // uiBaseUrl default is reflected in the persisted event's runUrl
+    expect(mockEventRepo.create).toHaveBeenCalledTimes(1);
+    const eventArgs = mockEventRepo.create.mock.calls[0][0] as {
+      payloadJson: { runUrl: string };
+    };
+    expect(eventArgs.payloadJson.runUrl).toBe("http://localhost:5173/runs/run-1");
+  });
+
+  it("does not debounce when the matching HUMAN_REQUESTED event falls outside the default debounce window", async () => {
+    const oldTs = new Date(Date.now() - 7 * 60 * 60 * 1000); // 7h ago, past the 6h default cutoff
+    const { app, sendHumanRequest } = await buildApp({
+      omitOptions: true,
+      existingEvents: [
+        {
+          eventType: "HUMAN_REQUESTED",
+          createdAt: oldTs,
+          payloadJson: { reason: "plan_ambiguous" },
+        },
+      ],
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/actions/request-human",
+      payload: { reason: "plan_ambiguous", summary: "Same issue, but the old notice expired" },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(JSON.parse(response.body).debounced).toBe(false);
+    expect(sendHumanRequest).not.toHaveBeenCalled();
+  });
+
+  it("ignores a non-HUMAN_REQUESTED event even when its reason and timestamp would otherwise match", async () => {
+    const recentTs = new Date(Date.now() - 60 * 60 * 1000); // 1h ago, well within the window
+    const { app, mockEventRepo, sendHumanRequest } = await buildApp({
+      existingEvents: [
+        {
+          eventType: "OTHER_EVENT_TYPE",
+          createdAt: recentTs,
+          payloadJson: { reason: "plan_ambiguous" },
+        },
+      ],
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/actions/request-human",
+      payload: { reason: "plan_ambiguous", summary: "Not actually a duplicate" },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(JSON.parse(response.body).debounced).toBe(false);
+    expect(sendHumanRequest).toHaveBeenCalledTimes(1);
+    expect(mockEventRepo.create).toHaveBeenCalledTimes(1);
+  });
+
+  it("omits the linearIssue identifier when the run's linearIssueIdentifier is null", async () => {
+    const { app, sendHumanRequest } = await buildApp({
+      runOverrides: { linearIssueIdentifier: null },
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/actions/request-human",
+      payload: { reason: "plan_ambiguous", summary: "No identifier on this run" },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(sendHumanRequest).toHaveBeenCalledTimes(1);
+    const payload = sendHumanRequest.mock.calls[0][0] as {
+      linearIssue: { identifier?: string };
+    };
+    expect(payload.linearIssue.identifier).toBeUndefined();
+    expect("identifier" in payload.linearIssue).toBe(true);
   });
 
   it("records event even when no channels configured (notified all false)", async () => {

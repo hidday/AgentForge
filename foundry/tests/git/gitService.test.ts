@@ -255,3 +255,276 @@ describe("GitService", () => {
     });
   });
 });
+
+// ---------------------------------------------------------------------------
+// Extended coverage: failure/best-effort paths for fetch, createWorktree,
+// pruneWorktrees, findWorktreeForBranch, removeWorktree, hasChanges,
+// commitAll, push, commitAndPush, remoteBranchExists, the setupRunWorktree
+// stale-path and origin-branch-exists branches, GitError's non-Error cause,
+// and shortenSlug's length-budget break.
+// ---------------------------------------------------------------------------
+
+function spyLogger() {
+  const warn = [] as unknown[][];
+  const info = [] as unknown[][];
+  const logger = {
+    info: (...args: unknown[]) => {
+      info.push(args);
+    },
+    warn: (...args: unknown[]) => {
+      warn.push(args);
+    },
+    error: () => {},
+    debug: () => {},
+    fatal: () => {},
+    child: () => logger,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  } as any;
+  return { logger, warn, info };
+}
+
+describe("GitService - extended coverage", () => {
+  let repoPath: string;
+
+  beforeEach(() => {
+    repoPath = createTestRepo();
+  });
+
+  afterEach(() => {
+    rmSync(repoPath, { recursive: true, force: true });
+  });
+
+  describe("GitError", () => {
+    it("stringifies a non-Error cause instead of reading .message", () => {
+      const err = new GitError("fetch", "/tmp/repo", "boom");
+      expect(err.message).toBe("git fetch failed in /tmp/repo: boom");
+      expect(err.name).toBe("GitError");
+    });
+  });
+
+  describe("fetch", () => {
+    it("throws GitError when the repo has no origin remote", async () => {
+      const svc = new GitService(spyLogger().logger);
+      await expect(svc.fetch(repoPath)).rejects.toThrow(GitError);
+      await expect(svc.fetch(repoPath)).rejects.toThrow(/git fetch failed/);
+    });
+  });
+
+  describe("createWorktree failure", () => {
+    it("throws GitError when the start point does not exist", async () => {
+      const svc = new GitService(spyLogger().logger);
+      const wtPath = join(repoPath, ".worktrees", "bad-wt");
+      await expect(
+        svc.createWorktree(repoPath, wtPath, "some-branch", "does-not-exist-startpoint"),
+      ).rejects.toThrow(GitError);
+      expect(existsSync(wtPath)).toBe(false);
+    });
+  });
+
+  describe("pruneWorktrees failure (best-effort)", () => {
+    it("swallows the failure and logs a warning instead of throwing", async () => {
+      const { logger, warn } = spyLogger();
+      const svc = new GitService(logger);
+      await expect(svc.pruneWorktrees("/definitely/does/not/exist")).resolves.toBeUndefined();
+      expect(warn).toHaveLength(1);
+      expect(warn[0]?.[1]).toBe("Failed to prune worktrees (best-effort cleanup)");
+      const meta = warn[0]?.[0] as { repoPath: string; error: string };
+      expect(meta.repoPath).toBe("/definitely/does/not/exist");
+      expect(typeof meta.error).toBe("string");
+      expect(meta.error.length).toBeGreaterThan(0);
+    });
+  });
+
+  describe("findWorktreeForBranch failure", () => {
+    it("throws GitError for a non-git directory", async () => {
+      const svc = new GitService(spyLogger().logger);
+      await expect(
+        svc.findWorktreeForBranch("/definitely/does/not/exist", "main"),
+      ).rejects.toThrow(GitError);
+    });
+  });
+
+  describe("removeWorktree failure (best-effort)", () => {
+    it("swallows the failure and logs a warning instead of throwing", async () => {
+      const { logger, warn } = spyLogger();
+      const svc = new GitService(logger);
+      const bogusPath = join(repoPath, ".worktrees", "never-existed");
+      await expect(svc.removeWorktree(repoPath, bogusPath)).resolves.toBeUndefined();
+      expect(warn).toHaveLength(1);
+      expect(warn[0]?.[1]).toBe("Failed to remove worktree (best-effort cleanup)");
+      const meta = warn[0]?.[0] as { repoPath: string; worktreePath: string; error: string };
+      expect(meta.worktreePath).toBe(bogusPath);
+      expect(typeof meta.error).toBe("string");
+    });
+  });
+
+  describe("hasChanges failure", () => {
+    it("throws GitError for a non-git directory", async () => {
+      const svc = new GitService(spyLogger().logger);
+      await expect(svc.hasChanges("/definitely/does/not/exist")).rejects.toThrow(GitError);
+    });
+  });
+
+  describe("commitAll failure", () => {
+    it("throws GitError when the underlying git command fails", async () => {
+      const svc = new GitService(spyLogger().logger);
+      await expect(
+        svc.commitAll("/definitely/does/not/exist", "msg"),
+      ).rejects.toThrow(GitError);
+    });
+  });
+
+  describe("push", () => {
+    it("throws GitError when no origin remote is configured", async () => {
+      const svc = new GitService(spyLogger().logger);
+      await expect(svc.push(repoPath, "main")).rejects.toThrow(GitError);
+      await expect(svc.push(repoPath, "main")).rejects.toThrow(/git push failed/);
+    });
+
+    it("pushes the branch to origin and updates the remote ref", async () => {
+      const bareDir = mkdtempSync(join(tmpdir(), "gitservice-push-bare-"));
+      try {
+        git(["clone", "--bare", repoPath, bareDir], tmpdir());
+        git(["remote", "add", "origin", bareDir], repoPath);
+
+        const svc = new GitService(spyLogger().logger);
+        await expect(svc.push(repoPath, "main")).resolves.toBeUndefined();
+
+        const remoteRefs = execFileSync("git", ["ls-remote", bareDir, "refs/heads/main"], {
+          encoding: "utf-8",
+        });
+        expect(remoteRefs).toContain("refs/heads/main");
+        const localHead = git(["rev-parse", "HEAD"], repoPath);
+        expect(remoteRefs).toContain(localHead);
+      } finally {
+        rmSync(bareDir, { recursive: true, force: true });
+      }
+    });
+  });
+
+  describe("commitAndPush", () => {
+    it("commits the dirty tree and pushes it to origin when on the correct branch", async () => {
+      const bareDir = mkdtempSync(join(tmpdir(), "gitservice-candp-bare-"));
+      try {
+        git(["clone", "--bare", repoPath, bareDir], tmpdir());
+        git(["remote", "add", "origin", bareDir], repoPath);
+        writeFileSync(join(repoPath, "new.txt"), "hello world");
+
+        const svc = new GitService(spyLogger().logger);
+        await svc.commitAndPush(repoPath, "main", "extended coverage commit");
+
+        const log = git(["log", "--oneline", "-1"], repoPath);
+        expect(log).toContain("extended coverage commit");
+        expect(await svc.hasChanges(repoPath)).toBe(false);
+
+        const remoteLog = execFileSync(
+          "git",
+          ["--git-dir", bareDir, "log", "main", "-1", "--oneline"],
+          { encoding: "utf-8" },
+        );
+        expect(remoteLog).toContain("extended coverage commit");
+      } finally {
+        rmSync(bareDir, { recursive: true, force: true });
+      }
+    });
+
+    it("rejects with BranchMismatchError and never attempts to push when on the wrong branch", async () => {
+      git(["checkout", "-b", "not-main"], repoPath);
+      const svc = new GitService(spyLogger().logger);
+      await expect(svc.commitAndPush(repoPath, "main", "msg")).rejects.toThrow(
+        BranchMismatchError,
+      );
+    });
+  });
+
+  describe("remoteBranchExists", () => {
+    it("returns true when origin/<branch> exists", async () => {
+      const bareDir = mkdtempSync(join(tmpdir(), "gitservice-rbe-bare-"));
+      try {
+        git(["clone", "--bare", repoPath, bareDir], tmpdir());
+        git(["remote", "add", "origin", bareDir], repoPath);
+        git(["fetch", "origin"], repoPath);
+
+        const svc = new GitService(spyLogger().logger);
+        expect(await svc.remoteBranchExists(repoPath, "main")).toBe(true);
+        expect(await svc.remoteBranchExists(repoPath, "no-such-branch")).toBe(false);
+      } finally {
+        rmSync(bareDir, { recursive: true, force: true });
+      }
+    });
+  });
+
+  describe("setupRunWorktree (additional branches)", () => {
+    let bareDir: string;
+
+    beforeEach(() => {
+      bareDir = mkdtempSync(join(tmpdir(), "gitservice-ext-bare-"));
+      git(["clone", "--bare", repoPath, bareDir], tmpdir());
+      git(["remote", "add", "origin", bareDir], repoPath);
+      git(["fetch", "origin"], repoPath);
+    });
+
+    afterEach(() => {
+      rmSync(bareDir, { recursive: true, force: true });
+    });
+
+    it("warns and proceeds when origin already has the target branch", async () => {
+      const { logger, warn } = spyLogger();
+      const svc = new GitService(logger);
+      const branchName = "hidday/pry-200-already-on-origin";
+
+      // Push the branch to origin first so remoteBranchExists() returns true.
+      git(["push", "origin", `HEAD:refs/heads/${branchName}`], repoPath);
+
+      const runId = "01234567-3456-7890-abcd-ef1234567890";
+      const result = await svc.setupRunWorktree(repoPath, runId, "main", branchName);
+
+      expect(await svc.currentBranch(result.worktreePath)).toBe(branchName);
+      expect(
+        warn.some(
+          (call) =>
+            typeof call[1] === "string" &&
+            (call[1] as string).includes("origin/<branch> already exists"),
+        ),
+      ).toBe(true);
+
+      await svc.removeWorktree(repoPath, result.worktreePath);
+    });
+
+    it("removes a stale worktree occupying the deterministic path before recreating it", async () => {
+      const { logger, warn } = spyLogger();
+      const svc = new GitService(logger);
+      const runId = "cafebabe-3456-7890-abcd-ef1234567890";
+      const branchName = "hidday/pry-201-stale-path";
+      const shortId = runId.slice(0, 8);
+      const dirName = buildWorktreeDirName(shortId, branchName);
+      const expectedPath = join(repoPath, ".worktrees", dirName);
+
+      // Pre-occupy the deterministic path with a real worktree on a different branch.
+      await svc.createWorktree(repoPath, expectedPath, "placeholder-branch", "main");
+      expect(existsSync(expectedPath)).toBe(true);
+
+      const result = await svc.setupRunWorktree(repoPath, runId, "main", branchName);
+
+      expect(result.worktreePath).toBe(expectedPath);
+      expect(await svc.currentBranch(result.worktreePath)).toBe(branchName);
+      expect(
+        warn.some(
+          (call) =>
+            typeof call[1] === "string" &&
+            (call[1] as string).includes("Worktree path already exists, removing first"),
+        ),
+      ).toBe(true);
+
+      await svc.removeWorktree(repoPath, result.worktreePath);
+    });
+  });
+
+  describe("shortenSlug (via buildWorktreeDirName)", () => {
+    it("stops appending parts once the length budget (30 chars) would be exceeded", () => {
+      const longPart = "x".repeat(30);
+      const branchName = `eng-1-short-${longPart}`;
+      expect(buildWorktreeDirName("abcdefgh", branchName)).toBe("run-abcdefgh-eng-1-short");
+    });
+  });
+});

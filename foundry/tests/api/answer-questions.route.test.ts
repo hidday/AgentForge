@@ -193,6 +193,36 @@ describe("POST /api/runs/:id/actions/answer-questions", () => {
     expect(body.error).toContain("Missing answers");
   });
 
+  it("returns 400 with String(err) when orchestrator rejects with a plain (non-Error) value", async () => {
+    const { app, mockOrchestrator } = await buildApp();
+    mockOrchestrator.answerQuestions.mockRejectedValue("unexpected failure (string)");
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/actions/answer-questions",
+      payload: { answers: [{ questionId: "q1", answer: "yes" }] },
+    });
+
+    expect(response.statusCode).toBe(400);
+    const body = JSON.parse(response.body) as { error: string };
+    expect(body.error).toBe("unexpected failure (string)");
+  });
+
+  it("returns 400 with err.message when orchestrator rejects with a plain Error (not Policy/Validation)", async () => {
+    const { app, mockOrchestrator } = await buildApp();
+    mockOrchestrator.answerQuestions.mockRejectedValue(new Error("unexpected DB error"));
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/actions/answer-questions",
+      payload: { answers: [{ questionId: "q1", answer: "yes" }] },
+    });
+
+    expect(response.statusCode).toBe(400);
+    const body = JSON.parse(response.body) as { error: string };
+    expect(body.error).toBe("unexpected DB error");
+  });
+
   it("returns 409 when orchestrator throws PolicyError (wrong state)", async () => {
     const { app, mockOrchestrator } = await buildApp();
     mockOrchestrator.answerQuestions.mockRejectedValue(

@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { resolveAgentModel, tierForStage } from "../../src/config/agentModels.js";
+import type { Stage } from "../../src/schemas/cliProtocol.js";
 import type { Env } from "../../src/config/env.js";
 
 const env = {
@@ -30,5 +31,14 @@ describe("agentModels", () => {
     expect(tierForStage("reviewer")).toBe("review");
     expect(resolveAgentModel("plan-reviewer", env)).toBe("gpt-5.6-sol");
     expect(resolveAgentModel("reviewer", env)).toBe("gpt-5.6-sol");
+  });
+
+  it("throws for a stage that maps to an unknown tier (exhaustiveness guard)", () => {
+    // STAGE_TIERS has no entry for an unrecognized stage, so tierForStage
+    // returns undefined and the switch in resolveAgentModel falls to its
+    // `default` branch, which throws rather than silently picking a model.
+    expect(() => resolveAgentModel("not-a-real-stage" as unknown as Stage, env)).toThrow(
+      "Unknown agent model tier: undefined",
+    );
   });
 });
