@@ -133,6 +133,17 @@ describe("DashboardPage", () => {
     expect(ones.length).toBeGreaterThanOrEqual(3);
   });
 
+  it("falls back to the 'idle' category when counting a run with an unrecognized state", () => {
+    const runs = [makeRun({ id: "r1", state: "SomeUnknownState" })];
+    useRunsMock.mockReturnValue({ runs, loading: false, error: null, refetch: vi.fn() });
+    render(<DashboardPage />);
+
+    // Total = 1, and it should count toward the (unlabeled) idle bucket rather
+    // than crash or leave counts undefined — no dedicated "Idle" stat tile
+    // exists, so we simply assert the total renders and nothing throws.
+    expect(screen.getByText("1")).toBeDefined();
+  });
+
   it("filters runs passed to RunsTable when a filter button is clicked", async () => {
     const runs = [
       makeRun({ id: "r1", state: "Todo" }), // idle

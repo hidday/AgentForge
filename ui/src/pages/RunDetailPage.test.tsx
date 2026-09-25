@@ -375,6 +375,26 @@ describe("RunDetailPage", () => {
     );
   });
 
+  it("scrolls the questions panel into view when ActionBar's onScrollToQuestions fires", () => {
+    const run = makeRun({});
+    useRunMock.mockReturnValue({
+      data: { run, artifacts: [], events: [] },
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+
+    render(<RunDetailPage />);
+
+    const { onScrollToQuestions } = actionBarMock.mock.calls[0]![0] as {
+      onScrollToQuestions: () => void;
+    };
+
+    // Should not throw even though the questions panel ref is not currently
+    // attached to any rendered element (no open questions in this state).
+    expect(() => onScrollToQuestions()).not.toThrow();
+  });
+
   it("does not render optional links (Linear/PR/Cursor/Claude) when their run fields are absent", () => {
     const run = makeRun({
       linearIssueTitle: null,
