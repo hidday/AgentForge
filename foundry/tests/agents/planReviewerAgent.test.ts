@@ -87,7 +87,7 @@ function buildPlanReviewerAgent() {
     logger as never,
   );
 
-  return { agent, getPrompt: () => capturedPrompt };
+  return { agent, getPrompt: () => capturedPrompt, logger };
 }
 
 describe("PlanReviewerAgent.run() relatedContext rendering", () => {
@@ -145,5 +145,38 @@ describe("PlanReviewerAgent.run() relatedContext rendering", () => {
     expect(prompt).not.toContain("BEGIN BACKGROUND CONTEXT");
     expect(prompt).not.toContain("Background: Related Linear Context");
     expect(prompt).not.toContain("{{relatedContextSection}}");
+  });
+});
+
+describe("PlanReviewerAgent.run() operatorNote handling", () => {
+  it("injects the Operator Note section into the prompt and logs hasOperatorNote=true when provided", async () => {
+    const { agent, getPrompt, logger } = buildPlanReviewerAgent();
+
+    await agent.run(makePlan(), makeTaskBundle(), "run-1", {
+      operatorNote: "The reviewer should double-check the migration order.",
+    });
+
+    const prompt = getPrompt();
+    expect(prompt).toContain("## Operator Note");
+    expect(prompt).toContain("The reviewer should double-check the migration order.");
+
+    const startLog = logger.info.mock.calls.find(
+      (c: unknown[]) => c[1] === "Starting plan reviewer agent (Codex CLI)",
+    );
+    expect(startLog).toBeDefined();
+    expect((startLog?.[0] as Record<string, unknown>).hasOperatorNote).toBe(true);
+  });
+
+  it("omits the Operator Note section and logs hasOperatorNote=false when not provided", async () => {
+    const { agent, getPrompt, logger } = buildPlanReviewerAgent();
+
+    await agent.run(makePlan(), makeTaskBundle(), "run-1");
+
+    expect(getPrompt()).not.toContain("## Operator Note");
+
+    const startLog = logger.info.mock.calls.find(
+      (c: unknown[]) => c[1] === "Starting plan reviewer agent (Codex CLI)",
+    );
+    expect((startLog?.[0] as Record<string, unknown>).hasOperatorNote).toBe(false);
   });
 });

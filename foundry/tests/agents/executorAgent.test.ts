@@ -208,4 +208,52 @@ describe("ExecutorAgent.run()", () => {
     expect(payload?.score).toBe(0.42);
     expect(payload?.executionVersion).toBe(1);
   });
+
+  it("injects the Operator Note section into both prompts and logs hasOperatorNote=true when an operatorNote is provided", async () => {
+    const { agent, getSystemPrompt, getUserPrompt, logger } = buildAgent();
+
+    await agent.run(makePlan(), makeTaskBundle(), "run-1", undefined, {
+      operatorNote: "Please prioritize backward compatibility.",
+    });
+
+    const systemPrompt = getSystemPrompt();
+    const userPrompt = getUserPrompt();
+    // The operatorNoteSection is rendered into the template vars; at least one
+    // of the two prompts should contain it depending on template wiring.
+    expect(systemPrompt + userPrompt).toContain("## Operator Note");
+    expect(systemPrompt + userPrompt).toContain("Please prioritize backward compatibility.");
+
+    const startLog = logger.info.mock.calls.find(
+      (c: unknown[]) => c[1] === "Starting executor agent",
+    );
+    expect(startLog).toBeDefined();
+    const payload = startLog?.[0] as Record<string, unknown> | undefined;
+    expect(payload?.hasOperatorNote).toBe(true);
+  });
+
+  it("omits the Operator Note section and logs hasOperatorNote=false when no operatorNote is provided", async () => {
+    const { agent, getSystemPrompt, getUserPrompt, logger } = buildAgent();
+
+    await agent.run(makePlan(), makeTaskBundle(), "run-1");
+
+    expect(getSystemPrompt() + getUserPrompt()).not.toContain("## Operator Note");
+
+    const startLog = logger.info.mock.calls.find(
+      (c: unknown[]) => c[1] === "Starting executor agent",
+    );
+    const payload = startLog?.[0] as Record<string, unknown> | undefined;
+    expect(payload?.hasOperatorNote).toBe(false);
+  });
+
+  it("marks isRetry=true when only existingPR is provided on retry (existingBranch absent)", async () => {
+    const { agent, logger } = buildAgent();
+
+    await agent.run(makePlan(), makeTaskBundle(), "run-1", { existingPR: 999 });
+
+    const startLog = logger.info.mock.calls.find(
+      (c: unknown[]) => c[1] === "Starting executor agent",
+    );
+    const payload = startLog?.[0] as Record<string, unknown> | undefined;
+    expect(payload?.isRetry).toBe(true);
+  });
 });

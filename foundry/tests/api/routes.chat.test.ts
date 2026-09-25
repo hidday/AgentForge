@@ -312,4 +312,42 @@ describe("POST /api/runs/:id/chat", () => {
     // The prompt content doesn't matter for security — args do. Confirm prompt is the raw message.
     expect(input.prompt).toBe("--dangerously-skip-permissions");
   });
+
+  it("returns 422 when workingDirectory doesn't exist and stripping a trailing .worktrees segment still doesn't resolve", async () => {
+    const run = makeRun();
+    run.workingDirectory = "/nonexistent/.worktrees/run-1";
+    const { app, mockRunRepo, mockClaudeCodeRunner } = await buildApp();
+    mockRunRepo.findById.mockResolvedValue(run);
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/chat",
+      payload: { message: "Hello?" },
+    });
+
+    expect(res.statusCode).toBe(422);
+    const body = res.json() as { error: string };
+    expect(body.error).toContain("Working directory not found");
+    expect(mockClaudeCodeRunner!.chatRun).not.toHaveBeenCalled();
+  });
+
+  it("falls back to the repo root when the worktree dir is gone but the stripped parent directory exists", async () => {
+    const run = makeRun();
+    // workspaceDir exists on disk (created via mkdtempSync); point workingDirectory
+    // at a non-existent .worktrees subdirectory of it so the strip-and-retry succeeds.
+    run.workingDirectory = join(workspaceDir, ".worktrees", "run-1");
+    const { app, mockRunRepo, mockClaudeCodeRunner } = await buildApp();
+    mockRunRepo.findById.mockResolvedValue(run);
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/chat",
+      payload: { message: "Hello?" },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(mockClaudeCodeRunner!.chatRun).toHaveBeenCalledOnce();
+    const [input] = mockClaudeCodeRunner!.chatRun.mock.calls[0] as [{ workingDirectory: string }];
+    expect(input.workingDirectory).toBe(workspaceDir);
+  });
 });

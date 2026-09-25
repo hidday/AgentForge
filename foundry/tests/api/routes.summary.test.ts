@@ -160,6 +160,29 @@ describe("GET /api/runs/:id/summary", () => {
     expect(body.plan.risks[1]).toBe(JSON.stringify({ other: "no description" }));
   });
 
+  it("falls back to String(r) for a risk object that throws when JSON.stringify'd", async () => {
+    const run = makeRun();
+    const circular: Record<string, unknown> = { note: "circular risk" };
+    circular.self = circular; // JSON.stringify throws "Converting circular structure to JSON"
+    const plan = {
+      summary: "Add feature",
+      risks: [circular],
+    };
+    const { app, mockRunRepo, mockArtifactRepo } = await buildApp();
+    mockRunRepo.findById.mockResolvedValue(run);
+    mockArtifactRepo.findLatestByType.mockImplementation((_id: string, type: string) => {
+      if (type === "Plan") return Promise.resolve(makeArtifact("Plan", 1, plan));
+      return Promise.resolve(null);
+    });
+
+    const res = await app.inject({ method: "GET", url: "/api/runs/run-1/summary" });
+
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as { plan: { risks: string[] } };
+    expect(body.plan.risks[0]).toBe(String(circular));
+    expect(body.plan.risks[0]).toBe("[object Object]");
+  });
+
   it("handles a plan with no steps/risks arrays (defaults to empty)", async () => {
     const run = makeRun();
     const plan = { summary: "Minimal plan" };
