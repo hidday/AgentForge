@@ -201,6 +201,54 @@ describe("useActiveProcesses", () => {
     expect(result.current.output).toBe("");
   });
 
+  it("defaults missing SSE fields on process:started to empty strings / a generated timestamp", async () => {
+    mockApi.getActiveProcesses.mockResolvedValue({ processes: [] });
+    const { result } = renderHook(() => useActiveProcesses("run-1"));
+    await waitFor(() => expect(mockApi.getActiveProcesses).toHaveBeenCalled());
+
+    act(() => {
+      sseHandler?.({ type: "process:started", runId: "run-1" });
+    });
+
+    expect(result.current.processes).toHaveLength(1);
+    const entry = result.current.processes[0]!;
+    expect(entry.id).toBe("");
+    expect(entry.command).toBe("");
+    expect(entry.stage).toBe("");
+    expect(entry.runtime).toBe("");
+    expect(typeof entry.startedAt).toBe("string");
+    expect(entry.startedAt.length).toBeGreaterThan(0);
+  });
+
+  it("does not update output after unmount when a pending getProcessOutput call resolves late", async () => {
+    let resolveActive!: (v: { processes: ActiveProcess[] }) => void;
+    let resolveOutput!: (v: { processId: string; output: string }) => void;
+    mockApi.getActiveProcesses.mockReturnValue(
+      new Promise((resolve) => {
+        resolveActive = resolve;
+      }),
+    );
+    mockApi.getProcessOutput.mockReturnValue(
+      new Promise((resolve) => {
+        resolveOutput = resolve;
+      }),
+    );
+
+    const { unmount } = renderHook(() => useActiveProcesses("run-1"));
+
+    // Let init() proceed up to (and suspend on) the getProcessOutput await.
+    await act(async () => {
+      resolveActive({ processes: [makeProcess()] });
+    });
+
+    unmount();
+
+    // Resolving after unmount must not throw (the `cancelled` guard short-circuits).
+    await act(async () => {
+      resolveOutput({ processId: "p1", output: "late output" });
+    });
+  });
+
   it("cancels a pending init on unmount without updating state after unmount", async () => {
     let resolveProcesses!: (v: { processes: ActiveProcess[] }) => void;
     mockApi.getActiveProcesses.mockReturnValue(

@@ -116,12 +116,26 @@ describe("api client", () => {
       expect(JSON.parse(options.body)).toEqual({ note: "note" });
     });
 
+    it("reReviewPlan with no note omits the note field from the body", async () => {
+      fetchMock.mockResolvedValue(jsonResponse({ ok: true, runId: "run-1" }));
+      await api.reReviewPlan("run-1");
+      const [, options] = fetchMock.mock.calls[0]!;
+      expect(options.body).toBe("{}");
+    });
+
     it("revisePlan posts a note", async () => {
       fetchMock.mockResolvedValue(jsonResponse({ ok: true, runId: "run-1" }));
       await api.revisePlan("run-1", "note");
       const [url, options] = fetchMock.mock.calls[0]!;
       expect(url).toBe("/api/runs/run-1/actions/revise-plan");
       expect(JSON.parse(options.body)).toEqual({ note: "note" });
+    });
+
+    it("revisePlan with no note omits the note field from the body", async () => {
+      fetchMock.mockResolvedValue(jsonResponse({ ok: true, runId: "run-1" }));
+      await api.revisePlan("run-1");
+      const [, options] = fetchMock.mock.calls[0]!;
+      expect(options.body).toBe("{}");
     });
 
     it("approveReview posts with no body", async () => {

@@ -50,9 +50,25 @@ describe("Markdown", () => {
     expect(link.getAttribute("rel")).toContain("noopener");
   });
 
-  it("renders a heading", () => {
-    render(<Markdown>{"# Heading One"}</Markdown>);
-    expect(screen.getByText("Heading One").tagName).toBe("H1");
+  it("renders ordered list items", () => {
+    render(<Markdown>{"1. first\n2. second"}</Markdown>);
+    expect(screen.getByText("first").tagName).toBe("LI");
+    const list = screen.getByText("first").closest("ol");
+    expect(list).not.toBeNull();
+    expect(list!.className).toContain("list-decimal");
+  });
+
+  it("renders h1-h4 headings with the expected tag names", () => {
+    render(<Markdown>{"# H1\n\n## H2\n\n### H3\n\n#### H4"}</Markdown>);
+    expect(screen.getByText("H1").tagName).toBe("H1");
+    expect(screen.getByText("H2").tagName).toBe("H2");
+    expect(screen.getByText("H3").tagName).toBe("H3");
+    expect(screen.getByText("H4").tagName).toBe("H4");
+  });
+
+  it("renders a horizontal rule", () => {
+    const { container } = render(<Markdown>{"above\n\n---\n\nbelow"}</Markdown>);
+    expect(container.querySelector("hr")).not.toBeNull();
   });
 
   it("renders a blockquote", () => {
