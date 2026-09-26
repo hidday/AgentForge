@@ -133,6 +133,36 @@ describe("DashboardPage", () => {
     expect(tileValues).toEqual(["5", "1", "1", "1", "1"]);
   });
 
+  it("counts multiple runs sharing the same state category together", () => {
+    const runs = [
+      makeRun({ id: "r1", state: "Planning" }), // active
+      makeRun({ id: "r2", state: "Implementing" }), // also active
+    ];
+    mockUseRuns.mockReturnValue({ runs, loading: false, error: null, refetch: vi.fn() });
+    const { container } = render(<DashboardPage />);
+
+    const statsGrid = container.querySelector(".grid.grid-cols-5")!;
+    const tileValues = Array.from(statsGrid.children).map(
+      (tile) => tile.firstElementChild?.textContent,
+    );
+    // Total=2, Active=2 (both runs), Awaiting/Blocked/Done=0
+    expect(tileValues).toEqual(["2", "2", "0", "0", "0"]);
+  });
+
+  it("counts a run with an unrecognized state as idle in the stats bar", () => {
+    const runs = [makeRun({ id: "r1", state: "SomeNewState" })];
+    mockUseRuns.mockReturnValue({ runs, loading: false, error: null, refetch: vi.fn() });
+    const { container } = render(<DashboardPage />);
+
+    const statsGrid = container.querySelector(".grid.grid-cols-5")!;
+    const tileValues = Array.from(statsGrid.children).map(
+      (tile) => tile.firstElementChild?.textContent,
+    );
+    // Total=1, Active/Awaiting/Blocked/Done=0 (the unknown state counts as idle,
+    // which has no dedicated stat tile).
+    expect(tileValues).toEqual(["1", "0", "0", "0", "0"]);
+  });
+
   it("filters the runs table by category when a filter button is clicked", () => {
     const runs = [
       makeRun({ id: "r1", state: "Planning" }), // active

@@ -169,6 +169,36 @@ describe("RunDetailPage", () => {
     );
   });
 
+  it("falls back to the Linear issue identifier when there's no title", () => {
+    const run = makeRun({ linearIssueTitle: null, linearIssueIdentifier: "ENG-99" });
+    mockUseRun.mockReturnValue({
+      data: { run, artifacts: [], events: [] },
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+    renderPage();
+
+    expect(screen.getByText("ENG-99")).toBeDefined();
+  });
+
+  it("falls back to a truncated linearIssueId when there's no title or identifier", () => {
+    const run = makeRun({
+      linearIssueTitle: null,
+      linearIssueIdentifier: null,
+      linearIssueId: "abcdefghijklmnop",
+    });
+    mockUseRun.mockReturnValue({
+      data: { run, artifacts: [], events: [] },
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+    renderPage();
+
+    expect(screen.getByText("abcdefgh")).toBeDefined();
+  });
+
   it("passes artifacts and events through to ArtifactTabs and EventTimeline", () => {
     const run = makeRun();
     const artifacts: Artifact[] = [
