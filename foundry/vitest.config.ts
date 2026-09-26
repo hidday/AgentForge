@@ -13,7 +13,10 @@ export default defineConfig({
       // src/generated/** is Prisma-generated client code (`@ts-nocheck`,
       // "Do not edit directly"); it is regenerated from the schema, not
       // hand-written, and untestable/meaningless to unit test directly.
-      exclude: ["src/server.ts", "src/generated/**"],
+      // runnerTypes.ts contains only `interface` declarations, which are
+      // erased at compile time and emit zero runtime statements/branches
+      // for any test to execute.
+      exclude: ["src/server.ts", "src/generated/**", "src/runtime/runnerTypes.ts"],
       reporter: ["text", "json-summary", "html"],
       reportsDirectory: "coverage",
     },
