@@ -106,6 +106,21 @@ function buildAgent() {
   return { agent, getUserPrompt: () => capturedUserPrompt };
 }
 
+describe("ExecutorAgent.run() isRetry logging when only existingPR is set", () => {
+  it("treats the run as a retry when retry.existingPR is set but existingBranch is null", async () => {
+    const { agent } = buildAgent();
+
+    // Exercises the `retry?.existingPR != null` side of the isRetry check
+    // independently of `retry?.existingBranch`.
+    const result = await agent.run(makePlan(), makeTaskBundle(), "run-1", {
+      existingBranch: null,
+      existingPR: 555,
+    });
+
+    expect(result.prNumber).toBe(555);
+  });
+});
+
 describe("ExecutorAgent.run() operator note injection", () => {
   it("injects the Operator Note section into the user prompt when operatorNote is provided", async () => {
     const { agent, getUserPrompt } = buildAgent();

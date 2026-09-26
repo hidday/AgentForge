@@ -58,6 +58,28 @@ function buildAgent() {
   return { agent, getUserPrompt: () => capturedUserPrompt };
 }
 
+describe("AnswerResearcherAgent.run() open questions section", () => {
+  it("omits the '## Open Questions to Research' heading entirely when there are no open questions", async () => {
+    const { agent, getUserPrompt } = buildAgent();
+    const plan: Plan = {
+      planVersion: 1,
+      summary: "Test plan",
+      requirementsTraceability: "",
+      assumptions: [],
+      openQuestions: [],
+      risks: [],
+      steps: [{ id: "s1", title: "Step 1", description: "Do something" }],
+      testPlan: "Run tests",
+      confidence: 0.9,
+    };
+
+    await agent.run(plan, makeTaskBundle(), "run-1");
+
+    const prompt = getUserPrompt();
+    expect(prompt).not.toContain("## Open Questions to Research");
+  });
+});
+
 describe("AnswerResearcherAgent.run() open question requiredForExecution rendering", () => {
   it("omits the *(blocks execution)* suffix for an open question that isn't required for execution", async () => {
     const { agent, getUserPrompt } = buildAgent();
