@@ -32,6 +32,24 @@ function makeLogger() {
   } as any;
 }
 
+describe("GitError", () => {
+  it("stringifies a non-Error cause instead of reading .message off it", () => {
+    const err = new GitError("fetch", "/repo", "a plain string failure reason");
+    expect(err.message).toBe("git fetch failed in /repo: a plain string failure reason");
+    expect(err.name).toBe("GitError");
+  });
+});
+
+describe("buildWorktreeDirName — slug length overflow", () => {
+  it("drops the slug entirely when even the first slug word alone exceeds the 30-char cap", () => {
+    const hugeWord = "x".repeat(35);
+    const result = buildWorktreeDirName("abcdefgh", `eng-1-${hugeWord}`);
+    // shortenSlug() breaks out before appending anything once the cumulative
+    // length would exceed 30, so no slug suffix is appended at all.
+    expect(result).toBe("run-abcdefgh-eng-1");
+  });
+});
+
 describe("GitService — error-path branch coverage", () => {
   let repoPath: string;
   let svc: GitService;

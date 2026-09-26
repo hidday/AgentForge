@@ -450,6 +450,299 @@ describe("DistillationAgent branch coverage", () => {
     );
   });
 
+  it("renders '_none_' fallbacks for empty plan steps/risks/assumptions, and truncates >12 steps", async () => {
+    const deps = buildDeps();
+    const manySteps = Array.from({ length: 14 }, (_, i) => ({
+      id: `s${i}`,
+      title: `Step ${i}`,
+      description: i === 0 ? "" : "Do something",
+    }));
+    deps.artifactRepo.findLatestByType.mockImplementation((_runId: string, type: string) => {
+      if (type === "ExecutionReport") return Promise.resolve(deps.executionArtifact);
+      if (type === "Plan")
+        return Promise.resolve({
+          ...deps.planArtifact,
+          payloadJson: {
+            ...deps.planArtifact.payloadJson,
+            assumptions: [],
+            risks: [],
+            steps: manySteps,
+          },
+        });
+      return Promise.resolve(null);
+    });
+    deps.agentRunner.run.mockImplementation(async (_runtime: unknown, opts: { prompt: string }) => {
+      (deps as unknown as { capturedPrompt: string }).capturedPrompt = opts.prompt;
+      return makeDistillationOutput({ shouldPersist: false, reason: "trivial" });
+    });
+
+    const agent = buildAgent(deps);
+    await agent.run("run-1", makeRun());
+
+    const prompt = (deps as unknown as { capturedPrompt: string }).capturedPrompt;
+    expect(prompt).toContain("**Assumptions**:\n_none_");
+    expect(prompt).toContain("**Risks**:\n_none_");
+    expect(prompt).toContain("…and 2 more steps");
+  });
+
+  it("truncates a bullet list (assumptions) that exceeds its display cap, and truncates an overlong summary", async () => {
+    const deps = buildDeps();
+    const manyAssumptions = Array.from({ length: 10 }, (_, i) => `Assumption number ${i}`);
+    const longSummary = "S".repeat(650);
+    deps.artifactRepo.findLatestByType.mockImplementation((_runId: string, type: string) => {
+      if (type === "ExecutionReport") return Promise.resolve(deps.executionArtifact);
+      if (type === "Plan")
+        return Promise.resolve({
+          ...deps.planArtifact,
+          payloadJson: {
+            ...deps.planArtifact.payloadJson,
+            summary: longSummary,
+            assumptions: manyAssumptions,
+          },
+        });
+      return Promise.resolve(null);
+    });
+    deps.agentRunner.run.mockImplementation(async (_runtime: unknown, opts: { prompt: string }) => {
+      (deps as unknown as { capturedPrompt: string }).capturedPrompt = opts.prompt;
+      return makeDistillationOutput({ shouldPersist: false, reason: "trivial" });
+    });
+
+    const agent = buildAgent(deps);
+    await agent.run("run-1", makeRun());
+
+    const prompt = (deps as unknown as { capturedPrompt: string }).capturedPrompt;
+    // bulletList caps assumptions display at 8 and appends an overflow line.
+    expect(prompt).toContain("- …and 2 more");
+    // truncate() cuts the 650-char summary down to 600 chars plus an ellipsis.
+    expect(prompt).toContain(`${"S".repeat(600)}…`);
+    expect(prompt).not.toContain("S".repeat(601));
+  });
+
+  it("renders '_none_' for an empty plan.steps list", async () => {
+    const deps = buildDeps();
+    deps.artifactRepo.findLatestByType.mockImplementation((_runId: string, type: string) => {
+      if (type === "ExecutionReport") return Promise.resolve(deps.executionArtifact);
+      if (type === "Plan")
+        return Promise.resolve({
+          ...deps.planArtifact,
+          payloadJson: { ...deps.planArtifact.payloadJson, steps: [] },
+        });
+      return Promise.resolve(null);
+    });
+    deps.agentRunner.run.mockImplementation(async (_runtime: unknown, opts: { prompt: string }) => {
+      (deps as unknown as { capturedPrompt: string }).capturedPrompt = opts.prompt;
+      return makeDistillationOutput({ shouldPersist: false, reason: "trivial" });
+    });
+
+    const agent = buildAgent(deps);
+    await agent.run("run-1", makeRun());
+
+    const prompt = (deps as unknown as { capturedPrompt: string }).capturedPrompt;
+    expect(prompt).toContain("**Steps**:\n_none_");
+  });
+
+  it("renders '_none_' for an empty filesChanged list and truncates >40 files", async () => {
+    const deps = buildDeps();
+    const manyFiles = Array.from({ length: 42 }, (_, i) => `src/file${i}.ts`);
+    deps.artifactRepo.findLatestByType.mockImplementation((_runId: string, type: string) => {
+      if (type === "ExecutionReport")
+        return Promise.resolve({
+          ...deps.executionArtifact,
+          payloadJson: { ...deps.executionArtifact.payloadJson, filesChanged: manyFiles },
+        });
+      return Promise.resolve(null);
+    });
+    deps.agentRunner.run.mockImplementation(async (_runtime: unknown, opts: { prompt: string }) => {
+      (deps as unknown as { capturedPrompt: string }).capturedPrompt = opts.prompt;
+      return makeDistillationOutput({ shouldPersist: false, reason: "trivial" });
+    });
+
+    const agent = buildAgent(deps);
+    await agent.run("run-1", makeRun());
+
+    const prompt = (deps as unknown as { capturedPrompt: string }).capturedPrompt;
+    expect(prompt).toContain("…and 2 more");
+  });
+
+  it("renders '_none_' for an empty filesChanged list", async () => {
+    const deps = buildDeps();
+    deps.artifactRepo.findLatestByType.mockImplementation((_runId: string, type: string) => {
+      if (type === "ExecutionReport")
+        return Promise.resolve({
+          ...deps.executionArtifact,
+          payloadJson: { ...deps.executionArtifact.payloadJson, filesChanged: [] },
+        });
+      return Promise.resolve(null);
+    });
+    deps.agentRunner.run.mockImplementation(async (_runtime: unknown, opts: { prompt: string }) => {
+      (deps as unknown as { capturedPrompt: string }).capturedPrompt = opts.prompt;
+      return makeDistillationOutput({ shouldPersist: false, reason: "trivial" });
+    });
+
+    const agent = buildAgent(deps);
+    await agent.run("run-1", makeRun());
+
+    const prompt = (deps as unknown as { capturedPrompt: string }).capturedPrompt;
+    expect(prompt).toContain("**Files Changed** (0):\n_none_");
+  });
+
+  it("includes check details only for a failing check that has details, omitting them for an empty-details failure", async () => {
+    const deps = buildDeps();
+    deps.artifactRepo.findLatestByType.mockImplementation((_runId: string, type: string) => {
+      if (type === "ExecutionReport")
+        return Promise.resolve({
+          ...deps.executionArtifact,
+          payloadJson: {
+            ...deps.executionArtifact.payloadJson,
+            checks: {
+              lint: { status: "fail", details: "2 lint errors" },
+              typecheck: { status: "fail", details: "" },
+              tests: { status: "pass", details: "ok" },
+            },
+          },
+        });
+      return Promise.resolve(null);
+    });
+    deps.agentRunner.run.mockImplementation(async (_runtime: unknown, opts: { prompt: string }) => {
+      (deps as unknown as { capturedPrompt: string }).capturedPrompt = opts.prompt;
+      return makeDistillationOutput({ shouldPersist: false, reason: "trivial" });
+    });
+
+    const agent = buildAgent(deps);
+    await agent.run("run-1", makeRun());
+
+    const prompt = (deps as unknown as { capturedPrompt: string }).capturedPrompt;
+    expect(prompt).toContain("- lint: fail — 2 lint errors");
+    expect(prompt).toContain("- typecheck: fail\n");
+    expect(prompt).not.toContain("- typecheck: fail — ");
+  });
+
+  it("renders '_none_' for empty remediation resolutions, and truncates >15 resolutions", async () => {
+    const deps = buildDeps();
+    const manyResolutions = Array.from({ length: 17 }, (_, i) => ({
+      findingId: `f${i}`,
+      status: "accepted" as const,
+      action: "Fixed it",
+      rationale: i === 0 ? "" : "Real bug",
+    }));
+    deps.artifactRepo.findLatestByType.mockImplementation((_runId: string, type: string) => {
+      if (type === "ExecutionReport") return Promise.resolve(deps.executionArtifact);
+      if (type === "Remediation")
+        return Promise.resolve({
+          ...deps.remediationArtifact,
+          payloadJson: { ...deps.remediationArtifact.payloadJson, resolution: manyResolutions },
+        });
+      return Promise.resolve(null);
+    });
+    deps.agentRunner.run.mockImplementation(async (_runtime: unknown, opts: { prompt: string }) => {
+      (deps as unknown as { capturedPrompt: string }).capturedPrompt = opts.prompt;
+      return makeDistillationOutput({ shouldPersist: false, reason: "trivial" });
+    });
+
+    const agent = buildAgent(deps);
+    await agent.run("run-1", makeRun());
+
+    const prompt = (deps as unknown as { capturedPrompt: string }).capturedPrompt;
+    expect(prompt).toContain("…and 2 more");
+    // First item has an empty rationale, so its "*why*" line should be omitted.
+    expect(prompt).toContain("- [accepted] f0: Fixed it\n");
+  });
+
+  it("renders '_none_' for an empty remediation resolutions list", async () => {
+    const deps = buildDeps();
+    deps.artifactRepo.findLatestByType.mockImplementation((_runId: string, type: string) => {
+      if (type === "ExecutionReport") return Promise.resolve(deps.executionArtifact);
+      if (type === "Remediation")
+        return Promise.resolve({
+          ...deps.remediationArtifact,
+          payloadJson: { ...deps.remediationArtifact.payloadJson, resolution: [] },
+        });
+      return Promise.resolve(null);
+    });
+    deps.agentRunner.run.mockImplementation(async (_runtime: unknown, opts: { prompt: string }) => {
+      (deps as unknown as { capturedPrompt: string }).capturedPrompt = opts.prompt;
+      return makeDistillationOutput({ shouldPersist: false, reason: "trivial" });
+    });
+
+    const agent = buildAgent(deps);
+    await agent.run("run-1", makeRun());
+
+    const prompt = (deps as unknown as { capturedPrompt: string }).capturedPrompt;
+    expect(prompt).toContain("**Resolutions**:\n_none_");
+  });
+
+  it("falls back to an empty taskCategory hint in the prompt when linearIssueTitle is null", async () => {
+    const deps = buildDeps();
+    deps.agentRunner.run.mockImplementation(async (_runtime: unknown, opts: { prompt: string }) => {
+      (deps as unknown as { capturedPrompt: string }).capturedPrompt = opts.prompt;
+      return makeDistillationOutput({ shouldPersist: false, reason: "trivial" });
+    });
+
+    const agent = buildAgent(deps);
+    await agent.run("run-1", makeRun({ linearIssueTitle: null }));
+
+    const prompt = (deps as unknown as { capturedPrompt: string }).capturedPrompt;
+    expect(prompt).toContain("**Task Category Hint**: \n");
+  });
+
+  it("includes the (truncated) linearIssueDescription in the novelty-check task query even when linearIssueTitle is null", async () => {
+    const deps = buildDeps();
+    // A skill whose content overlaps heavily with the *description* only —
+    // if the description weren't folded into the novelty-check task query,
+    // this near-empty-title run would not trip the novelty gate.
+    deps.agentSkillRepo.findActiveByRepo.mockResolvedValue([
+      {
+        id: "skill-1",
+        repoSlug: "test-repo",
+        name: null,
+        description: null,
+        taskCategory: "token rotation strategy details",
+        skillMarkdown: "token rotation strategy details for refresh tokens",
+        successCount: 0,
+        failureCount: 0,
+        utilityScore: 0.5,
+        lastUsedAt: new Date(),
+        createdAt: new Date(),
+        archivedAt: null,
+      },
+    ]);
+
+    const agent = buildAgent(deps);
+    await agent.run(
+      "run-1",
+      makeRun({
+        linearIssueTitle: null,
+        linearIssueDescription: "token rotation strategy details for refresh tokens",
+      } as never),
+    );
+
+    // The LLM is never invoked because the (deterministic) novelty gate fired first.
+    expect(deps.agentRunner.run).not.toHaveBeenCalled();
+    expect(deps.eventRepo.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        payloadJson: expect.objectContaining({
+          shouldPersist: false,
+          reason: expect.stringContaining("novelty_gate_failed"),
+        }),
+      }),
+    );
+  });
+
+  it("logs String(err) when the agent runner rejects with a non-Error value", async () => {
+    const deps = buildDeps();
+    deps.agentSkillRepo.findActiveByRepo.mockResolvedValue([]);
+    // eslint-disable-next-line @typescript-eslint/no-floating-promises
+    deps.agentRunner.run.mockRejectedValue("a plain string rejection");
+
+    const agent = buildAgent(deps);
+    await agent.run("run-1", makeRun());
+
+    expect(deps.logger.warn).toHaveBeenCalledWith(
+      { runId: "run-1", error: "a plain string rejection" },
+      "Distillation LLM call failed or parse error",
+    );
+  });
+
   it("skips persistence when shouldPersist=true but skillMarkdown is blank/whitespace-only", async () => {
     const deps = buildDeps();
     deps.agentSkillRepo.findActiveByRepo.mockResolvedValue([]);

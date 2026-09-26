@@ -163,6 +163,39 @@ describe("ClaudeCodeRunner — NDJSON envelope unwrapping", () => {
     expect(out.parsed.payload.value).toBe("ok");
   });
 
+  it("skips blank lines while scanning an NDJSON stream from the end", async () => {
+    const lines = [
+      JSON.stringify({ type: "system", subtype: "init" }),
+      JSON.stringify({ type: "result", result: validStructuredOutput, is_error: false }),
+      "",
+      "   ",
+    ];
+    const processRunner = makeMockProcessRunner({
+      stdout: lines.join("\n"),
+      stderr: "",
+      exitCode: 0,
+      durationMs: 10,
+      timedOut: false,
+    });
+    const logger = makeMockLogger();
+    const runner = new ClaudeCodeRunner(
+      processRunner as never,
+      "claude",
+      [],
+      "claude-opus-4-8",
+      logger as never,
+    );
+
+    const out = await runner.run(
+      { prompt: "x", workingDirectory: "/tmp", timeoutMs: 1000 },
+      "planner",
+      echoSchema,
+    );
+
+    expect(out.success).toBe(true);
+    expect(out.parsed.payload.value).toBe("ok");
+  });
+
   it("falls back to the raw stdout text when neither single-JSON nor NDJSON parsing finds a result", async () => {
     const rawOutput = "this is not json\nnor is this second line";
     const processRunner = makeMockProcessRunner({
