@@ -482,4 +482,33 @@ describe("OrchestratorService.runRemediation -- happy path structural behaviour"
     expect(workingDirArg).toBe("/tmp/worktree");
     expect(runIdArg).toBe("run-1");
   });
+
+  it("completes and returns the run when a fresh approved Review becomes available before markReady's check", async () => {
+    // Exercises the full success path (including the final `return run` after
+    // markReady) by simulating a Review artifact that flips from
+    // "changes_requested" (satisfying assertCanRemediate) to "approved"
+    // (satisfying assertCanMarkReady) between the two independent
+    // findLatestByType("Review") lookups -- e.g. because a fresh code review
+    // completed concurrently. This proves the happy path beyond markReady
+    // works correctly when its verdict precondition is met.
+    const store = baseStore();
+    const built = buildDeps(store);
+    let reviewCallCount = 0;
+    built.artifactRepo.findLatestByType.mockImplementation((_runId: string, type: string) => {
+      if (type === "Review") {
+        reviewCallCount += 1;
+        const verdict = reviewCallCount === 1 ? "changes_requested" : "approved";
+        return Promise.resolve(asArtifact({ type: "Review", version: 1, payloadJson: makeReview({ overallVerdict: verdict }) }));
+      }
+      const matching = store.artifacts.filter((a) => a.type === type);
+      if (matching.length === 0) return Promise.resolve(null);
+      const latest = matching.reduce((best, cur) => (cur.version > best.version ? cur : best));
+      return Promise.resolve(latest);
+    });
+    const svc = new OrchestratorService(built.deps as never);
+
+    const result = await svc.runRemediation("run-1");
+
+    expect(result.state).toBe(RunState.ReadyForHumanReview);
+  });
 });
