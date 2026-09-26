@@ -314,7 +314,7 @@ describe("GitHubSyncService.postRemediationResolutions", () => {
     expect(githubClient.commentOnPR).toHaveBeenCalledTimes(1);
   });
 
-  it("uses the grey_question icon for an unrecognized status", async () => {
+  it("uses the warning icon for the 'partially_addressed' status", async () => {
     const githubClient = makeGitHubClient();
     const service = new GitHubSyncService(githubClient as never, makeLogger() as never);
 
@@ -327,5 +327,22 @@ describe("GitHubSyncService.postRemediationResolutions", () => {
 
     const replyBody = githubClient.replyToReviewComment.mock.calls[0]?.[3] as string;
     expect(replyBody).toContain(":warning: **partially addressed**");
+  });
+
+  it("falls back to the grey_question icon (both in the reply and the summary row) for a status outside the known set", async () => {
+    const githubClient = makeGitHubClient();
+    const service = new GitHubSyncService(githubClient as never, makeLogger() as never);
+    const weirdResolution = makeResolution({
+      findingId: "f1",
+      status: "unexpected_status" as unknown as ResolutionItem["status"],
+    });
+
+    await service.postRemediationResolutions("acme/widgets", 42, [weirdResolution], { f1: 5 });
+
+    const replyBody = githubClient.replyToReviewComment.mock.calls[0]?.[3] as string;
+    expect(replyBody).toContain(":grey_question: **unexpected status**");
+
+    const [, , summaryBody] = githubClient.commentOnPR.mock.calls[0] as [string, number, string];
+    expect(summaryBody).toContain("| :grey_question: **f1** | unexpected status |");
   });
 });

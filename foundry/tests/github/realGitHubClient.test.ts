@@ -16,6 +16,11 @@ function statusError(status: number, message = "boom"): Error & { status: number
   return err;
 }
 
+/** A non-Error rejection value, to exercise the `err instanceof Error ? ... : String(err)` fallback branch. */
+function nonErrorRejection(status?: number): unknown {
+  return status === undefined ? "plain string failure" : { status, toString: () => "plain object failure" };
+}
+
 interface FakeOctokit {
   repos: { get: ReturnType<typeof vi.fn> };
   git: { getRef: ReturnType<typeof vi.fn>; createRef: ReturnType<typeof vi.fn> };
@@ -93,6 +98,14 @@ describe("RealGitHubClient", () => {
         /cannot access repo "acme\/widgets".*Original: 404 Not Found/,
       );
     });
+
+    it("stringifies a non-Error rejection value instead of reading .message", async () => {
+      octokit.repos.get.mockRejectedValue(nonErrorRejection());
+
+      await expect(client.verifyRepoAccess("acme/widgets")).rejects.toThrow(
+        "Original: plain string failure",
+      );
+    });
   });
 
   describe("getDefaultBranch", () => {
@@ -107,6 +120,14 @@ describe("RealGitHubClient", () => {
 
       await expect(client.getDefaultBranch("acme/widgets")).rejects.toThrow(
         'GitHub getDefaultBranch failed for "acme/widgets": rate limited',
+      );
+    });
+
+    it("wraps a non-Error rejection via String() instead of throwing on .message access", async () => {
+      octokit.repos.get.mockRejectedValue(nonErrorRejection());
+
+      await expect(client.getDefaultBranch("acme/widgets")).rejects.toThrow(
+        'GitHub getDefaultBranch failed for "acme/widgets": plain string failure',
       );
     });
   });
@@ -226,6 +247,21 @@ describe("RealGitHubClient", () => {
       await expect(
         client.createDraftPR("acme/widgets", "ai/issue-1", "main", "Title", "Body"),
       ).rejects.toThrow('GitHub createDraftPR failed for "acme/widgets"');
+    });
+
+    it("treats a non-Error 422 rejection's stringified form as non-field-validation and looks up the existing PR", async () => {
+      octokit.pulls.create.mockRejectedValue(nonErrorRejection(422));
+      octokit.pulls.list.mockResolvedValue({ data: [{ number: 88 }] });
+
+      const result = await client.createDraftPR(
+        "acme/widgets",
+        "ai/issue-1",
+        "main",
+        "Title",
+        "Body",
+      );
+
+      expect(result).toBe(88);
     });
   });
 
@@ -454,6 +490,18 @@ describe("RealGitHubClient", () => {
         "Failed to reply to PR review comment, skipping",
       );
     });
+
+    it("stringifies a non-Error rejection in the logged warning", async () => {
+      octokit.pulls.createReplyForReviewComment.mockRejectedValue(nonErrorRejection());
+
+      await expect(
+        client.replyToReviewComment("acme/widgets", 10, 555, "thanks"),
+      ).resolves.toBeUndefined();
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.objectContaining({ error: "plain string failure" }),
+        "Failed to reply to PR review comment, skipping",
+      );
+    });
   });
 
   describe("submitPRReview", () => {
@@ -502,6 +550,14 @@ describe("RealGitHubClient", () => {
 
       await expect(
         client.submitPRReview("acme/widgets", 10, "note", "COMMENT"),
+      ).rejects.toThrow('GitHub submitPRReview failed for "acme/widgets"');
+    });
+
+    it("wraps a non-Error rejection via String() instead of throwing on .message access", async () => {
+      octokit.pulls.createReview.mockRejectedValue(nonErrorRejection());
+
+      await expect(
+        client.submitPRReview("acme/widgets", 10, "LGTM", "APPROVE"),
       ).rejects.toThrow('GitHub submitPRReview failed for "acme/widgets"');
     });
   });
