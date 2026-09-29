@@ -32,19 +32,6 @@ function makeRelated(overrides: Partial<RelatedLinearIssue> = {}): RelatedLinear
   };
 }
 
-function makeIssue(overrides: Partial<LinearIssue> = {}): LinearIssue {
-  return {
-    id: "issue-1",
-    title: "Focus",
-    description: "",
-    branchName: "ai/issue-1",
-    state: "Todo",
-    labels: [],
-    priority: 0,
-    ...overrides,
-  };
-}
-
 describe("MockLinearClient.getRelatedContext", () => {
   it("returns an empty blockers array when no relations have been seeded", async () => {
     const client = new MockLinearClient();
