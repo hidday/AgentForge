@@ -9,6 +9,7 @@ import {
   makePlanReview,
   stubPlanner,
   stubPlanReviser,
+  stubReviewer,
 } from "./helpers/testKit.js";
 
 describe("OrchestratorService -- buildTaskBundle edge cases (via runPlanReview)", () => {
@@ -186,7 +187,7 @@ describe("OrchestratorService -- formatPlanReviewComment / formatCodeReviewComme
         scoreRationale: "ok",
       },
     });
-    h.reviewerAgent.run.mockResolvedValue({
+    stubReviewer(h, {
       reviewId: "rev-1",
       summary: "found stuff",
       overallVerdict: "changes_requested",
@@ -421,6 +422,12 @@ describe("OrchestratorService.runManualPlanRevision -- no operator note", () => 
     h.planReviewerAgent.run.mockResolvedValue(
       makePlanReview({ overallVerdict: "changes_requested" }),
     );
+    await h.artifactRepo.create({
+      runId: "run-1",
+      type: "PlanReview",
+      version: 1,
+      payloadJson: makePlanReview({ overallVerdict: "changes_requested" }),
+    });
     stubPlanReviser(h, makePlan({ planVersion: 2 }), {
       originalPlanVersion: 1,
       revisedPlanVersion: 2,
@@ -433,7 +440,7 @@ describe("OrchestratorService.runManualPlanRevision -- no operator note", () => 
 
     expect(h.planReviserAgent.run).toHaveBeenCalledWith(
       expect.anything(),
-      expect.anything(),
+      expect.objectContaining({ overallVerdict: "changes_requested" }),
       expect.anything(),
       "run-1",
       undefined,
