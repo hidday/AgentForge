@@ -512,3 +512,146 @@ describe("OrchestratorService -- updateSkillMetrics with a legacy event missing 
     expect(h.agentSkillRepo.incrementFailure).not.toHaveBeenCalled();
   });
 });
+
+describe("OrchestratorService -- updateSkillMetrics with a non-Error thrown by the repo", () => {
+  it("stringifies a non-Error thrown while updating a skill's metric", async () => {
+    const run = makeRun({ id: "run-1", state: RunState.ReadyForHumanReview });
+    const h = buildStorefulDeps(run);
+    h.store.events.push({
+      id: "evt-1",
+      runId: "run-1",
+      eventType: "SKILL_INJECTION",
+      source: "orchestrator",
+      payloadJson: { skillIds: ["skill-a"] },
+      createdAt: new Date(),
+    });
+    h.agentSkillRepo.incrementSuccess.mockRejectedValue("quota exceeded");
+
+    const svc = new OrchestratorService({ ...h.deps, agentSkillRepo: h.agentSkillRepo } as never);
+    await svc.approveHumanReview("run-1");
+
+    expect(h.logger.warn).toHaveBeenCalledWith(
+      expect.objectContaining({ runId: "run-1", skillId: "skill-a", error: "quota exceeded" }),
+      "Failed to update skill metric",
+    );
+  });
+});
+
+describe("OrchestratorService.answerQuestions -- forwards prior researched answers into the re-plan", () => {
+  it("includes previously researched answers when re-planning after human clarification", async () => {
+    const run = makeRun({ id: "run-1", state: RunState.HumanClarificationNeeded, planVersion: 1 });
+    const h = buildStorefulDeps(run);
+    await h.artifactRepo.create({
+      runId: "run-1",
+      type: "Plan",
+      version: 1,
+      payloadJson: makePlan({
+        openQuestions: [{ id: "q1", question: "Required?", requiredForExecution: true }],
+      }),
+    });
+    await h.artifactRepo.create({
+      runId: "run-1",
+      type: "TaskBundle",
+      version: 1,
+      payloadJson: { issue: { id: "LIN-1" } },
+    });
+    await h.artifactRepo.create({
+      runId: "run-1",
+      type: "ResearchedAnswers",
+      version: 1,
+      payloadJson: {
+        summary: "prior research",
+        answers: [
+          { questionId: "q0", question: "Earlier one?", answer: "Yes", confidence: "high" },
+        ],
+        completedAt: "2026-01-01T00:00:00Z",
+      },
+    });
+
+    stubPlanner(h, makePlan({ planVersion: 2, openQuestions: [] }));
+    h.planReviewerAgent.run.mockResolvedValue(makePlanReview({ overallVerdict: "approved" }));
+
+    const svc = new OrchestratorService(h.deps as never);
+    await svc.answerQuestions("run-1", [{ questionId: "q1", answer: "yes" }]);
+
+    expect(h.plannerAgent.run).toHaveBeenCalledWith(
+      expect.anything(),
+      "run-1",
+      expect.objectContaining({
+        researchedAnswers: [
+          { questionId: "q0", question: "Earlier one?", answer: "Yes", confidence: "high" },
+        ],
+      }),
+    );
+  });
+});
+
+describe("OrchestratorService -- maybeResearchAndReplan forwards existing human answers", () => {
+  it("passes the already-submitted human answers into both the researcher call and the researched re-plan", async () => {
+    // A HumanAnswers artifact is created as part of answerQuestions itself (for the
+    // *current* submission) before maybeResearchAndReplan runs; if the re-plan still
+    // has (non-blocking) open questions and the researcher hasn't run yet for this
+    // run, maybeResearchAndReplan must forward those just-submitted answers.
+    const run = makeRun({ id: "run-1", state: RunState.HumanClarificationNeeded, planVersion: 1 });
+    const h = buildStorefulDeps(run);
+    await h.artifactRepo.create({
+      runId: "run-1",
+      type: "Plan",
+      version: 1,
+      payloadJson: makePlan({
+        openQuestions: [{ id: "q1", question: "Required?", requiredForExecution: true }],
+      }),
+    });
+    await h.artifactRepo.create({
+      runId: "run-1",
+      type: "TaskBundle",
+      version: 1,
+      payloadJson: { issue: { id: "LIN-1" } },
+    });
+
+    // First plannerAgent.run call (the re-plan with the human answer) still has a
+    // non-blocking open question, which triggers maybeResearchAndReplan; the second
+    // call is the researcher-driven re-plan.
+    stubPlanner(
+      h,
+      makePlan({
+        planVersion: 2,
+        openQuestions: [{ id: "q2", question: "Nice to know?", requiredForExecution: false }],
+      }),
+      makePlan({ planVersion: 3, openQuestions: [] }),
+    );
+    h.answerResearcherAgent.run.mockResolvedValue({
+      summary: "resolved",
+      answers: [
+        { questionId: "q2", question: "Nice to know?", answer: "Sure", confidence: "high" },
+      ],
+      completedAt: "2026-01-01T00:00:00Z",
+    });
+    h.planReviewerAgent.run.mockResolvedValue(makePlanReview({ overallVerdict: "approved" }));
+
+    const svc = new OrchestratorService({
+      ...h.deps,
+      answerResearcherAgent: h.answerResearcherAgent,
+    } as never);
+    await svc.answerQuestions("run-1", [{ questionId: "q1", answer: "yes" }]);
+
+    // The researcher call itself should have received the just-submitted human answer.
+    expect(h.answerResearcherAgent.run).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      "run-1",
+      expect.objectContaining({ humanAnswers: [{ questionId: "q1", answer: "yes" }] }),
+    );
+    // And the researched re-plan call should ALSO carry those human answers forward.
+    expect(h.plannerAgent.run).toHaveBeenLastCalledWith(
+      expect.anything(),
+      "run-1",
+      expect.objectContaining({
+        researchedAnswers: expect.arrayContaining([
+          expect.objectContaining({ questionId: "q2" }),
+        ]),
+        humanAnswers: [{ questionId: "q1", answer: "yes" }],
+      }),
+    );
+  });
+});
