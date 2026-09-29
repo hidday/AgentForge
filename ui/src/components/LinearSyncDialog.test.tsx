@@ -455,7 +455,7 @@ describe("LinearSyncDialog", () => {
   });
 
   it("clears the pending min-loader timer on unmount", async () => {
-    const clearTimeoutSpy = vi.spyOn(global, "clearTimeout");
+    const clearTimeoutSpy = vi.spyOn(globalThis, "clearTimeout");
     mockApi.ingestIssues.mockReturnValue(new Promise(() => {}));
 
     const { unmount } = render(
