@@ -214,6 +214,59 @@ describe("ChatPanel", () => {
     expect(screen.queryByText("Failing question")).toBeNull();
   });
 
+  it("collapses and re-expands the panel when the header is clicked", async () => {
+    const artifacts: Artifact[] = [
+      makeArtifact("user", "Visible message", "a1", "2024-01-01T00:00:01Z"),
+    ];
+    render(<ChatPanel runId={RUN_ID} artifacts={artifacts} />);
+
+    // Expanded by default: message and input are present.
+    expect(screen.getByText("Visible message")).toBeDefined();
+    expect(screen.getByPlaceholderText(/ask the agent/i)).toBeDefined();
+
+    const header = screen.getByRole("button", { name: /chat with agent/i });
+    await userEvent.click(header);
+
+    // Collapsed: body content (messages, input form) is no longer rendered.
+    expect(screen.queryByText("Visible message")).toBeNull();
+    expect(screen.queryByPlaceholderText(/ask the agent/i)).toBeNull();
+
+    await userEvent.click(header);
+
+    // Re-expanded: body content is back.
+    expect(screen.getByText("Visible message")).toBeDefined();
+    expect(screen.getByPlaceholderText(/ask the agent/i)).toBeDefined();
+  });
+
+  it("auto-scrolls the message list into view when a new message arrives", async () => {
+    const scrollIntoViewMock = vi.fn();
+    // jsdom does not implement scrollIntoView; stub it so the component's
+    // feature-detection guard (`typeof ... === "function"`) passes and the
+    // scrollIntoView call itself is exercised.
+    Object.defineProperty(HTMLDivElement.prototype, "scrollIntoView", {
+      value: scrollIntoViewMock,
+      writable: true,
+      configurable: true,
+    });
+
+    try {
+      const { rerender } = render(<ChatPanel runId={RUN_ID} artifacts={[]} />);
+      expect(scrollIntoViewMock).toHaveBeenCalled();
+
+      scrollIntoViewMock.mockClear();
+
+      const artifacts: Artifact[] = [
+        makeArtifact("user", "New message", "a1", "2024-01-01T00:00:01Z"),
+      ];
+      rerender(<ChatPanel runId={RUN_ID} artifacts={artifacts} />);
+
+      expect(scrollIntoViewMock).toHaveBeenCalledWith({ behavior: "smooth" });
+    } finally {
+      // @ts-expect-error -- cleanup the polyfill so it doesn't leak into other test files
+      delete HTMLDivElement.prototype.scrollIntoView;
+    }
+  });
+
   it("message list does not change from artifact-derived count when only local state changes", async () => {
     let resolveRequest!: (v: { reply: string; durationMs: number }) => void;
     mockApi.sendChatMessage.mockReturnValue(
