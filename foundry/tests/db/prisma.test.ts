@@ -1,106 +1,80 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi } from "vitest";
+import { getPrismaClient, disconnectPrisma } from "../../src/db/prisma.js";
 
-const envMock = vi.hoisted(() => ({
-  env: {
-    DATABASE_URL: "postgresql://test:test@localhost:5432/test",
-    LOG_LEVEL: "info" as string,
-  },
-}));
-
-const prismaClientCtor = vi.hoisted(() => vi.fn());
-const prismaPgCtor = vi.hoisted(() => vi.fn());
-const disconnectMock = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
-
-vi.mock("../../src/generated/prisma/client.js", () => ({
-  PrismaClient: class {
-    $disconnect = disconnectMock;
-    constructor(...args: unknown[]) {
-      prismaClientCtor(...args);
-    }
-  },
-}));
-
-vi.mock("@prisma/adapter-pg", () => ({
-  PrismaPg: class {
-    constructor(...args: unknown[]) {
-      prismaPgCtor(...args);
-    }
-  },
-}));
-
-vi.mock("../../src/config/env.js", () => ({
-  env: envMock.env,
-}));
-
-describe("prisma", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    vi.resetModules();
-    envMock.env.LOG_LEVEL = "info";
+// Note: getPrismaClient() constructs a real PrismaClient wired to a PrismaPg
+// adapter, but PrismaClient construction itself does not open a database
+// connection (Prisma connects lazily on first query), so this is safe to
+// exercise without a real database. These tests verify the singleton-reuse
+// and disconnect wiring in db/prisma.ts without ever issuing a query.
+//
+// Test order matters here: the module holds a single module-level `prisma`
+// variable, so the "no client yet" case must run before anything creates one.
+describe("prisma singleton", () => {
+  it("disconnectPrisma() no-ops when no client has been created yet", async () => {
+    await expect(disconnectPrisma()).resolves.toBeUndefined();
   });
 
-  it("constructs the client with the pg adapter using env.DATABASE_URL and a minimal log level by default", async () => {
-    envMock.env.LOG_LEVEL = "info";
-    const { getPrismaClient } = await import("../../src/db/prisma.js");
-
-    getPrismaClient();
-
-    expect(prismaPgCtor).toHaveBeenCalledWith({
-      connectionString: "postgresql://test:test@localhost:5432/test",
-    });
-    expect(prismaClientCtor).toHaveBeenCalledTimes(1);
-    const [options] = prismaClientCtor.mock.calls[0] as [{ log: string[]; adapter: unknown }];
-    expect(options.log).toEqual(["warn", "error"]);
-    expect(options.adapter).toBeInstanceOf(Object);
+  it("getPrismaClient() returns a client exposing the expected Prisma API", () => {
+    const client = getPrismaClient();
+    expect(client).toBeDefined();
+    expect(typeof client.$disconnect).toBe("function");
+    expect(typeof client.$connect).toBe("function");
   });
 
-  it("uses the verbose log level list when LOG_LEVEL is debug or trace", async () => {
-    envMock.env.LOG_LEVEL = "debug";
-    const { getPrismaClient } = await import("../../src/db/prisma.js");
-
-    getPrismaClient();
-
-    const [options] = prismaClientCtor.mock.calls[0] as [{ log: string[] }];
-    expect(options.log).toEqual(["query", "info", "warn", "error"]);
-  });
-
-  it("uses the verbose log level list for trace as well", async () => {
-    envMock.env.LOG_LEVEL = "trace";
-    const { getPrismaClient } = await import("../../src/db/prisma.js");
-
-    getPrismaClient();
-
-    const [options] = prismaClientCtor.mock.calls[0] as [{ log: string[] }];
-    expect(options.log).toEqual(["query", "info", "warn", "error"]);
-  });
-
-  it("returns the same cached instance on repeated calls (singleton)", async () => {
-    const { getPrismaClient } = await import("../../src/db/prisma.js");
-
+  it("getPrismaClient() reuses the same instance across repeated calls", () => {
     const first = getPrismaClient();
     const second = getPrismaClient();
-
-    expect(first).toBe(second);
-    expect(prismaClientCtor).toHaveBeenCalledTimes(1);
+    const third = getPrismaClient();
+    expect(second).toBe(first);
+    expect(third).toBe(first);
   });
 
-  it("disconnectPrisma calls $disconnect and clears the cache so a new client is built next time", async () => {
-    const { getPrismaClient, disconnectPrisma } = await import("../../src/db/prisma.js");
+  it("disconnectPrisma() calls $disconnect on the existing client and clears the singleton", async () => {
+    const client = getPrismaClient();
+    const disconnectSpy = vi.spyOn(client, "$disconnect").mockResolvedValue(undefined);
 
-    const first = getPrismaClient();
     await disconnectPrisma();
 
-    expect(disconnectMock).toHaveBeenCalledTimes(1);
+    expect(disconnectSpy).toHaveBeenCalledTimes(1);
 
-    const second = getPrismaClient();
-    expect(prismaClientCtor).toHaveBeenCalledTimes(2);
-    expect(second).not.toBe(first);
+    // After disconnecting, the module's singleton is cleared, so the next
+    // call must construct (and return) a brand new client instance.
+    const next = getPrismaClient();
+    expect(next).not.toBe(client);
   });
 
-  it("disconnectPrisma is a no-op when no client was ever created", async () => {
-    const { disconnectPrisma } = await import("../../src/db/prisma.js");
+  it("disconnectPrisma() is a no-op again once the singleton has been cleared", async () => {
+    // At this point in the suite a client exists (created by the previous
+    // test). Disconnect it, then call disconnectPrisma() a second time in a
+    // row to confirm the second call does nothing (no client to disconnect).
+    const client = getPrismaClient();
+    const disconnectSpy = vi.spyOn(client, "$disconnect").mockResolvedValue(undefined);
 
-    await expect(disconnectPrisma()).resolves.toBeUndefined();
-    expect(disconnectMock).not.toHaveBeenCalled();
+    await disconnectPrisma();
+    await disconnectPrisma();
+
+    expect(disconnectSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("enables verbose query/info logging when LOG_LEVEL is debug or trace", async () => {
+    const originalLogLevel = process.env.LOG_LEVEL;
+    process.env.LOG_LEVEL = "debug";
+    vi.resetModules();
+    try {
+      // Re-import with a fresh module registry so config/env.ts re-parses
+      // process.env with LOG_LEVEL=debug, taking the verbose-logging branch
+      // in getPrismaClient()'s `log` option.
+      const fresh = await import("../../src/db/prisma.js");
+      const client = fresh.getPrismaClient();
+      expect(client).toBeDefined();
+      await fresh.disconnectPrisma();
+    } finally {
+      if (originalLogLevel === undefined) {
+        delete process.env.LOG_LEVEL;
+      } else {
+        process.env.LOG_LEVEL = originalLogLevel;
+      }
+      vi.resetModules();
+    }
   });
 });

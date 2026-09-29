@@ -195,6 +195,48 @@ describe("ExecutorAgent.run()", () => {
     expect(githubClient.createDraftPR).not.toHaveBeenCalled();
   });
 
+  it("treats a retry context with only an existingPR (no existingBranch) as a retry in the start log", async () => {
+    const { agent, githubClient, logger } = buildAgent();
+
+    const result = await agent.run(makePlan(), makeTaskBundle(), "run-1", {
+      existingPR: 777,
+    });
+
+    // existingBranch is absent so branchName falls back to the task bundle's
+    // working branch, but existingPR alone should still be enough to skip
+    // creating a new draft PR and to mark isRetry: true in the start log.
+    expect(result.prNumber).toBe(777);
+    expect(githubClient.createDraftPR).not.toHaveBeenCalled();
+
+    const startLog = logger.info.mock.calls.find(
+      (c: unknown[]) => c[1] === "Starting executor agent",
+    );
+    expect(startLog).toBeDefined();
+    const payload = startLog?.[0] as Record<string, unknown> | undefined;
+    expect(payload?.isRetry).toBe(true);
+  });
+
+  it("renders the operator note section into the user prompt when provided", async () => {
+    const { agent, getUserPrompt } = buildAgent();
+
+    await agent.run(makePlan(), makeTaskBundle(), "run-1", undefined, {
+      operatorNote: "Please double-check the retry logic.",
+    });
+
+    const userPrompt = getUserPrompt();
+    expect(userPrompt).toContain("## Operator Note");
+    expect(userPrompt).toContain("Please double-check the retry logic.");
+  });
+
+  it("omits the operator note section when no operator note is provided", async () => {
+    const { agent, getUserPrompt } = buildAgent();
+
+    await agent.run(makePlan(), makeTaskBundle(), "run-1");
+
+    const userPrompt = getUserPrompt();
+    expect(userPrompt).not.toContain("## Operator Note");
+  });
+
   it("logs the score and executionVersion in the completion event", async () => {
     const { agent, logger } = buildAgent({ score: 0.42 });
 
@@ -207,5 +249,25 @@ describe("ExecutorAgent.run()", () => {
     const payload = completionLog?.[0] as Record<string, unknown> | undefined;
     expect(payload?.score).toBe(0.42);
     expect(payload?.executionVersion).toBe(1);
+  });
+
+  it("injects the operator note section into the user prompt when provided", async () => {
+    const { agent, getUserPrompt } = buildAgent();
+
+    await agent.run(makePlan(), makeTaskBundle(), "run-1", undefined, {
+      operatorNote: "Please double-check the error handling.",
+    });
+
+    const userPrompt = getUserPrompt();
+    expect(userPrompt).toContain("## Operator Note");
+    expect(userPrompt).toContain("Please double-check the error handling.");
+  });
+
+  it("omits the operator note section when no note is provided", async () => {
+    const { agent, getUserPrompt } = buildAgent();
+
+    await agent.run(makePlan(), makeTaskBundle(), "run-1");
+
+    expect(getUserPrompt()).not.toContain("## Operator Note");
   });
 });

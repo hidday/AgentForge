@@ -37,16 +37,8 @@ async function buildApp(orchestratorOverrides: Record<string, unknown> = {}) {
     getRunRepo: () => mockRunRepo,
     getArtifactRepo: () => mockArtifactRepo,
     getEventRepo: () => mockEventRepo,
-    answerQuestions: vi.fn(),
     approvePlan: vi.fn(),
-    rejectPlan: vi.fn(),
-    approveHumanReview: vi.fn(),
-    handleCommand: vi.fn(),
-    runPlanRevision: vi.fn(),
-    runPlanReview: vi.fn(),
     runExecution: vi.fn().mockResolvedValue(undefined),
-    runReview: vi.fn(),
-    runRemediation: vi.fn(),
     ...orchestratorOverrides,
   };
 
@@ -58,8 +50,8 @@ async function buildApp(orchestratorOverrides: Record<string, unknown> = {}) {
 
   const app = Fastify({ logger: false });
   registerApiRoutes(app, mockOrchestrator as never, mockEmitter as never, mockProcessRunner as never);
-  await app.ready();
 
+  await app.ready();
   return { app, mockOrchestrator };
 }
 
@@ -68,7 +60,7 @@ describe("POST /api/runs/:id/actions/approve-plan", () => {
     vi.clearAllMocks();
   });
 
-  it("returns 200 with the new state and kicks off execution in the background", async () => {
+  it("returns 200, calls approvePlan with sanitized note, and kicks off runExecution", async () => {
     const run = makeRun();
     const { app, mockOrchestrator } = await buildApp();
     mockOrchestrator.approvePlan.mockResolvedValue(run);
@@ -76,51 +68,49 @@ describe("POST /api/runs/:id/actions/approve-plan", () => {
     const res = await app.inject({
       method: "POST",
       url: "/api/runs/run-1/actions/approve-plan",
-      payload: {},
+      payload: { note: "  looks good  " },
     });
 
     expect(res.statusCode).toBe(200);
-    expect(res.json()).toEqual({ ok: true, state: run.state });
-    expect(mockOrchestrator.approvePlan).toHaveBeenCalledWith("run-1", { note: undefined });
-    // runExecution is fire-and-forget; give the microtask queue a tick.
-    await new Promise((r) => setTimeout(r, 0));
-    expect(mockOrchestrator.runExecution).toHaveBeenCalledWith("run-1", { note: undefined });
+    const body = res.json() as { ok: boolean; state: string };
+    expect(body.ok).toBe(true);
+    expect(body.state).toBe(run.state);
+    expect(mockOrchestrator.approvePlan).toHaveBeenCalledWith("run-1", { note: "looks good" });
+    expect(mockOrchestrator.runExecution).toHaveBeenCalledWith("run-1", { note: "looks good" });
   });
 
-  it("sanitizes and forwards a trimmed note", async () => {
+  it("treats a blank note as undefined", async () => {
     const run = makeRun();
     const { app, mockOrchestrator } = await buildApp();
     mockOrchestrator.approvePlan.mockResolvedValue(run);
 
     const res = await app.inject({
-      method: "POST",
-      url: "/api/runs/run-1/actions/approve-plan",
-      payload: { note: "   looks good, ship it   " },
-    });
-
-    expect(res.statusCode).toBe(200);
-    expect(mockOrchestrator.approvePlan).toHaveBeenCalledWith("run-1", {
-      note: "looks good, ship it",
-    });
-  });
-
-  it("treats a blank note as no note provided", async () => {
-    const run = makeRun();
-    const { app, mockOrchestrator } = await buildApp();
-    mockOrchestrator.approvePlan.mockResolvedValue(run);
-
-    await app.inject({
       method: "POST",
       url: "/api/runs/run-1/actions/approve-plan",
       payload: { note: "   " },
     });
 
+    expect(res.statusCode).toBe(200);
     expect(mockOrchestrator.approvePlan).toHaveBeenCalledWith("run-1", { note: undefined });
   });
 
-  it("returns 400 when orchestrator.approvePlan throws", async () => {
+  it("works with no body at all", async () => {
+    const run = makeRun();
     const { app, mockOrchestrator } = await buildApp();
-    mockOrchestrator.approvePlan.mockRejectedValue(new Error("Plan is not awaiting approval"));
+    mockOrchestrator.approvePlan.mockResolvedValue(run);
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/actions/approve-plan",
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(mockOrchestrator.approvePlan).toHaveBeenCalledWith("run-1", { note: undefined });
+  });
+
+  it("returns 400 when approvePlan throws", async () => {
+    const { app, mockOrchestrator } = await buildApp();
+    mockOrchestrator.approvePlan.mockRejectedValue(new Error("Cannot approve plan in state Done"));
 
     const res = await app.inject({
       method: "POST",
@@ -129,11 +119,48 @@ describe("POST /api/runs/:id/actions/approve-plan", () => {
     });
 
     expect(res.statusCode).toBe(400);
-    expect(res.json()).toEqual({ error: "Plan is not awaiting approval" });
+    expect(res.json()).toEqual({ error: "Cannot approve plan in state Done" });
     expect(mockOrchestrator.runExecution).not.toHaveBeenCalled();
   });
 
-  it("logs but does not fail the request when the background runExecution rejects", async () => {
+  it("returns 400 with String(err) when approvePlan rejects with a non-Error value", async () => {
+    const { app, mockOrchestrator } = await buildApp();
+    mockOrchestrator.approvePlan.mockRejectedValue("plain string failure");
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/actions/approve-plan",
+      payload: {},
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toEqual({ error: "plain string failure" });
+  });
+
+  it("logs a truncated message when the fire-and-forget runExecution rejects with a non-Error value", async () => {
+    const run = makeRun();
+    const { app, mockOrchestrator } = await buildApp({
+      runExecution: vi.fn().mockRejectedValue("background failure"),
+    });
+    mockOrchestrator.approvePlan.mockResolvedValue(run);
+    const errorSpy = vi.fn();
+    app.log.error = errorSpy as never;
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/actions/approve-plan",
+      payload: {},
+    });
+
+    expect(res.statusCode).toBe(200);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(errorSpy).toHaveBeenCalledWith(
+      { runId: "run-1", error: "background failure" },
+      "Execution failed",
+    );
+  });
+
+  it("does not fail the request when the fire-and-forget runExecution rejects", async () => {
     const run = makeRun();
     const { app, mockOrchestrator } = await buildApp({
       runExecution: vi.fn().mockRejectedValue(new Error("boom")),
@@ -147,7 +174,8 @@ describe("POST /api/runs/:id/actions/approve-plan", () => {
     });
 
     expect(res.statusCode).toBe(200);
-    // Allow the rejected background promise's .catch() handler to run.
-    await new Promise((r) => setTimeout(r, 0));
+    // give the unhandled promise a tick to settle via .catch()
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(mockOrchestrator.runExecution).toHaveBeenCalled();
   });
 });

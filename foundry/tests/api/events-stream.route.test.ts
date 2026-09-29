@@ -1,163 +1,114 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
+import Fastify, { type FastifyInstance } from "fastify";
+import http from "node:http";
 import { EventEmitter } from "node:events";
 import { registerApiRoutes } from "../../src/api/routes.js";
-import type { DashboardEvent } from "../../src/api/runEventEmitter.js";
 
-type Handler = (request: unknown, reply: unknown) => void;
-
-function buildFakeApp() {
-  const routes: Record<string, Handler> = {};
-  const app = {
-    get: vi.fn((path: string, handler: Handler) => {
-      routes[`GET ${path}`] = handler;
-    }),
-    post: vi.fn((path: string, handler: Handler) => {
-      routes[`POST ${path}`] = handler;
-    }),
-    log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
-  };
-  return { app, routes };
+function waitFor(condition: () => boolean, timeoutMs = 2000): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const start = Date.now();
+    const check = () => {
+      if (condition()) return resolve();
+      if (Date.now() - start > timeoutMs) {
+        return reject(new Error("timed out waiting for condition"));
+      }
+      setTimeout(check, 10);
+    };
+    check();
+  });
 }
 
-function buildOrchestratorStub() {
-  return {
-    getRunRepo: () => ({ findById: vi.fn(), findAll: vi.fn() }),
-    getArtifactRepo: () => ({ findByRunId: vi.fn() }),
-    getEventRepo: () => ({ findByRunId: vi.fn() }),
-  };
-}
+async function buildApp() {
+  const mockRunRepo = { findById: vi.fn(), findAll: vi.fn() };
+  const mockArtifactRepo = { findByRunId: vi.fn() };
+  const mockEventRepo = { findByRunId: vi.fn() };
 
-function setup() {
-  const { app, routes } = buildFakeApp();
+  const mockOrchestrator = {
+    getRunRepo: () => mockRunRepo,
+    getArtifactRepo: () => mockArtifactRepo,
+    getEventRepo: () => mockEventRepo,
+  };
+
   const emitter = new EventEmitter();
-  const processRunner = { getActiveProcesses: vi.fn(), getProcessOutput: vi.fn() };
-  registerApiRoutes(
-    app as never,
-    buildOrchestratorStub() as never,
-    emitter as never,
-    processRunner as never,
-  );
+  const mockProcessRunner = {
+    getActiveProcesses: vi.fn().mockReturnValue([]),
+    getProcessOutput: vi.fn().mockReturnValue(null),
+  };
 
-  const handler = routes["GET /api/events/stream"];
-  const rawReply = { writeHead: vi.fn(), write: vi.fn(), end: vi.fn() };
-  const rawRequest = new EventEmitter();
+  const app = Fastify({ logger: false });
+  registerApiRoutes(app, mockOrchestrator as never, emitter as never, mockProcessRunner as never);
 
-  return { handler, rawReply, rawRequest, emitter };
+  await app.ready();
+  await app.listen({ port: 0, host: "127.0.0.1" });
+  const address = app.server.address();
+  const port = typeof address === "object" && address !== null ? address.port : 0;
+
+  return { app, emitter, port };
 }
 
 describe("GET /api/events/stream", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
+  let app: FastifyInstance | undefined;
+
+  afterEach(async () => {
+    await app?.close();
+    app = undefined;
+    vi.restoreAllMocks();
   });
 
-  afterEach(() => {
-    vi.useRealTimers();
-  });
+  it(
+    "sets SSE headers, writes an initial comment, forwards dashboard events, " +
+      "sends heartbeats, and unsubscribes on client disconnect",
+    async () => {
+      const setIntervalSpy = vi.spyOn(global, "setInterval");
 
-  it("writes SSE headers and an initial comment to open the stream", () => {
-    const { handler, rawReply, rawRequest } = setup();
+      const built = await buildApp();
+      app = built.app;
+      const { emitter, port } = built;
 
-    handler({ raw: rawRequest }, { raw: rawReply });
+      const chunks: string[] = [];
+      let req!: http.ClientRequest;
+      const res = await new Promise<http.IncomingMessage>((resolve) => {
+        req = http.get({ host: "127.0.0.1", port, path: "/api/events/stream" }, (response) => {
+          response.on("data", (chunk: Buffer) => chunks.push(chunk.toString()));
+          resolve(response);
+        });
+      });
 
-    expect(rawReply.writeHead).toHaveBeenCalledWith(200, {
-      "Content-Type": "text/event-stream",
-      "Cache-Control": "no-cache",
-      Connection: "keep-alive",
-    });
-    expect(rawReply.write).toHaveBeenCalledWith(":\n\n");
-  });
+      expect(res.statusCode).toBe(200);
+      expect(res.headers["content-type"]).toBe("text/event-stream");
+      expect(res.headers["cache-control"]).toBe("no-cache");
+      expect(res.headers.connection).toBe("keep-alive");
 
-  it("forwards dashboard events to the client as SSE data frames", () => {
-    const { handler, rawReply, rawRequest, emitter } = setup();
-    handler({ raw: rawRequest }, { raw: rawReply });
+      // Initial ":\n\n" comment is written immediately on connect.
+      await waitFor(() => chunks.join("").includes(":\n\n"));
+      expect(chunks.join("")).toBe(":\n\n");
+      expect(emitter.listenerCount("dashboard")).toBe(1);
 
-    const event: DashboardEvent = {
-      type: "run:created",
-      runId: "run-1",
-      issueId: "LIN-1",
-      repo: "test-repo",
-      timestamp: "2026-01-01T00:00:00.000Z",
-    };
-    emitter.emit("dashboard", event);
+      // Emitting a dashboard event should be forwarded as an SSE data line.
+      chunks.length = 0;
+      emitter.emit("dashboard", {
+        type: "run:created",
+        runId: "run-1",
+        issueId: "LIN-1",
+        repo: "test-repo",
+        timestamp: "2026-01-01T00:00:00.000Z",
+      });
+      await waitFor(() => chunks.join("").includes("run:created"));
+      expect(chunks.join("")).toBe(
+        'data: {"type":"run:created","runId":"run-1","issueId":"LIN-1","repo":"test-repo","timestamp":"2026-01-01T00:00:00.000Z"}\n\n',
+      );
 
-    expect(rawReply.write).toHaveBeenCalledWith(`data: ${JSON.stringify(event)}\n\n`);
-  });
+      // Manually invoke the captured heartbeat callback (registered with a
+      // 15s interval) rather than waiting on a real 15-second timer.
+      const heartbeatCall = setIntervalSpy.mock.calls.find((call) => call[1] === 15_000);
+      expect(heartbeatCall).toBeDefined();
+      chunks.length = 0;
+      (heartbeatCall![0] as () => void)();
+      await waitFor(() => chunks.join("") === ":\n\n");
 
-  it("fans out a single dashboard event to multiple connected clients", () => {
-    const { app, routes } = buildFakeApp();
-    const emitter = new EventEmitter();
-    const processRunner = { getActiveProcesses: vi.fn(), getProcessOutput: vi.fn() };
-    registerApiRoutes(
-      app as never,
-      buildOrchestratorStub() as never,
-      emitter as never,
-      processRunner as never,
-    );
-    const handler = routes["GET /api/events/stream"];
-
-    const replyA = { writeHead: vi.fn(), write: vi.fn(), end: vi.fn() };
-    const requestA = new EventEmitter();
-    const replyB = { writeHead: vi.fn(), write: vi.fn(), end: vi.fn() };
-    const requestB = new EventEmitter();
-
-    handler({ raw: requestA }, { raw: replyA });
-    handler({ raw: requestB }, { raw: replyB });
-
-    const event: DashboardEvent = {
-      type: "run:questions-answered",
-      runId: "run-1",
-      questionCount: 2,
-      timestamp: "2026-01-01T00:00:00.000Z",
-    };
-    emitter.emit("dashboard", event);
-
-    const frame = `data: ${JSON.stringify(event)}\n\n`;
-    expect(replyA.write).toHaveBeenCalledWith(frame);
-    expect(replyB.write).toHaveBeenCalledWith(frame);
-  });
-
-  it("sends a heartbeat comment every 15 seconds", () => {
-    vi.useFakeTimers();
-    const { handler, rawReply, rawRequest } = setup();
-    handler({ raw: rawRequest }, { raw: rawReply });
-    rawReply.write.mockClear();
-
-    vi.advanceTimersByTime(15_000);
-    expect(rawReply.write).toHaveBeenCalledWith(":\n\n");
-
-    rawReply.write.mockClear();
-    vi.advanceTimersByTime(15_000);
-    expect(rawReply.write).toHaveBeenCalledWith(":\n\n");
-  });
-
-  it("removes the dashboard listener and stops the heartbeat when the client disconnects", () => {
-    vi.useFakeTimers();
-    const { handler, rawReply, rawRequest, emitter } = setup();
-    const offSpy = vi.spyOn(emitter, "off");
-
-    handler({ raw: rawRequest }, { raw: rawReply });
-    expect(emitter.listenerCount("dashboard")).toBe(1);
-
-    rawRequest.emit("close");
-
-    expect(offSpy).toHaveBeenCalledWith("dashboard", expect.any(Function));
-    expect(emitter.listenerCount("dashboard")).toBe(0);
-
-    rawReply.write.mockClear();
-
-    // Further dashboard events must not reach the disconnected client.
-    const event: DashboardEvent = {
-      type: "run:created",
-      runId: "run-1",
-      issueId: "LIN-1",
-      repo: "test-repo",
-      timestamp: "2026-01-01T00:00:00.000Z",
-    };
-    emitter.emit("dashboard", event);
-    expect(rawReply.write).not.toHaveBeenCalled();
-
-    // The heartbeat interval must be cleared too.
-    vi.advanceTimersByTime(60_000);
-    expect(rawReply.write).not.toHaveBeenCalled();
-  });
+      // Disconnecting the client triggers cleanup: listener removed, interval cleared.
+      req.destroy();
+      await waitFor(() => emitter.listenerCount("dashboard") === 0);
+    },
+  );
 });

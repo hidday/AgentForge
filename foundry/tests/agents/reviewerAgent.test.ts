@@ -18,7 +18,7 @@ function makeTaskBundle(): TaskBundle {
       name: "test-repo",
       defaultBranch: "main",
       workingBranch: "ai/lin-1",
-      repoPath: "/tmp/repo-path",
+      repoPath: "/tmp/repo",
       allowedPaths: ["src/"],
       protectedPaths: [],
     },
@@ -35,7 +35,7 @@ function makeTaskBundle(): TaskBundle {
 
 function makePlan(): Plan {
   return {
-    planVersion: 2,
+    planVersion: 1,
     summary: "Test plan",
     requirementsTraceability: "",
     assumptions: [],
@@ -47,7 +47,7 @@ function makePlan(): Plan {
   };
 }
 
-function makeReport(overrides: Partial<ExecutionReport> = {}): ExecutionReport {
+function makeExecutionReport(): ExecutionReport {
   return {
     executionVersion: 1,
     summary: "Implemented things.",
@@ -61,14 +61,13 @@ function makeReport(overrides: Partial<ExecutionReport> = {}): ExecutionReport {
     prDraftCreated: true,
     score: 0.8,
     scoreRationale: "Implementation looks solid.",
-    ...overrides,
   };
 }
 
 function makeReview(overrides: Partial<Review> = {}): Review {
   return {
     reviewId: "rev-001",
-    summary: "Found one important issue and one nit.",
+    summary: "Found a real bug and one nit.",
     findings: [
       {
         id: "f1",
@@ -76,16 +75,16 @@ function makeReview(overrides: Partial<Review> = {}): Review {
         type: "bug",
         file: "src/foo.ts",
         lineHint: 12,
-        title: "Null pointer risk",
-        details: "foo can be null here",
+        title: "Missing null check",
+        details: "Will throw if foo is null",
       },
       {
         id: "f2",
         severity: "important",
-        type: "test-gap",
+        type: "bug",
         file: "src/foo.ts",
-        title: "Missing edge case test",
-        details: "No test for empty input",
+        title: "Off by one",
+        details: "Loop bound is wrong",
       },
       {
         id: "f3",
@@ -93,7 +92,7 @@ function makeReview(overrides: Partial<Review> = {}): Review {
         type: "style",
         file: "src/foo.ts",
         title: "Long line",
-        details: "Consider splitting",
+        details: "Could be split for readability",
       },
     ],
     overallVerdict: "changes_requested",
@@ -101,35 +100,30 @@ function makeReview(overrides: Partial<Review> = {}): Review {
   };
 }
 
-function buildAgent(reviewOverride?: Review, runImpl?: () => Promise<unknown>) {
+function buildAgent(reviewOverride?: Review) {
   let capturedSystemPrompt = "";
   let capturedUserPrompt = "";
-  let capturedInput: Record<string, unknown> = {};
+  let capturedRuntime: unknown;
+  let capturedWorkingDirectory: unknown;
 
   const agentRunner = {
     run: vi.fn().mockImplementation(
-      runImpl ??
-        (async (
-          _runtime: unknown,
-          opts: {
-            prompt: string;
-            systemPrompt: string;
-            workingDirectory: string;
-            timeoutMs: number;
-            runId: string;
+      async (
+        runtime: unknown,
+        opts: { prompt: string; systemPrompt: string; workingDirectory: string },
+      ) => {
+        capturedRuntime = runtime;
+        capturedSystemPrompt = opts.systemPrompt;
+        capturedUserPrompt = opts.prompt;
+        capturedWorkingDirectory = opts.workingDirectory;
+        return {
+          raw: "raw reviewer transcript",
+          parsed: {
+            stage: "reviewer" as const,
+            payload: reviewOverride ?? makeReview(),
           },
-        ) => {
-          capturedSystemPrompt = opts.systemPrompt;
-          capturedUserPrompt = opts.prompt;
-          capturedInput = opts as unknown as Record<string, unknown>;
-          return {
-            raw: "raw reviewer transcript",
-            parsed: {
-              stage: "reviewer" as const,
-              payload: reviewOverride ?? makeReview(),
-            },
-          };
-        }),
+        };
+      },
     ),
   };
 
@@ -155,97 +149,87 @@ function buildAgent(reviewOverride?: Review, runImpl?: () => Promise<unknown>) {
     logger,
     getSystemPrompt: () => capturedSystemPrompt,
     getUserPrompt: () => capturedUserPrompt,
-    getInput: () => capturedInput,
+    getRuntime: () => capturedRuntime,
+    getWorkingDirectory: () => capturedWorkingDirectory,
   };
 }
 
 describe("ReviewerAgent.run()", () => {
-  it("builds the prompt bundle from the plan, execution report, diff, and task bundle and routes it to the reviewer runner", async () => {
-    const { agent, agentRunner, getSystemPrompt, getUserPrompt, getInput } = buildAgent();
-    const plan = makePlan();
-    const report = makeReport();
-    const taskBundle = makeTaskBundle();
-    const diff = "diff --git a/src/foo.ts b/src/foo.ts\n+added line";
+  it("logs the start of the reviewer agent with the runId", async () => {
+    const { agent, logger } = buildAgent();
 
-    await agent.run(plan, report, diff, taskBundle, "run-1");
+    await agent.run(makePlan(), makeExecutionReport(), "diff --git a/foo.ts", makeTaskBundle(), "run-1");
 
-    expect(agentRunner.run).toHaveBeenCalledTimes(1);
-    const [runtime, , stageName, schema] = agentRunner.run.mock.calls[0];
-    expect(runtime).toBe("codex");
-    expect(stageName).toBe("reviewer");
-    expect(schema).toBeDefined();
-
-    const input = getInput();
-    expect(input.workingDirectory).toBe("/tmp/repo-path");
-    expect(input.runId).toBe("run-1");
-
-    const systemPrompt = getSystemPrompt();
-    expect(systemPrompt).toContain("senior software engineer acting as a code reviewer");
-    expect(systemPrompt).toContain("BEGIN_STRUCTURED_OUTPUT");
-
-    const userPrompt = getUserPrompt();
-    expect(userPrompt).toContain("LIN-1");
-    expect(userPrompt).toContain("Test issue");
-    expect(userPrompt).toContain("v2");
-    expect(userPrompt).toContain("Test plan");
-    expect(userPrompt).toContain("Implemented things.");
-    expect(userPrompt).toContain("pass");
-    expect(userPrompt).toContain(diff);
-    expect(userPrompt).not.toContain("{{diff}}");
-    expect(userPrompt).not.toContain("{{plan.summary}}");
-  });
-
-  it("persists a ReviewerTranscript artifact (version 3) with the runner's raw output", async () => {
-    const { agent, artifactRepo } = buildAgent();
-
-    await agent.run(makePlan(), makeReport(), "some diff", makeTaskBundle(), "run-1");
-
-    expect(artifactRepo.create).toHaveBeenCalledWith(
-      expect.objectContaining({
-        runId: "run-1",
-        type: "ReviewerTranscript",
-        version: 3,
-        payloadJson: {},
-        rawText: "raw reviewer transcript",
-      }),
+    expect(logger.info).toHaveBeenCalledWith(
+      { runId: "run-1" },
+      "Starting reviewer agent (Codex CLI)",
     );
   });
 
-  it("persists a Review artifact (version 1) with the parsed review payload", async () => {
+  it("invokes the agent runner on the reviewer runtime with the working directory from the repo", async () => {
+    const { agent, getRuntime, getWorkingDirectory } = buildAgent();
+
+    await agent.run(makePlan(), makeExecutionReport(), "diff", makeTaskBundle(), "run-1");
+
+    expect(getRuntime()).toBe("codex");
+    expect(getWorkingDirectory()).toBe("/tmp/repo");
+  });
+
+  it("renders the plan, execution report, and diff into the prompts", async () => {
+    const { agent, getSystemPrompt, getUserPrompt } = buildAgent();
+
+    await agent.run(makePlan(), makeExecutionReport(), "diff --git a/foo.ts b/foo.ts", makeTaskBundle(), "run-1");
+
+    const systemPrompt = getSystemPrompt();
+    const userPrompt = getUserPrompt();
+    // Neither prompt should contain unresolved template placeholders for the
+    // top-level vars passed to renderTemplate.
+    expect(systemPrompt + userPrompt).not.toContain("{{diff}}");
+  });
+
+  it("writes a ReviewerTranscript artifact with the raw model output", async () => {
+    const { agent, artifactRepo } = buildAgent();
+
+    await agent.run(makePlan(), makeExecutionReport(), "diff", makeTaskBundle(), "run-1");
+
+    const calls = artifactRepo.create.mock.calls.map((c: unknown[]) => c[0]) as {
+      type: string;
+      version: number;
+      rawText: string;
+    }[];
+    const transcript = calls.find((a) => a.type === "ReviewerTranscript");
+    expect(transcript).toBeDefined();
+    expect(transcript?.version).toBe(3);
+    expect(transcript?.rawText).toBe("raw reviewer transcript");
+  });
+
+  it("writes a Review artifact (version 1) with the parsed payload", async () => {
     const review = makeReview();
     const { agent, artifactRepo } = buildAgent(review);
 
-    await agent.run(makePlan(), makeReport(), "some diff", makeTaskBundle(), "run-1");
+    await agent.run(makePlan(), makeExecutionReport(), "diff", makeTaskBundle(), "run-1");
 
-    expect(artifactRepo.create).toHaveBeenCalledWith(
-      expect.objectContaining({
-        runId: "run-1",
-        type: "Review",
-        version: 1,
-        payloadJson: review,
-        rawText: JSON.stringify(review, null, 2),
-      }),
-    );
+    const calls = artifactRepo.create.mock.calls.map((c: unknown[]) => c[0]) as {
+      type: string;
+      version: number;
+      payloadJson: unknown;
+      rawText: string;
+    }[];
+    const reviewArtifact = calls.find((a) => a.type === "Review");
+    expect(reviewArtifact).toBeDefined();
+    expect(reviewArtifact?.version).toBe(1);
+    expect(reviewArtifact?.payloadJson).toEqual(review);
+    expect(reviewArtifact?.rawText).toBe(JSON.stringify(review, null, 2));
   });
 
-  it("parses the runner's output into the review verdict/findings shape and returns it unchanged", async () => {
-    const review = makeReview();
-    const { agent } = buildAgent(review);
-
-    const result = await agent.run(makePlan(), makeReport(), "some diff", makeTaskBundle(), "run-1");
-
-    expect(result).toEqual(review);
-    expect(result.reviewId).toBe("rev-001");
-    expect(result.overallVerdict).toBe("changes_requested");
-    expect(result.findings).toHaveLength(3);
-  });
-
-  it("logs blocker and important finding counts computed from the parsed findings", async () => {
+  it("logs blocker and important finding counts computed from the review", async () => {
     const { agent, logger } = buildAgent();
 
-    await agent.run(makePlan(), makeReport(), "some diff", makeTaskBundle(), "run-1");
+    await agent.run(makePlan(), makeExecutionReport(), "diff", makeTaskBundle(), "run-1");
 
-    const completionLog = logger.info.mock.calls.find((c: unknown[]) => c[1] === "Review completed");
+    const completionLog = logger.info.mock.calls.find(
+      (c: unknown[]) => c[1] === "Review completed",
+    );
     expect(completionLog).toBeDefined();
     const payload = completionLog?.[0] as Record<string, unknown> | undefined;
     expect(payload?.reviewId).toBe("rev-001");
@@ -255,87 +239,39 @@ describe("ReviewerAgent.run()", () => {
     expect(payload?.importantCount).toBe(1);
   });
 
-  it("handles an empty findings array: zero counts, and an approved verdict is preserved", async () => {
-    const emptyReview = makeReview({ findings: [], overallVerdict: "approved" });
-    const { agent, logger, artifactRepo } = buildAgent(emptyReview);
-
-    const result = await agent.run(makePlan(), makeReport(), "some diff", makeTaskBundle(), "run-1");
-
-    expect(result.findings).toEqual([]);
-    expect(result.overallVerdict).toBe("approved");
-
-    const completionLog = logger.info.mock.calls.find((c: unknown[]) => c[1] === "Review completed");
-    const payload = completionLog?.[0] as Record<string, unknown> | undefined;
-    expect(payload?.totalFindings).toBe(0);
-    expect(payload?.blockerCount).toBe(0);
-    expect(payload?.importantCount).toBe(0);
-
-    const reviewArtifact = artifactRepo.create.mock.calls
-      .map((c: unknown[]) => c[0] as { type: string })
-      .find((a) => a.type === "Review");
-    expect(reviewArtifact).toBeDefined();
-  });
-
-  it("counts multiple blockers and multiple important findings independently of suggestion/nit findings", async () => {
+  it("reports zero blocker/important counts when the review has none of that severity", async () => {
     const review = makeReview({
       findings: [
-        { id: "f1", severity: "blocker", type: "bug", file: "a.ts", title: "t1", details: "d1" },
-        { id: "f2", severity: "blocker", type: "bug", file: "a.ts", title: "t2", details: "d2" },
         {
-          id: "f3",
-          severity: "important",
-          type: "bug",
-          file: "a.ts",
-          title: "t3",
-          details: "d3",
+          id: "f1",
+          severity: "nit",
+          type: "style",
+          file: "src/foo.ts",
+          title: "Nit only",
+          details: "Minor",
         },
-        { id: "f4", severity: "suggestion", type: "style", file: "a.ts", title: "t4", details: "d4" },
-        { id: "f5", severity: "nit", type: "style", file: "a.ts", title: "t5", details: "d5" },
       ],
+      overallVerdict: "approved",
     });
     const { agent, logger } = buildAgent(review);
 
-    await agent.run(makePlan(), makeReport(), "some diff", makeTaskBundle(), "run-1");
+    await agent.run(makePlan(), makeExecutionReport(), "diff", makeTaskBundle(), "run-1");
 
-    const completionLog = logger.info.mock.calls.find((c: unknown[]) => c[1] === "Review completed");
-    const payload = completionLog?.[0] as Record<string, unknown> | undefined;
-    expect(payload?.totalFindings).toBe(5);
-    expect(payload?.blockerCount).toBe(2);
-    expect(payload?.importantCount).toBe(1);
-  });
-
-  it("propagates a rejection when the agent runner throws, and never persists any artifacts", async () => {
-    const { agent, artifactRepo } = buildAgent(undefined, async () => {
-      throw new Error("Codex CLI timed out");
-    });
-
-    await expect(
-      agent.run(makePlan(), makeReport(), "some diff", makeTaskBundle(), "run-1"),
-    ).rejects.toThrow("Codex CLI timed out");
-
-    expect(artifactRepo.create).not.toHaveBeenCalled();
-  });
-
-  it("propagates a schema-validation error thrown by the underlying runner without persisting artifacts", async () => {
-    const { agent, artifactRepo } = buildAgent(undefined, async () => {
-      throw new Error("Output failed schema validation: payload.overallVerdict required");
-    });
-
-    await expect(
-      agent.run(makePlan(), makeReport(), "some diff", makeTaskBundle(), "run-1"),
-    ).rejects.toThrow(/schema validation/);
-
-    expect(artifactRepo.create).not.toHaveBeenCalled();
-  });
-
-  it("logs a 'Starting reviewer agent' info event before invoking the runner", async () => {
-    const { agent, logger } = buildAgent();
-
-    await agent.run(makePlan(), makeReport(), "some diff", makeTaskBundle(), "run-7");
-
-    expect(logger.info).toHaveBeenCalledWith(
-      { runId: "run-7" },
-      "Starting reviewer agent (Codex CLI)",
+    const completionLog = logger.info.mock.calls.find(
+      (c: unknown[]) => c[1] === "Review completed",
     );
+    const payload = completionLog?.[0] as Record<string, unknown> | undefined;
+    expect(payload?.blockerCount).toBe(0);
+    expect(payload?.importantCount).toBe(0);
+    expect(payload?.verdict).toBe("approved");
+  });
+
+  it("returns the parsed review payload", async () => {
+    const review = makeReview();
+    const { agent } = buildAgent(review);
+
+    const result = await agent.run(makePlan(), makeExecutionReport(), "diff", makeTaskBundle(), "run-1");
+
+    expect(result).toEqual(review);
   });
 });

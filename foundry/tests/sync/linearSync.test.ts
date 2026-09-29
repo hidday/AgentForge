@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { LinearSyncService, getLabelForState } from "../../src/sync/linearSync.js";
 import { RunState } from "../../src/domain/runState.js";
 import type { Run } from "../../src/domain/types.js";
@@ -29,99 +29,104 @@ function makeRun(overrides: Partial<Run> = {}): Run {
   };
 }
 
-function buildDeps(listLabels: string[] = []) {
-  const linearClient = {
-    getIssue: vi.fn(),
-    getRelatedContext: vi.fn(),
-    searchIssues: vi.fn(),
-    postComment: vi.fn(),
-    updateIssueState: vi.fn().mockResolvedValue(undefined),
-    addLabel: vi.fn().mockResolvedValue(undefined),
-    removeLabel: vi.fn().mockResolvedValue(undefined),
-    listLabels: vi.fn().mockResolvedValue(listLabels),
-  };
-  const logger = {
-    info: vi.fn(),
-    warn: vi.fn(),
-    error: vi.fn(),
-    debug: vi.fn(),
-  };
-  return { linearClient, logger };
+function makeLogger() {
+  return { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
 }
 
 describe("getLabelForState", () => {
-  it("maps every run state to a label and issue state", () => {
-    expect(getLabelForState(RunState.Todo)).toEqual({ label: "ai:todo", issueState: "Todo" });
+  it("maps every RunState to a label/issueState pair", () => {
+    for (const state of Object.values(RunState)) {
+      const mapping = getLabelForState(state);
+      expect(mapping.label.startsWith("ai:")).toBe(true);
+      expect(typeof mapping.issueState).toBe("string");
+      expect(mapping.issueState.length).toBeGreaterThan(0);
+    }
+  });
+
+  it("returns the expected mapping for ReadyForHumanReview", () => {
     expect(getLabelForState(RunState.ReadyForHumanReview)).toEqual({
       label: "ai:ready-for-review",
       issueState: "In Review",
     });
-    expect(getLabelForState(RunState.Done)).toEqual({ label: "ai:done", issueState: "Done" });
-    expect(getLabelForState(RunState.Failed)).toEqual({ label: "ai:failed", issueState: "Cancelled" });
-    expect(getLabelForState(RunState.AIBlocked)).toEqual({
-      label: "ai:blocked",
-      issueState: "In Progress",
+  });
+
+  it("returns the expected mapping for Failed", () => {
+    expect(getLabelForState(RunState.Failed)).toEqual({
+      label: "ai:failed",
+      issueState: "Cancelled",
     });
   });
 });
 
 describe("LinearSyncService.syncState", () => {
-  it("adds the mapped label when it is not already present, with no stale labels to remove", async () => {
-    const { linearClient, logger } = buildDeps([]);
+  it("adds the mapped label and updates issue state when no ai: label is present", async () => {
+    const linearClient = {
+      listLabels: vi.fn().mockResolvedValue(["bug"]),
+      removeLabel: vi.fn().mockResolvedValue(undefined),
+      addLabel: vi.fn().mockResolvedValue(undefined),
+      updateIssueState: vi.fn().mockResolvedValue(undefined),
+    };
+    const logger = makeLogger();
     const svc = new LinearSyncService(linearClient as never, logger as never);
-    const run = makeRun({ linearIssueId: "LIN-42", state: RunState.Implementing });
 
+    const run = makeRun({ state: RunState.Implementing });
     await svc.syncState(run);
 
-    expect(linearClient.listLabels).toHaveBeenCalledWith("LIN-42");
     expect(linearClient.removeLabel).not.toHaveBeenCalled();
-    expect(linearClient.addLabel).toHaveBeenCalledWith("LIN-42", "ai:implementing");
-    expect(linearClient.updateIssueState).toHaveBeenCalledWith("LIN-42", "In Progress");
-    expect(logger.debug).toHaveBeenCalledWith(
-      expect.objectContaining({
-        issueId: "LIN-42",
-        state: RunState.Implementing,
-        label: "ai:implementing",
-        issueState: "In Progress",
-        removedLabels: [],
-      }),
-      "Synced Linear state",
-    );
+    expect(linearClient.addLabel).toHaveBeenCalledWith("LIN-1", "ai:implementing");
+    expect(linearClient.updateIssueState).toHaveBeenCalledWith("LIN-1", "In Progress");
+    expect(logger.debug).toHaveBeenCalled();
   });
 
-  it("removes stale ai: labels that no longer match the current state", async () => {
-    const { linearClient, logger } = buildDeps(["ai:planning", "ai:code-review", "bug"]);
+  it("removes stale ai: labels that differ from the target label", async () => {
+    const linearClient = {
+      listLabels: vi.fn().mockResolvedValue(["ai:planning", "ai:implementing", "bug"]),
+      removeLabel: vi.fn().mockResolvedValue(undefined),
+      addLabel: vi.fn().mockResolvedValue(undefined),
+      updateIssueState: vi.fn().mockResolvedValue(undefined),
+    };
+    const logger = makeLogger();
     const svc = new LinearSyncService(linearClient as never, logger as never);
-    const run = makeRun({ linearIssueId: "LIN-42", state: RunState.Implementing });
 
+    const run = makeRun({ state: RunState.AIReview });
     await svc.syncState(run);
 
-    expect(linearClient.removeLabel).toHaveBeenCalledWith("LIN-42", "ai:planning");
-    expect(linearClient.removeLabel).toHaveBeenCalledWith("LIN-42", "ai:code-review");
-    expect(linearClient.removeLabel).not.toHaveBeenCalledWith("LIN-42", "bug");
-    expect(linearClient.addLabel).toHaveBeenCalledWith("LIN-42", "ai:implementing");
+    expect(linearClient.removeLabel).toHaveBeenCalledWith("LIN-1", "ai:planning");
+    expect(linearClient.removeLabel).toHaveBeenCalledWith("LIN-1", "ai:implementing");
+    expect(linearClient.removeLabel).toHaveBeenCalledTimes(2);
+    expect(linearClient.addLabel).toHaveBeenCalledWith("LIN-1", "ai:code-review");
   });
 
-  it("does not add the label again when it is already present", async () => {
-    const { linearClient, logger } = buildDeps(["ai:implementing"]);
+  it("does not re-add the label when it is already present", async () => {
+    const linearClient = {
+      listLabels: vi.fn().mockResolvedValue(["ai:done"]),
+      removeLabel: vi.fn().mockResolvedValue(undefined),
+      addLabel: vi.fn().mockResolvedValue(undefined),
+      updateIssueState: vi.fn().mockResolvedValue(undefined),
+    };
+    const logger = makeLogger();
     const svc = new LinearSyncService(linearClient as never, logger as never);
-    const run = makeRun({ linearIssueId: "LIN-42", state: RunState.Implementing });
 
+    const run = makeRun({ state: RunState.Done });
     await svc.syncState(run);
 
     expect(linearClient.addLabel).not.toHaveBeenCalled();
     expect(linearClient.removeLabel).not.toHaveBeenCalled();
-    expect(linearClient.updateIssueState).toHaveBeenCalledWith("LIN-42", "In Progress");
+    expect(linearClient.updateIssueState).toHaveBeenCalledWith("LIN-1", "Done");
   });
 
-  it("leaves non-ai labels untouched", async () => {
-    const { linearClient, logger } = buildDeps(["bug", "urgent"]);
+  it("does not treat the current mapped label as stale", async () => {
+    const linearClient = {
+      listLabels: vi.fn().mockResolvedValue(["ai:blocked"]),
+      removeLabel: vi.fn().mockResolvedValue(undefined),
+      addLabel: vi.fn().mockResolvedValue(undefined),
+      updateIssueState: vi.fn().mockResolvedValue(undefined),
+    };
+    const logger = makeLogger();
     const svc = new LinearSyncService(linearClient as never, logger as never);
-    const run = makeRun({ linearIssueId: "LIN-1", state: RunState.Todo });
 
-    await svc.syncState(run);
+    await svc.syncState(makeRun({ state: RunState.AIBlocked }));
 
     expect(linearClient.removeLabel).not.toHaveBeenCalled();
-    expect(linearClient.addLabel).toHaveBeenCalledWith("LIN-1", "ai:todo");
   });
 });

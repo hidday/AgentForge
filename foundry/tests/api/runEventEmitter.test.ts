@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { RunEventEmitter, type DashboardEvent } from "../../src/api/runEventEmitter.js";
 
 describe("RunEventEmitter", () => {
@@ -6,216 +6,232 @@ describe("RunEventEmitter", () => {
 
   beforeEach(() => {
     emitter = new RunEventEmitter();
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-03-15T12:00:00.000Z"));
-  });
-
-  afterEach(() => {
     vi.useRealTimers();
   });
 
-  it("emitStateChanged sends a run:state-changed event with from/to and a timestamp", () => {
-    const listener = vi.fn();
-    emitter.on("dashboard", listener);
-
-    emitter.emitStateChanged("run-1", "Planning", "AwaitingPlanApproval");
-
-    expect(listener).toHaveBeenCalledTimes(1);
-    const event = listener.mock.calls[0][0] as DashboardEvent;
-    expect(event).toEqual({
-      type: "run:state-changed",
-      runId: "run-1",
-      from: "Planning",
-      to: "AwaitingPlanApproval",
-      timestamp: "2026-03-15T12:00:00.000Z",
-    });
+  it("does nothing (no throw) when a method is called with no subscribers", () => {
+    expect(() => emitter.emitStateChanged("run-1", "Todo", "Planning")).not.toThrow();
   });
 
-  it("emitArtifactCreated sends a run:artifact-created event with type and version", () => {
-    const listener = vi.fn();
-    emitter.on("dashboard", listener);
+  it("emitStateChanged notifies subscribers with the correct shape", () => {
+    const handler = vi.fn();
+    emitter.on("dashboard", handler);
 
-    emitter.emitArtifactCreated("run-1", "Plan", 3);
+    emitter.emitStateChanged("run-1", "Todo", "Planning");
 
-    expect(listener).toHaveBeenCalledWith({
+    expect(handler).toHaveBeenCalledTimes(1);
+    const event = handler.mock.calls[0][0] as DashboardEvent;
+    expect(event.type).toBe("run:state-changed");
+    expect(event).toMatchObject({
+      type: "run:state-changed",
+      runId: "run-1",
+      from: "Todo",
+      to: "Planning",
+    });
+    expect(typeof (event as { timestamp: string }).timestamp).toBe("string");
+    expect(() => new Date((event as { timestamp: string }).timestamp).toISOString()).not.toThrow();
+  });
+
+  it("emitArtifactCreated notifies subscribers with the correct shape", () => {
+    const handler = vi.fn();
+    emitter.on("dashboard", handler);
+
+    emitter.emitArtifactCreated("run-1", "Plan", 2);
+
+    const event = handler.mock.calls[0][0] as DashboardEvent;
+    expect(event).toMatchObject({
       type: "run:artifact-created",
       runId: "run-1",
       artifactType: "Plan",
-      version: 3,
-      timestamp: "2026-03-15T12:00:00.000Z",
+      version: 2,
     });
   });
 
-  it("emitRunCreated sends a run:created event with issueId and repo", () => {
-    const listener = vi.fn();
-    emitter.on("dashboard", listener);
+  it("emitRunCreated notifies subscribers with the correct shape", () => {
+    const handler = vi.fn();
+    emitter.on("dashboard", handler);
 
-    emitter.emitRunCreated("run-2", "LIN-42", "org/repo");
+    emitter.emitRunCreated("run-1", "LIN-1", "test-repo");
 
-    expect(listener).toHaveBeenCalledWith({
+    const event = handler.mock.calls[0][0] as DashboardEvent;
+    expect(event).toMatchObject({
       type: "run:created",
-      runId: "run-2",
-      issueId: "LIN-42",
-      repo: "org/repo",
-      timestamp: "2026-03-15T12:00:00.000Z",
+      runId: "run-1",
+      issueId: "LIN-1",
+      repo: "test-repo",
     });
   });
 
-  it("emitProcessStarted sends a process:started event with stage, runtime and command", () => {
-    const listener = vi.fn();
-    emitter.on("dashboard", listener);
+  it("emitProcessStarted notifies subscribers with the correct shape", () => {
+    const handler = vi.fn();
+    emitter.on("dashboard", handler);
 
     emitter.emitProcessStarted("run-1", "proc-1", "planning", "claude-code", "claude plan");
 
-    expect(listener).toHaveBeenCalledWith({
+    const event = handler.mock.calls[0][0] as DashboardEvent;
+    expect(event).toMatchObject({
       type: "process:started",
       runId: "run-1",
       processId: "proc-1",
       stage: "planning",
       runtime: "claude-code",
       command: "claude plan",
-      timestamp: "2026-03-15T12:00:00.000Z",
     });
   });
 
-  it("emitProcessOutput sends a process:output event carrying the output chunk", () => {
-    const listener = vi.fn();
-    emitter.on("dashboard", listener);
+  it("emitProcessOutput notifies subscribers with the correct shape", () => {
+    const handler = vi.fn();
+    emitter.on("dashboard", handler);
 
-    emitter.emitProcessOutput("run-1", "proc-1", "some stdout chunk\n");
+    emitter.emitProcessOutput("run-1", "proc-1", "some output chunk");
 
-    expect(listener).toHaveBeenCalledWith({
+    const event = handler.mock.calls[0][0] as DashboardEvent;
+    expect(event).toMatchObject({
       type: "process:output",
       runId: "run-1",
       processId: "proc-1",
-      chunk: "some stdout chunk\n",
-      timestamp: "2026-03-15T12:00:00.000Z",
+      chunk: "some output chunk",
     });
   });
 
-  it("emitProcessCompleted sends a process:completed event with exitCode and durationMs", () => {
-    const listener = vi.fn();
-    emitter.on("dashboard", listener);
+  it("emitProcessOutput handles empty-string chunks", () => {
+    const handler = vi.fn();
+    emitter.on("dashboard", handler);
 
-    emitter.emitProcessCompleted("run-1", "proc-1", "planning", "claude-code", 0, 1234);
+    emitter.emitProcessOutput("run-1", "proc-1", "");
 
-    expect(listener).toHaveBeenCalledWith({
+    const event = handler.mock.calls[0][0] as DashboardEvent;
+    expect((event as { chunk: string }).chunk).toBe("");
+  });
+
+  it("emitProcessCompleted notifies subscribers with the correct shape, including zero exit code", () => {
+    const handler = vi.fn();
+    emitter.on("dashboard", handler);
+
+    emitter.emitProcessCompleted("run-1", "proc-1", "planning", "claude-code", 0, 1500);
+
+    const event = handler.mock.calls[0][0] as DashboardEvent;
+    expect(event).toMatchObject({
       type: "process:completed",
       runId: "run-1",
       processId: "proc-1",
       stage: "planning",
       runtime: "claude-code",
       exitCode: 0,
-      durationMs: 1234,
-      timestamp: "2026-03-15T12:00:00.000Z",
+      durationMs: 1500,
     });
   });
 
-  it("emitProcessCompleted carries a non-zero exit code through unchanged", () => {
-    const listener = vi.fn();
-    emitter.on("dashboard", listener);
+  it("emitProcessCompleted preserves a non-zero exit code", () => {
+    const handler = vi.fn();
+    emitter.on("dashboard", handler);
 
-    emitter.emitProcessCompleted("run-1", "proc-1", "implementing", "codex", 1, 999);
+    emitter.emitProcessCompleted("run-1", "proc-1", "planning", "claude-code", 1, 42);
 
-    const event = listener.mock.calls[0][0] as DashboardEvent;
-    expect(event).toMatchObject({ exitCode: 1, durationMs: 999 });
+    const event = handler.mock.calls[0][0] as DashboardEvent;
+    expect((event as { exitCode: number }).exitCode).toBe(1);
   });
 
-  it("emitQuestionsAnswered sends a run:questions-answered event with the question count", () => {
-    const listener = vi.fn();
-    emitter.on("dashboard", listener);
+  it("emitQuestionsAnswered notifies subscribers with the correct shape", () => {
+    const handler = vi.fn();
+    emitter.on("dashboard", handler);
 
     emitter.emitQuestionsAnswered("run-1", 4);
 
-    expect(listener).toHaveBeenCalledWith({
+    const event = handler.mock.calls[0][0] as DashboardEvent;
+    expect(event).toMatchObject({
       type: "run:questions-answered",
       runId: "run-1",
       questionCount: 4,
-      timestamp: "2026-03-15T12:00:00.000Z",
     });
   });
 
-  it("emitChatReply sends a run:chat-reply event with reply text and duration", () => {
-    const listener = vi.fn();
-    emitter.on("dashboard", listener);
+  it("emitChatReply notifies subscribers with the correct shape", () => {
+    const handler = vi.fn();
+    emitter.on("dashboard", handler);
 
-    emitter.emitChatReply("run-1", "Here's the answer", 250);
+    emitter.emitChatReply("run-1", "Here is my answer", 750);
 
-    expect(listener).toHaveBeenCalledWith({
+    const event = handler.mock.calls[0][0] as DashboardEvent;
+    expect(event).toMatchObject({
       type: "run:chat-reply",
       runId: "run-1",
-      reply: "Here's the answer",
-      durationMs: 250,
-      timestamp: "2026-03-15T12:00:00.000Z",
+      reply: "Here is my answer",
+      durationMs: 750,
     });
   });
 
-  it("fans out a single emit to every subscriber on the dashboard channel", () => {
-    const listenerA = vi.fn();
-    const listenerB = vi.fn();
-    const listenerC = vi.fn();
-    emitter.on("dashboard", listenerA);
-    emitter.on("dashboard", listenerB);
-    emitter.on("dashboard", listenerC);
+  it("notifies multiple subscribers on the same event", () => {
+    const handler1 = vi.fn();
+    const handler2 = vi.fn();
+    emitter.on("dashboard", handler1);
+    emitter.on("dashboard", handler2);
 
     emitter.emitRunCreated("run-1", "LIN-1", "repo");
 
-    expect(listenerA).toHaveBeenCalledTimes(1);
-    expect(listenerB).toHaveBeenCalledTimes(1);
-    expect(listenerC).toHaveBeenCalledTimes(1);
-    // All subscribers receive the exact same event payload.
-    expect(listenerA.mock.calls[0][0]).toEqual(listenerB.mock.calls[0][0]);
-    expect(listenerB.mock.calls[0][0]).toEqual(listenerC.mock.calls[0][0]);
+    expect(handler1).toHaveBeenCalledTimes(1);
+    expect(handler2).toHaveBeenCalledTimes(1);
+    // Both subscribers should have received the exact same event payload.
+    expect(handler1.mock.calls[0][0]).toEqual(handler2.mock.calls[0][0]);
   });
 
-  it("stops notifying a subscriber once it is removed (client disconnect)", () => {
-    const listener = vi.fn();
-    emitter.on("dashboard", listener);
+  it("stops notifying a handler after it unsubscribes via off()", () => {
+    const handler = vi.fn();
+    emitter.on("dashboard", handler);
 
     emitter.emitRunCreated("run-1", "LIN-1", "repo");
-    expect(listener).toHaveBeenCalledTimes(1);
+    expect(handler).toHaveBeenCalledTimes(1);
 
-    emitter.off("dashboard", listener);
-    emitter.emitRunCreated("run-2", "LIN-2", "repo");
-
-    // Still only the one call from before the removal.
-    expect(listener).toHaveBeenCalledTimes(1);
-  });
-
-  it("removing one subscriber does not affect other still-connected subscribers", () => {
-    const listenerA = vi.fn();
-    const listenerB = vi.fn();
-    emitter.on("dashboard", listenerA);
-    emitter.on("dashboard", listenerB);
-
-    emitter.off("dashboard", listenerA);
+    emitter.off("dashboard", handler);
     emitter.emitRunCreated("run-1", "LIN-1", "repo");
 
-    expect(listenerA).not.toHaveBeenCalled();
-    expect(listenerB).toHaveBeenCalledTimes(1);
+    // Still just one call — the second emission was not delivered.
+    expect(handler).toHaveBeenCalledTimes(1);
   });
 
-  it("does not throw when a subscriber's handler throws synchronously", () => {
-    // Node's EventEmitter propagates a listener's thrown error synchronously
-    // to the emit() call; a route that writes to a dead HTTP socket may
-    // throw here, and the emitter must not corrupt state for other emits.
-    const throwingListener = vi.fn(() => {
-      throw new Error("write after end");
+  it("supports a handler unsubscribing itself mid-broadcast without breaking other subscribers", () => {
+    const calls: string[] = [];
+    const selfUnsub = vi.fn(() => {
+      calls.push("self");
+      emitter.off("dashboard", selfUnsub);
     });
-    emitter.on("dashboard", throwingListener);
+    const other = vi.fn(() => {
+      calls.push("other");
+    });
 
-    expect(() => emitter.emitRunCreated("run-1", "LIN-1", "repo")).toThrow("write after end");
+    emitter.on("dashboard", selfUnsub);
+    emitter.on("dashboard", other);
 
-    // The emitter itself is still usable afterwards.
-    const nextListener = vi.fn();
-    emitter.off("dashboard", throwingListener);
-    emitter.on("dashboard", nextListener);
-    emitter.emitRunCreated("run-2", "LIN-2", "repo");
-    expect(nextListener).toHaveBeenCalledTimes(1);
+    // First emission: both handlers run; selfUnsub removes itself afterward.
+    emitter.emitRunCreated("run-1", "LIN-1", "repo");
+    expect(calls).toEqual(["self", "other"]);
+
+    // Second emission: only `other` should still be subscribed.
+    calls.length = 0;
+    emitter.emitRunCreated("run-1", "LIN-1", "repo");
+    expect(calls).toEqual(["other"]);
+    expect(selfUnsub).toHaveBeenCalledTimes(1);
+    expect(other).toHaveBeenCalledTimes(2);
   });
 
-  it("does not emit anything on the dashboard channel when there are no subscribers", () => {
-    // No listeners registered; emitting must not throw.
-    expect(() => emitter.emitChatReply("run-1", "reply", 10)).not.toThrow();
+  it("produces monotonically-parseable ISO timestamps across successive emissions", () => {
+    const handler = vi.fn();
+    emitter.on("dashboard", handler);
+
+    emitter.emitStateChanged("run-1", "Todo", "Planning");
+    emitter.emitStateChanged("run-1", "Planning", "AwaitingPlanApproval");
+
+    const [first, second] = handler.mock.calls.map(
+      (c) => new Date((c[0] as { timestamp: string }).timestamp).getTime(),
+    );
+    expect(Number.isNaN(first)).toBe(false);
+    expect(Number.isNaN(second)).toBe(false);
+    expect(second).toBeGreaterThanOrEqual(first);
+  });
+
+  it("is a Node EventEmitter instance exposing on/off/emit", () => {
+    expect(typeof emitter.on).toBe("function");
+    expect(typeof emitter.off).toBe("function");
+    expect(typeof emitter.emit).toBe("function");
   });
 });

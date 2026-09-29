@@ -1,77 +1,68 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
-
-const fsMocks = vi.hoisted(() => ({
-  existsSync: vi.fn(),
-  mkdirSync: vi.fn(),
-}));
-
-vi.mock("node:fs", () => ({
-  existsSync: fsMocks.existsSync,
-  mkdirSync: fsMocks.mkdirSync,
-}));
-
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { mkdtempSync, rmSync, existsSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 import { RepoRunner } from "../../src/repo/repoRunner.js";
-import type { Logger } from "../../src/utils/logger.js";
 
-function makeLogger(): Logger {
+function makeLogger() {
   return {
-    debug: vi.fn(),
-    info: vi.fn(),
-    warn: vi.fn(),
-    error: vi.fn(),
-  } as unknown as Logger;
+    info: () => {},
+    warn: () => {},
+    error: () => {},
+    debug: () => {},
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  } as any;
 }
 
 describe("RepoRunner", () => {
-  let logger: Logger;
+  let baseDir: string;
   let runner: RepoRunner;
 
   beforeEach(() => {
-    vi.clearAllMocks();
-    logger = makeLogger();
-    runner = new RepoRunner(logger);
+    baseDir = mkdtempSync(join(tmpdir(), "reporunner-test-"));
+    runner = new RepoRunner(makeLogger());
+  });
+
+  afterEach(() => {
+    rmSync(baseDir, { recursive: true, force: true });
   });
 
   describe("ensureWorkingDirectory", () => {
-    it("sanitizes the branch name and returns the resolved directory when it already exists", () => {
-      fsMocks.existsSync.mockReturnValue(true);
-
-      const dir = runner.ensureWorkingDirectory("/base", "feature/ABC-123");
-
-      expect(dir).toBe("/base/feature_ABC-123");
-      expect(fsMocks.mkdirSync).not.toHaveBeenCalled();
-      expect(logger.info).not.toHaveBeenCalled();
+    it("creates the directory when it does not exist", () => {
+      const dir = runner.ensureWorkingDirectory(baseDir, "feature-branch");
+      expect(existsSync(dir)).toBe(true);
+      expect(dir).toBe(join(baseDir, "feature-branch"));
     });
 
-    it("creates the directory recursively and logs when it does not exist", () => {
-      fsMocks.existsSync.mockReturnValue(false);
+    it("sanitizes characters outside [a-zA-Z0-9_-] in the branch name", () => {
+      const dir = runner.ensureWorkingDirectory(baseDir, "feat/foo bar@baz");
+      expect(existsSync(dir)).toBe(true);
+      expect(dir).toBe(join(baseDir, "feat_foo_bar_baz"));
+    });
 
-      const dir = runner.ensureWorkingDirectory("/base", "feature/x y");
-
-      expect(dir).toBe("/base/feature_x_y");
-      expect(fsMocks.mkdirSync).toHaveBeenCalledWith("/base/feature_x_y", { recursive: true });
-      expect(logger.info).toHaveBeenCalledWith({ dir: "/base/feature_x_y" }, "Created working directory");
+    it("is idempotent when the directory already exists", () => {
+      const first = runner.ensureWorkingDirectory(baseDir, "again");
+      const second = runner.ensureWorkingDirectory(baseDir, "again");
+      expect(second).toBe(first);
+      expect(existsSync(second)).toBe(true);
     });
   });
 
   describe("resolveRepoPath", () => {
-    it("returns the resolved base path without creating it when it already exists", () => {
-      fsMocks.existsSync.mockReturnValue(true);
+    it("creates the base path when it does not exist and returns its resolved path", () => {
+      const target = join(baseDir, "nested", "repo-root");
+      expect(existsSync(target)).toBe(false);
 
-      const dir = runner.resolveRepoPath("/base/repo");
+      const result = runner.resolveRepoPath(target);
 
-      expect(dir).toBe("/base/repo");
-      expect(fsMocks.mkdirSync).not.toHaveBeenCalled();
+      expect(result).toBe(target);
+      expect(existsSync(target)).toBe(true);
     });
 
-    it("creates the base path recursively and logs when it does not exist", () => {
-      fsMocks.existsSync.mockReturnValue(false);
-
-      const dir = runner.resolveRepoPath("/base/repo");
-
-      expect(dir).toBe("/base/repo");
-      expect(fsMocks.mkdirSync).toHaveBeenCalledWith("/base/repo", { recursive: true });
-      expect(logger.info).toHaveBeenCalledWith({ dir: "/base/repo" }, "Created repo base path");
+    it("returns the resolved path without error when it already exists", () => {
+      const result = runner.resolveRepoPath(baseDir);
+      expect(result).toBe(baseDir);
+      expect(existsSync(baseDir)).toBe(true);
     });
   });
 });

@@ -1,84 +1,191 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { PlanView } from "./PlanView.tsx";
 
-const fullPlan = {
-  planVersion: 3,
-  confidence: 0.8,
-  summary: "This plan implements the requested feature.",
-  requirementsTraceability: "Covers issue AC 1 and AC 2.",
-  steps: [
-    { id: "s1", title: "Set up scaffolding", description: "Create base files." },
-    { id: "s2", title: "Implement logic", description: "Write the core logic." },
-  ],
-  assumptions: ["The API is stable"],
-  risks: ["Might break backwards compatibility"],
-  openQuestions: [
-    { id: "q1", question: "Should we support v1 clients?", requiredForExecution: true },
-    { id: "q2", question: "Any style preference?", requiredForExecution: false },
-  ],
-};
+// Mock the Markdown component so PlanView tests are isolated from react-markdown internals
+vi.mock("@/components/Markdown.tsx", () => ({
+  Markdown: ({ children }: { children: string }) => (
+    <div data-testid="markdown-content">{children}</div>
+  ),
+}));
 
 describe("PlanView", () => {
-  it("renders all plan sections when fully populated", () => {
-    render(<PlanView plan={fullPlan} />);
-
-    expect(screen.getByText("v3")).toBeDefined();
-    expect(screen.getByText("80%")).toBeDefined();
-    expect(screen.getByText("This plan implements the requested feature.")).toBeDefined();
-    expect(screen.getByText("Requirements Traceability")).toBeDefined();
-    expect(screen.getByText("Covers issue AC 1 and AC 2.")).toBeDefined();
-
-    expect(screen.getByText("Steps")).toBeDefined();
-    expect(screen.getByText("Set up scaffolding")).toBeDefined();
-    expect(screen.getByText("Create base files.")).toBeDefined();
-    expect(screen.getByText("Implement logic")).toBeDefined();
-
-    expect(screen.getByText("Assumptions")).toBeDefined();
-    expect(screen.getByText("The API is stable")).toBeDefined();
-
-    expect(screen.getByText("Risks")).toBeDefined();
-    expect(screen.getByText("Might break backwards compatibility")).toBeDefined();
-
-    expect(screen.getByText("Open Questions")).toBeDefined();
-    expect(screen.getByText("Should we support v1 clients?")).toBeDefined();
-    expect(screen.getByText("blocks execution")).toBeDefined();
-    expect(screen.getByText("Any style preference?")).toBeDefined();
-  });
-
-  it("does not render optional sections when assumptions/risks/openQuestions are empty arrays", () => {
-    const plan = {
-      ...fullPlan,
-      assumptions: [],
-      risks: [],
-      openQuestions: [],
-    };
-    render(<PlanView plan={plan} />);
-
+  it("renders nothing extra for a minimal/empty plan", () => {
+    const { container } = render(<PlanView plan={{}} />);
+    // Header row still renders (empty version/confidence slots) but no sections
+    expect(screen.queryByText("Steps")).toBeNull();
     expect(screen.queryByText("Assumptions")).toBeNull();
     expect(screen.queryByText("Risks")).toBeNull();
     expect(screen.queryByText("Open Questions")).toBeNull();
-    // Steps section should still render
-    expect(screen.getByText("Steps")).toBeDefined();
+    expect(container.querySelector(".space-y-5")).not.toBeNull();
   });
 
-  it("renders without a version badge or confidence bar when absent", () => {
-    render(<PlanView plan={{ summary: "Just a summary" }} />);
-    expect(screen.getByText("Just a summary")).toBeDefined();
+  it("renders the plan version when present", () => {
+    render(<PlanView plan={{ planVersion: 3 }} />);
+    expect(screen.getByText("v3")).toBeDefined();
+  });
+
+  it("does not render a version badge when planVersion is absent", () => {
+    render(<PlanView plan={{}} />);
     expect(screen.queryByText(/^v\d/)).toBeNull();
   });
 
-  it("does not mark an open question as blocking when requiredForExecution is false", () => {
+  it("renders the confidence bar and percentage with done color when >= 0.7", () => {
+    const { container } = render(<PlanView plan={{ confidence: 0.85 }} />);
+    expect(screen.getByText("85%")).toBeDefined();
+    expect(container.querySelector(".bg-state-done")).not.toBeNull();
+  });
+
+  it("renders the confidence bar with waiting color when between 0.4 and 0.7", () => {
+    const { container } = render(<PlanView plan={{ confidence: 0.5 }} />);
+    expect(screen.getByText("50%")).toBeDefined();
+    expect(container.querySelector(".bg-state-waiting")).not.toBeNull();
+  });
+
+  it("renders the confidence bar with blocked color when below 0.4", () => {
+    const { container } = render(<PlanView plan={{ confidence: 0.2 }} />);
+    expect(screen.getByText("20%")).toBeDefined();
+    expect(container.querySelector(".bg-state-blocked")).not.toBeNull();
+  });
+
+  it("does not render the confidence bar when confidence is absent", () => {
+    const { container } = render(<PlanView plan={{}} />);
+    expect(container.querySelector(".tabular-nums")).toBeNull();
+  });
+
+  it("renders the summary through Markdown when present", () => {
+    render(<PlanView plan={{ summary: "This is the plan summary." }} />);
+    expect(screen.getByText("This is the plan summary.")).toBeDefined();
+  });
+
+  it("does not render a summary section when absent", () => {
+    render(<PlanView plan={{}} />);
+    expect(screen.queryAllByTestId("markdown-content").length).toBe(0);
+  });
+
+  it("renders requirements traceability when present", () => {
+    render(
+      <PlanView
+        plan={{ requirementsTraceability: "Covers REQ-1 and REQ-2." }}
+      />,
+    );
+    expect(screen.getByText("Requirements Traceability")).toBeDefined();
+    expect(screen.getByText("Covers REQ-1 and REQ-2.")).toBeDefined();
+  });
+
+  it("does not render requirements traceability section when absent", () => {
+    render(<PlanView plan={{}} />);
+    expect(screen.queryByText("Requirements Traceability")).toBeNull();
+  });
+
+  it("renders steps with numbering, title, and description", () => {
     render(
       <PlanView
         plan={{
-          openQuestions: [
-            { id: "q1", question: "Optional question?", requiredForExecution: false },
+          steps: [
+            { id: "s1", title: "Set up scaffolding", description: "Create the base files." },
+            { id: "s2", title: "Wire up API", description: "Connect to backend." },
           ],
         }}
       />,
     );
-    expect(screen.getByText("Optional question?")).toBeDefined();
+    expect(screen.getByText("Steps")).toBeDefined();
+    expect(screen.getByText("1.")).toBeDefined();
+    expect(screen.getByText("2.")).toBeDefined();
+    expect(screen.getByText("Set up scaffolding")).toBeDefined();
+    expect(screen.getByText("Wire up API")).toBeDefined();
+    expect(screen.getByText("Create the base files.")).toBeDefined();
+  });
+
+  it("does not render the Steps section when steps is empty", () => {
+    render(<PlanView plan={{ steps: [] }} />);
+    expect(screen.queryByText("Steps")).toBeNull();
+  });
+
+  it("renders assumptions as a bulleted list", () => {
+    render(
+      <PlanView plan={{ assumptions: ["Node 22 is available", "CI has network access"] }} />,
+    );
+    expect(screen.getByText("Assumptions")).toBeDefined();
+    expect(screen.getByText("Node 22 is available")).toBeDefined();
+    expect(screen.getByText("CI has network access")).toBeDefined();
+  });
+
+  it("does not render the Assumptions section when empty", () => {
+    render(<PlanView plan={{ assumptions: [] }} />);
+    expect(screen.queryByText("Assumptions")).toBeNull();
+  });
+
+  it("renders risks as a bulleted list", () => {
+    render(<PlanView plan={{ risks: ["Rate limiting may occur"] }} />);
+    expect(screen.getByText("Risks")).toBeDefined();
+    expect(screen.getByText("Rate limiting may occur")).toBeDefined();
+  });
+
+  it("does not render the Risks section when empty", () => {
+    render(<PlanView plan={{ risks: [] }} />);
+    expect(screen.queryByText("Risks")).toBeNull();
+  });
+
+  it("renders open questions with the required-for-execution badge", () => {
+    render(
+      <PlanView
+        plan={{
+          openQuestions: [
+            { id: "q1", question: "Which environment?", requiredForExecution: true },
+            { id: "q2", question: "Any budget constraints?", requiredForExecution: false },
+          ],
+        }}
+      />,
+    );
+    expect(screen.getByText("Open Questions")).toBeDefined();
+    expect(screen.getByText("Which environment?")).toBeDefined();
+    expect(screen.getByText("Any budget constraints?")).toBeDefined();
+    expect(screen.getByText("blocks execution")).toBeDefined();
+  });
+
+  it("does not show the blocks-execution badge for non-required questions", () => {
+    render(
+      <PlanView
+        plan={{
+          openQuestions: [
+            { id: "q1", question: "Any budget constraints?", requiredForExecution: false },
+          ],
+        }}
+      />,
+    );
     expect(screen.queryByText("blocks execution")).toBeNull();
+  });
+
+  it("does not render the Open Questions section when empty", () => {
+    render(<PlanView plan={{ openQuestions: [] }} />);
+    expect(screen.queryByText("Open Questions")).toBeNull();
+  });
+
+  it("renders a fully populated plan end to end", () => {
+    render(
+      <PlanView
+        plan={{
+          planVersion: 2,
+          confidence: 0.9,
+          summary: "Full plan summary",
+          requirementsTraceability: "Traces all reqs",
+          steps: [{ id: "s1", title: "Step one", description: "Do the thing" }],
+          assumptions: ["Assumption A"],
+          risks: ["Risk A"],
+          openQuestions: [
+            { id: "q1", question: "Question A", requiredForExecution: true },
+          ],
+        }}
+      />,
+    );
+    expect(screen.getByText("v2")).toBeDefined();
+    expect(screen.getByText("90%")).toBeDefined();
+    expect(screen.getByText("Full plan summary")).toBeDefined();
+    expect(screen.getByText("Traces all reqs")).toBeDefined();
+    expect(screen.getByText("Step one")).toBeDefined();
+    expect(screen.getByText("Assumption A")).toBeDefined();
+    expect(screen.getByText("Risk A")).toBeDefined();
+    expect(screen.getByText("Question A")).toBeDefined();
   });
 });

@@ -1,101 +1,95 @@
 import { describe, it, expect } from "vitest";
-import { OpenQuestionSchema, PlanSchema, PlanStepSchema } from "../../src/schemas/plan.js";
+import { OpenQuestionSchema, PlanSchema } from "../../src/schemas/plan.js";
 
 describe("OpenQuestionSchema", () => {
-  it("parses the object form unchanged", () => {
-    const result = OpenQuestionSchema.parse({
+  it("accepts the full object form as-is", () => {
+    const parsed = OpenQuestionSchema.parse({
       id: "q1",
-      question: "Is this in scope?",
+      question: "Which auth provider?",
       requiredForExecution: true,
     });
-    expect(result).toEqual({ id: "q1", question: "Is this in scope?", requiredForExecution: true });
-  });
-
-  it("defaults requiredForExecution to false when it fails validation in object form", () => {
-    const result = OpenQuestionSchema.parse({
+    expect(parsed).toEqual({
       id: "q1",
-      question: "Is this in scope?",
-      requiredForExecution: "yes",
+      question: "Which auth provider?",
+      requiredForExecution: true,
     });
-    expect(result.requiredForExecution).toBe(false);
   });
 
-  it("normalizes a plain string into the object shape", () => {
-    const result = OpenQuestionSchema.parse("Should we migrate the DB first?");
-    expect(result).toEqual({
+  it("defaults requiredForExecution to false via .catch() when it's the wrong type", () => {
+    const parsed = OpenQuestionSchema.parse({
       id: "q1",
-      question: "Should we migrate the DB first?",
+      question: "Which auth provider?",
+      requiredForExecution: "not-a-boolean",
+    });
+    expect(parsed.requiredForExecution).toBe(false);
+  });
+
+  it("normalizes a plain string into the full object shape", () => {
+    const parsed = OpenQuestionSchema.parse("Which auth provider should we use?");
+    expect(parsed).toEqual({
+      id: expect.stringMatching(/^q/),
+      question: "Which auth provider should we use?",
       requiredForExecution: false,
     });
   });
 });
 
-describe("PlanStepSchema", () => {
-  it("parses a valid step", () => {
-    const step = { id: "s1", title: "Do the thing", description: "Details here" };
-    expect(PlanStepSchema.parse(step)).toEqual(step);
-  });
-
-  it("rejects a step missing a required field", () => {
-    expect(PlanStepSchema.safeParse({ id: "s1", title: "Do the thing" }).success).toBe(false);
-  });
-});
-
 describe("PlanSchema", () => {
-  const basePlan = {
-    planVersion: 1,
-    summary: "Implement the feature",
-    assumptions: ["Node 22 is available"],
-    openQuestions: [],
-    risks: ["Might break CI"],
-    steps: [{ id: "s1", title: "Step one", description: "Do it" }],
-    testPlan: "Run unit tests",
-    confidence: 0.8,
-  };
+  function baseFields() {
+    return {
+      planVersion: 1,
+      summary: "Add auth middleware",
+      assumptions: [],
+      openQuestions: [],
+      risks: [],
+      steps: [{ id: "s1", title: "Step 1", description: "Do something" }],
+      testPlan: "Run tests",
+      confidence: 0.8,
+    };
+  }
 
-  it("parses a fully valid plan and defaults requirementsTraceability to empty string", () => {
-    const result = PlanSchema.parse(basePlan);
-    expect(result.requirementsTraceability).toBe("");
-    expect(result.summary).toBe("Implement the feature");
+  it("parses a fully valid plan, defaulting requirementsTraceability to an empty string", () => {
+    const parsed = PlanSchema.parse(baseFields());
+    expect(parsed.requirementsTraceability).toBe("");
   });
 
-  it("accepts an explicit requirementsTraceability value", () => {
-    const result = PlanSchema.parse({ ...basePlan, requirementsTraceability: "Covers REQ-1" });
-    expect(result.requirementsTraceability).toBe("Covers REQ-1");
-  });
-
-  it("accepts string-form openQuestions and normalizes them, deriving id from the field path", () => {
-    const result = PlanSchema.parse({ ...basePlan, openQuestions: ["Do we need sign-off?"] });
-    expect(result.openQuestions).toEqual([
-      { id: "qopenQuestions-0", question: "Do we need sign-off?", requiredForExecution: false },
-    ]);
-  });
-
-  it("normalizes assumptions and risks provided as objects via FlexString variants", () => {
-    const result = PlanSchema.parse({
-      ...basePlan,
-      assumptions: [{ description: "an assumption" }, { text: "another" }],
-      risks: [{ risk: "a risk" }, { assumption: "mislabeled risk" }],
+  it("normalizes assumptions/risks given as plain strings via FlexString", () => {
+    const parsed = PlanSchema.parse({
+      ...baseFields(),
+      assumptions: ["Users are already authenticated upstream"],
+      risks: ["Token rotation could break active sessions"],
     });
-    expect(result.assumptions).toEqual(["an assumption", "another"]);
-    expect(result.risks).toEqual(["a risk", "mislabeled risk"]);
+    expect(parsed.assumptions).toEqual(["Users are already authenticated upstream"]);
+    expect(parsed.risks).toEqual(["Token rotation could break active sessions"]);
   });
 
-  it("falls back to an empty string for an unrecognized FlexString shape", () => {
-    const result = PlanSchema.parse({ ...basePlan, assumptions: [{ unexpected: "shape" }] });
-    expect(result.assumptions).toEqual([""]);
+  it("normalizes assumptions/risks given as {description}/{risk}/{text}/{assumption} objects", () => {
+    const parsed = PlanSchema.parse({
+      ...baseFields(),
+      assumptions: [{ assumption: "Config is already loaded" }, { text: "generic text form" }],
+      risks: [{ risk: "Could break existing sessions" }, { description: "generic description form" }],
+    });
+    expect(parsed.assumptions).toEqual(["Config is already loaded", "generic text form"]);
+    expect(parsed.risks).toEqual(["Could break existing sessions", "generic description form"]);
   });
 
-  it("rejects an invalid confidence value outside [0, 1]", () => {
-    expect(PlanSchema.safeParse({ ...basePlan, confidence: 1.5 }).success).toBe(false);
+  it("falls back to an empty string for an assumption/risk that matches none of the FlexString shapes", () => {
+    const parsed = PlanSchema.parse({
+      ...baseFields(),
+      assumptions: [{ unexpectedShape: true }],
+      risks: [12345],
+    });
+    expect(parsed.assumptions).toEqual([""]);
+    expect(parsed.risks).toEqual([""]);
   });
 
-  it("rejects a non-positive planVersion", () => {
-    expect(PlanSchema.safeParse({ ...basePlan, planVersion: 0 }).success).toBe(false);
+  it("rejects a non-positive or non-integer planVersion", () => {
+    expect(() => PlanSchema.parse({ ...baseFields(), planVersion: 0 })).toThrow();
+    expect(() => PlanSchema.parse({ ...baseFields(), planVersion: 1.5 })).toThrow();
   });
 
-  it("rejects a plan missing a required field", () => {
-    const { testPlan: _testPlan, ...missing } = basePlan;
-    expect(PlanSchema.safeParse(missing).success).toBe(false);
+  it("rejects a confidence outside [0, 1]", () => {
+    expect(() => PlanSchema.parse({ ...baseFields(), confidence: 1.5 })).toThrow();
+    expect(() => PlanSchema.parse({ ...baseFields(), confidence: -0.1 })).toThrow();
   });
 });

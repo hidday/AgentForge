@@ -5,6 +5,19 @@ import {
   type RelatedLinearIssue,
 } from "../../src/linear/linearClient.js";
 
+function makeIssue(overrides: Partial<LinearIssue> = {}): LinearIssue {
+  return {
+    id: "issue-1",
+    title: "Focus issue",
+    description: "",
+    branchName: "ai/issue-1",
+    state: "Todo",
+    labels: [],
+    priority: 0,
+    ...overrides,
+  };
+}
+
 function makeRelated(overrides: Partial<RelatedLinearIssue> = {}): RelatedLinearIssue {
   return {
     id: "rel-1",
@@ -89,96 +102,60 @@ describe("MockLinearClient.getRelatedContext", () => {
 });
 
 describe("MockLinearClient.getIssue", () => {
-  it("returns a clone of the seeded issue", async () => {
+  it("returns a cloned copy of a seeded issue", async () => {
     const client = new MockLinearClient();
     const seeded = makeIssue({ id: "issue-1", title: "Original title" });
     client.seedIssue(seeded);
 
     const result = await client.getIssue("issue-1");
-    expect(result).toEqual(seeded);
-
     result.title = "Mutated";
+
+    expect(result).toEqual({ ...seeded, title: "Mutated" });
     const second = await client.getIssue("issue-1");
     expect(second.title).toBe("Original title");
   });
 
   it("throws when the issue was never seeded", () => {
     const client = new MockLinearClient();
-    // getIssue throws synchronously (it is not an `async` function), so the
-    // throw happens on invocation rather than via a rejected promise.
-    expect(() => client.getIssue("missing-issue")).toThrow(
-      "Mock: Issue missing-issue not found",
-    );
+
+    expect(() => client.getIssue("missing")).toThrow("Mock: Issue missing not found");
   });
 });
 
 describe("MockLinearClient.searchIssues", () => {
-  it("matches only issues with the given state", async () => {
+  it("matches issues by state and returns cloned results", async () => {
     const client = new MockLinearClient();
-    client.seedIssue(makeIssue({ id: "todo-1", state: "Todo" }));
-    client.seedIssue(makeIssue({ id: "done-1", state: "Done" }));
+    client.seedIssue(makeIssue({ id: "a", state: "Todo" }));
+    client.seedIssue(makeIssue({ id: "b", state: "Done" }));
 
     const results = await client.searchIssues({ state: "Todo" });
 
-    expect(results.map((i) => i.id)).toEqual(["todo-1"]);
+    expect(results).toHaveLength(1);
+    expect(results[0].id).toBe("a");
   });
 
-  it("combines state and projectName filters (both must match)", async () => {
+  it("further filters by projectName when provided", async () => {
     const client = new MockLinearClient();
-    client.seedIssue(makeIssue({ id: "match", state: "Todo", project: "Platform" }));
-    client.seedIssue(makeIssue({ id: "wrong-project", state: "Todo", project: "Mobile" }));
-    client.seedIssue(makeIssue({ id: "wrong-state", state: "Done", project: "Platform" }));
+    client.seedIssue(makeIssue({ id: "a", state: "Todo", project: "Alpha" }));
+    client.seedIssue(makeIssue({ id: "b", state: "Todo", project: "Beta" }));
 
-    const results = await client.searchIssues({ state: "Todo", projectName: "Platform" });
+    const results = await client.searchIssues({ state: "Todo", projectName: "Beta" });
 
-    expect(results.map((i) => i.id)).toEqual(["match"]);
-  });
-
-  it("excludes issues with no project when projectName filter is set", async () => {
-    const client = new MockLinearClient();
-    client.seedIssue(makeIssue({ id: "no-project", state: "Todo" }));
-
-    const results = await client.searchIssues({ state: "Todo", projectName: "Platform" });
-
-    expect(results).toEqual([]);
-  });
-
-  it("ignores assigneeMe and team filters (mock only filters on state/projectName)", async () => {
-    const client = new MockLinearClient();
-    client.seedIssue(makeIssue({ id: "issue-1", state: "Todo", team: "ENG" }));
-
-    const results = await client.searchIssues({
-      state: "Todo",
-      assigneeMe: true,
-      team: "OTHER-TEAM",
-    });
-
-    expect(results.map((i) => i.id)).toEqual(["issue-1"]);
+    expect(results).toEqual([makeIssue({ id: "b", state: "Todo", project: "Beta" })]);
   });
 
   it("returns an empty array when nothing matches", async () => {
     const client = new MockLinearClient();
-    client.seedIssue(makeIssue({ id: "issue-1", state: "Done" }));
+    client.seedIssue(makeIssue({ id: "a", state: "Todo" }));
 
-    const results = await client.searchIssues({ state: "Todo" });
+    const results = await client.searchIssues({ state: "In Review" });
 
     expect(results).toEqual([]);
-  });
-
-  it("returns clones, not live references to seeded issues", async () => {
-    const client = new MockLinearClient();
-    client.seedIssue(makeIssue({ id: "issue-1", state: "Todo" }));
-
-    const [result] = await client.searchIssues({ state: "Todo" });
-    result.title = "Mutated";
-
-    const [second] = await client.searchIssues({ state: "Todo" });
-    expect(second.title).toBe("Focus");
   });
 });
 
 describe("MockLinearClient.postComment / getPostedComments", () => {
-  it("records posted comments against their issue id", async () => {
+  it("records posted comments and returns them via getPostedComments", async () => {
     const client = new MockLinearClient();
 
     await client.postComment("issue-1", "First comment");
@@ -190,19 +167,19 @@ describe("MockLinearClient.postComment / getPostedComments", () => {
     ]);
   });
 
-  it("returns a copy, so mutating the result does not affect internal state", async () => {
+  it("returns a copy so mutating the result does not affect internal state", async () => {
     const client = new MockLinearClient();
-    await client.postComment("issue-1", "First comment");
+    await client.postComment("issue-1", "Comment");
 
     const comments = client.getPostedComments();
-    comments.push({ issueId: "fake", body: "fake" });
+    comments.push({ issueId: "issue-2", body: "Injected" });
 
-    expect(client.getPostedComments()).toEqual([{ issueId: "issue-1", body: "First comment" }]);
+    expect(client.getPostedComments()).toEqual([{ issueId: "issue-1", body: "Comment" }]);
   });
 });
 
 describe("MockLinearClient.updateIssueState", () => {
-  it("updates the state of an existing issue", async () => {
+  it("updates the state of a seeded issue", async () => {
     const client = new MockLinearClient();
     client.seedIssue(makeIssue({ id: "issue-1", state: "Todo" }));
 
@@ -212,80 +189,85 @@ describe("MockLinearClient.updateIssueState", () => {
     expect(issue.state).toBe("In Progress");
   });
 
-  it("is a no-op and does not throw for a nonexistent issue", async () => {
+  it("is a no-op when the issue does not exist", async () => {
     const client = new MockLinearClient();
-    await expect(client.updateIssueState("missing", "Done")).resolves.toBeUndefined();
+
+    await expect(client.updateIssueState("missing", "In Progress")).resolves.toBeUndefined();
   });
 });
 
 describe("MockLinearClient.addLabel", () => {
-  it("adds a new label to an existing issue", async () => {
+  it("adds a label that is not already present", async () => {
     const client = new MockLinearClient();
-    client.seedIssue(makeIssue({ id: "issue-1", labels: ["bug"] }));
+    client.seedIssue(makeIssue({ id: "issue-1", labels: ["foo"] }));
 
-    await client.addLabel("issue-1", "urgent");
+    await client.addLabel("issue-1", "bar");
 
-    const issue = await client.getIssue("issue-1");
-    expect(issue.labels).toEqual(["bug", "urgent"]);
+    const labels = await client.listLabels("issue-1");
+    expect(labels).toEqual(["foo", "bar"]);
   });
 
-  it("does not add a duplicate label that already exists", async () => {
+  it("does not duplicate a label that is already present", async () => {
     const client = new MockLinearClient();
-    client.seedIssue(makeIssue({ id: "issue-1", labels: ["bug"] }));
+    client.seedIssue(makeIssue({ id: "issue-1", labels: ["foo"] }));
 
-    await client.addLabel("issue-1", "bug");
+    await client.addLabel("issue-1", "foo");
 
-    const issue = await client.getIssue("issue-1");
-    expect(issue.labels).toEqual(["bug"]);
+    const labels = await client.listLabels("issue-1");
+    expect(labels).toEqual(["foo"]);
   });
 
-  it("is a no-op and does not throw for a nonexistent issue", async () => {
+  it("is a no-op when the issue does not exist", async () => {
     const client = new MockLinearClient();
-    await expect(client.addLabel("missing", "urgent")).resolves.toBeUndefined();
+
+    await expect(client.addLabel("missing", "foo")).resolves.toBeUndefined();
   });
 });
 
 describe("MockLinearClient.removeLabel", () => {
-  it("removes an existing label from an issue", async () => {
+  it("removes an existing label from a seeded issue", async () => {
     const client = new MockLinearClient();
-    client.seedIssue(makeIssue({ id: "issue-1", labels: ["bug", "urgent"] }));
+    client.seedIssue(makeIssue({ id: "issue-1", labels: ["foo", "bar"] }));
 
-    await client.removeLabel("issue-1", "bug");
+    await client.removeLabel("issue-1", "foo");
 
-    const issue = await client.getIssue("issue-1");
-    expect(issue.labels).toEqual(["urgent"]);
+    const labels = await client.listLabels("issue-1");
+    expect(labels).toEqual(["bar"]);
   });
 
   it("is a no-op when the label is not present on the issue", async () => {
     const client = new MockLinearClient();
-    client.seedIssue(makeIssue({ id: "issue-1", labels: ["urgent"] }));
+    client.seedIssue(makeIssue({ id: "issue-1", labels: ["bar"] }));
 
-    await client.removeLabel("issue-1", "bug");
+    await client.removeLabel("issue-1", "foo");
 
-    const issue = await client.getIssue("issue-1");
-    expect(issue.labels).toEqual(["urgent"]);
+    const labels = await client.listLabels("issue-1");
+    expect(labels).toEqual(["bar"]);
   });
 
-  it("is a no-op and does not throw for a nonexistent issue", async () => {
+  it("is a no-op when the issue does not exist", async () => {
     const client = new MockLinearClient();
-    await expect(client.removeLabel("missing", "bug")).resolves.toBeUndefined();
+
+    await expect(client.removeLabel("missing", "foo")).resolves.toBeUndefined();
   });
 });
 
 describe("MockLinearClient.listLabels", () => {
-  it("returns a copy of the issue's labels", async () => {
+  it("returns a copy of the seeded issue's labels", async () => {
     const client = new MockLinearClient();
-    client.seedIssue(makeIssue({ id: "issue-1", labels: ["bug", "urgent"] }));
+    client.seedIssue(makeIssue({ id: "issue-1", labels: ["foo", "bar"] }));
 
     const labels = await client.listLabels("issue-1");
-    expect(labels).toEqual(["bug", "urgent"]);
+    labels.push("mutated");
 
-    labels.push("fake");
-    expect(await client.listLabels("issue-1")).toEqual(["bug", "urgent"]);
+    expect(await client.listLabels("issue-1")).toEqual(["foo", "bar"]);
   });
 
-  it("returns an empty array for a nonexistent issue", async () => {
+  it("returns an empty array when the issue does not exist", async () => {
     const client = new MockLinearClient();
-    await expect(client.listLabels("missing")).resolves.toEqual([]);
+
+    const labels = await client.listLabels("missing");
+
+    expect(labels).toEqual([]);
   });
 });

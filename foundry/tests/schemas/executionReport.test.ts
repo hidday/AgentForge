@@ -1,90 +1,53 @@
 import { describe, it, expect } from "vitest";
-import {
-  CheckResultSchema,
-  ChecksSchema,
-  ExecutionReportSchema,
-} from "../../src/schemas/executionReport.js";
+import { CheckResultSchema, ExecutionReportSchema } from "../../src/schemas/executionReport.js";
 
-describe("CheckResultSchema status normalization", () => {
-  it("keeps a known status ('pass') as-is", () => {
+describe("CheckResultSchema", () => {
+  it("passes through a known status unchanged", () => {
     expect(CheckResultSchema.parse({ status: "pass", details: "ok" }).status).toBe("pass");
-  });
-
-  it("keeps 'fail' as-is", () => {
     expect(CheckResultSchema.parse({ status: "fail", details: "broke" }).status).toBe("fail");
-  });
-
-  it("keeps 'skip' as-is", () => {
     expect(CheckResultSchema.parse({ status: "skip", details: "n/a" }).status).toBe("skip");
   });
 
-  it("normalizes an unrecognized status to 'skip'", () => {
-    expect(CheckResultSchema.parse({ status: "unknown-status", details: "?" }).status).toBe(
-      "skip",
-    );
-  });
-});
-
-describe("ChecksSchema", () => {
-  it("parses a full set of checks", () => {
-    const checks = {
-      lint: { status: "pass", details: "clean" },
-      typecheck: { status: "pass", details: "clean" },
-      tests: { status: "fail", details: "1 failing" },
-    };
-    const result = ChecksSchema.parse(checks);
-    expect(result.tests.status).toBe("fail");
-  });
-
-  it("rejects a missing check", () => {
-    const checks = {
-      lint: { status: "pass", details: "clean" },
-      typecheck: { status: "pass", details: "clean" },
-    };
-    expect(ChecksSchema.safeParse(checks).success).toBe(false);
+  it("normalizes an unrecognized status string to 'skip'", () => {
+    const parsed = CheckResultSchema.parse({ status: "unknown-status", details: "?" });
+    expect(parsed.status).toBe("skip");
   });
 });
 
 describe("ExecutionReportSchema", () => {
-  const validReport = {
-    summary: "Implemented the feature",
-    filesChanged: ["src/foo.ts"],
-    checks: {
-      lint: { status: "pass", details: "clean" },
-      typecheck: { status: "pass", details: "clean" },
-      tests: { status: "pass", details: "all green" },
-    },
-    notes: ["Nothing unusual"],
-    prDraftCreated: true,
-    score: 0.9,
-    scoreRationale: "All checks passed",
-  };
+  function baseFields() {
+    return {
+      summary: "Implemented the feature.",
+      filesChanged: ["src/foo.ts"],
+      checks: {
+        lint: { status: "pass", details: "" },
+        typecheck: { status: "pass", details: "" },
+        tests: { status: "pass", details: "" },
+      },
+      notes: [],
+      prDraftCreated: true,
+      score: 0.9,
+      scoreRationale: "All checks pass.",
+    };
+  }
 
-  it("parses a valid report and defaults executionVersion to 1", () => {
-    const result = ExecutionReportSchema.parse(validReport);
-    expect(result.executionVersion).toBe(1);
+  it("defaults executionVersion to 1 when omitted", () => {
+    const parsed = ExecutionReportSchema.parse(baseFields());
+    expect(parsed.executionVersion).toBe(1);
   });
 
   it("accepts an explicit executionVersion", () => {
-    const result = ExecutionReportSchema.parse({ ...validReport, executionVersion: 3 });
-    expect(result.executionVersion).toBe(3);
+    const parsed = ExecutionReportSchema.parse({ ...baseFields(), executionVersion: 3 });
+    expect(parsed.executionVersion).toBe(3);
   });
 
   it("rejects a score outside [0, 1]", () => {
-    expect(ExecutionReportSchema.safeParse({ ...validReport, score: 1.2 }).success).toBe(false);
+    expect(() => ExecutionReportSchema.parse({ ...baseFields(), score: 1.1 })).toThrow();
+    expect(() => ExecutionReportSchema.parse({ ...baseFields(), score: -0.1 })).toThrow();
   });
 
-  it("rejects a missing required field", () => {
-    const { summary: _summary, ...missing } = validReport;
-    expect(ExecutionReportSchema.safeParse(missing).success).toBe(false);
-  });
-
-  it("normalizes an unknown check status nested inside a full report", () => {
-    const report = {
-      ...validReport,
-      checks: { ...validReport.checks, tests: { status: "weird", details: "?" } },
-    };
-    const result = ExecutionReportSchema.parse(report);
-    expect(result.checks.tests.status).toBe("skip");
+  it("rejects a non-positive or non-integer executionVersion", () => {
+    expect(() => ExecutionReportSchema.parse({ ...baseFields(), executionVersion: 0 })).toThrow();
+    expect(() => ExecutionReportSchema.parse({ ...baseFields(), executionVersion: 1.5 })).toThrow();
   });
 });

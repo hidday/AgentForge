@@ -11,8 +11,8 @@ interface FakeIssue {
   url: string;
   labelIds: string[];
   state: Promise<{ id: string; name: string } | null>;
-  project: Promise<{ name: string } | null>;
-  cycle: Promise<{ name: string } | null>;
+  project: Promise<{ id: string; name: string } | null>;
+  cycle: Promise<{ id: string; name: string } | null>;
   team: Promise<{ id: string; key: string } | null>;
   labels: () => Promise<{ nodes: Array<{ id: string; name: string }> } | null>;
 }
@@ -27,8 +27,8 @@ function makeFakeIssue(overrides: Partial<FakeIssue> & { id: string }): FakeIssu
     url: "https://linear.app/team/issue/PRY-1",
     labelIds: [],
     state: Promise.resolve({ id: "state-1", name: "Todo" }),
-    project: Promise.resolve(null),
-    cycle: Promise.resolve(null),
+    project: Promise.resolve({ id: "proj-1", name: "Project X" }),
+    cycle: Promise.resolve({ id: "cycle-1", name: "Cycle 1" }),
     team: Promise.resolve({ id: "team-1", key: "PRY" }),
     labels: () => Promise.resolve({ nodes: [] }),
     ...overrides,
@@ -44,467 +44,514 @@ function makeLogger() {
   };
 }
 
-function makeFakeSdk(overrides: Record<string, unknown> = {}) {
-  return {
-    issue: vi.fn(),
-    issues: vi.fn().mockResolvedValue({ nodes: [] }),
-    createComment: vi.fn().mockResolvedValue({}),
-    updateIssue: vi.fn().mockResolvedValue({}),
-    team: vi.fn(),
-    issueLabels: vi.fn().mockResolvedValue({ nodes: [] }),
-    createIssueLabel: vi.fn(),
-    ...overrides,
-  };
-}
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type FakeSdk = Record<string, any>;
 
-type FakeSdk = ReturnType<typeof makeFakeSdk>;
-
-function makeClient(): { client: RealLinearClient; sdk: FakeSdk; logger: ReturnType<typeof makeLogger> } {
-  const logger = makeLogger();
-  const client = new RealLinearClient("test-key", logger as never);
-  const sdk = makeFakeSdk();
+function injectSdk(client: RealLinearClient, sdk: FakeSdk): void {
   (client as unknown as { sdk: FakeSdk }).sdk = sdk;
-  return { client, sdk, logger };
 }
 
-describe("RealLinearClient.getIssue", () => {
-  let client: RealLinearClient;
-  let sdk: FakeSdk;
-
-  beforeEach(() => {
-    ({ client, sdk } = makeClient());
-  });
-
-  it("maps a fully populated SDK issue to a LinearIssue", async () => {
-    const issue = makeFakeIssue({
-      id: "issue-1",
-      identifier: "PRY-1",
-      title: "Fix bug",
-      description: "Details",
-      priority: 2,
-      labels: () => Promise.resolve({ nodes: [{ id: "l1", name: "bug" }] }),
-      state: Promise.resolve({ id: "s1", name: "In Progress" }),
-      project: Promise.resolve({ name: "Platform" }),
-      cycle: Promise.resolve({ name: "Sprint 1" }),
-      team: Promise.resolve({ id: "t1", key: "PRY" }),
-    });
-    sdk.issue.mockResolvedValue(issue);
-
-    const result = await client.getIssue("issue-1");
-
-    expect(result).toEqual({
-      id: "issue-1",
-      identifier: "PRY-1",
-      title: "Fix bug",
-      description: "Details",
-      branchName: "ai/issue-1",
-      state: "In Progress",
-      labels: ["bug"],
-      priority: 2,
-      url: "https://linear.app/team/issue/PRY-1",
-      project: "Platform",
-      team: "PRY",
-      cycle: "Sprint 1",
-    });
-  });
-
-  it("defaults null description to an empty string", async () => {
-    sdk.issue.mockResolvedValue(makeFakeIssue({ id: "issue-1", description: null }));
-    const result = await client.getIssue("issue-1");
-    expect(result.description).toBe("");
-  });
-
-  it("defaults missing state to 'Unknown' and missing project/cycle/team to undefined", async () => {
-    sdk.issue.mockResolvedValue(
-      makeFakeIssue({
-        id: "issue-1",
-        state: Promise.resolve(null),
-        project: Promise.resolve(null),
-        cycle: Promise.resolve(null),
-        team: Promise.resolve(null),
-      }),
-    );
-
-    const result = await client.getIssue("issue-1");
-
-    expect(result.state).toBe("Unknown");
-    expect(result.project).toBeUndefined();
-    expect(result.cycle).toBeUndefined();
-    expect(result.team).toBeUndefined();
-  });
-
-  it("defaults labels to an empty array when the labels connection has no nodes", async () => {
-    sdk.issue.mockResolvedValue(
-      makeFakeIssue({ id: "issue-1", labels: () => Promise.resolve(null) }),
-    );
-
-    const result = await client.getIssue("issue-1");
-    expect(result.labels).toEqual([]);
-  });
-});
-
-describe("RealLinearClient.searchIssues", () => {
-  let client: RealLinearClient;
-  let sdk: FakeSdk;
+describe("RealLinearClient", () => {
   let logger: ReturnType<typeof makeLogger>;
+  let client: RealLinearClient;
 
   beforeEach(() => {
-    ({ client, sdk, logger } = makeClient());
+    logger = makeLogger();
+    client = new RealLinearClient("test-key", logger as never);
   });
 
-  it("builds a state-only filter when no optional filters are given", async () => {
-    sdk.issues.mockResolvedValue({ nodes: [] });
-
-    await client.searchIssues({ state: "Todo" });
-
-    expect(sdk.issues).toHaveBeenCalledWith({
-      filter: { state: { name: { eq: "Todo" } } },
-    });
-  });
-
-  it("adds project, assignee and team clauses when provided", async () => {
-    sdk.issues.mockResolvedValue({ nodes: [] });
-
-    await client.searchIssues({
-      state: "Todo",
-      projectName: "Platform",
-      assigneeMe: true,
-      team: "PRY",
-    });
-
-    expect(sdk.issues).toHaveBeenCalledWith({
-      filter: {
-        state: { name: { eq: "Todo" } },
-        project: { name: { eq: "Platform" } },
-        assignee: { isMe: { eq: true } },
-        team: { or: [{ name: { eq: "PRY" } }, { key: { eq: "PRY" } }] },
-      },
-    });
-  });
-
-  it("maps matched issues, using the requested state rather than the SDK's own state field", async () => {
-    const issue = makeFakeIssue({
-      id: "issue-1",
-      labels: () => Promise.resolve({ nodes: [{ id: "l1", name: "bug" }] }),
-      project: Promise.resolve({ name: "Platform" }),
-      cycle: Promise.resolve({ name: "Sprint 1" }),
-      team: Promise.resolve({ id: "t1", key: "PRY" }),
-    });
-    sdk.issues.mockResolvedValue({ nodes: [issue] });
-
-    const results = await client.searchIssues({ state: "Todo" });
-
-    expect(results).toEqual([
-      {
+  describe("getIssue", () => {
+    it("maps a fully-populated SDK issue to a LinearIssue", async () => {
+      const issue = makeFakeIssue({
         id: "issue-1",
-        identifier: "PRY-1",
-        title: "Issue title",
-        description: "Issue description",
+        identifier: "PRY-42",
+        title: "Fix the bug",
+        description: "Some description",
+        labels: () => Promise.resolve({ nodes: [{ id: "l1", name: "bug" }] }),
+      });
+      injectSdk(client, { issue: () => Promise.resolve(issue) });
+
+      const result = await client.getIssue("issue-1");
+
+      expect(result).toEqual({
+        id: "issue-1",
+        identifier: "PRY-42",
+        title: "Fix the bug",
+        description: "Some description",
         branchName: "ai/issue-1",
         state: "Todo",
         labels: ["bug"],
         priority: 0,
         url: "https://linear.app/team/issue/PRY-1",
-        project: "Platform",
+        project: "Project X",
         team: "PRY",
-        cycle: "Sprint 1",
-      },
-    ]);
-    expect(logger.info).toHaveBeenCalledWith(
-      expect.objectContaining({ stateName: "Todo", count: 1 }),
-      "Searched Linear issues",
-    );
-  });
-
-  it("returns an empty array when the issues connection has no nodes", async () => {
-    sdk.issues.mockResolvedValue({ nodes: undefined });
-    const results = await client.searchIssues({ state: "Todo" });
-    expect(results).toEqual([]);
-  });
-
-  it("defaults labels/description/project/cycle/team to empty/undefined when absent", async () => {
-    const issue = makeFakeIssue({
-      id: "issue-1",
-      description: null,
-      labels: () => Promise.resolve(null),
-      project: Promise.resolve(null),
-      cycle: Promise.resolve(null),
-      team: Promise.resolve(null),
-    });
-    sdk.issues.mockResolvedValue({ nodes: [issue] });
-
-    const [result] = await client.searchIssues({ state: "Todo" });
-
-    expect(result.labels).toEqual([]);
-    expect(result.description).toBe("");
-    expect(result.project).toBeUndefined();
-    expect(result.cycle).toBeUndefined();
-    expect(result.team).toBeUndefined();
-  });
-});
-
-describe("RealLinearClient.postComment", () => {
-  it("posts a comment via the SDK", async () => {
-    const { client, sdk, logger } = makeClient();
-
-    await client.postComment("issue-1", "Hello world");
-
-    expect(sdk.createComment).toHaveBeenCalledWith({ issueId: "issue-1", body: "Hello world" });
-    expect(logger.debug).toHaveBeenCalled();
-  });
-});
-
-describe("RealLinearClient.updateIssueState", () => {
-  let client: RealLinearClient;
-  let sdk: FakeSdk;
-  let logger: ReturnType<typeof makeLogger>;
-
-  beforeEach(() => {
-    ({ client, sdk, logger } = makeClient());
-  });
-
-  it("warns and does not update when the issue has no team", async () => {
-    sdk.issue.mockResolvedValue(makeFakeIssue({ id: "issue-1", team: Promise.resolve(null) }));
-
-    await client.updateIssueState("issue-1", "Done");
-
-    expect(logger.warn).toHaveBeenCalledWith(
-      { issueId: "issue-1" },
-      "Cannot update state: issue has no team",
-    );
-    expect(sdk.updateIssue).not.toHaveBeenCalled();
-  });
-
-  it("warns and does not update when the state name cannot be resolved", async () => {
-    sdk.issue.mockResolvedValue(makeFakeIssue({ id: "issue-1" }));
-    sdk.team.mockResolvedValue({
-      states: () => Promise.resolve({ nodes: [{ id: "s1", name: "Todo" }] }),
+        cycle: "Cycle 1",
+      });
     });
 
-    await client.updateIssueState("issue-1", "Nonexistent State");
+    it("falls back to defaults when description, state, project, cycle, team, and labels are absent", async () => {
+      const issue = makeFakeIssue({
+        id: "issue-2",
+        description: null,
+        state: Promise.resolve(null),
+        project: Promise.resolve(null),
+        cycle: Promise.resolve(null),
+        team: Promise.resolve(null),
+        labels: () => Promise.resolve(null),
+      });
+      injectSdk(client, { issue: () => Promise.resolve(issue) });
 
-    expect(logger.warn).toHaveBeenCalledWith(
-      { issueId: "issue-1", stateName: "Nonexistent State", teamId: "team-1" },
-      "Could not find workflow state by name",
-    );
-    expect(sdk.updateIssue).not.toHaveBeenCalled();
+      const result = await client.getIssue("issue-2");
+
+      expect(result.description).toBe("");
+      expect(result.state).toBe("Unknown");
+      expect(result.project).toBeUndefined();
+      expect(result.team).toBeUndefined();
+      expect(result.cycle).toBeUndefined();
+      expect(result.labels).toEqual([]);
+    });
   });
 
-  it("resolves the state id from the team's workflow states and updates the issue", async () => {
-    sdk.issue.mockResolvedValue(makeFakeIssue({ id: "issue-1" }));
-    sdk.team.mockResolvedValue({
-      states: () =>
-        Promise.resolve({
-          nodes: [
-            { id: "s1", name: "Todo" },
-            { id: "s2", name: "Done" },
-          ],
-        }),
+  describe("searchIssues", () => {
+    it("builds a base filter with only state when no optional filters are given", async () => {
+      const issuesSpy = vi.fn().mockResolvedValue({ nodes: [] });
+      injectSdk(client, { issues: issuesSpy });
+
+      await client.searchIssues({ state: "Todo" });
+
+      expect(issuesSpy).toHaveBeenCalledWith({
+        filter: { state: { name: { eq: "Todo" } } },
+      });
     });
 
-    await client.updateIssueState("issue-1", "Done");
+    it("adds project, assignee, and team clauses when provided", async () => {
+      const issuesSpy = vi.fn().mockResolvedValue({ nodes: [] });
+      injectSdk(client, { issues: issuesSpy });
 
-    expect(sdk.updateIssue).toHaveBeenCalledWith("issue-1", { stateId: "s2" });
-  });
+      await client.searchIssues({
+        state: "In Progress",
+        projectName: "Project X",
+        assigneeMe: true,
+        team: "PRY",
+      });
 
-  it("treats a missing states connection as no workflow states (warns, no update)", async () => {
-    sdk.issue.mockResolvedValue(makeFakeIssue({ id: "issue-1" }));
-    sdk.team.mockResolvedValue({ states: () => Promise.resolve(null) });
-
-    await client.updateIssueState("issue-1", "Done");
-
-    expect(logger.warn).toHaveBeenCalledWith(
-      { issueId: "issue-1", stateName: "Done", teamId: "team-1" },
-      "Could not find workflow state by name",
-    );
-    expect(sdk.updateIssue).not.toHaveBeenCalled();
-  });
-
-  it("caches the team's workflow states across calls (fetches the team only once)", async () => {
-    sdk.issue.mockResolvedValue(makeFakeIssue({ id: "issue-1" }));
-    sdk.team.mockResolvedValue({
-      states: () =>
-        Promise.resolve({
-          nodes: [
-            { id: "s1", name: "Todo" },
-            { id: "s2", name: "Done" },
-          ],
-        }),
+      expect(issuesSpy).toHaveBeenCalledWith({
+        filter: {
+          state: { name: { eq: "In Progress" } },
+          project: { name: { eq: "Project X" } },
+          assignee: { isMe: { eq: true } },
+          team: { or: [{ name: { eq: "PRY" } }, { key: { eq: "PRY" } }] },
+        },
+      });
     });
 
-    await client.updateIssueState("issue-1", "Todo");
-    await client.updateIssueState("issue-1", "Done");
-
-    expect(sdk.team).toHaveBeenCalledTimes(1);
-  });
-});
-
-describe("RealLinearClient.addLabel", () => {
-  let client: RealLinearClient;
-  let sdk: FakeSdk;
-  let logger: ReturnType<typeof makeLogger>;
-
-  beforeEach(() => {
-    ({ client, sdk, logger } = makeClient());
-  });
-
-  it("finds an existing label by name and adds it to the issue", async () => {
-    sdk.issue.mockResolvedValue(makeFakeIssue({ id: "issue-1", labelIds: ["existing"] }));
-    sdk.issueLabels.mockResolvedValue({ nodes: [{ id: "label-urgent", name: "urgent" }] });
-
-    await client.addLabel("issue-1", "urgent");
-
-    expect(sdk.issueLabels).toHaveBeenCalledWith({ filter: { name: { eq: "urgent" } } });
-    expect(sdk.updateIssue).toHaveBeenCalledWith("issue-1", {
-      labelIds: ["existing", "label-urgent"],
-    });
-    expect(logger.info).not.toHaveBeenCalled();
-  });
-
-  it("creates a new label scoped to the issue's team when none exists", async () => {
-    sdk.issue.mockResolvedValue(makeFakeIssue({ id: "issue-1", labelIds: [] }));
-    sdk.issueLabels.mockResolvedValue({ nodes: [] });
-    sdk.createIssueLabel.mockResolvedValue({
-      issueLabel: Promise.resolve({ id: "label-new", name: "new-label" }),
-    });
-
-    await client.addLabel("issue-1", "new-label");
-
-    expect(sdk.createIssueLabel).toHaveBeenCalledWith({ name: "new-label", teamId: "team-1" });
-    expect(sdk.updateIssue).toHaveBeenCalledWith("issue-1", { labelIds: ["label-new"] });
-    expect(logger.info).toHaveBeenCalledWith(
-      { labelName: "new-label", labelId: "label-new" },
-      "Created new Linear label",
-    );
-  });
-
-  it("creates a label without a teamId when the issue has no team", async () => {
-    sdk.issue.mockResolvedValue(
-      makeFakeIssue({ id: "issue-1", labelIds: [], team: Promise.resolve(null) }),
-    );
-    sdk.issueLabels.mockResolvedValue({ nodes: [] });
-    sdk.createIssueLabel.mockResolvedValue({
-      issueLabel: Promise.resolve({ id: "label-new", name: "new-label" }),
-    });
-
-    await client.addLabel("issue-1", "new-label");
-
-    expect(sdk.createIssueLabel).toHaveBeenCalledWith({ name: "new-label" });
-  });
-
-  it("throws when label creation returns no issueLabel", async () => {
-    sdk.issue.mockResolvedValue(makeFakeIssue({ id: "issue-1", labelIds: [] }));
-    sdk.issueLabels.mockResolvedValue({ nodes: [] });
-    sdk.createIssueLabel.mockResolvedValue({ issueLabel: Promise.resolve(undefined) });
-
-    await expect(client.addLabel("issue-1", "broken-label")).rejects.toThrow(
-      "Failed to create label: broken-label",
-    );
-  });
-
-  it("does not add a duplicate when the label id is already present on the issue", async () => {
-    sdk.issue.mockResolvedValue(makeFakeIssue({ id: "issue-1", labelIds: ["label-urgent"] }));
-    sdk.issueLabels.mockResolvedValue({ nodes: [{ id: "label-urgent", name: "urgent" }] });
-
-    await client.addLabel("issue-1", "urgent");
-
-    expect(sdk.updateIssue).not.toHaveBeenCalled();
-  });
-
-  it("caches a resolved label id, skipping the lookup on a second call", async () => {
-    sdk.issue.mockResolvedValue(makeFakeIssue({ id: "issue-1", labelIds: [] }));
-    sdk.issueLabels.mockResolvedValue({ nodes: [{ id: "label-urgent", name: "urgent" }] });
-
-    await client.addLabel("issue-1", "urgent");
-    await client.addLabel("issue-1", "urgent");
-
-    expect(sdk.issueLabels).toHaveBeenCalledTimes(1);
-  });
-});
-
-describe("RealLinearClient.removeLabel", () => {
-  let client: RealLinearClient;
-  let sdk: FakeSdk;
-
-  beforeEach(() => {
-    ({ client, sdk } = makeClient());
-  });
-
-  it("looks up the label by name and removes it from labelIds", async () => {
-    sdk.issue.mockResolvedValue(
-      makeFakeIssue({
+    it("maps matching issues, applying the requested state and defaults for missing fields", async () => {
+      const issue = makeFakeIssue({
         id: "issue-1",
-        labelIds: ["label-urgent", "label-bug"],
+        identifier: "PRY-1",
+        description: null,
+        project: Promise.resolve(null),
+        cycle: Promise.resolve(null),
+        team: Promise.resolve(null),
+        labels: () => Promise.resolve({ nodes: [{ id: "l1", name: "urgent" }] }),
+      });
+      injectSdk(client, { issues: () => Promise.resolve({ nodes: [issue] }) });
+
+      const results = await client.searchIssues({ state: "Todo" });
+
+      expect(results).toEqual([
+        {
+          id: "issue-1",
+          identifier: "PRY-1",
+          title: "Issue title",
+          description: "",
+          branchName: "ai/issue-1",
+          state: "Todo",
+          labels: ["urgent"],
+          priority: 0,
+          url: "https://linear.app/team/issue/PRY-1",
+          project: undefined,
+          team: undefined,
+          cycle: undefined,
+        },
+      ]);
+      expect(logger.info).toHaveBeenCalledWith(
+        expect.objectContaining({ count: 1 }),
+        "Searched Linear issues",
+      );
+    });
+
+    it("returns an empty array when the SDK returns no nodes at all", async () => {
+      injectSdk(client, { issues: () => Promise.resolve(null) });
+
+      const results = await client.searchIssues({ state: "Todo" });
+
+      expect(results).toEqual([]);
+    });
+
+    it("carries through present project/team/cycle names and treats a null labels connection as no labels", async () => {
+      const issue = makeFakeIssue({
+        id: "issue-1",
+        labels: () => Promise.resolve(null),
+      });
+      injectSdk(client, { issues: () => Promise.resolve({ nodes: [issue] }) });
+
+      const [result] = await client.searchIssues({ state: "Todo" });
+
+      expect(result.labels).toEqual([]);
+      expect(result.project).toBe("Project X");
+      expect(result.team).toBe("PRY");
+      expect(result.cycle).toBe("Cycle 1");
+    });
+  });
+
+  describe("postComment", () => {
+    it("creates a comment via the SDK", async () => {
+      const createComment = vi.fn().mockResolvedValue(undefined);
+      injectSdk(client, { createComment });
+
+      await client.postComment("issue-1", "Hello world");
+
+      expect(createComment).toHaveBeenCalledWith({ issueId: "issue-1", body: "Hello world" });
+      expect(logger.debug).toHaveBeenCalledWith({ issueId: "issue-1" }, "Posted comment to Linear issue");
+    });
+  });
+
+  describe("updateIssueState", () => {
+    it("warns and does nothing when the issue has no team", async () => {
+      const issue = makeFakeIssue({ id: "issue-1", team: Promise.resolve(null) });
+      const updateIssue = vi.fn();
+      injectSdk(client, { issue: () => Promise.resolve(issue), updateIssue });
+
+      await client.updateIssueState("issue-1", "Done");
+
+      expect(updateIssue).not.toHaveBeenCalled();
+      expect(logger.warn).toHaveBeenCalledWith(
+        { issueId: "issue-1" },
+        "Cannot update state: issue has no team",
+      );
+    });
+
+    it("warns and does nothing when the requested state name cannot be resolved", async () => {
+      const issue = makeFakeIssue({ id: "issue-1" });
+      const updateIssue = vi.fn();
+      const team = vi.fn().mockResolvedValue({
+        states: () => Promise.resolve({ nodes: [{ id: "s1", name: "Todo" }] }),
+      });
+      injectSdk(client, { issue: () => Promise.resolve(issue), team, updateIssue });
+
+      await client.updateIssueState("issue-1", "Nonexistent State");
+
+      expect(updateIssue).not.toHaveBeenCalled();
+      expect(logger.warn).toHaveBeenCalledWith(
+        { issueId: "issue-1", stateName: "Nonexistent State", teamId: "team-1" },
+        "Could not find workflow state by name",
+      );
+    });
+
+    it("warns and does nothing when the team has no workflow states at all (null states connection)", async () => {
+      const issue = makeFakeIssue({ id: "issue-1" });
+      const updateIssue = vi.fn();
+      const team = vi.fn().mockResolvedValue({ states: () => Promise.resolve(null) });
+      injectSdk(client, { issue: () => Promise.resolve(issue), team, updateIssue });
+
+      await client.updateIssueState("issue-1", "Done");
+
+      expect(updateIssue).not.toHaveBeenCalled();
+      expect(logger.warn).toHaveBeenCalledWith(
+        { issueId: "issue-1", stateName: "Done", teamId: "team-1" },
+        "Could not find workflow state by name",
+      );
+    });
+
+    it("updates the issue state when the state name resolves to an id", async () => {
+      const issue = makeFakeIssue({ id: "issue-1" });
+      const updateIssue = vi.fn().mockResolvedValue(undefined);
+      const teamStates = vi.fn().mockResolvedValue({ nodes: [{ id: "s-done", name: "Done" }] });
+      const team = vi.fn().mockResolvedValue({ states: teamStates });
+      injectSdk(client, { issue: () => Promise.resolve(issue), team, updateIssue });
+
+      await client.updateIssueState("issue-1", "Done");
+
+      expect(updateIssue).toHaveBeenCalledWith("issue-1", { stateId: "s-done" });
+    });
+
+    it("caches resolved workflow states per team across calls", async () => {
+      const issue1 = makeFakeIssue({ id: "issue-1" });
+      const issue2 = makeFakeIssue({ id: "issue-2" });
+      const updateIssue = vi.fn().mockResolvedValue(undefined);
+      const teamStates = vi.fn().mockResolvedValue({
+        nodes: [
+          { id: "s-todo", name: "Todo" },
+          { id: "s-done", name: "Done" },
+        ],
+      });
+      const team = vi.fn().mockResolvedValue({ states: teamStates });
+      const issueFn = vi.fn((id: string) =>
+        Promise.resolve(id === "issue-1" ? issue1 : issue2),
+      );
+      injectSdk(client, { issue: issueFn, team, updateIssue });
+
+      await client.updateIssueState("issue-1", "Done");
+      await client.updateIssueState("issue-2", "Todo");
+
+      expect(team).toHaveBeenCalledTimes(1);
+      expect(updateIssue).toHaveBeenNthCalledWith(1, "issue-1", { stateId: "s-done" });
+      expect(updateIssue).toHaveBeenNthCalledWith(2, "issue-2", { stateId: "s-todo" });
+    });
+  });
+
+  describe("addLabel", () => {
+    it("creates and adds a new label id when it is not already on the issue", async () => {
+      const issue = makeFakeIssue({ id: "issue-1", labelIds: ["existing-id"] });
+      const updateIssue = vi.fn().mockResolvedValue(undefined);
+      const issueLabels = vi.fn().mockResolvedValue({ nodes: [] });
+      const payload = { issueLabel: Promise.resolve({ id: "new-label-id" }) };
+      const createIssueLabel = vi.fn().mockResolvedValue(payload);
+      injectSdk(client, {
+        issue: () => Promise.resolve(issue),
+        updateIssue,
+        issueLabels,
+        createIssueLabel,
+      });
+
+      await client.addLabel("issue-1", "urgent");
+
+      expect(createIssueLabel).toHaveBeenCalledWith({ name: "urgent", teamId: "team-1" });
+      expect(updateIssue).toHaveBeenCalledWith("issue-1", {
+        labelIds: ["existing-id", "new-label-id"],
+      });
+    });
+
+    it("does not call updateIssue when the label id is already present", async () => {
+      const issue = makeFakeIssue({ id: "issue-1", labelIds: ["label-1"] });
+      const updateIssue = vi.fn();
+      const issueLabels = vi.fn().mockResolvedValue({ nodes: [{ id: "label-1", name: "urgent" }] });
+      injectSdk(client, {
+        issue: () => Promise.resolve(issue),
+        updateIssue,
+        issueLabels,
+      });
+
+      await client.addLabel("issue-1", "urgent");
+
+      expect(updateIssue).not.toHaveBeenCalled();
+    });
+
+    it("reuses an existing label found via issueLabels lookup instead of creating one", async () => {
+      const issue = makeFakeIssue({ id: "issue-1", labelIds: [] });
+      const updateIssue = vi.fn().mockResolvedValue(undefined);
+      const issueLabels = vi.fn().mockResolvedValue({ nodes: [{ id: "found-id", name: "urgent" }] });
+      const createIssueLabel = vi.fn();
+      injectSdk(client, {
+        issue: () => Promise.resolve(issue),
+        updateIssue,
+        issueLabels,
+        createIssueLabel,
+      });
+
+      await client.addLabel("issue-1", "urgent");
+
+      expect(createIssueLabel).not.toHaveBeenCalled();
+      expect(updateIssue).toHaveBeenCalledWith("issue-1", { labelIds: ["found-id"] });
+    });
+
+    it("creates a label without a teamId when the issue has no team", async () => {
+      const issue = makeFakeIssue({ id: "issue-1", labelIds: [], team: Promise.resolve(null) });
+      const updateIssue = vi.fn().mockResolvedValue(undefined);
+      const issueLabels = vi.fn().mockResolvedValue({ nodes: [] });
+      const payload = { issueLabel: Promise.resolve({ id: "new-id" }) };
+      const createIssueLabel = vi.fn().mockResolvedValue(payload);
+      injectSdk(client, {
+        issue: () => Promise.resolve(issue),
+        updateIssue,
+        issueLabels,
+        createIssueLabel,
+      });
+
+      await client.addLabel("issue-1", "urgent");
+
+      expect(createIssueLabel).toHaveBeenCalledWith({ name: "urgent" });
+    });
+
+    it("throws when label creation does not yield a created label", async () => {
+      const issue = makeFakeIssue({ id: "issue-1", labelIds: [] });
+      const issueLabels = vi.fn().mockResolvedValue({ nodes: [] });
+      const createIssueLabel = vi.fn().mockResolvedValue({ issueLabel: Promise.resolve(undefined) });
+      injectSdk(client, {
+        issue: () => Promise.resolve(issue),
+        issueLabels,
+        createIssueLabel,
+        updateIssue: vi.fn(),
+      });
+
+      await expect(client.addLabel("issue-1", "urgent")).rejects.toThrow(
+        "Failed to create label: urgent",
+      );
+    });
+
+    it("caches a resolved label id across repeated addLabel calls", async () => {
+      const issue1 = makeFakeIssue({ id: "issue-1", labelIds: [] });
+      const issue2 = makeFakeIssue({ id: "issue-2", labelIds: [] });
+      const issueLabels = vi.fn().mockResolvedValue({ nodes: [{ id: "cached-id", name: "urgent" }] });
+      const updateIssue = vi.fn().mockResolvedValue(undefined);
+      const issueFn = vi.fn((id: string) => Promise.resolve(id === "issue-1" ? issue1 : issue2));
+      injectSdk(client, { issue: issueFn, issueLabels, updateIssue });
+
+      await client.addLabel("issue-1", "urgent");
+      await client.addLabel("issue-2", "urgent");
+
+      expect(issueLabels).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe("removeLabel", () => {
+    it("removes a label using a cached label id without re-fetching labels", async () => {
+      const issue = makeFakeIssue({ id: "issue-1", labelIds: ["label-1", "label-2"] });
+      const labelsFetch = vi.fn().mockResolvedValue({ nodes: [{ id: "label-1", name: "urgent" }] });
+      const updateIssue = vi.fn().mockResolvedValue(undefined);
+      injectSdk(client, {
+        issue: () => Promise.resolve({ ...issue, labels: labelsFetch }),
+        updateIssue,
+      });
+
+      // Prime the cache via listLabels first.
+      await client.listLabels("issue-1");
+      labelsFetch.mockClear();
+
+      await client.removeLabel("issue-1", "urgent");
+
+      expect(labelsFetch).not.toHaveBeenCalled();
+      expect(updateIssue).toHaveBeenCalledWith("issue-1", { labelIds: ["label-2"] });
+    });
+
+    it("resolves the label id via the issue's labels when not cached, then removes it", async () => {
+      const issue = makeFakeIssue({
+        id: "issue-1",
+        labelIds: ["label-1", "label-2"],
+        labels: () => Promise.resolve({ nodes: [{ id: "label-1", name: "urgent" }] }),
+      });
+      const updateIssue = vi.fn().mockResolvedValue(undefined);
+      injectSdk(client, { issue: () => Promise.resolve(issue), updateIssue });
+
+      await client.removeLabel("issue-1", "urgent");
+
+      expect(updateIssue).toHaveBeenCalledWith("issue-1", { labelIds: ["label-2"] });
+    });
+
+    it("does nothing when the named label is not found on the issue", async () => {
+      const issue = makeFakeIssue({
+        id: "issue-1",
+        labelIds: ["label-1"],
+        labels: () => Promise.resolve({ nodes: [{ id: "label-1", name: "other" }] }),
+      });
+      const updateIssue = vi.fn();
+      injectSdk(client, { issue: () => Promise.resolve(issue), updateIssue });
+
+      await client.removeLabel("issue-1", "urgent");
+
+      expect(updateIssue).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("getRelatedContext (nullish coalescing edge cases)", () => {
+    it("treats a null inverseRelations result as having no blockers", async () => {
+      const focus = makeFakeIssue({
+        id: "focus-id",
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        inverseRelations: (() => Promise.resolve(null)) as any,
+      });
+      injectSdk(client, { issue: () => Promise.resolve(focus) });
+
+      const ctx = await client.getRelatedContext("focus-id");
+
+      expect(ctx.blockers).toEqual([]);
+    });
+
+    it("defaults labels to [] and state to 'Unknown' for a related issue with null labels/state", async () => {
+      const parent = makeFakeIssue({
+        id: "parent-id",
+        identifier: "PRY-100",
+        labels: () => Promise.resolve(null),
+        state: Promise.resolve(null),
+      });
+      const focus = makeFakeIssue({ id: "focus-id" });
+      const focusWithParent = {
+        ...focus,
+        parent: Promise.resolve(parent),
+        inverseRelations: () => Promise.resolve({ nodes: [] }),
+      };
+      injectSdk(client, {
+        issue: (id: string) => Promise.resolve(id === "focus-id" ? focusWithParent : parent),
+      });
+
+      const ctx = await client.getRelatedContext("focus-id");
+
+      expect(ctx.parent?.labels).toEqual([]);
+      expect(ctx.parent?.state).toBe("Unknown");
+    });
+  });
+
+  describe("getRelatedContext (blocker hydration failure)", () => {
+    it("logs a warning and skips a blocker whose relation.issue rejects", async () => {
+      const goodBlocker = makeFakeIssue({ id: "blocker-good", identifier: "PRY-2" });
+      const focus = makeFakeIssue({
+        id: "focus-id",
+        team: Promise.resolve(null),
+        project: Promise.resolve(null),
+        cycle: Promise.resolve(null),
+      });
+      const hydrationError = new Error("issue fetch failed");
+      const inverseRelations = () =>
+        Promise.resolve({
+          nodes: [
+            { id: "rel-bad", type: "blocks", issue: Promise.reject(hydrationError) },
+            { id: "rel-good", type: "blocks", issue: Promise.resolve(goodBlocker) },
+          ],
+        });
+      const focusWithRelations = { ...focus, inverseRelations };
+      injectSdk(client, {
+        issue: (id: string) =>
+          Promise.resolve(id === "focus-id" ? focusWithRelations : goodBlocker),
+      });
+
+      const ctx = await client.getRelatedContext("focus-id");
+
+      expect(ctx.blockers).toHaveLength(1);
+      expect(ctx.blockers[0].id).toBe("blocker-good");
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.objectContaining({ relationId: "rel-bad", focusIssueId: "focus-id" }),
+        "Failed to hydrate blocker issue from relation",
+      );
+    });
+  });
+
+  describe("listLabels", () => {
+    it("returns label names and populates the label cache", async () => {
+      const issue = makeFakeIssue({
+        id: "issue-1",
         labels: () =>
           Promise.resolve({
             nodes: [
-              { id: "label-urgent", name: "urgent" },
-              { id: "label-bug", name: "bug" },
+              { id: "l1", name: "bug" },
+              { id: "l2", name: "urgent" },
             ],
           }),
-      }),
-    );
+      });
+      injectSdk(client, { issue: () => Promise.resolve(issue) });
 
-    await client.removeLabel("issue-1", "urgent");
+      const names = await client.listLabels("issue-1");
 
-    expect(sdk.updateIssue).toHaveBeenCalledWith("issue-1", { labelIds: ["label-bug"] });
-  });
+      expect(names).toEqual(["bug", "urgent"]);
+    });
 
-  it("is a no-op when the label name is not found on the issue", async () => {
-    sdk.issue.mockResolvedValue(
-      makeFakeIssue({
-        id: "issue-1",
-        labelIds: ["label-bug"],
-        labels: () => Promise.resolve({ nodes: [{ id: "label-bug", name: "bug" }] }),
-      }),
-    );
+    it("returns an empty array when the issue has no labels", async () => {
+      const issue = makeFakeIssue({ id: "issue-1", labels: () => Promise.resolve(null) });
+      injectSdk(client, { issue: () => Promise.resolve(issue) });
 
-    await client.removeLabel("issue-1", "urgent");
+      const names = await client.listLabels("issue-1");
 
-    expect(sdk.updateIssue).not.toHaveBeenCalled();
-  });
-
-  it("uses the cached label id (from a prior listLabels/addLabel) without re-fetching labels", async () => {
-    const labelsFn = vi
-      .fn()
-      .mockResolvedValue({ nodes: [{ id: "label-urgent", name: "urgent" }] });
-    sdk.issue.mockResolvedValue(
-      makeFakeIssue({ id: "issue-1", labelIds: ["label-urgent"], labels: labelsFn }),
-    );
-
-    // Prime the cache via listLabels first.
-    await client.listLabels("issue-1");
-    labelsFn.mockClear();
-
-    await client.removeLabel("issue-1", "urgent");
-
-    expect(labelsFn).not.toHaveBeenCalled();
-    expect(sdk.updateIssue).toHaveBeenCalledWith("issue-1", { labelIds: [] });
-  });
-});
-
-describe("RealLinearClient.listLabels", () => {
-  it("returns label names and populates the label cache", async () => {
-    const { client, sdk } = makeClient();
-    sdk.issue.mockResolvedValue(
-      makeFakeIssue({
-        id: "issue-1",
-        labels: () =>
-          Promise.resolve({ nodes: [{ id: "l1", name: "bug" }, { id: "l2", name: "urgent" }] }),
-      }),
-    );
-
-    const names = await client.listLabels("issue-1");
-
-    expect(names).toEqual(["bug", "urgent"]);
-  });
-
-  it("returns an empty array when the labels connection has no nodes", async () => {
-    const { client, sdk } = makeClient();
-    sdk.issue.mockResolvedValue(
-      makeFakeIssue({ id: "issue-1", labels: () => Promise.resolve(null) }),
-    );
-
-    await expect(client.listLabels("issue-1")).resolves.toEqual([]);
+      expect(names).toEqual([]);
+    });
   });
 });

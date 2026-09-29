@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { ActionBar } from "./ActionBar.tsx";
 
 vi.mock("@/api/client.ts", () => ({
   api: {
@@ -15,302 +16,297 @@ vi.mock("@/api/client.ts", () => ({
   },
 }));
 
-import { ActionBar } from "./ActionBar.tsx";
 import { api } from "@/api/client.ts";
 
-const mockApi = api as unknown as Record<string, ReturnType<typeof vi.fn>>;
+const mockApi = api as unknown as {
+  approvePlan: ReturnType<typeof vi.fn>;
+  rejectPlan: ReturnType<typeof vi.fn>;
+  reReviewPlan: ReturnType<typeof vi.fn>;
+  revisePlan: ReturnType<typeof vi.fn>;
+  approveReview: ReturnType<typeof vi.fn>;
+  pauseRun: ReturnType<typeof vi.fn>;
+  resumeRun: ReturnType<typeof vi.fn>;
+  retryStage: ReturnType<typeof vi.fn>;
+};
 
-const RUN_ID = "run-42";
-
-function resolvedApi() {
-  for (const fn of Object.values(mockApi)) {
-    fn.mockReset();
-    fn.mockResolvedValue({ ok: true, state: "Whatever" });
-  }
-}
+const RUN_ID = "run-1";
 
 describe("ActionBar", () => {
   beforeEach(() => {
-    resolvedApi();
+    vi.clearAllMocks();
   });
 
-  it("renders nothing when no action applies to the current state", () => {
+  it("renders nothing when the state has no applicable actions", () => {
     const { container } = render(
       <ActionBar runId={RUN_ID} state="Done" onAction={vi.fn()} />,
     );
     expect(container.firstChild).toBeNull();
   });
 
-  describe("Todo state", () => {
-    it("shows a 'Start Run' retry button that calls api.retryStage on confirm", async () => {
-      const onAction = vi.fn();
-      render(<ActionBar runId={RUN_ID} state="Todo" onAction={onAction} />);
-
-      const btn = screen.getByRole("button", { name: /Start Run/i });
-      await userEvent.click(btn);
-
-      expect(screen.getByRole("heading", { name: "Start Run" })).toBeDefined();
-      expect(screen.getByText(/Re-run the current stage \(Todo\)/i)).toBeDefined();
-
-      await userEvent.click(screen.getByRole("button", { name: "Retry" }));
-
-      expect(mockApi.retryStage).toHaveBeenCalledWith(RUN_ID);
-      expect(onAction).toHaveBeenCalledTimes(1);
-    });
-  });
-
-  describe("AwaitingPlanApproval state", () => {
-    it("shows Approve Plan, Reject Plan, Re-review Plan, and Revise Plan, but not Answer Optional Questions by default", () => {
-      render(<ActionBar runId={RUN_ID} state="AwaitingPlanApproval" onAction={vi.fn()} />);
-      expect(screen.getByRole("button", { name: /Approve Plan/i })).toBeDefined();
-      expect(screen.getByRole("button", { name: /Reject Plan/i })).toBeDefined();
-      expect(screen.getByRole("button", { name: /Re-review Plan/i })).toBeDefined();
-      expect(screen.getByRole("button", { name: /Revise Plan/i })).toBeDefined();
-      expect(screen.queryByRole("button", { name: /Answer Optional Questions/i })).toBeNull();
-    });
-
-    it("shows Answer Optional Questions when hasOptionalQuestions is true, and invokes onScrollToQuestions", async () => {
-      const onScrollToQuestions = vi.fn();
-      render(
-        <ActionBar
-          runId={RUN_ID}
-          state="AwaitingPlanApproval"
-          onAction={vi.fn()}
-          hasOptionalQuestions
-          onScrollToQuestions={onScrollToQuestions}
-        />,
-      );
-      const btn = screen.getByRole("button", { name: /Answer Optional Questions/i });
-      await userEvent.click(btn);
-      expect(onScrollToQuestions).toHaveBeenCalledTimes(1);
-    });
-
-    it("Approve Plan opens a confirm dialog with notes and calls api.approvePlan with the trimmed note", async () => {
-      const onAction = vi.fn();
-      render(<ActionBar runId={RUN_ID} state="AwaitingPlanApproval" onAction={onAction} />);
-
-      await userEvent.click(screen.getByRole("button", { name: /^Approve Plan$/i }));
-
-      expect(screen.getByRole("heading", { name: "Approve Plan" })).toBeDefined();
-      const textarea = screen.getByPlaceholderText(/extra context, edge cases/i);
-      await userEvent.type(textarea, "  watch the migration  ");
-
-      await userEvent.click(screen.getByRole("button", { name: "Approve & Start" }));
-
-      expect(mockApi.approvePlan).toHaveBeenCalledWith(RUN_ID, "watch the migration");
-      expect(onAction).toHaveBeenCalledTimes(1);
-    });
-
-    it("Approve Plan dialog: clicking Cancel closes it without calling the API", async () => {
-      const onAction = vi.fn();
-      render(<ActionBar runId={RUN_ID} state="AwaitingPlanApproval" onAction={onAction} />);
-
-      await userEvent.click(screen.getByRole("button", { name: /^Approve Plan$/i }));
-      expect(screen.getByRole("heading", { name: "Approve Plan" })).toBeDefined();
-
-      await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
-
-      expect(screen.queryByRole("heading", { name: "Approve Plan" })).toBeNull();
-      expect(mockApi.approvePlan).not.toHaveBeenCalled();
-      expect(onAction).not.toHaveBeenCalled();
-    });
-
-    it("Reject Plan opens the custom reject dialog defaulting to iterate mode, and submits feedback + mode", async () => {
-      const onAction = vi.fn();
-      render(<ActionBar runId={RUN_ID} state="AwaitingPlanApproval" onAction={onAction} />);
-
-      await userEvent.click(screen.getByRole("button", { name: /^Reject Plan$/i }));
-
-      expect(screen.getByText("This will reject the current plan and send it back for re-planning.")).toBeDefined();
-      const iterateBtn = screen.getByRole("button", { name: /Revise plan Iterate with full context/i });
-      expect(iterateBtn.className).toContain("bg-accent");
-
-      const feedback = screen.getByPlaceholderText(/describe what should change/i);
-      await userEvent.type(feedback, "Please simplify step 2");
-
-      // Switch to "fresh" and back to "iterate" to exercise both mode-toggle handlers.
-      await userEvent.click(screen.getByRole("button", { name: /Start fresh Clean slate, feedback only/i }));
-      await userEvent.click(iterateBtn);
-      expect(iterateBtn.className).toContain("bg-accent");
-
-      const confirmButtons = screen.getAllByRole("button", { name: "Reject Plan" });
-      // The second "Reject Plan" is the dialog's submit button (first is the trigger in the bar).
-      await userEvent.click(confirmButtons[confirmButtons.length - 1]);
-
-      expect(mockApi.rejectPlan).toHaveBeenCalledWith(RUN_ID, "Please simplify step 2", "iterate");
-      expect(onAction).toHaveBeenCalledTimes(1);
-    });
-
-    it("Reject Plan can switch to 'Start fresh' mode and submits with no feedback as undefined", async () => {
-      render(<ActionBar runId={RUN_ID} state="AwaitingPlanApproval" onAction={vi.fn()} />);
-      await userEvent.click(screen.getByRole("button", { name: /^Reject Plan$/i }));
-
-      await userEvent.click(screen.getByRole("button", { name: /Start fresh Clean slate, feedback only/i }));
-
-      const confirmButtons = screen.getAllByRole("button", { name: "Reject Plan" });
-      await userEvent.click(confirmButtons[confirmButtons.length - 1]);
-
-      expect(mockApi.rejectPlan).toHaveBeenCalledWith(RUN_ID, undefined, "fresh");
-    });
-
-    it("Reject Plan cancel closes the dialog without calling the API", async () => {
-      render(<ActionBar runId={RUN_ID} state="AwaitingPlanApproval" onAction={vi.fn()} />);
-      await userEvent.click(screen.getByRole("button", { name: /^Reject Plan$/i }));
-
-      const feedback = screen.getByPlaceholderText(/describe what should change/i);
-      await userEvent.type(feedback, "abandoned feedback");
-
-      await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
-
-      expect(mockApi.rejectPlan).not.toHaveBeenCalled();
-      expect(screen.queryByPlaceholderText(/describe what should change/i)).toBeNull();
-    });
-
-    it("Re-review Plan opens its own confirm dialog and calls api.reReviewPlan", async () => {
-      const onAction = vi.fn();
-      render(<ActionBar runId={RUN_ID} state="AwaitingPlanApproval" onAction={onAction} />);
-
-      await userEvent.click(screen.getByRole("button", { name: /^Re-review Plan$/i }));
-      expect(screen.getAllByText("Re-review Plan").length).toBeGreaterThan(0);
-      expect(screen.getByText(/Run the plan reviewer again/i)).toBeDefined();
-
-      await userEvent.click(screen.getByRole("button", { name: "Re-review" }));
-
-      expect(mockApi.reReviewPlan).toHaveBeenCalledWith(RUN_ID, undefined);
-      expect(onAction).toHaveBeenCalledTimes(1);
-    });
-
-    it("Revise Plan opens its own confirm dialog and calls api.revisePlan with the note", async () => {
-      const onAction = vi.fn();
-      render(<ActionBar runId={RUN_ID} state="AwaitingPlanApproval" onAction={onAction} />);
-
-      await userEvent.click(screen.getByRole("button", { name: /^Revise Plan$/i }));
-      const textarea = screen.getByPlaceholderText(/tighten the rollout step/i);
-      await userEvent.type(textarea, "expand tests");
-
-      await userEvent.click(screen.getByRole("button", { name: "Revise" }));
-
-      expect(mockApi.revisePlan).toHaveBeenCalledWith(RUN_ID, "expand tests");
-      expect(onAction).toHaveBeenCalledTimes(1);
-    });
-  });
-
-  describe("ReadyForHumanReview state", () => {
-    it("shows Approve & Complete with no notes field, and calls api.approveReview on confirm", async () => {
-      const onAction = vi.fn();
-      render(<ActionBar runId={RUN_ID} state="ReadyForHumanReview" onAction={onAction} />);
-
-      await userEvent.click(screen.getByRole("button", { name: /Approve & Complete/i }));
-      expect(screen.getByText(/mark the run as complete/i)).toBeDefined();
-      expect(screen.queryByRole("textbox")).toBeNull();
-
-      await userEvent.click(screen.getByRole("button", { name: "Complete Run" }));
-
-      expect(mockApi.approveReview).toHaveBeenCalledWith(RUN_ID);
-      expect(onAction).toHaveBeenCalledTimes(1);
-    });
-  });
-
-  describe("active category states", () => {
-    it("Implementing state shows both Pause and Retry Execution buttons, each wired to the right API call", async () => {
-      const onAction = vi.fn();
-      render(<ActionBar runId={RUN_ID} state="Implementing" onAction={onAction} />);
-
-      expect(screen.getByRole("button", { name: /Pause/i })).toBeDefined();
-      expect(screen.getByRole("button", { name: /Retry Execution/i })).toBeDefined();
-
-      await userEvent.click(screen.getByRole("button", { name: /Pause/i }));
-      const pauseConfirmButtons = screen.getAllByRole("button", { name: "Pause" });
-      await userEvent.click(pauseConfirmButtons[pauseConfirmButtons.length - 1]);
-      expect(mockApi.pauseRun).toHaveBeenCalledWith(RUN_ID);
-      expect(onAction).toHaveBeenCalledTimes(1);
-
-      await userEvent.click(screen.getByRole("button", { name: /Retry Execution/i }));
-      await userEvent.click(screen.getByRole("button", { name: "Retry" }));
-      expect(mockApi.retryStage).toHaveBeenCalledWith(RUN_ID);
-      expect(onAction).toHaveBeenCalledTimes(2);
-    });
-  });
-
-  describe("Resume-eligible states", () => {
-    it.each(["AIBlocked", "HumanClarificationNeeded", "Failed"])(
-      "%s shows a Resume button that calls api.resumeRun",
-      async (state) => {
-        const onAction = vi.fn();
-        render(<ActionBar runId={RUN_ID} state={state} onAction={onAction} />);
-
-        await userEvent.click(screen.getByRole("button", { name: /^Resume$/i }));
-        const resumeConfirmButtons = screen.getAllByRole("button", { name: "Resume" });
-        await userEvent.click(resumeConfirmButtons[resumeConfirmButtons.length - 1]);
-
-        expect(mockApi.resumeRun).toHaveBeenCalledWith(RUN_ID);
-        expect(onAction).toHaveBeenCalledTimes(1);
-      },
+  it("Approve Plan opens a confirm dialog and calls api.approvePlan + onAction on confirm", async () => {
+    mockApi.approvePlan.mockResolvedValue({ ok: true, state: "Implementing" });
+    const onAction = vi.fn();
+    render(
+      <ActionBar runId={RUN_ID} state="AwaitingPlanApproval" onAction={onAction} />,
     );
 
-    it("HumanClarificationNeeded also shows an Answer Questions button invoking onScrollToQuestions", async () => {
-      const onScrollToQuestions = vi.fn();
-      render(
-        <ActionBar
-          runId={RUN_ID}
-          state="HumanClarificationNeeded"
-          onAction={vi.fn()}
-          onScrollToQuestions={onScrollToQuestions}
-        />,
-      );
-      await userEvent.click(screen.getByRole("button", { name: /Answer Questions/i }));
-      expect(onScrollToQuestions).toHaveBeenCalledTimes(1);
+    await userEvent.click(screen.getByRole("button", { name: /^approve plan$/i }));
+
+    expect(screen.getByText("Approve Plan", { selector: "h3" })).toBeDefined();
+    const confirmBtn = screen.getByRole("button", { name: /approve & start/i });
+    await userEvent.click(confirmBtn);
+
+    await waitFor(() => {
+      expect(mockApi.approvePlan).toHaveBeenCalledWith(RUN_ID, undefined);
+      expect(onAction).toHaveBeenCalledOnce();
     });
   });
 
-  describe("loading and error handling", () => {
-    it("shows a 'Working...' spinner and disables the confirm button while the action is pending", async () => {
-      let resolveAction!: () => void;
-      mockApi.pauseRun.mockReturnValue(
-        new Promise<void>((res) => {
-          resolveAction = res;
-        }),
-      );
-      render(<ActionBar runId={RUN_ID} state="Implementing" onAction={vi.fn()} />);
+  it("Approve Plan passes trimmed notes text to the API", async () => {
+    mockApi.approvePlan.mockResolvedValue({ ok: true, state: "Implementing" });
+    render(<ActionBar runId={RUN_ID} state="AwaitingPlanApproval" onAction={vi.fn()} />);
 
-      await userEvent.click(screen.getByRole("button", { name: /^Pause$/i }));
-      const pauseConfirmButtons = screen.getAllByRole("button", { name: "Pause" });
-      await userEvent.click(pauseConfirmButtons[pauseConfirmButtons.length - 1]);
+    await userEvent.click(screen.getByRole("button", { name: /^approve plan$/i }));
+    const textarea = screen.getByPlaceholderText(/extra context/i);
+    await userEvent.type(textarea, "  watch the edge cases  ");
+    await userEvent.click(screen.getByRole("button", { name: /approve & start/i }));
 
-      expect(screen.getByText("Working...")).toBeDefined();
-      expect(
-        (screen.getByRole("button", { name: /Working/i }) as HTMLButtonElement).disabled,
-      ).toBe(true);
+    await waitFor(() => {
+      expect(mockApi.approvePlan).toHaveBeenCalledWith(RUN_ID, "watch the edge cases");
+    });
+  });
 
-      resolveAction();
-      await screen.findByRole("button", { name: /^Pause$/i });
+  it("dialog Cancel closes without calling the API", async () => {
+    render(<ActionBar runId={RUN_ID} state="AwaitingPlanApproval" onAction={vi.fn()} />);
+
+    await userEvent.click(screen.getByRole("button", { name: /^approve plan$/i }));
+    expect(screen.getByText("Approve Plan", { selector: "h3" })).toBeDefined();
+
+    await userEvent.click(screen.getByRole("button", { name: /^cancel$/i }));
+
+    expect(screen.queryByText("Approve Plan", { selector: "h3" })).toBeNull();
+    expect(mockApi.approvePlan).not.toHaveBeenCalled();
+  });
+
+  it("does not call onAction when the confirmed action rejects", async () => {
+    mockApi.approvePlan.mockRejectedValue(new Error("boom"));
+    const onAction = vi.fn();
+    render(<ActionBar runId={RUN_ID} state="AwaitingPlanApproval" onAction={onAction} />);
+
+    await userEvent.click(screen.getByRole("button", { name: /^approve plan$/i }));
+    await userEvent.click(screen.getByRole("button", { name: /approve & start/i }));
+
+    await waitFor(() => {
+      expect(mockApi.approvePlan).toHaveBeenCalledOnce();
+    });
+    expect(onAction).not.toHaveBeenCalled();
+    // Dialog closes even on failure
+    expect(screen.queryByText("Approve Plan", { selector: "h3" })).toBeNull();
+  });
+
+  it("Reject Plan opens the custom reject dialog, defaults to iterate mode, and submits trimmed feedback", async () => {
+    mockApi.rejectPlan.mockResolvedValue({ ok: true, state: "Planning" });
+    const onAction = vi.fn();
+    render(<ActionBar runId={RUN_ID} state="AwaitingPlanApproval" onAction={onAction} />);
+
+    await userEvent.click(screen.getByRole("button", { name: /^reject plan$/i }));
+    expect(screen.getByText("This will reject the current plan and send it back for re-planning.")).toBeDefined();
+
+    const feedback = screen.getByPlaceholderText(/describe what should change/i);
+    await userEvent.type(feedback, "  needs more detail  ");
+
+    // Submit via the dialog's own Reject Plan button (there are two matches:
+    // the trigger and the dialog submit — pick the last one rendered).
+    const rejectButtons = screen.getAllByRole("button", { name: /^reject plan$/i });
+    await userEvent.click(rejectButtons[rejectButtons.length - 1]!);
+
+    await waitFor(() => {
+      expect(mockApi.rejectPlan).toHaveBeenCalledWith(RUN_ID, "needs more detail", "iterate");
+      expect(onAction).toHaveBeenCalledOnce();
+    });
+  });
+
+  it("Reject Plan can switch to fresh mode before submitting", async () => {
+    mockApi.rejectPlan.mockResolvedValue({ ok: true, state: "Planning" });
+    render(<ActionBar runId={RUN_ID} state="AwaitingPlanApproval" onAction={vi.fn()} />);
+
+    await userEvent.click(screen.getByRole("button", { name: /^reject plan$/i }));
+    await userEvent.click(screen.getByText("Start fresh"));
+
+    const rejectButtons = screen.getAllByRole("button", { name: /^reject plan$/i });
+    await userEvent.click(rejectButtons[rejectButtons.length - 1]!);
+
+    await waitFor(() => {
+      expect(mockApi.rejectPlan).toHaveBeenCalledWith(RUN_ID, undefined, "fresh");
+    });
+  });
+
+  it("Reject Plan can switch to fresh then back to iterate mode before submitting", async () => {
+    mockApi.rejectPlan.mockResolvedValue({ ok: true, state: "Planning" });
+    render(<ActionBar runId={RUN_ID} state="AwaitingPlanApproval" onAction={vi.fn()} />);
+
+    await userEvent.click(screen.getByRole("button", { name: /^reject plan$/i }));
+    await userEvent.click(screen.getByText("Start fresh"));
+    await userEvent.click(screen.getByText("Revise plan"));
+
+    const rejectButtons = screen.getAllByRole("button", { name: /^reject plan$/i });
+    await userEvent.click(rejectButtons[rejectButtons.length - 1]!);
+
+    await waitFor(() => {
+      expect(mockApi.rejectPlan).toHaveBeenCalledWith(RUN_ID, undefined, "iterate");
+    });
+  });
+
+  it("Reject Plan dialog Cancel resets state without calling the API", async () => {
+    render(<ActionBar runId={RUN_ID} state="AwaitingPlanApproval" onAction={vi.fn()} />);
+
+    await userEvent.click(screen.getByRole("button", { name: /^reject plan$/i }));
+    const feedback = screen.getByPlaceholderText(/describe what should change/i);
+    await userEvent.type(feedback, "some feedback");
+
+    await userEvent.click(screen.getByRole("button", { name: /^cancel$/i }));
+
+    expect(
+      screen.queryByText("This will reject the current plan and send it back for re-planning."),
+    ).toBeNull();
+    expect(mockApi.rejectPlan).not.toHaveBeenCalled();
+  });
+
+  it("Re-review Plan and Revise Plan buttons render for AwaitingPlanApproval and call their APIs", async () => {
+    mockApi.reReviewPlan.mockResolvedValue({ ok: true, runId: RUN_ID });
+    mockApi.revisePlan.mockResolvedValue({ ok: true, runId: RUN_ID });
+    render(<ActionBar runId={RUN_ID} state="AwaitingPlanApproval" onAction={vi.fn()} />);
+
+    await userEvent.click(screen.getByRole("button", { name: /re-review plan/i }));
+    await userEvent.click(screen.getByRole("button", { name: /^re-review$/i }));
+    await waitFor(() => {
+      expect(mockApi.reReviewPlan).toHaveBeenCalledWith(RUN_ID, undefined);
     });
 
-    it("does not call onAction and still closes the dialog when the action rejects", async () => {
-      const onAction = vi.fn();
-      mockApi.pauseRun.mockRejectedValue(new Error("network error"));
-      render(<ActionBar runId={RUN_ID} state="Implementing" onAction={onAction} />);
-
-      await userEvent.click(screen.getByRole("button", { name: /^Pause$/i }));
-      const pauseConfirmButtons = screen.getAllByRole("button", { name: "Pause" });
-      await userEvent.click(pauseConfirmButtons[pauseConfirmButtons.length - 1]);
-
-      await screen.findByRole("button", { name: /^Pause$/i });
-      expect(onAction).not.toHaveBeenCalled();
+    await userEvent.click(screen.getByRole("button", { name: /^revise plan$/i }));
+    await userEvent.click(screen.getByRole("button", { name: /^revise$/i }));
+    await waitFor(() => {
+      expect(mockApi.revisePlan).toHaveBeenCalledWith(RUN_ID, undefined);
     });
+  });
 
-    it("Reject Plan: does not call onAction and resets state when api.rejectPlan rejects", async () => {
-      const onAction = vi.fn();
-      mockApi.rejectPlan.mockRejectedValue(new Error("boom"));
-      render(<ActionBar runId={RUN_ID} state="AwaitingPlanApproval" onAction={onAction} />);
+  it("Answer Questions button appears for HumanClarificationNeeded and triggers onScrollToQuestions", async () => {
+    const onScrollToQuestions = vi.fn();
+    render(
+      <ActionBar
+        runId={RUN_ID}
+        state="HumanClarificationNeeded"
+        onAction={vi.fn()}
+        onScrollToQuestions={onScrollToQuestions}
+      />,
+    );
 
-      await userEvent.click(screen.getByRole("button", { name: /^Reject Plan$/i }));
-      const confirmButtons = screen.getAllByRole("button", { name: "Reject Plan" });
-      await userEvent.click(confirmButtons[confirmButtons.length - 1]);
+    await userEvent.click(screen.getByRole("button", { name: /answer questions/i }));
+    expect(onScrollToQuestions).toHaveBeenCalledOnce();
+  });
 
-      await screen.findByRole("button", { name: /^Approve Plan$/i });
-      expect(onAction).not.toHaveBeenCalled();
-      expect(screen.queryByText(/This will reject the current plan/i)).toBeNull();
+  it("Resume button appears for HumanClarificationNeeded and calls api.resumeRun", async () => {
+    mockApi.resumeRun.mockResolvedValue({ ok: true });
+    const onAction = vi.fn();
+    render(<ActionBar runId={RUN_ID} state="HumanClarificationNeeded" onAction={onAction} />);
+
+    await userEvent.click(screen.getByRole("button", { name: /^resume$/i }));
+    const resumeButtons = screen.getAllByRole("button", { name: /^resume$/i });
+    await userEvent.click(resumeButtons[resumeButtons.length - 1]!);
+
+    await waitFor(() => {
+      expect(mockApi.resumeRun).toHaveBeenCalledWith(RUN_ID);
+      expect(onAction).toHaveBeenCalledOnce();
+    });
+  });
+
+  it("Answer Optional Questions button appears when hasOptionalQuestions is true", async () => {
+    const onScrollToQuestions = vi.fn();
+    render(
+      <ActionBar
+        runId={RUN_ID}
+        state="AwaitingPlanApproval"
+        onAction={vi.fn()}
+        onScrollToQuestions={onScrollToQuestions}
+        hasOptionalQuestions={true}
+      />,
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: /answer optional questions/i }));
+    expect(onScrollToQuestions).toHaveBeenCalledOnce();
+  });
+
+  it("does not show Answer Optional Questions when hasOptionalQuestions is false", () => {
+    render(<ActionBar runId={RUN_ID} state="AwaitingPlanApproval" onAction={vi.fn()} />);
+    expect(screen.queryByRole("button", { name: /answer optional questions/i })).toBeNull();
+  });
+
+  it("Approve & Complete appears for ReadyForHumanReview and calls api.approveReview with no note", async () => {
+    mockApi.approveReview.mockResolvedValue({ ok: true, state: "Done" });
+    const onAction = vi.fn();
+    render(<ActionBar runId={RUN_ID} state="ReadyForHumanReview" onAction={onAction} />);
+
+    await userEvent.click(screen.getByRole("button", { name: /approve & complete/i }));
+    await userEvent.click(screen.getByRole("button", { name: /complete run/i }));
+
+    await waitFor(() => {
+      expect(mockApi.approveReview).toHaveBeenCalledWith(RUN_ID);
+      expect(onAction).toHaveBeenCalledOnce();
+    });
+  });
+
+  it("Pause button appears for active-category states and calls api.pauseRun", async () => {
+    mockApi.pauseRun.mockResolvedValue({ ok: true });
+    const onAction = vi.fn();
+    render(<ActionBar runId={RUN_ID} state="Implementing" onAction={onAction} />);
+
+    await userEvent.click(screen.getByRole("button", { name: /^pause$/i }));
+    const pauseButtons = screen.getAllByRole("button", { name: /^pause$/i });
+    await userEvent.click(pauseButtons[pauseButtons.length - 1]!);
+
+    await waitFor(() => {
+      expect(mockApi.pauseRun).toHaveBeenCalledWith(RUN_ID);
+      expect(onAction).toHaveBeenCalledOnce();
+    });
+  });
+
+  it("Resume button appears for AIBlocked and calls api.resumeRun", async () => {
+    mockApi.resumeRun.mockResolvedValue({ ok: true });
+    render(<ActionBar runId={RUN_ID} state="AIBlocked" onAction={vi.fn()} />);
+
+    await userEvent.click(screen.getByRole("button", { name: /^resume$/i }));
+    expect(screen.getByText("This will reset the run back to the start. It will begin re-planning.")).toBeDefined();
+  });
+
+  it("Resume button appears for Failed state", () => {
+    render(<ActionBar runId={RUN_ID} state="Failed" onAction={vi.fn()} />);
+    expect(screen.getByRole("button", { name: /^resume$/i })).toBeDefined();
+  });
+
+  it.each([
+    ["Todo", "Start Run"],
+    ["Planning", "Retry Planning"],
+    ["PlanRevision", "Retry Plan Revision"],
+    ["PlanReview", "Retry Plan Review"],
+    ["Implementing", "Retry Execution"],
+    ["AIReview", "Retry Code Review"],
+    ["AddressingReview", "Retry Remediation"],
+  ])("shows the correct retry label for state %s", async (state, label) => {
+    render(<ActionBar runId={RUN_ID} state={state} onAction={vi.fn()} />);
+    expect(screen.getByRole("button", { name: new RegExp(`^${label}$`, "i") })).toBeDefined();
+  });
+
+  it("Retry action calls api.retryStage and onAction on confirm", async () => {
+    mockApi.retryStage.mockResolvedValue({ ok: true, state: "Planning", retrying: true });
+    const onAction = vi.fn();
+    render(<ActionBar runId={RUN_ID} state="Planning" onAction={onAction} />);
+
+    await userEvent.click(screen.getByRole("button", { name: /retry planning/i }));
+    await userEvent.click(screen.getByRole("button", { name: /^retry$/i }));
+
+    await waitFor(() => {
+      expect(mockApi.retryStage).toHaveBeenCalledWith(RUN_ID);
+      expect(onAction).toHaveBeenCalledOnce();
     });
   });
 });

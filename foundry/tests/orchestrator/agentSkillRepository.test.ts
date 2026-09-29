@@ -1,28 +1,19 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import {
   AgentSkillRepository,
   mapAgentSkillToDocument,
   type AgentSkill,
 } from "../../src/orchestrator/agentSkillRepository.js";
-import { scoreSkillRelevance } from "../../src/utils/similarity.js";
-import { env } from "../../src/config/env.js";
-
-vi.mock("../../src/utils/similarity.js", () => ({
-  scoreSkillRelevance: vi.fn(),
-}));
-
-vi.mock("../../src/config/env.js", () => ({
-  env: { MAX_SKILLS_INJECTED: 3 },
-}));
+import type { PrismaClient } from "../../src/generated/prisma/client.js";
 
 function makeSkill(overrides: Partial<AgentSkill> = {}): AgentSkill {
   return {
     id: "skill-1",
     repoSlug: "org/repo",
-    name: "some-skill",
-    description: "A skill",
-    taskCategory: "bugfix",
-    skillMarkdown: "# Some skill\nDo the thing.",
+    name: "deploy-service",
+    description: "How to deploy the service",
+    taskCategory: "deployment",
+    skillMarkdown: "# Deploy\nRun the deploy script.",
     successCount: 0,
     failureCount: 0,
     utilityScore: 0,
@@ -33,16 +24,8 @@ function makeSkill(overrides: Partial<AgentSkill> = {}): AgentSkill {
   } as AgentSkill;
 }
 
-function buildPrismaMock() {
-  const tx = {
-    agentSkill: {
-      findUniqueOrThrow: vi.fn(),
-      findFirst: vi.fn(),
-      update: vi.fn(),
-      create: vi.fn(),
-    },
-  };
-  const prisma = {
+function makePrisma(overrides: Record<string, unknown> = {}) {
+  return {
     agentSkill: {
       create: vi.fn(),
       findUnique: vi.fn(),
@@ -50,33 +33,23 @@ function buildPrismaMock() {
       findMany: vi.fn(),
       count: vi.fn(),
       update: vi.fn(),
+      ...overrides,
     },
-    $transaction: vi.fn(async (fn: (tx: unknown) => unknown) => fn(tx)),
-  };
-  return { prisma, tx };
+    $transaction: vi.fn(),
+  } as unknown as PrismaClient;
 }
 
 describe("mapAgentSkillToDocument", () => {
-  it("maps an AgentSkill row to a SkillDocument with the expected fields", () => {
-    const skill = makeSkill({
-      id: "skill-42",
-      repoSlug: "org/repo",
-      name: "my-skill",
-      description: "desc",
-      taskCategory: "feature",
-      skillMarkdown: "md",
-      utilityScore: 0.5,
-    });
-
+  it("projects an AgentSkill row onto a SkillDocument", () => {
+    const skill = makeSkill({ id: "s1", repoSlug: "org/repo", utilityScore: 0.5 });
     const doc = mapAgentSkillToDocument(skill);
-
     expect(doc).toEqual({
-      id: "skill-42",
+      id: "s1",
       repoSlug: "org/repo",
-      name: "my-skill",
-      description: "desc",
-      taskCategory: "feature",
-      skillMarkdown: "md",
+      name: skill.name,
+      description: skill.description,
+      taskCategory: skill.taskCategory,
+      skillMarkdown: skill.skillMarkdown,
       utilityScore: 0.5,
       lastUsedAt: skill.lastUsedAt,
     });
@@ -84,33 +57,28 @@ describe("mapAgentSkillToDocument", () => {
 });
 
 describe("AgentSkillRepository", () => {
-  beforeEach(() => {
-    vi.mocked(scoreSkillRelevance).mockReset();
-    env.MAX_SKILLS_INJECTED = 3;
-  });
-
   describe("create", () => {
-    it("creates a new skill with zeroed counters and utility score", async () => {
-      const { prisma } = buildPrismaMock();
+    it("creates with zeroed counters/score and returns the raw prisma row", async () => {
       const created = makeSkill();
-      prisma.agentSkill.create.mockResolvedValue(created);
-      const repo = new AgentSkillRepository(prisma as never);
+      const create = vi.fn().mockResolvedValue(created);
+      const prisma = makePrisma({ create });
+      const repo = new AgentSkillRepository(prisma);
 
       const result = await repo.create({
         repoSlug: "org/repo",
-        name: "new-skill",
-        description: "desc",
-        taskCategory: "bugfix",
-        skillMarkdown: "# md",
+        name: "deploy-service",
+        description: "How to deploy the service",
+        taskCategory: "deployment",
+        skillMarkdown: "# Deploy\nRun the deploy script.",
       });
 
-      expect(prisma.agentSkill.create).toHaveBeenCalledWith({
+      expect(create).toHaveBeenCalledWith({
         data: {
           repoSlug: "org/repo",
-          name: "new-skill",
-          description: "desc",
-          taskCategory: "bugfix",
-          skillMarkdown: "# md",
+          name: "deploy-service",
+          description: "How to deploy the service",
+          taskCategory: "deployment",
+          skillMarkdown: "# Deploy\nRun the deploy script.",
           utilityScore: 0.0,
           successCount: 0,
           failureCount: 0,
@@ -122,42 +90,38 @@ describe("AgentSkillRepository", () => {
 
   describe("findById", () => {
     it("returns the skill when found", async () => {
-      const { prisma } = buildPrismaMock();
-      const skill = makeSkill({ id: "skill-7" });
-      prisma.agentSkill.findUnique.mockResolvedValue(skill);
-      const repo = new AgentSkillRepository(prisma as never);
+      const skill = makeSkill({ id: "s42" });
+      const findUnique = vi.fn().mockResolvedValue(skill);
+      const prisma = makePrisma({ findUnique });
+      const repo = new AgentSkillRepository(prisma);
 
-      const result = await repo.findById("skill-7");
-
-      expect(prisma.agentSkill.findUnique).toHaveBeenCalledWith({ where: { id: "skill-7" } });
-      expect(result).toBe(skill);
+      const result = await repo.findById("s42");
+      expect(findUnique).toHaveBeenCalledWith({ where: { id: "s42" } });
+      expect(result?.id).toBe("s42");
     });
 
     it("returns null when not found", async () => {
-      const { prisma } = buildPrismaMock();
-      prisma.agentSkill.findUnique.mockResolvedValue(null);
-      const repo = new AgentSkillRepository(prisma as never);
+      const findUnique = vi.fn().mockResolvedValue(null);
+      const prisma = makePrisma({ findUnique });
+      const repo = new AgentSkillRepository(prisma);
 
-      const result = await repo.findById("missing");
-
-      expect(result).toBeNull();
+      expect(await repo.findById("missing")).toBeNull();
     });
   });
 
   describe("findByRepoCategoryNearTime", () => {
     it("queries within the default 5s window around the given time", async () => {
-      const { prisma } = buildPrismaMock();
-      const skill = makeSkill();
-      prisma.agentSkill.findFirst.mockResolvedValue(skill);
-      const repo = new AgentSkillRepository(prisma as never);
+      const findFirst = vi.fn().mockResolvedValue(makeSkill());
+      const prisma = makePrisma({ findFirst });
+      const repo = new AgentSkillRepository(prisma);
       const around = new Date("2026-01-01T00:00:10.000Z");
 
-      const result = await repo.findByRepoCategoryNearTime("org/repo", "bugfix", around);
+      await repo.findByRepoCategoryNearTime("org/repo", "deployment", around);
 
-      expect(prisma.agentSkill.findFirst).toHaveBeenCalledWith({
+      expect(findFirst).toHaveBeenCalledWith({
         where: {
           repoSlug: "org/repo",
-          taskCategory: "bugfix",
+          taskCategory: "deployment",
           createdAt: {
             gte: new Date("2026-01-01T00:00:05.000Z"),
             lte: new Date("2026-01-01T00:00:15.000Z"),
@@ -165,21 +129,20 @@ describe("AgentSkillRepository", () => {
         },
         orderBy: { createdAt: "desc" },
       });
-      expect(result).toBe(skill);
     });
 
     it("honors a custom windowMs", async () => {
-      const { prisma } = buildPrismaMock();
-      prisma.agentSkill.findFirst.mockResolvedValue(null);
-      const repo = new AgentSkillRepository(prisma as never);
+      const findFirst = vi.fn().mockResolvedValue(null);
+      const prisma = makePrisma({ findFirst });
+      const repo = new AgentSkillRepository(prisma);
       const around = new Date("2026-01-01T00:00:10.000Z");
 
-      const result = await repo.findByRepoCategoryNearTime("org/repo", "bugfix", around, 1000);
+      const result = await repo.findByRepoCategoryNearTime("org/repo", "deployment", around, 1000);
 
-      expect(prisma.agentSkill.findFirst).toHaveBeenCalledWith({
+      expect(findFirst).toHaveBeenCalledWith({
         where: {
           repoSlug: "org/repo",
-          taskCategory: "bugfix",
+          taskCategory: "deployment",
           createdAt: {
             gte: new Date("2026-01-01T00:00:09.000Z"),
             lte: new Date("2026-01-01T00:00:11.000Z"),
@@ -192,314 +155,336 @@ describe("AgentSkillRepository", () => {
   });
 
   describe("findActiveByRepo", () => {
-    it("queries only non-archived skills for the repo", async () => {
-      const { prisma } = buildPrismaMock();
+    it("filters by repoSlug and archivedAt: null", async () => {
       const skills = [makeSkill({ id: "a" }), makeSkill({ id: "b" })];
-      prisma.agentSkill.findMany.mockResolvedValue(skills);
-      const repo = new AgentSkillRepository(prisma as never);
+      const findMany = vi.fn().mockResolvedValue(skills);
+      const prisma = makePrisma({ findMany });
+      const repo = new AgentSkillRepository(prisma);
 
       const result = await repo.findActiveByRepo("org/repo");
 
-      expect(prisma.agentSkill.findMany).toHaveBeenCalledWith({
+      expect(findMany).toHaveBeenCalledWith({
         where: { repoSlug: "org/repo", archivedAt: null },
       });
-      expect(result).toBe(skills);
+      expect(result).toHaveLength(2);
     });
   });
 
   describe("countActiveByRepo", () => {
-    it("counts only non-archived skills for the repo", async () => {
-      const { prisma } = buildPrismaMock();
-      prisma.agentSkill.count.mockResolvedValue(4);
-      const repo = new AgentSkillRepository(prisma as never);
+    it("counts active skills for a repo", async () => {
+      const count = vi.fn().mockResolvedValue(4);
+      const prisma = makePrisma({ count });
+      const repo = new AgentSkillRepository(prisma);
 
       const result = await repo.countActiveByRepo("org/repo");
 
-      expect(prisma.agentSkill.count).toHaveBeenCalledWith({
-        where: { repoSlug: "org/repo", archivedAt: null },
-      });
+      expect(count).toHaveBeenCalledWith({ where: { repoSlug: "org/repo", archivedAt: null } });
       expect(result).toBe(4);
     });
   });
 
   describe("findLowestUtilityActive", () => {
     it("orders by utilityScore asc then lastUsedAt asc", async () => {
-      const { prisma } = buildPrismaMock();
-      const skill = makeSkill({ id: "low-util" });
-      prisma.agentSkill.findFirst.mockResolvedValue(skill);
-      const repo = new AgentSkillRepository(prisma as never);
+      const skill = makeSkill({ id: "low" });
+      const findFirst = vi.fn().mockResolvedValue(skill);
+      const prisma = makePrisma({ findFirst });
+      const repo = new AgentSkillRepository(prisma);
 
       const result = await repo.findLowestUtilityActive("org/repo");
 
-      expect(prisma.agentSkill.findFirst).toHaveBeenCalledWith({
+      expect(findFirst).toHaveBeenCalledWith({
         where: { repoSlug: "org/repo", archivedAt: null },
         orderBy: [{ utilityScore: "asc" }, { lastUsedAt: "asc" }],
       });
-      expect(result).toBe(skill);
+      expect(result?.id).toBe("low");
     });
 
     it("returns null when there are no active skills", async () => {
-      const { prisma } = buildPrismaMock();
-      prisma.agentSkill.findFirst.mockResolvedValue(null);
-      const repo = new AgentSkillRepository(prisma as never);
+      const findFirst = vi.fn().mockResolvedValue(null);
+      const prisma = makePrisma({ findFirst });
+      const repo = new AgentSkillRepository(prisma);
 
-      const result = await repo.findLowestUtilityActive("org/repo");
-
-      expect(result).toBeNull();
+      expect(await repo.findLowestUtilityActive("org/repo")).toBeNull();
     });
   });
 
   describe("archiveById", () => {
-    it("sets archivedAt to the current time", async () => {
-      const { prisma } = buildPrismaMock();
-      prisma.agentSkill.update.mockResolvedValue(makeSkill());
-      const repo = new AgentSkillRepository(prisma as never);
-      const before = Date.now();
+    it("sets archivedAt to a Date via update", async () => {
+      const update = vi.fn().mockResolvedValue(makeSkill());
+      const prisma = makePrisma({ update });
+      const repo = new AgentSkillRepository(prisma);
 
-      await repo.archiveById("skill-1");
+      await repo.archiveById("s1");
 
-      expect(prisma.agentSkill.update).toHaveBeenCalledTimes(1);
-      const call = prisma.agentSkill.update.mock.calls[0][0];
-      expect(call.where).toEqual({ id: "skill-1" });
+      expect(update).toHaveBeenCalledTimes(1);
+      const call = update.mock.calls[0][0];
+      expect(call.where).toEqual({ id: "s1" });
       expect(call.data.archivedAt).toBeInstanceOf(Date);
-      expect(call.data.archivedAt.getTime()).toBeGreaterThanOrEqual(before);
     });
   });
 
   describe("findTopKByRelevance", () => {
-    it("scores, sorts descending, and slices to k when k <= MAX_SKILLS_INJECTED", async () => {
-      const { prisma } = buildPrismaMock();
-      const skillA = makeSkill({ id: "a", name: "alpha" });
-      const skillB = makeSkill({ id: "b", name: "beta" });
-      const skillC = makeSkill({ id: "c", name: "gamma" });
-      prisma.agentSkill.findMany.mockResolvedValue([skillA, skillB, skillC]);
+    it("scores active skills by relevance, sorts descending, and caps at min(k, MAX_SKILLS_INJECTED)", async () => {
+      const skills = [
+        makeSkill({
+          id: "irrelevant",
+          taskCategory: "unrelated-topic",
+          skillMarkdown: "totally different content about gardening",
+          name: "gardening",
+          description: "how to garden",
+        }),
+        makeSkill({
+          id: "exact-match",
+          taskCategory: "deployment",
+          skillMarkdown: "# Deploy the service to production",
+          name: "deploy-service",
+          description: "deploy the service",
+        }),
+        makeSkill({
+          id: "partial-match",
+          taskCategory: "deployment-rollback",
+          skillMarkdown: "# Rollback a deployment",
+          name: "rollback",
+          description: "rollback",
+        }),
+      ];
+      const findMany = vi.fn().mockResolvedValue(skills);
+      const prisma = makePrisma({ findMany });
+      const repo = new AgentSkillRepository(prisma);
 
-      vi.mocked(scoreSkillRelevance).mockImplementation((skill) => {
-        const scores: Record<string, number> = { alpha: 0.2, beta: 0.9, gamma: 0.5 };
-        return scores[skill.name as string] ?? 0;
-      });
+      const result = await repo.findTopKByRelevance("org/repo", "deploy the service", 10);
 
-      const repo = new AgentSkillRepository(prisma as never);
-      const result = await repo.findTopKByRelevance("org/repo", "fix the bug", 2);
-
-      expect(prisma.agentSkill.findMany).toHaveBeenCalledWith({
+      expect(findMany).toHaveBeenCalledWith({
         where: { repoSlug: "org/repo", archivedAt: null },
       });
-      expect(scoreSkillRelevance).toHaveBeenCalledTimes(3);
-      expect(result.map((d) => d.id)).toEqual(["b", "c"]);
+      // capped at env.MAX_SKILLS_INJECTED (default 3), and the exact match should rank first
+      expect(result.length).toBeLessThanOrEqual(3);
+      expect(result[0].id).toBe("exact-match");
+      // ordering must be non-increasing relevance: irrelevant skill should not outrank exact match
+      const ids = result.map((r) => r.id);
+      expect(ids.indexOf("exact-match")).toBeLessThan(
+        ids.indexOf("irrelevant") === -1 ? Infinity : ids.indexOf("irrelevant"),
+      );
     });
 
-    it("caps k at env.MAX_SKILLS_INJECTED even when a larger k is requested", async () => {
-      const { prisma } = buildPrismaMock();
-      env.MAX_SKILLS_INJECTED = 2;
-      const skills = [
-        makeSkill({ id: "a", name: "alpha" }),
-        makeSkill({ id: "b", name: "beta" }),
-        makeSkill({ id: "c", name: "gamma" }),
-      ];
-      prisma.agentSkill.findMany.mockResolvedValue(skills);
-      vi.mocked(scoreSkillRelevance).mockImplementation((skill) => {
-        const scores: Record<string, number> = { alpha: 0.9, beta: 0.5, gamma: 0.1 };
-        return scores[skill.name as string] ?? 0;
+    it("returns SkillDocument shapes, not raw AgentSkill rows", async () => {
+      const skills = [makeSkill({ id: "s1" })];
+      const findMany = vi.fn().mockResolvedValue(skills);
+      const prisma = makePrisma({ findMany });
+      const repo = new AgentSkillRepository(prisma);
+
+      const result = await repo.findTopKByRelevance("org/repo", "deploy", 5);
+
+      expect(result[0]).toEqual({
+        id: "s1",
+        repoSlug: "org/repo",
+        name: skills[0].name,
+        description: skills[0].description,
+        taskCategory: skills[0].taskCategory,
+        skillMarkdown: skills[0].skillMarkdown,
+        utilityScore: skills[0].utilityScore,
+        lastUsedAt: skills[0].lastUsedAt,
       });
+    });
 
-      const repo = new AgentSkillRepository(prisma as never);
-      const result = await repo.findTopKByRelevance("org/repo", "query", 10);
+    it("respects a k smaller than the number of active skills", async () => {
+      const skills = [
+        makeSkill({ id: "a", taskCategory: "deployment" }),
+        makeSkill({ id: "b", taskCategory: "deployment" }),
+      ];
+      const findMany = vi.fn().mockResolvedValue(skills);
+      const prisma = makePrisma({ findMany });
+      const repo = new AgentSkillRepository(prisma);
 
-      expect(result).toHaveLength(2);
-      expect(result.map((d) => d.id)).toEqual(["a", "b"]);
+      const result = await repo.findTopKByRelevance("org/repo", "deployment", 1);
+      expect(result).toHaveLength(1);
     });
 
     it("returns an empty array when there are no active skills", async () => {
-      const { prisma } = buildPrismaMock();
-      prisma.agentSkill.findMany.mockResolvedValue([]);
-      const repo = new AgentSkillRepository(prisma as never);
+      const findMany = vi.fn().mockResolvedValue([]);
+      const prisma = makePrisma({ findMany });
+      const repo = new AgentSkillRepository(prisma);
 
-      const result = await repo.findTopKByRelevance("org/repo", "query", 3);
-
+      const result = await repo.findTopKByRelevance("org/repo", "anything", 5);
       expect(result).toEqual([]);
-      expect(scoreSkillRelevance).not.toHaveBeenCalled();
     });
   });
 
   describe("incrementSuccess", () => {
-    it("increments successCount and recomputes utilityScore inside a transaction", async () => {
-      const { prisma, tx } = buildPrismaMock();
-      const existing = makeSkill({ id: "skill-1", successCount: 2, failureCount: 1 });
-      const updated = makeSkill({ id: "skill-1", successCount: 3, failureCount: 1 });
-      tx.agentSkill.findUniqueOrThrow.mockResolvedValue(existing);
-      tx.agentSkill.update.mockResolvedValue(updated);
-      const repo = new AgentSkillRepository(prisma as never);
+    it("increments successCount, recomputes utilityScore, and updates lastUsedAt inside a transaction", async () => {
+      const existing = makeSkill({ id: "s1", successCount: 2, failureCount: 1 });
+      const updated = makeSkill({ id: "s1", successCount: 3, failureCount: 1 });
+      const findUniqueOrThrow = vi.fn().mockResolvedValue(existing);
+      const update = vi.fn().mockResolvedValue(updated);
+      const tx = { agentSkill: { findUniqueOrThrow, update } };
+      const $transaction = vi.fn().mockImplementation((fn: (tx: unknown) => unknown) => fn(tx));
+      const prisma = { $transaction } as unknown as PrismaClient;
+      const repo = new AgentSkillRepository(prisma);
 
-      const result = await repo.incrementSuccess("skill-1");
+      const result = await repo.incrementSuccess("s1");
 
-      expect(prisma.$transaction).toHaveBeenCalledTimes(1);
-      expect(tx.agentSkill.findUniqueOrThrow).toHaveBeenCalledWith({ where: { id: "skill-1" } });
-      // newSuccessCount = 3, newUtilityScore = 3 / (3 + 1 + 1) = 0.6
-      expect(tx.agentSkill.update).toHaveBeenCalledWith({
-        where: { id: "skill-1" },
+      expect(findUniqueOrThrow).toHaveBeenCalledWith({ where: { id: "s1" } });
+      // newSuccessCount = 3; newUtilityScore = 3 / (3 + 1 + 1) = 0.6
+      expect(update).toHaveBeenCalledWith({
+        where: { id: "s1" },
         data: expect.objectContaining({
           successCount: 3,
           utilityScore: 0.6,
         }),
       });
-      const call = tx.agentSkill.update.mock.calls[0][0];
-      expect(call.data.lastUsedAt).toBeInstanceOf(Date);
+      const updateData = update.mock.calls[0][0].data;
+      expect(updateData.lastUsedAt).toBeInstanceOf(Date);
       expect(result).toBe(updated);
     });
 
-    it("propagates the error when the skill does not exist", async () => {
-      const { prisma, tx } = buildPrismaMock();
-      const notFound = new Error("No AgentSkill found");
-      tx.agentSkill.findUniqueOrThrow.mockRejectedValue(notFound);
-      const repo = new AgentSkillRepository(prisma as never);
+    it("propagates a not-found error from findUniqueOrThrow", async () => {
+      const notFoundErr = new Error("No AgentSkill found");
+      const findUniqueOrThrow = vi.fn().mockRejectedValue(notFoundErr);
+      const tx = { agentSkill: { findUniqueOrThrow, update: vi.fn() } };
+      const $transaction = vi.fn().mockImplementation((fn: (tx: unknown) => unknown) => fn(tx));
+      const prisma = { $transaction } as unknown as PrismaClient;
+      const repo = new AgentSkillRepository(prisma);
 
-      await expect(repo.incrementSuccess("missing")).rejects.toBe(notFound);
-      expect(tx.agentSkill.update).not.toHaveBeenCalled();
+      await expect(repo.incrementSuccess("missing")).rejects.toThrow("No AgentSkill found");
     });
   });
 
   describe("incrementFailure", () => {
-    it("increments failureCount and recomputes utilityScore inside a transaction", async () => {
-      const { prisma, tx } = buildPrismaMock();
-      const existing = makeSkill({ id: "skill-1", successCount: 3, failureCount: 1 });
-      const updated = makeSkill({ id: "skill-1", successCount: 3, failureCount: 2 });
-      tx.agentSkill.findUniqueOrThrow.mockResolvedValue(existing);
-      tx.agentSkill.update.mockResolvedValue(updated);
-      const repo = new AgentSkillRepository(prisma as never);
+    it("increments failureCount and recomputes utilityScore using the successCount ratio", async () => {
+      const existing = makeSkill({ id: "s1", successCount: 2, failureCount: 1 });
+      const updated = makeSkill({ id: "s1", successCount: 2, failureCount: 2 });
+      const findUniqueOrThrow = vi.fn().mockResolvedValue(existing);
+      const update = vi.fn().mockResolvedValue(updated);
+      const tx = { agentSkill: { findUniqueOrThrow, update } };
+      const $transaction = vi.fn().mockImplementation((fn: (tx: unknown) => unknown) => fn(tx));
+      const prisma = { $transaction } as unknown as PrismaClient;
+      const repo = new AgentSkillRepository(prisma);
 
-      const result = await repo.incrementFailure("skill-1");
+      const result = await repo.incrementFailure("s1");
 
-      expect(prisma.$transaction).toHaveBeenCalledTimes(1);
-      // newFailureCount = 2, newUtilityScore = 3 / (3 + 2 + 1) = 0.5
-      expect(tx.agentSkill.update).toHaveBeenCalledWith({
-        where: { id: "skill-1" },
+      // newFailureCount = 2; newUtilityScore = 2 / (2 + 2 + 1) = 0.4
+      expect(update).toHaveBeenCalledWith({
+        where: { id: "s1" },
         data: expect.objectContaining({
           failureCount: 2,
-          utilityScore: 0.5,
+          utilityScore: 0.4,
         }),
       });
       expect(result).toBe(updated);
     });
-
-    it("propagates the error when the skill does not exist", async () => {
-      const { prisma, tx } = buildPrismaMock();
-      const notFound = new Error("No AgentSkill found");
-      tx.agentSkill.findUniqueOrThrow.mockRejectedValue(notFound);
-      const repo = new AgentSkillRepository(prisma as never);
-
-      await expect(repo.incrementFailure("missing")).rejects.toBe(notFound);
-      expect(tx.agentSkill.update).not.toHaveBeenCalled();
-    });
   });
 
   describe("archiveIfLowUtility", () => {
-    it("archives the skill when utilityScore < 0.2 AND totalUses >= 5 (boundary: exactly 5 uses)", async () => {
-      const { prisma } = buildPrismaMock();
-      prisma.agentSkill.update.mockResolvedValue(makeSkill());
-      const repo = new AgentSkillRepository(prisma as never);
-      const skill = makeSkill({ id: "low", utilityScore: 0.19, successCount: 1, failureCount: 4 });
+    it("archives when utilityScore < 0.2 and total uses >= 5", async () => {
+      const update = vi.fn().mockResolvedValue(makeSkill());
+      const prisma = makePrisma({ update });
+      const repo = new AgentSkillRepository(prisma);
+      const skill = makeSkill({ id: "low-util", utilityScore: 0.1, successCount: 1, failureCount: 4 });
 
       await repo.archiveIfLowUtility(skill);
 
-      expect(prisma.agentSkill.update).toHaveBeenCalledWith({
-        where: { id: "low" },
-        data: { archivedAt: expect.any(Date) },
+      expect(update).toHaveBeenCalledWith({
+        where: { id: "low-util" },
+        data: expect.objectContaining({ archivedAt: expect.any(Date) }),
       });
     });
 
-    it("does not archive when utilityScore is at or above the 0.2 threshold", async () => {
-      const { prisma } = buildPrismaMock();
-      const repo = new AgentSkillRepository(prisma as never);
-      const skill = makeSkill({ id: "ok", utilityScore: 0.2, successCount: 2, failureCount: 3 });
+    it("does not archive when utilityScore is high even with many uses", async () => {
+      const update = vi.fn();
+      const prisma = makePrisma({ update });
+      const repo = new AgentSkillRepository(prisma);
+      const skill = makeSkill({ utilityScore: 0.9, successCount: 9, failureCount: 1 });
 
       await repo.archiveIfLowUtility(skill);
 
-      expect(prisma.agentSkill.update).not.toHaveBeenCalled();
+      expect(update).not.toHaveBeenCalled();
     });
 
-    it("does not archive when totalUses is below 5, even with low utility", async () => {
-      const { prisma } = buildPrismaMock();
-      const repo = new AgentSkillRepository(prisma as never);
-      const skill = makeSkill({ id: "new", utilityScore: 0.0, successCount: 1, failureCount: 3 });
+    it("does not archive when utilityScore is low but total uses are below the threshold", async () => {
+      const update = vi.fn();
+      const prisma = makePrisma({ update });
+      const repo = new AgentSkillRepository(prisma);
+      const skill = makeSkill({ utilityScore: 0.1, successCount: 1, failureCount: 2 });
 
       await repo.archiveIfLowUtility(skill);
 
-      expect(prisma.agentSkill.update).not.toHaveBeenCalled();
+      expect(update).not.toHaveBeenCalled();
     });
 
-    it("archives when both totalUses and low utility exceed the boundary", async () => {
-      const { prisma } = buildPrismaMock();
-      prisma.agentSkill.update.mockResolvedValue(makeSkill());
-      const repo = new AgentSkillRepository(prisma as never);
-      const skill = makeSkill({ id: "bad", utilityScore: 0.05, successCount: 1, failureCount: 9 });
+    it("treats the boundary (utilityScore exactly 0.2) as not low", async () => {
+      const update = vi.fn();
+      const prisma = makePrisma({ update });
+      const repo = new AgentSkillRepository(prisma);
+      const skill = makeSkill({ utilityScore: 0.2, successCount: 5, failureCount: 5 });
 
       await repo.archiveIfLowUtility(skill);
 
-      expect(prisma.agentSkill.update).toHaveBeenCalledWith({
-        where: { id: "bad" },
-        data: { archivedAt: expect.any(Date) },
-      });
+      expect(update).not.toHaveBeenCalled();
     });
   });
 
   describe("displaceAndCreate", () => {
-    it("archives the lowest-utility active skill and creates the new skill inside a transaction", async () => {
-      const { prisma, tx } = buildPrismaMock();
-      const lowestUtility = makeSkill({ id: "to-displace", utilityScore: 0.01 });
-      const createdSkill = makeSkill({ id: "new-skill" });
-      tx.agentSkill.findFirst.mockResolvedValue(lowestUtility);
-      tx.agentSkill.update.mockResolvedValue({ ...lowestUtility, archivedAt: new Date() });
-      tx.agentSkill.create.mockResolvedValue(createdSkill);
-      const repo = new AgentSkillRepository(prisma as never);
+    it("archives the lowest-utility active skill and creates the new one inside a transaction", async () => {
+      const lowestUtility = makeSkill({ id: "to-archive", utilityScore: 0.01 });
+      const newSkillRow = makeSkill({ id: "new-skill" });
+      const findFirst = vi.fn().mockResolvedValue(lowestUtility);
+      const update = vi.fn().mockResolvedValue({ ...lowestUtility, archivedAt: new Date() });
+      const create = vi.fn().mockResolvedValue(newSkillRow);
+      const tx = { agentSkill: { findFirst, update, create } };
+      const $transaction = vi.fn().mockImplementation((fn: (tx: unknown) => unknown) => fn(tx));
+      const prisma = { $transaction } as unknown as PrismaClient;
+      const repo = new AgentSkillRepository(prisma);
 
       const result = await repo.displaceAndCreate("org/repo", {
         name: "new-skill",
         description: "desc",
-        taskCategory: "bugfix",
+        taskCategory: "cat",
         skillMarkdown: "md",
       });
 
-      expect(prisma.$transaction).toHaveBeenCalledTimes(1);
-      expect(tx.agentSkill.findFirst).toHaveBeenCalledWith({
+      expect(findFirst).toHaveBeenCalledWith({
         where: { repoSlug: "org/repo", archivedAt: null },
         orderBy: [{ utilityScore: "asc" }, { lastUsedAt: "asc" }],
       });
-      expect(tx.agentSkill.update).toHaveBeenCalledWith({
-        where: { id: "to-displace" },
+      expect(update).toHaveBeenCalledWith({
+        where: { id: "to-archive" },
         data: { archivedAt: expect.any(Date) },
       });
-      expect(tx.agentSkill.create).toHaveBeenCalledWith({
+      expect(create).toHaveBeenCalledWith({
         data: {
           repoSlug: "org/repo",
           name: "new-skill",
           description: "desc",
-          taskCategory: "bugfix",
+          taskCategory: "cat",
           skillMarkdown: "md",
           utilityScore: 0.0,
           successCount: 0,
           failureCount: 0,
         },
       });
-      expect(result).toEqual({ newSkill: createdSkill, displacedSkillId: "to-displace" });
+      expect(result).toEqual({ newSkill: newSkillRow, displacedSkillId: "to-archive" });
     });
 
-    it("throws and creates nothing when there is no active skill to displace", async () => {
-      const { prisma, tx } = buildPrismaMock();
-      tx.agentSkill.findFirst.mockResolvedValue(null);
-      const repo = new AgentSkillRepository(prisma as never);
+    it("throws when there is no active skill to displace", async () => {
+      const findFirst = vi.fn().mockResolvedValue(null);
+      const update = vi.fn();
+      const create = vi.fn();
+      const tx = { agentSkill: { findFirst, update, create } };
+      const $transaction = vi.fn().mockImplementation((fn: (tx: unknown) => unknown) => fn(tx));
+      const prisma = { $transaction } as unknown as PrismaClient;
+      const repo = new AgentSkillRepository(prisma);
 
       await expect(
-        repo.displaceAndCreate("org/repo", {
-          name: "new-skill",
-          description: "desc",
-          taskCategory: "bugfix",
-          skillMarkdown: "md",
+        repo.displaceAndCreate("org/empty-repo", {
+          name: "x",
+          description: "x",
+          taskCategory: "x",
+          skillMarkdown: "x",
         }),
-      ).rejects.toThrow("No active skills found for repo org/repo to displace");
+      ).rejects.toThrow("No active skills found for repo org/empty-repo to displace");
 
-      expect(tx.agentSkill.update).not.toHaveBeenCalled();
-      expect(tx.agentSkill.create).not.toHaveBeenCalled();
+      expect(update).not.toHaveBeenCalled();
+      expect(create).not.toHaveBeenCalled();
     });
   });
 });

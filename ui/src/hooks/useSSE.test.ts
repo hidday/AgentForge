@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { renderHook } from "@testing-library/react";
 import { useSSE, type DashboardEvent } from "./useSSE.ts";
 
@@ -25,74 +25,63 @@ describe("useSSE", () => {
     vi.stubGlobal("EventSource", FakeEventSource);
   });
 
-  afterEach(() => {
-    vi.unstubAllGlobals();
-  });
-
-  it("subscribes to the events stream on mount", () => {
-    const onEvent = vi.fn();
-    renderHook(() => useSSE(onEvent));
-
+  it("opens an EventSource against /api/events/stream on mount", () => {
+    renderHook(() => useSSE(() => {}));
     expect(FakeEventSource.instances).toHaveLength(1);
     expect(FakeEventSource.instances[0]!.url).toBe("/api/events/stream");
   });
 
-  it("calls the callback with the parsed event when a message arrives", () => {
+  it("closes the EventSource on unmount", () => {
+    const { unmount } = renderHook(() => useSSE(() => {}));
+    const instance = FakeEventSource.instances[0]!;
+    expect(instance.closed).toBe(false);
+    unmount();
+    expect(instance.closed).toBe(true);
+  });
+
+  it("invokes the callback with the parsed event on a valid message", () => {
     const onEvent = vi.fn();
     renderHook(() => useSSE(onEvent));
+    const instance = FakeEventSource.instances[0]!;
 
-    const source = FakeEventSource.instances[0]!;
-    const event: DashboardEvent = { type: "run:created", runId: "r1" };
-    source.onmessage!({ data: JSON.stringify(event) });
+    const event: DashboardEvent = { type: "run:created", runId: "run-1" };
+    instance.onmessage!({ data: JSON.stringify(event) });
 
     expect(onEvent).toHaveBeenCalledWith(event);
   });
 
-  it("ignores malformed message data without throwing", () => {
+  it("silently ignores malformed (non-JSON) message data", () => {
     const onEvent = vi.fn();
     renderHook(() => useSSE(onEvent));
+    const instance = FakeEventSource.instances[0]!;
 
-    const source = FakeEventSource.instances[0]!;
-    expect(() => source.onmessage!({ data: "{not valid json" })).not.toThrow();
+    expect(() => instance.onmessage!({ data: "not json" })).not.toThrow();
     expect(onEvent).not.toHaveBeenCalled();
   });
 
-  it("does not throw when the source errors", () => {
-    const onEvent = vi.fn();
-    renderHook(() => useSSE(onEvent));
-
-    const source = FakeEventSource.instances[0]!;
-    expect(() => source.onerror!()).not.toThrow();
+  it("does not throw when onerror fires (auto-reconnect is a no-op)", () => {
+    renderHook(() => useSSE(() => {}));
+    const instance = FakeEventSource.instances[0]!;
+    expect(() => instance.onerror!()).not.toThrow();
   });
 
-  it("closes the connection on unmount", () => {
-    const onEvent = vi.fn();
-    const { unmount } = renderHook(() => useSSE(onEvent));
-
-    const source = FakeEventSource.instances[0]!;
-    expect(source.closed).toBe(false);
-    unmount();
-    expect(source.closed).toBe(true);
-  });
-
-  it("uses the latest callback without resubscribing when onEvent changes", () => {
-    const onEvent1 = vi.fn();
-    const onEvent2 = vi.fn();
+  it("always calls the latest callback without reopening the connection when the callback identity changes", () => {
+    const first = vi.fn();
+    const second = vi.fn();
     const { rerender } = renderHook(({ cb }) => useSSE(cb), {
-      initialProps: { cb: onEvent1 },
+      initialProps: { cb: first },
     });
-
     expect(FakeEventSource.instances).toHaveLength(1);
 
-    rerender({ cb: onEvent2 });
-    // Still only one EventSource — no resubscription on callback change.
+    rerender({ cb: second });
+    // Still only one EventSource — effect with [] deps doesn't re-run.
     expect(FakeEventSource.instances).toHaveLength(1);
 
-    const source = FakeEventSource.instances[0]!;
-    const event: DashboardEvent = { type: "run:created", runId: "r1" };
-    source.onmessage!({ data: JSON.stringify(event) });
+    const instance = FakeEventSource.instances[0]!;
+    const event: DashboardEvent = { type: "run:created", runId: "run-2" };
+    instance.onmessage!({ data: JSON.stringify(event) });
 
-    expect(onEvent1).not.toHaveBeenCalled();
-    expect(onEvent2).toHaveBeenCalledWith(event);
+    expect(first).not.toHaveBeenCalled();
+    expect(second).toHaveBeenCalledWith(event);
   });
 });

@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { GitHubSyncService } from "../../src/sync/githubSync.js";
 import { RunState } from "../../src/domain/runState.js";
 import type { Run } from "../../src/domain/types.js";
@@ -17,7 +17,7 @@ function makeRun(overrides: Partial<Run> = {}): Run {
     repo: "test-repo",
     branchName: null,
     prNumber: 42,
-    state: RunState.ReadyForHumanReview,
+    state: RunState.Implementing,
     planVersion: 1,
     approvedPlanVersion: null,
     plannerRuntime: null,
@@ -32,15 +32,30 @@ function makeRun(overrides: Partial<Run> = {}): Run {
   };
 }
 
+function makeLogger() {
+  return { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
+}
+
+function makeGithubClient(overrides: Record<string, unknown> = {}) {
+  return {
+    markPRReady: vi.fn().mockResolvedValue(undefined),
+    commentOnPR: vi.fn().mockResolvedValue(undefined),
+    createPRReviewComment: vi.fn().mockResolvedValue(1001),
+    submitPRReview: vi.fn().mockResolvedValue(undefined),
+    replyToReviewComment: vi.fn().mockResolvedValue(undefined),
+    ...overrides,
+  };
+}
+
 function makeFinding(overrides: Partial<Finding> = {}): Finding {
   return {
     id: "f1",
-    severity: "blocker",
+    severity: "important",
     type: "bug",
     file: "src/foo.ts",
     lineHint: 10,
-    title: "Bad thing",
-    details: "It is bad",
+    title: "Possible bug",
+    details: "This looks wrong.",
     ...overrides,
   };
 }
@@ -48,298 +63,283 @@ function makeFinding(overrides: Partial<Finding> = {}): Finding {
 function makeExecutionReport(overrides: Partial<ExecutionReport> = {}): ExecutionReport {
   return {
     executionVersion: 1,
-    summary: "Did the thing",
-    filesChanged: [],
+    summary: "Implemented the feature.",
+    filesChanged: ["src/a.ts", "src/b.ts"],
     checks: {
       lint: { status: "pass", details: "clean" },
       typecheck: { status: "pass", details: "clean" },
-      tests: { status: "pass", details: "clean" },
+      tests: { status: "fail", details: "1 test failed" },
     },
     notes: [],
     prDraftCreated: true,
-    score: 0.9,
-    scoreRationale: "Solid work",
+    score: 0.8,
+    scoreRationale: "Mostly good",
     ...overrides,
   };
 }
 
-function makeResolution(overrides: Partial<ResolutionItem> = {}): ResolutionItem {
-  return {
-    findingId: "f1",
-    status: "accepted",
-    action: "Fixed it",
-    rationale: "Because reasons",
-    ...overrides,
-  };
-}
+describe("GitHubSyncService.syncState", () => {
+  it("does nothing when the run has no prNumber", async () => {
+    const githubClient = makeGithubClient();
+    const logger = makeLogger();
+    const svc = new GitHubSyncService(githubClient as never, logger as never);
 
-function buildDeps() {
-  const githubClient = {
-    verifyRepoAccess: vi.fn(),
-    getDefaultBranch: vi.fn(),
-    createBranch: vi.fn(),
-    createDraftPR: vi.fn(),
-    commentOnPR: vi.fn().mockResolvedValue(undefined),
-    getPRDiff: vi.fn(),
-    markPRReady: vi.fn().mockResolvedValue(undefined),
-    listPRComments: vi.fn(),
-    createPRReviewComment: vi.fn(),
-    replyToReviewComment: vi.fn().mockResolvedValue(undefined),
-    submitPRReview: vi.fn().mockResolvedValue(undefined),
-  };
-  const logger = {
-    info: vi.fn(),
-    warn: vi.fn(),
-    error: vi.fn(),
-    debug: vi.fn(),
-  };
-  return { githubClient, logger };
-}
+    await svc.syncState(makeRun({ prNumber: null, state: RunState.ReadyForHumanReview }));
 
-describe("GitHubSyncService", () => {
-  let deps: ReturnType<typeof buildDeps>;
-  let svc: GitHubSyncService;
-
-  beforeEach(() => {
-    deps = buildDeps();
-    svc = new GitHubSyncService(deps.githubClient as never, deps.logger as never);
+    expect(githubClient.markPRReady).not.toHaveBeenCalled();
+    expect(githubClient.commentOnPR).not.toHaveBeenCalled();
   });
 
-  describe("syncState", () => {
-    it("does nothing when the run has no prNumber", async () => {
-      const run = makeRun({ prNumber: null, state: RunState.ReadyForHumanReview });
-      await svc.syncState(run);
-      expect(deps.githubClient.markPRReady).not.toHaveBeenCalled();
-      expect(deps.githubClient.commentOnPR).not.toHaveBeenCalled();
-    });
+  it("does nothing when the run has a PR but is not in ReadyForHumanReview", async () => {
+    const githubClient = makeGithubClient();
+    const svc = new GitHubSyncService(githubClient as never, makeLogger() as never);
 
-    it("marks the PR ready and comments when state is ReadyForHumanReview", async () => {
-      const run = makeRun({ prNumber: 7, state: RunState.ReadyForHumanReview, repo: "acme/repo" });
-      await svc.syncState(run);
-      expect(deps.githubClient.markPRReady).toHaveBeenCalledWith("acme/repo", 7);
-      expect(deps.githubClient.commentOnPR).toHaveBeenCalledWith(
-        "acme/repo",
-        7,
-        "All AI checks passed. Ready for human review.",
-      );
-      expect(deps.logger.debug).toHaveBeenCalledWith(
-        { repo: "acme/repo", prNumber: 7 },
-        "Marked PR ready for review",
-      );
-    });
+    await svc.syncState(makeRun({ prNumber: 42, state: RunState.Implementing }));
 
-    it("does not mark ready for other states even with a prNumber", async () => {
-      const run = makeRun({ prNumber: 7, state: RunState.Implementing });
-      await svc.syncState(run);
-      expect(deps.githubClient.markPRReady).not.toHaveBeenCalled();
-      expect(deps.githubClient.commentOnPR).not.toHaveBeenCalled();
-      expect(deps.logger.debug).not.toHaveBeenCalled();
-    });
+    expect(githubClient.markPRReady).not.toHaveBeenCalled();
+    expect(githubClient.commentOnPR).not.toHaveBeenCalled();
   });
 
-  describe("postReviewFindings", () => {
-    it("posts inline comments, maps returned comment ids, and submits an APPROVE review", async () => {
-      deps.githubClient.createPRReviewComment.mockResolvedValue(555);
-      const findings = [makeFinding({ id: "f1", severity: "important", title: "Title A" })];
+  it("marks the PR ready and comments when state is ReadyForHumanReview with a prNumber", async () => {
+    const githubClient = makeGithubClient();
+    const logger = makeLogger();
+    const svc = new GitHubSyncService(githubClient as never, logger as never);
 
-      const map = await svc.postReviewFindings("acme/repo", 3, findings, "approved");
+    const run = makeRun({ prNumber: 42, state: RunState.ReadyForHumanReview, repo: "org/repo" });
+    await svc.syncState(run);
 
-      expect(deps.githubClient.createPRReviewComment).toHaveBeenCalledWith(
-        "acme/repo",
-        3,
-        "**[IMPORTANT]** Title A\n\nIt is bad",
-        "src/foo.ts",
-        10,
-      );
-      expect(map.get("f1")).toBe(555);
-      expect(deps.githubClient.submitPRReview).toHaveBeenCalledWith(
-        "acme/repo",
-        3,
-        expect.stringContaining("AI Code Review: Approved"),
-        "APPROVE",
-      );
-      expect(deps.logger.info).toHaveBeenCalledWith(
-        expect.objectContaining({
-          repo: "acme/repo",
-          prNumber: 3,
-          findingsCount: 1,
-          verdict: "approved",
-          mappedComments: 1,
-        }),
-        "Posted review findings as PR review comments",
-      );
+    expect(githubClient.markPRReady).toHaveBeenCalledWith("org/repo", 42);
+    expect(githubClient.commentOnPR).toHaveBeenCalledWith(
+      "org/repo",
+      42,
+      "All AI checks passed. Ready for human review.",
+    );
+    expect(logger.debug).toHaveBeenCalledWith(
+      { repo: "org/repo", prNumber: 42 },
+      "Marked PR ready for review",
+    );
+  });
+});
+
+describe("GitHubSyncService.postReviewFindings", () => {
+  it("posts one inline comment per finding and maps finding id to comment id", async () => {
+    const githubClient = makeGithubClient({
+      createPRReviewComment: vi
+        .fn()
+        .mockResolvedValueOnce(101)
+        .mockResolvedValueOnce(102),
     });
+    const svc = new GitHubSyncService(githubClient as never, makeLogger() as never);
 
-    it("submits REQUEST_CHANGES for a non-approved verdict", async () => {
-      deps.githubClient.createPRReviewComment.mockResolvedValue(1);
-      await svc.postReviewFindings("acme/repo", 3, [makeFinding()], "changes_requested");
-      expect(deps.githubClient.submitPRReview).toHaveBeenCalledWith(
-        "acme/repo",
-        3,
-        expect.stringContaining("AI Code Review: Changes Requested"),
-        "REQUEST_CHANGES",
-      );
-    });
+    const findings = [makeFinding({ id: "f1" }), makeFinding({ id: "f2", file: "src/bar.ts" })];
+    const result = await svc.postReviewFindings("org/repo", 7, findings, "changes_requested");
 
-    it("omits findings from the map when createPRReviewComment returns a falsy id", async () => {
-      deps.githubClient.createPRReviewComment.mockResolvedValue(0);
-      const map = await svc.postReviewFindings("acme/repo", 3, [makeFinding({ id: "f-no-id" })], "approved");
-      expect(map.has("f-no-id")).toBe(false);
-      expect(map.size).toBe(0);
-    });
-
-    it("handles an empty findings list", async () => {
-      const map = await svc.postReviewFindings("acme/repo", 3, [], "approved");
-      expect(map.size).toBe(0);
-      expect(deps.githubClient.createPRReviewComment).not.toHaveBeenCalled();
-      expect(deps.githubClient.submitPRReview).toHaveBeenCalledWith(
-        "acme/repo",
-        3,
-        expect.stringContaining("0 finding(s) posted"),
-        "APPROVE",
-      );
-    });
+    expect(githubClient.createPRReviewComment).toHaveBeenNthCalledWith(
+      1,
+      "org/repo",
+      7,
+      expect.stringContaining("**[IMPORTANT]** Possible bug"),
+      "src/foo.ts",
+      10,
+    );
+    expect(result.get("f1")).toBe(101);
+    expect(result.get("f2")).toBe(102);
+    expect(githubClient.submitPRReview).toHaveBeenCalledWith(
+      "org/repo",
+      7,
+      expect.stringContaining("Changes Requested"),
+      "REQUEST_CHANGES",
+    );
   });
 
-  describe("postExecutionReportUpdate", () => {
-    it("renders check icons for pass, fail, and non-pass/fail statuses", async () => {
-      const report = makeExecutionReport({
+  it("submits an APPROVE review when verdict is approved", async () => {
+    const githubClient = makeGithubClient();
+    const svc = new GitHubSyncService(githubClient as never, makeLogger() as never);
+
+    await svc.postReviewFindings("org/repo", 7, [], "approved");
+
+    expect(githubClient.submitPRReview).toHaveBeenCalledWith(
+      "org/repo",
+      7,
+      expect.stringContaining("Approved"),
+      "APPROVE",
+    );
+  });
+
+  it("skips mapping a finding whose comment creation returns a falsy id", async () => {
+    const githubClient = makeGithubClient({
+      createPRReviewComment: vi.fn().mockResolvedValue(0),
+    });
+    const svc = new GitHubSyncService(githubClient as never, makeLogger() as never);
+
+    const result = await svc.postReviewFindings("org/repo", 7, [makeFinding()], "approved");
+
+    expect(result.size).toBe(0);
+  });
+});
+
+describe("GitHubSyncService.postExecutionReportUpdate", () => {
+  it("posts a comment including score, checks, and a plain files-changed list under the collapse threshold", async () => {
+    const githubClient = makeGithubClient();
+    const logger = makeLogger();
+    const svc = new GitHubSyncService(githubClient as never, logger as never);
+
+    const report = makeExecutionReport({ filesChanged: ["src/a.ts", "src/b.ts"] });
+    await svc.postExecutionReportUpdate("org/repo", 7, report);
+
+    expect(githubClient.commentOnPR).toHaveBeenCalledTimes(1);
+    const body = (githubClient.commentOnPR as ReturnType<typeof vi.fn>).mock.calls[0][2] as string;
+
+    expect(body).toContain("Score: 80%");
+    expect(body).toContain(":white_check_mark: **Lint**");
+    expect(body).toContain(":x: **Tests** -- 1 test failed");
+    expect(body).toContain("### Files changed (2)");
+    expect(body).not.toContain("<details>");
+    expect(body).toContain("- `src/a.ts`");
+    expect(logger.info).toHaveBeenCalled();
+  });
+
+  it("collapses the files-changed section into a <details> block above the threshold", async () => {
+    const githubClient = makeGithubClient();
+    const svc = new GitHubSyncService(githubClient as never, makeLogger() as never);
+
+    const files = Array.from({ length: 9 }, (_, i) => `src/file${String(i)}.ts`);
+    await svc.postExecutionReportUpdate("org/repo", 7, makeExecutionReport({ filesChanged: files }));
+
+    const body = (githubClient.commentOnPR as ReturnType<typeof vi.fn>).mock.calls[0][2] as string;
+    expect(body).toContain("<details>");
+    expect(body).toContain("Files changed (9)");
+    expect(body).toContain("</details>");
+  });
+
+  it("omits the files-changed section entirely when no files changed", async () => {
+    const githubClient = makeGithubClient();
+    const svc = new GitHubSyncService(githubClient as never, makeLogger() as never);
+
+    await svc.postExecutionReportUpdate("org/repo", 7, makeExecutionReport({ filesChanged: [] }));
+
+    const body = (githubClient.commentOnPR as ReturnType<typeof vi.fn>).mock.calls[0][2] as string;
+    expect(body).not.toContain("Files changed");
+  });
+
+  it("includes a Notes section when notes are present, and omits it otherwise", async () => {
+    const githubClient = makeGithubClient();
+    const svc = new GitHubSyncService(githubClient as never, makeLogger() as never);
+
+    await svc.postExecutionReportUpdate(
+      "org/repo",
+      7,
+      makeExecutionReport({ notes: ["Watch out for X"] }),
+    );
+    const withNotes = (githubClient.commentOnPR as ReturnType<typeof vi.fn>).mock.calls[0][2] as string;
+    expect(withNotes).toContain("### Notes");
+    expect(withNotes).toContain("- Watch out for X");
+
+    (githubClient.commentOnPR as ReturnType<typeof vi.fn>).mockClear();
+    await svc.postExecutionReportUpdate("org/repo", 7, makeExecutionReport({ notes: [] }));
+    const withoutNotes = (githubClient.commentOnPR as ReturnType<typeof vi.fn>).mock.calls[0][2] as string;
+    expect(withoutNotes).not.toContain("### Notes");
+  });
+
+  it("renders the neutral icon for a skip check status", async () => {
+    const githubClient = makeGithubClient();
+    const svc = new GitHubSyncService(githubClient as never, makeLogger() as never);
+
+    await svc.postExecutionReportUpdate(
+      "org/repo",
+      7,
+      makeExecutionReport({
         checks: {
-          lint: { status: "pass", details: "ok" },
-          typecheck: { status: "fail", details: "broken" },
-          tests: { status: "skip", details: "skipped" },
+          lint: { status: "skip", details: "not run" },
+          typecheck: { status: "pass", details: "ok" },
+          tests: { status: "pass", details: "ok" },
         },
-      });
-      await svc.postExecutionReportUpdate("acme/repo", 5, report);
-      const body = deps.githubClient.commentOnPR.mock.calls[0][2] as string;
-      expect(body).toContain(":white_check_mark: **Lint** -- ok");
-      expect(body).toContain(":x: **Typecheck** -- broken");
-      expect(body).toContain(":heavy_minus_sign: **Tests** -- skipped");
-    });
+      }),
+    );
+    const body = (githubClient.commentOnPR as ReturnType<typeof vi.fn>).mock.calls[0][2] as string;
+    expect(body).toContain(":heavy_minus_sign: **Lint** -- not run");
+  });
+});
 
-    it("renders a plain files-changed list at or below the collapse threshold", async () => {
-      const files = Array.from({ length: 8 }, (_, i) => `src/file${String(i)}.ts`);
-      const report = makeExecutionReport({ filesChanged: files });
-      await svc.postExecutionReportUpdate("acme/repo", 5, report);
-      const body = deps.githubClient.commentOnPR.mock.calls[0][2] as string;
-      expect(body).toContain("### Files changed (8)");
-      expect(body).not.toContain("<details>");
-      expect(body).toContain("- `src/file0.ts`");
-    });
+describe("GitHubSyncService.postRemediationResolutions", () => {
+  it("replies to mapped comments and posts a summary table", async () => {
+    const githubClient = makeGithubClient();
+    const logger = makeLogger();
+    const svc = new GitHubSyncService(githubClient as never, logger as never);
 
-    it("collapses the files-changed list above the threshold", async () => {
-      const files = Array.from({ length: 9 }, (_, i) => `src/file${String(i)}.ts`);
-      const report = makeExecutionReport({ filesChanged: files });
-      await svc.postExecutionReportUpdate("acme/repo", 5, report);
-      const body = deps.githubClient.commentOnPR.mock.calls[0][2] as string;
-      expect(body).toContain("<details>");
-      expect(body).toContain("<summary><strong>Files changed (9)</strong></summary>");
-      expect(body).toContain("</details>");
-    });
+    const resolutions: ResolutionItem[] = [
+      { findingId: "f1", status: "accepted", action: "Fixed it", rationale: "Was a real bug" },
+      {
+        findingId: "f2",
+        status: "rejected",
+        action: "No change",
+        rationale: "False positive",
+      },
+    ];
+    const commentMap = { f1: 101 };
 
-    it("omits the files-changed section entirely when there are no files", async () => {
-      const report = makeExecutionReport({ filesChanged: [] });
-      await svc.postExecutionReportUpdate("acme/repo", 5, report);
-      const body = deps.githubClient.commentOnPR.mock.calls[0][2] as string;
-      expect(body).not.toContain("Files changed");
-    });
+    await svc.postRemediationResolutions("org/repo", 7, resolutions, commentMap);
 
-    it("includes a notes section only when notes are present", async () => {
-      const withNotes = makeExecutionReport({ notes: ["Heads up", "Another note"] });
-      await svc.postExecutionReportUpdate("acme/repo", 5, withNotes);
-      const bodyWithNotes = deps.githubClient.commentOnPR.mock.calls[0][2] as string;
-      expect(bodyWithNotes).toContain("### Notes");
-      expect(bodyWithNotes).toContain("- Heads up");
-      expect(bodyWithNotes).toContain("- Another note");
+    expect(githubClient.replyToReviewComment).toHaveBeenCalledTimes(1);
+    expect(githubClient.replyToReviewComment).toHaveBeenCalledWith(
+      "org/repo",
+      7,
+      101,
+      expect.stringContaining(":white_check_mark: **accepted**"),
+    );
 
-      deps.githubClient.commentOnPR.mockClear();
-      const withoutNotes = makeExecutionReport({ notes: [] });
-      await svc.postExecutionReportUpdate("acme/repo", 5, withoutNotes);
-      const bodyWithoutNotes = deps.githubClient.commentOnPR.mock.calls[0][2] as string;
-      expect(bodyWithoutNotes).not.toContain("### Notes");
-    });
-
-    it("includes the score, rationale and summary, and logs the update", async () => {
-      const report = makeExecutionReport({
-        executionVersion: 3,
-        score: 0.876,
-        scoreRationale: "Mostly good",
-        summary: "Refactored the thing",
-        filesChanged: ["a.ts", "b.ts"],
-      });
-      await svc.postExecutionReportUpdate("acme/repo", 5, report);
-      const body = deps.githubClient.commentOnPR.mock.calls[0][2] as string;
-      expect(body).toContain("## AI Execution Report (v3) -- Score: 88%");
-      expect(body).toContain("*Mostly good*");
-      expect(body).toContain("Refactored the thing");
-      expect(deps.logger.info).toHaveBeenCalledWith(
-        expect.objectContaining({
-          repo: "acme/repo",
-          prNumber: 5,
-          executionVersion: 3,
-          score: 0.876,
-          filesChanged: 2,
-        }),
-        "Posted execution report update to PR",
-      );
-    });
+    expect(githubClient.commentOnPR).toHaveBeenCalledTimes(1);
+    const summary = (githubClient.commentOnPR as ReturnType<typeof vi.fn>).mock.calls[0][2] as string;
+    expect(summary).toContain("## AI Remediation Summary");
+    expect(summary).toContain("f1");
+    expect(summary).toContain("f2");
+    expect(logger.info).toHaveBeenCalledWith(
+      expect.objectContaining({ resolutionCount: 2, repliedTo: 1 }),
+      "Posted remediation resolutions to PR",
+    );
   });
 
-  describe("postRemediationResolutions", () => {
-    it("replies to mapped review comments and posts a summary table", async () => {
-      const resolutions = [
-        makeResolution({ findingId: "f1", status: "accepted", action: "Fixed", rationale: "Because" }),
-        makeResolution({ findingId: "f2", status: "rejected", action: "Won't fix", rationale: "Not valid" }),
-      ];
-      const commentMap = { f1: 100 };
+  it("skips replying for resolutions with no mapped GitHub comment id", async () => {
+    const githubClient = makeGithubClient();
+    const svc = new GitHubSyncService(githubClient as never, makeLogger() as never);
 
-      await svc.postRemediationResolutions("acme/repo", 3, resolutions, commentMap);
+    const resolutions: ResolutionItem[] = [
+      {
+        findingId: "unmapped",
+        status: "partially_addressed",
+        action: "Partial fix",
+        rationale: "Only some addressed",
+      },
+    ];
 
-      expect(deps.githubClient.replyToReviewComment).toHaveBeenCalledTimes(1);
-      expect(deps.githubClient.replyToReviewComment).toHaveBeenCalledWith(
-        "acme/repo",
-        3,
-        100,
-        expect.stringContaining(":white_check_mark: **accepted**"),
-      );
+    await svc.postRemediationResolutions("org/repo", 7, resolutions, {});
 
-      const summaryBody = deps.githubClient.commentOnPR.mock.calls[0][2] as string;
-      expect(summaryBody).toContain("## AI Remediation Summary");
-      expect(summaryBody).toContain("| :white_check_mark: **f1** | accepted | Fixed | Because |");
-      expect(summaryBody).toContain("| :no_entry_sign: **f2** | rejected | Won't fix | Not valid |");
+    expect(githubClient.replyToReviewComment).not.toHaveBeenCalled();
+    expect(githubClient.commentOnPR).toHaveBeenCalledTimes(1);
+  });
 
-      expect(deps.logger.info).toHaveBeenCalledWith(
-        expect.objectContaining({
-          repo: "acme/repo",
-          prNumber: 3,
-          resolutionCount: 2,
-          repliedTo: 1,
-        }),
-        "Posted remediation resolutions to PR",
-      );
-    });
+  it("uses the fallback icon for an unrecognized resolution status", async () => {
+    const githubClient = makeGithubClient();
+    const svc = new GitHubSyncService(githubClient as never, makeLogger() as never);
 
-    it("skips replying when a finding has no mapped GitHub comment id", async () => {
-      const resolutions = [makeResolution({ findingId: "unmapped" })];
-      await svc.postRemediationResolutions("acme/repo", 3, resolutions, {});
-      expect(deps.githubClient.replyToReviewComment).not.toHaveBeenCalled();
-      expect(deps.githubClient.commentOnPR).toHaveBeenCalled();
-    });
+    const resolutions = [
+      {
+        findingId: "f1",
+        status: "unknown_status" as ResolutionItem["status"],
+        action: "Did something",
+        rationale: "Because",
+      },
+    ];
 
-    it("uses the partially_addressed icon and falls back for unknown statuses", async () => {
-      const resolutions = [
-        makeResolution({ findingId: "f1", status: "partially_addressed" }),
-        { findingId: "f2", status: "mystery", action: "a", rationale: "r" } as unknown as ResolutionItem,
-      ];
-      const commentMap = { f1: 1, f2: 2 };
-      await svc.postRemediationResolutions("acme/repo", 3, resolutions, commentMap);
+    await svc.postRemediationResolutions("org/repo", 7, resolutions, { f1: 55 });
 
-      const replyBodies = deps.githubClient.replyToReviewComment.mock.calls.map((c) => c[3] as string);
-      expect(replyBodies[0]).toContain(":warning:");
-      expect(replyBodies[1]).toContain(":grey_question:");
-
-      const summaryBody = deps.githubClient.commentOnPR.mock.calls[0][2] as string;
-      expect(summaryBody).toContain(":grey_question: **f2**");
-    });
+    expect(githubClient.replyToReviewComment).toHaveBeenCalledWith(
+      "org/repo",
+      7,
+      55,
+      expect.stringContaining(":grey_question:"),
+    );
+    const summary = (githubClient.commentOnPR as ReturnType<typeof vi.fn>).mock.calls[0][2] as string;
+    expect(summary).toContain(":grey_question:");
   });
 });

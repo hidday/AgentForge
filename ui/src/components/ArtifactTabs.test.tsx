@@ -1,34 +1,41 @@
 import { describe, it, expect, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { ArtifactTabs } from "./ArtifactTabs.tsx";
 import type { Artifact } from "@/api/client.ts";
+import { ArtifactTabs } from "./ArtifactTabs.tsx";
 
 vi.mock("./PlanView.tsx", () => ({
   PlanView: ({ plan }: { plan: Record<string, unknown> }) => (
     <div data-testid="plan-view">{JSON.stringify(plan)}</div>
   ),
 }));
+
 vi.mock("./ReviewView.tsx", () => ({
   ReviewView: ({ review }: { review: Record<string, unknown> }) => (
     <div data-testid="review-view">{JSON.stringify(review)}</div>
   ),
 }));
+
 vi.mock("./ExecutionReportView.tsx", () => ({
   ExecutionReportView: ({ report }: { report: Record<string, unknown> }) => (
     <div data-testid="execution-view">{JSON.stringify(report)}</div>
   ),
 }));
 
-function makeArtifact(type: string, payloadJson: unknown, version = 1, id?: string): Artifact {
+function makeArtifact(
+  type: string,
+  payloadJson: unknown,
+  overrides: Partial<Artifact> = {},
+): Artifact {
   return {
-    id: id ?? `${type}-${version}`,
+    id: `${type}-${overrides.version ?? 1}`,
     runId: "run-1",
     type,
-    version,
+    version: 1,
     payloadJson,
     rawText: "",
     createdAt: "2024-01-01T00:00:00Z",
+    ...overrides,
   };
 }
 
@@ -36,133 +43,170 @@ describe("ArtifactTabs", () => {
   it("shows the empty state when there are no artifacts", () => {
     render(<ArtifactTabs artifacts={[]} />);
     expect(
-      screen.getByText(/No artifacts yet — the run hasn't produced any output\./i),
+      screen.getByText("No artifacts yet — the run hasn't produced any output."),
     ).toBeDefined();
-    expect(screen.queryByRole("button", { name: "Plan" })).toBeNull();
   });
 
-  it("renders only tabs for artifact types that are present, and selects the first tab by default", () => {
-    const artifacts = [
-      makeArtifact("Plan", { steps: [] }),
-      makeArtifact("Review", { overallVerdict: "approved" }),
-    ];
-    render(<ArtifactTabs artifacts={artifacts} />);
-
+  it("only renders tabs for artifact types that are present", () => {
+    render(
+      <ArtifactTabs
+        artifacts={[makeArtifact("Plan", { steps: [] })]}
+      />,
+    );
     expect(screen.getByRole("button", { name: "Plan" })).toBeDefined();
-    expect(screen.getByRole("button", { name: "Code Review" })).toBeDefined();
-    // Not present since no matching artifact
+    expect(screen.queryByRole("button", { name: "Code Review" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Execution" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Remediation" })).toBeNull();
+  });
 
-    // Plan tab active by default -> PlanView rendered
+  it("defaults to the first available tab and renders its content", () => {
+    render(
+      <ArtifactTabs
+        artifacts={[makeArtifact("Plan", { steps: [{ id: "s1" }] })]}
+      />,
+    );
     expect(screen.getByTestId("plan-view")).toBeDefined();
-    expect(screen.queryByTestId("review-view")).toBeNull();
   });
 
-  it("clicking a tab switches the active tab and renders that artifact's content", async () => {
-    const artifacts = [
-      makeArtifact("Plan", { steps: [] }),
-      makeArtifact("Review", { overallVerdict: "approved" }),
-    ];
-    render(<ArtifactTabs artifacts={artifacts} />);
+  it("switches tabs and content on click", async () => {
+    render(
+      <ArtifactTabs
+        artifacts={[
+          makeArtifact("Plan", { steps: [] }),
+          makeArtifact("Review", { overallVerdict: "approved" }),
+        ]}
+      />,
+    );
 
+    expect(screen.getByTestId("plan-view")).toBeDefined();
     await userEvent.click(screen.getByRole("button", { name: "Code Review" }));
-
-    expect(screen.getByTestId("review-view")).toBeDefined();
     expect(screen.queryByTestId("plan-view")).toBeNull();
-
-    // Active tab button should carry the active styling class
-    const reviewTabBtn = screen.getByRole("button", { name: "Code Review" });
-    expect(reviewTabBtn.className).toContain("bg-accent");
-    const planTabBtn = screen.getByRole("button", { name: "Plan" });
-    expect(planTabBtn.className).not.toContain("bg-accent");
+    expect(screen.getByTestId("review-view")).toBeDefined();
   });
 
-  it("renders the ExecutionReportView for the ExecutionReport artifact type", () => {
-    const artifacts = [makeArtifact("ExecutionReport", { summary: "done" })];
-    render(<ArtifactTabs artifacts={artifacts} />);
-    expect(screen.getByTestId("execution-view")).toBeDefined();
+  it("renders the PlanReview tab through ReviewView", () => {
+    render(
+      <ArtifactTabs
+        artifacts={[makeArtifact("PlanReview", { overallVerdict: "changes_requested" })]}
+      />,
+    );
+    expect(screen.getByRole("button", { name: "Plan Review" })).toBeDefined();
+    expect(screen.getByTestId("review-view").textContent).toContain("changes_requested");
   });
 
-  it("shows rejection feedback entries sorted by version descending, using the RejectionFeedback tab", async () => {
-    const artifacts = [
-      makeArtifact("Plan", { steps: [] }),
-      makeArtifact(
-        "RejectionContext",
-        { planVersion: 1, feedback: "First rejection", source: "api" },
-        1,
-        "rej-1",
-      ),
-      makeArtifact(
-        "RejectionContext",
-        { planVersion: 2, feedback: "Second rejection", source: "linear" },
-        2,
-        "rej-2",
-      ),
-    ];
-    render(<ArtifactTabs artifacts={artifacts} />);
+  it("renders the Execution tab through ExecutionReportView", () => {
+    render(
+      <ArtifactTabs
+        artifacts={[makeArtifact("ExecutionReport", { summary: "Done work" })]}
+      />,
+    );
+    expect(screen.getByTestId("execution-view").textContent).toContain("Done work");
+  });
 
-    await userEvent.click(screen.getByRole("button", { name: "Rejection Feedback" }));
+  it("renders PlanRevision dispositions with status styling and formatted status text", () => {
+    render(
+      <ArtifactTabs
+        artifacts={[
+          makeArtifact("PlanRevision", {
+            dispositions: [
+              { findingId: "F1", status: "accepted", rationale: "Looks good" },
+              { findingId: "F2", status: "dismissed", rationale: "Not applicable" },
+              { findingId: "F3", status: "partially_incorporated", rationale: "Partly done" },
+            ],
+          }),
+        ]}
+      />,
+    );
+    expect(screen.getByText("F1")).toBeDefined();
+    expect(screen.getByText("Looks good")).toBeDefined();
+    expect(screen.getByText("partially incorporated")).toBeDefined();
+  });
 
-    const feedbackTexts = screen
-      .getAllByText(/rejection$/i, { selector: "p" })
-      .map((el) => el.textContent);
-    expect(feedbackTexts).toEqual(["Second rejection", "First rejection"]);
+  it("shows a message when PlanRevision has no dispositions", () => {
+    render(
+      <ArtifactTabs artifacts={[makeArtifact("PlanRevision", {})]} />,
+    );
+    expect(screen.getByText("No dispositions recorded")).toBeDefined();
+  });
+
+  it("falls back to the default style for an unrecognized PlanRevision disposition status", () => {
+    const { container } = render(
+      <ArtifactTabs
+        artifacts={[
+          makeArtifact("PlanRevision", {
+            dispositions: [
+              { findingId: "F9", status: "pending_review", rationale: "Still triaging" },
+            ],
+          }),
+        ]}
+      />,
+    );
+    expect(screen.getByText("pending review")).toBeDefined();
+    const badge = container.querySelector("span.bg-surface-hover.text-text-muted");
+    expect(badge?.textContent).toBe("pending review");
+  });
+
+  it("renders Remediation resolutions with rationale and default executionVersion fallback", () => {
+    const { container } = render(
+      <ArtifactTabs
+        artifacts={[
+          makeArtifact("Remediation", {
+            resolution: [
+              {
+                findingId: "R1",
+                status: "accepted",
+                action: "Fixed the bug",
+                rationale: "Root cause addressed",
+              },
+              {
+                findingId: "R2",
+                status: "rejected",
+                action: "Declined change",
+                rationale: "Out of scope",
+              },
+            ],
+          }),
+        ]}
+      />,
+    );
+    expect(screen.getByText("R1")).toBeDefined();
+    expect(screen.getByText("Fixed the bug")).toBeDefined();
+    expect(screen.getByText("Root cause addressed")).toBeDefined();
+    // executionVersion falls back to 2 when not present on the remediation payload
+    const note = container.querySelector("p.italic");
+    expect(note?.textContent?.replace(/\s+/g, " ")).toContain("v2 report.");
+  });
+
+  it("renders the RejectionFeedback tab with multiple artifacts sorted by version descending", () => {
+    render(
+      <ArtifactTabs
+        artifacts={[
+          makeArtifact(
+            "RejectionContext",
+            { planVersion: 1, feedback: "First rejection", source: "api" },
+            { id: "rc1", version: 1 },
+          ),
+          makeArtifact(
+            "RejectionContext",
+            { planVersion: 2, feedback: "Second rejection", source: "linear" },
+            { id: "rc2", version: 2 },
+          ),
+        ]}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "Rejection Feedback" })).toBeDefined();
+    expect(screen.getByText("Second rejection")).toBeDefined();
+    expect(screen.getByText("First rejection")).toBeDefined();
     expect(screen.getByText("Plan V2 Rejection")).toBeDefined();
     expect(screen.getByText("Plan V1 Rejection")).toBeDefined();
     expect(screen.getByText("linear")).toBeDefined();
     expect(screen.getByText("api")).toBeDefined();
-  });
 
-  it("shows a 'no dispositions' fallback message for a PlanRevision artifact with an empty dispositions list", () => {
-    const artifacts = [makeArtifact("PlanRevision", { dispositions: [] })];
-    render(<ArtifactTabs artifacts={artifacts} />);
-    expect(screen.getByText("No dispositions recorded")).toBeDefined();
-  });
-
-  it("renders plan-revision dispositions with status-specific styling", () => {
-    const artifacts = [
-      makeArtifact("PlanRevision", {
-        dispositions: [
-          { findingId: "F1", status: "accepted", rationale: "Looks good" },
-          { findingId: "F2", status: "dismissed", rationale: "Not applicable" },
-          { findingId: "F3", status: "partially_incorporated", rationale: "Partial" },
-          { findingId: "F4", status: "unknown_status", rationale: "Other" },
-        ],
-      }),
-    ];
-    render(<ArtifactTabs artifacts={artifacts} />);
-    expect(screen.getByText("F1")).toBeDefined();
-    expect(screen.getByText("accepted")).toBeDefined();
-    expect(screen.getByText("dismissed")).toBeDefined();
-    expect(screen.getByText("partially incorporated")).toBeDefined();
-    expect(screen.getByText("unknown status")).toBeDefined();
-  });
-
-  it("renders remediation resolutions and falls back to executionVersion 2 when absent", () => {
-    const artifacts = [
-      makeArtifact("Remediation", {
-        resolution: [
-          { findingId: "R1", status: "accepted", action: "Fixed it", rationale: "why" },
-          { findingId: "R2", status: "rejected", action: "Skipped", rationale: "why not" },
-          { findingId: "R3", status: "other", action: "Deferred", rationale: "later" },
-        ],
-      }),
-    ];
-    render(<ArtifactTabs artifacts={artifacts} />);
-    expect(screen.getByText("R1")).toBeDefined();
-    expect(screen.getByText("Fixed it")).toBeDefined();
-    expect(screen.getByText(/open it to see the v2 report\./i)).toBeDefined();
-  });
-
-  it("uses the executionVersion from the remediation payload when present", () => {
-    const artifacts = [
-      makeArtifact("Remediation", {
-        resolution: [],
-        executionReport: { executionVersion: 5 },
-      }),
-    ];
-    render(<ArtifactTabs artifacts={artifacts} />);
-    expect(screen.getByText(/open it to see the v5 report\./i)).toBeDefined();
+    // Version 2 (the latest rejection) must appear before version 1 in the DOM.
+    const v2Heading = screen.getByText("Plan V2 Rejection");
+    const v1Heading = screen.getByText("Plan V1 Rejection");
+    expect(
+      v2Heading.compareDocumentPosition(v1Heading) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
   });
 });

@@ -328,12 +328,12 @@ describe("parseClaudeOutput – partial line noise filtering", () => {
     expect(parseClaudeOutput(fragment)).toEqual([]);
   });
 
-  it("filters a stop_reason:null/stop_sequence:null fragment that carries none of the other noise markers", () => {
-    // Deliberately excludes any of the metadata-noise keywords (input_tokens,
-    // output_tokens, etc.) and the parent_tool_use_id/session_id pairing, so
-    // this line can only be classified as noise via the dedicated
-    // stop_reason/stop_sequence check.
-    const fragment = 'incomplete"},"stop_reason":null,"stop_sequence":null}';
+  it("filters a stop_reason/stop_sequence-null fragment even without any other noise marker", () => {
+    // Deliberately excludes every keyword from METADATA_NOISE_RE and the
+    // parent_tool_use_id/session_id combo, so only the dedicated
+    // stop_reason+stop_sequence check (not an earlier short-circuit) can
+    // classify this fragment as noise.
+    const fragment = 'ntent":"done"}],"stop_reason":null,"stop_sequence":null}';
     expect(parseClaudeOutput(fragment)).toEqual([]);
   });
 

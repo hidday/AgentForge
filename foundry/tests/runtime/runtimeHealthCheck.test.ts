@@ -3,22 +3,38 @@ import { RuntimeHealthCheck } from "../../src/runtime/runtimeHealthCheck.js";
 import { PreflightError } from "../../src/utils/errors.js";
 import type { ProcessResult, ProcessSpawnOptions } from "../../src/runtime/runnerTypes.js";
 
-function makeLogger() {
-  return { info: vi.fn(), error: vi.fn(), warn: vi.fn(), debug: vi.fn() };
+function makeMockLogger() {
+  return {
+    info: vi.fn(),
+    error: vi.fn(),
+    warn: vi.fn(),
+    debug: vi.fn(),
+  };
 }
 
-function ok(stdout = "", stderr = "", exitCode = 0): ProcessResult {
-  return { stdout, stderr, exitCode, durationMs: 10, timedOut: false };
+function okResult(overrides: Partial<ProcessResult> = {}): ProcessResult {
+  return {
+    stdout: "",
+    stderr: "",
+    exitCode: 0,
+    durationMs: 10,
+    timedOut: false,
+    ...overrides,
+  };
 }
 
-function timedOut(): ProcessResult {
-  return { stdout: "", stderr: "", exitCode: 1, durationMs: 5000, timedOut: true };
-}
+const isVersionCall = (opts: ProcessSpawnOptions) => opts.args.includes("--version");
 
-const configs = RuntimeHealthCheck.buildRuntimeConfigs("claude", [], "codex", ["exec", "-"], "agent");
+describe("RuntimeHealthCheck.buildRuntimeConfigs", () => {
+  it("builds the expected shape for each runtime", () => {
+    const configs = RuntimeHealthCheck.buildRuntimeConfigs(
+      "claude",
+      ["--print"],
+      "codex",
+      ["exec", "-"],
+      "agent",
+    );
 
-describe("RuntimeHealthCheck.buildRuntimeConfigs()", () => {
-  it("builds command/probe configuration for each runtime", () => {
     expect(configs["claude-code"]).toMatchObject({
       command: "claude",
       versionArgs: ["--version"],
@@ -40,241 +56,430 @@ describe("RuntimeHealthCheck.buildRuntimeConfigs()", () => {
   });
 });
 
-describe("RuntimeHealthCheck.getRequiredRuntimes() / getLastResult()", () => {
-  it("derives required runtimes from AGENT_STAGES (claude-code and codex, never cursor)", () => {
-    const check = new RuntimeHealthCheck({ execute: vi.fn() } as never, configs, makeLogger() as never);
-    expect(check.getRequiredRuntimes()).toEqual(new Set(["claude-code", "codex"]));
-  });
-
-  it("getLastResult() is undefined before runPreflight() has ever run", () => {
-    const check = new RuntimeHealthCheck({ execute: vi.fn() } as never, configs, makeLogger() as never);
-    expect(check.getLastResult()).toBeUndefined();
+describe("RuntimeHealthCheck.getRequiredRuntimes", () => {
+  it("returns exactly the runtimes referenced by AGENT_STAGES (claude-code, codex) and excludes cursor", () => {
+    const health = new RuntimeHealthCheck({} as never, {} as never, makeMockLogger() as never);
+    const required = health.getRequiredRuntimes();
+    expect(required).toEqual(new Set(["claude-code", "codex"]));
+    expect(required.has("cursor")).toBe(false);
   });
 });
 
-describe("RuntimeHealthCheck.runPreflight() — healthy path", () => {
-  it("resolves ok:true when all required runtimes pass binary and auth checks", async () => {
-    const execute = vi.fn((opts: ProcessSpawnOptions) => {
-      if (opts.command === "claude" && opts.args[0] === "--version") return Promise.resolve(ok("1.2.3\n"));
-      if (opts.command === "claude" && opts.args[0] === "auth") return Promise.resolve(ok('{"loggedIn": true}'));
-      if (opts.command === "codex" && opts.args[0] === "--version") return Promise.resolve(ok("codex 4.5\n"));
-      if (opts.command === "codex" && opts.args[0] === "exec") return Promise.resolve(ok("PONG"));
-      return Promise.reject(new Error(`unexpected call: ${opts.command} ${opts.args.join(" ")}`));
+describe("RuntimeHealthCheck.getLastResult", () => {
+  it("returns undefined before runPreflight has ever run", () => {
+    const health = new RuntimeHealthCheck({} as never, {} as never, makeMockLogger() as never);
+    expect(health.getLastResult()).toBeUndefined();
+  });
+});
+
+const baseConfigs = {
+  "claude-code": {
+    command: "claude",
+    versionArgs: ["--version"],
+    probeArgs: ["auth", "status"],
+    successPattern: '"loggedIn":\\s*true',
+  },
+  codex: {
+    command: "codex",
+    versionArgs: ["--version"],
+    probeArgs: ["exec", "-"],
+    probeStdin: "Respond with exactly: PONG",
+  },
+  cursor: {
+    command: "agent",
+    versionArgs: ["--version"],
+    probeArgs: ["status"],
+    exitCodeOnly: true,
+  },
+} as const;
+
+describe("RuntimeHealthCheck.runPreflight — success path", () => {
+  it("returns ok:true, probes only required runtimes, and records the result via getLastResult", async () => {
+    const execute = vi.fn(async (opts: ProcessSpawnOptions) => {
+      if (isVersionCall(opts)) {
+        return okResult({ stdout: `${opts.command} v1.2.3\n` });
+      }
+      if (opts.command === "claude") {
+        return okResult({ stdout: '{"loggedIn": true}' });
+      }
+      // codex probe
+      return okResult({ stdout: "PONG" });
     });
     const processRunner = { execute };
-    const logger = makeLogger();
-    const check = new RuntimeHealthCheck(processRunner as never, configs, logger as never);
+    const logger = makeMockLogger();
+    const health = new RuntimeHealthCheck(processRunner as never, baseConfigs as never, logger as never);
 
-    const result = await check.runPreflight();
+    const result = await health.runPreflight();
 
     expect(result.ok).toBe(true);
-    expect([...result.requiredRuntimes].sort()).toEqual(["claude-code", "codex"]);
+    expect(result.requiredRuntimes.sort()).toEqual(["claude-code", "codex"]);
     expect(result.skippedRuntimes).toEqual(["cursor"]);
     expect(result.results).toHaveLength(2);
     for (const r of result.results) {
       expect(r.binaryCheck.ok).toBe(true);
+      expect(r.binaryCheck.version).toContain("v1.2.3");
       expect(r.authCheck.ok).toBe(true);
     }
-    expect(check.getLastResult()).toBe(result);
+    // cursor's command ("agent") should never have been invoked
+    expect(execute).not.toHaveBeenCalledWith(expect.objectContaining({ command: "agent" }));
+    expect(health.getLastResult()).toBe(result);
     expect(logger.info).toHaveBeenCalledWith(
       expect.objectContaining({ totalDurationMs: expect.any(Number) }),
       "Preflight passed: all agent runtimes are accessible and authenticated",
     );
   });
-
-  it("passes the codex auth check on a PONG response even with a non-zero exit code", async () => {
-    const execute = vi.fn((opts: ProcessSpawnOptions) => {
-      if (opts.args[0] === "--version") return Promise.resolve(ok("v1\n"));
-      if (opts.command === "claude" && opts.args[0] === "auth") return Promise.resolve(ok('{"loggedIn": true}'));
-      if (opts.command === "codex" && opts.args[0] === "exec") return Promise.resolve(ok("noise PONG noise", "", 1));
-      return Promise.reject(new Error("unexpected"));
-    });
-    const check = new RuntimeHealthCheck({ execute } as never, configs, makeLogger() as never);
-
-    const result = await check.runPreflight();
-    expect(result.ok).toBe(true);
-  });
 });
 
-describe("RuntimeHealthCheck.runPreflight() — unhealthy paths", () => {
-  it("throws PreflightError and skips the auth check when the binary check fails", async () => {
-    const execute = vi.fn((opts: ProcessSpawnOptions) => {
-      if (opts.command === "claude" && opts.args[0] === "--version") {
-        return Promise.resolve(ok("", "command not found", 127));
+describe("RuntimeHealthCheck.runPreflight — binary check failures", () => {
+  it("marks binaryCheck failed and skips authCheck when the version probe times out", async () => {
+    const execute = vi.fn(async (opts: ProcessSpawnOptions) => {
+      if (isVersionCall(opts) && opts.command === "claude") {
+        return okResult({ timedOut: true });
       }
-      if (opts.command === "codex" && opts.args[0] === "--version") return Promise.resolve(ok("codex 4.5\n"));
-      if (opts.command === "codex" && opts.args[0] === "exec") return Promise.resolve(ok("PONG"));
-      return Promise.reject(new Error("unexpected"));
+      if (isVersionCall(opts)) {
+        return okResult({ stdout: "codex v1\n" });
+      }
+      return okResult({ stdout: "PONG" });
     });
-    const logger = makeLogger();
-    const check = new RuntimeHealthCheck({ execute } as never, configs, logger as never);
+    const processRunner = { execute };
+    const logger = makeMockLogger();
+    const health = new RuntimeHealthCheck(processRunner as never, baseConfigs as never, logger as never);
 
-    await expect(check.runPreflight()).rejects.toThrow(PreflightError);
+    await expect(health.runPreflight()).rejects.toThrow(PreflightError);
 
-    const lastResult = check.getLastResult();
+    const lastResult = health.getLastResult();
     expect(lastResult?.ok).toBe(false);
     const claudeResult = lastResult?.results.find((r) => r.runtime === "claude-code");
     expect(claudeResult?.binaryCheck.ok).toBe(false);
-    expect(claudeResult?.binaryCheck.error).toContain("Exit code 127");
-    expect(claudeResult?.authCheck).toEqual({
-      ok: false,
-      durationMs: 0,
-      error: "Skipped: binary check failed",
-    });
-    expect(logger.error).toHaveBeenCalled();
-  });
-
-  it("marks the binary check as failed when the version probe times out", async () => {
-    const execute = vi.fn((opts: ProcessSpawnOptions) => {
-      if (opts.command === "claude" && opts.args[0] === "--version") return Promise.resolve(timedOut());
-      if (opts.command === "codex" && opts.args[0] === "--version") return Promise.resolve(ok("codex 4.5\n"));
-      if (opts.command === "codex" && opts.args[0] === "exec") return Promise.resolve(ok("PONG"));
-      return Promise.reject(new Error("unexpected"));
-    });
-    const check = new RuntimeHealthCheck({ execute } as never, configs, makeLogger() as never);
-
-    await expect(check.runPreflight()).rejects.toThrow(PreflightError);
-    const claudeResult = check.getLastResult()?.results.find((r) => r.runtime === "claude-code");
-    expect(claudeResult?.binaryCheck.ok).toBe(false);
-    expect(claudeResult?.binaryCheck.error).toBe("Timed out after 5000ms");
-  });
-
-  it("marks the auth check as failed when the auth probe times out", async () => {
-    const execute = vi.fn((opts: ProcessSpawnOptions) => {
-      if (opts.args[0] === "--version") return Promise.resolve(ok("v1\n"));
-      if (opts.command === "claude" && opts.args[0] === "auth") return Promise.resolve(timedOut());
-      if (opts.command === "codex" && opts.args[0] === "exec") return Promise.resolve(ok("PONG"));
-      return Promise.reject(new Error("unexpected"));
-    });
-    const check = new RuntimeHealthCheck({ execute } as never, configs, makeLogger() as never);
-
-    await expect(check.runPreflight()).rejects.toThrow(PreflightError);
-    const claudeResult = check.getLastResult()?.results.find((r) => r.runtime === "claude-code");
+    expect(claudeResult?.binaryCheck.error).toContain("Timed out after 5000ms");
     expect(claudeResult?.authCheck.ok).toBe(false);
-    expect(claudeResult?.authCheck.error).toBe("Auth probe timed out after 30000ms");
+    expect(claudeResult?.authCheck.error).toBe("Skipped: binary check failed");
+    // auth probe args should never be sent for claude since binary check failed first.
+    expect(execute).not.toHaveBeenCalledWith(
+      expect.objectContaining({ command: "claude", args: ["auth", "status"] }),
+    );
   });
 
-  it("fails the claude-code auth check when the success pattern does not match", async () => {
-    const execute = vi.fn((opts: ProcessSpawnOptions) => {
-      if (opts.args[0] === "--version") return Promise.resolve(ok("v1\n"));
-      if (opts.command === "claude" && opts.args[0] === "auth") return Promise.resolve(ok('{"loggedIn": false}'));
-      if (opts.command === "codex" && opts.args[0] === "exec") return Promise.resolve(ok("PONG"));
-      return Promise.reject(new Error("unexpected"));
-    });
-    const check = new RuntimeHealthCheck({ execute } as never, configs, makeLogger() as never);
-
-    await expect(check.runPreflight()).rejects.toThrow(PreflightError);
-    const claudeResult = check.getLastResult()?.results.find((r) => r.runtime === "claude-code");
-    expect(claudeResult?.authCheck.ok).toBe(false);
-    expect(claudeResult?.authCheck.error).toContain("expected pattern not found");
-  });
-
-  it("fails the codex auth check when neither exit code nor PONG indicate success", async () => {
-    const execute = vi.fn((opts: ProcessSpawnOptions) => {
-      if (opts.args[0] === "--version") return Promise.resolve(ok("v1\n"));
-      if (opts.command === "claude" && opts.args[0] === "auth") return Promise.resolve(ok('{"loggedIn": true}'));
-      if (opts.command === "codex" && opts.args[0] === "exec") {
-        return Promise.resolve(ok("", "not authenticated", 1));
+  it("marks binaryCheck failed with exit-code details on non-zero exit", async () => {
+    const execute = vi.fn(async (opts: ProcessSpawnOptions) => {
+      if (isVersionCall(opts) && opts.command === "claude") {
+        return okResult({ exitCode: 127, stderr: "command not found: claude" });
       }
-      return Promise.reject(new Error("unexpected"));
+      if (isVersionCall(opts)) {
+        return okResult({ stdout: "codex v1\n" });
+      }
+      return okResult({ stdout: "PONG" });
     });
-    const check = new RuntimeHealthCheck({ execute } as never, configs, makeLogger() as never);
+    const processRunner = { execute };
+    const health = new RuntimeHealthCheck(
+      processRunner as never,
+      baseConfigs as never,
+      makeMockLogger() as never,
+    );
 
-    await expect(check.runPreflight()).rejects.toThrow(PreflightError);
-    const codexResult = check.getLastResult()?.results.find((r) => r.runtime === "codex");
+    await expect(health.runPreflight()).rejects.toThrow(PreflightError);
+    const claudeResult = health.getLastResult()?.results.find((r) => r.runtime === "claude-code");
+    expect(claudeResult?.binaryCheck.ok).toBe(false);
+    expect(claudeResult?.binaryCheck.error).toContain("Exit code 127");
+    expect(claudeResult?.binaryCheck.error).toContain("command not found: claude");
+  });
+
+  it("marks binaryCheck failed with the caught error message when execute() rejects", async () => {
+    const execute = vi.fn(async (opts: ProcessSpawnOptions) => {
+      if (isVersionCall(opts) && opts.command === "claude") {
+        throw new Error("ENOENT: spawn claude");
+      }
+      if (isVersionCall(opts)) {
+        return okResult({ stdout: "codex v1\n" });
+      }
+      return okResult({ stdout: "PONG" });
+    });
+    const processRunner = { execute };
+    const health = new RuntimeHealthCheck(
+      processRunner as never,
+      baseConfigs as never,
+      makeMockLogger() as never,
+    );
+
+    await expect(health.runPreflight()).rejects.toThrow(PreflightError);
+    const claudeResult = health.getLastResult()?.results.find((r) => r.runtime === "claude-code");
+    expect(claudeResult?.binaryCheck.ok).toBe(false);
+    expect(claudeResult?.binaryCheck.error).toBe("ENOENT: spawn claude");
+  });
+
+  it("stringifies a non-Error value thrown by execute() as the binaryCheck error", async () => {
+    const execute = vi.fn(async (opts: ProcessSpawnOptions) => {
+      if (isVersionCall(opts) && opts.command === "claude") {
+        throw "spawn EACCES";
+      }
+      if (isVersionCall(opts)) {
+        return okResult({ stdout: "codex v1\n" });
+      }
+      return okResult({ stdout: "PONG" });
+    });
+    const processRunner = { execute };
+    const health = new RuntimeHealthCheck(
+      processRunner as never,
+      baseConfigs as never,
+      makeMockLogger() as never,
+    );
+
+    await expect(health.runPreflight()).rejects.toThrow(PreflightError);
+    const claudeResult = health.getLastResult()?.results.find((r) => r.runtime === "claude-code");
+    expect(claudeResult?.binaryCheck.ok).toBe(false);
+    expect(claudeResult?.binaryCheck.error).toBe("spawn EACCES");
+  });
+});
+
+describe("RuntimeHealthCheck.runPreflight — auth check via successPattern (claude-code)", () => {
+  it("fails auth when the success pattern does not match stdout/stderr", async () => {
+    const execute = vi.fn(async (opts: ProcessSpawnOptions) => {
+      if (isVersionCall(opts)) {
+        return okResult({ stdout: "v1\n" });
+      }
+      if (opts.command === "claude") {
+        return okResult({ stdout: '{"loggedIn": false}' });
+      }
+      return okResult({ stdout: "PONG" });
+    });
+    const processRunner = { execute };
+    const health = new RuntimeHealthCheck(
+      processRunner as never,
+      baseConfigs as never,
+      makeMockLogger() as never,
+    );
+
+    await expect(health.runPreflight()).rejects.toThrow(PreflightError);
+    const claudeResult = health.getLastResult()?.results.find((r) => r.runtime === "claude-code");
+    expect(claudeResult?.authCheck.ok).toBe(false);
+    expect(claudeResult?.authCheck.error).toContain("expected pattern not found in output");
+  });
+
+  it("fails auth with a timeout message when the probe times out", async () => {
+    const execute = vi.fn(async (opts: ProcessSpawnOptions) => {
+      if (isVersionCall(opts)) {
+        return okResult({ stdout: "v1\n" });
+      }
+      if (opts.command === "claude") {
+        return okResult({ timedOut: true });
+      }
+      return okResult({ stdout: "PONG" });
+    });
+    const processRunner = { execute };
+    const health = new RuntimeHealthCheck(
+      processRunner as never,
+      baseConfigs as never,
+      makeMockLogger() as never,
+    );
+
+    await expect(health.runPreflight()).rejects.toThrow(PreflightError);
+    const claudeResult = health.getLastResult()?.results.find((r) => r.runtime === "claude-code");
+    expect(claudeResult?.authCheck.ok).toBe(false);
+    expect(claudeResult?.authCheck.error).toContain("Auth probe timed out after 30000ms");
+  });
+
+  it("catches an exception thrown from the auth probe", async () => {
+    const execute = vi.fn(async (opts: ProcessSpawnOptions) => {
+      if (isVersionCall(opts)) {
+        return okResult({ stdout: "v1\n" });
+      }
+      if (opts.command === "claude") {
+        throw new Error("socket hang up");
+      }
+      return okResult({ stdout: "PONG" });
+    });
+    const processRunner = { execute };
+    const health = new RuntimeHealthCheck(
+      processRunner as never,
+      baseConfigs as never,
+      makeMockLogger() as never,
+    );
+
+    await expect(health.runPreflight()).rejects.toThrow(PreflightError);
+    const claudeResult = health.getLastResult()?.results.find((r) => r.runtime === "claude-code");
+    expect(claudeResult?.authCheck.ok).toBe(false);
+    expect(claudeResult?.authCheck.error).toBe("socket hang up");
+  });
+
+  it("stringifies a non-Error value thrown from the auth probe", async () => {
+    const execute = vi.fn(async (opts: ProcessSpawnOptions) => {
+      if (isVersionCall(opts)) {
+        return okResult({ stdout: "v1\n" });
+      }
+      if (opts.command === "claude") {
+        throw { code: "ECONNRESET" };
+      }
+      return okResult({ stdout: "PONG" });
+    });
+    const processRunner = { execute };
+    const health = new RuntimeHealthCheck(
+      processRunner as never,
+      baseConfigs as never,
+      makeMockLogger() as never,
+    );
+
+    await expect(health.runPreflight()).rejects.toThrow(PreflightError);
+    const claudeResult = health.getLastResult()?.results.find((r) => r.runtime === "claude-code");
+    expect(claudeResult?.authCheck.ok).toBe(false);
+    expect(claudeResult?.authCheck.error).toBe("[object Object]");
+  });
+});
+
+describe("RuntimeHealthCheck.runPreflight — auth check via exitCodeOnly path", () => {
+  // claude-code and codex are the two runtimes required by the real AGENT_STAGES;
+  // to exercise the exitCodeOnly branch of checkAuth we give claude-code's injected
+  // config that shape instead of its usual successPattern.
+  const exitCodeOnlyConfigs = {
+    ...baseConfigs,
+    "claude-code": {
+      command: "claude",
+      versionArgs: ["--version"],
+      probeArgs: ["status"],
+      exitCodeOnly: true,
+    },
+  };
+
+  it("passes auth when exit code is 0", async () => {
+    const execute = vi.fn(async (opts: ProcessSpawnOptions) => {
+      if (isVersionCall(opts)) return okResult({ stdout: "v1\n" });
+      if (opts.command === "claude") return okResult({ exitCode: 0 });
+      return okResult({ stdout: "PONG" });
+    });
+    const health = new RuntimeHealthCheck(
+      { execute } as never,
+      exitCodeOnlyConfigs as never,
+      makeMockLogger() as never,
+    );
+
+    const result = await health.runPreflight();
+    expect(result.ok).toBe(true);
+    const claudeResult = result.results.find((r) => r.runtime === "claude-code");
+    expect(claudeResult?.authCheck.ok).toBe(true);
+  });
+
+  it("fails auth with exit-code detail when exit code is non-zero", async () => {
+    const execute = vi.fn(async (opts: ProcessSpawnOptions) => {
+      if (isVersionCall(opts)) return okResult({ stdout: "v1\n" });
+      if (opts.command === "claude") {
+        return okResult({ exitCode: 3, stderr: "not logged in" });
+      }
+      return okResult({ stdout: "PONG" });
+    });
+    const health = new RuntimeHealthCheck(
+      { execute } as never,
+      exitCodeOnlyConfigs as never,
+      makeMockLogger() as never,
+    );
+
+    await expect(health.runPreflight()).rejects.toThrow(PreflightError);
+    const claudeResult = health.getLastResult()?.results.find((r) => r.runtime === "claude-code");
+    expect(claudeResult?.authCheck.ok).toBe(false);
+    expect(claudeResult?.authCheck.error).toContain("Exit code 3");
+    expect(claudeResult?.authCheck.error).toContain("not logged in");
+  });
+
+  it("falls back to stdout for the exit-code detail when stderr is empty", async () => {
+    const execute = vi.fn(async (opts: ProcessSpawnOptions) => {
+      if (isVersionCall(opts)) return okResult({ stdout: "v1\n" });
+      if (opts.command === "claude") {
+        return okResult({ exitCode: 3, stdout: "diagnostic: not authenticated", stderr: "" });
+      }
+      return okResult({ stdout: "PONG" });
+    });
+    const health = new RuntimeHealthCheck(
+      { execute } as never,
+      exitCodeOnlyConfigs as never,
+      makeMockLogger() as never,
+    );
+
+    await expect(health.runPreflight()).rejects.toThrow(PreflightError);
+    const claudeResult = health.getLastResult()?.results.find((r) => r.runtime === "claude-code");
+    expect(claudeResult?.authCheck.ok).toBe(false);
+    expect(claudeResult?.authCheck.error).toContain("Exit code 3");
+    expect(claudeResult?.authCheck.error).toContain("diagnostic: not authenticated");
+  });
+});
+
+describe("RuntimeHealthCheck.runPreflight — auth check via PONG fallback path (codex)", () => {
+  it("fails with exit-code detail when exit is non-zero and no PONG is present", async () => {
+    const execute = vi.fn(async (opts: ProcessSpawnOptions) => {
+      if (isVersionCall(opts)) return okResult({ stdout: "v1\n" });
+      if (opts.command === "claude") return okResult({ stdout: '{"loggedIn": true}' });
+      // codex probe: non-zero exit, no PONG anywhere in output
+      return okResult({ exitCode: 1, stdout: "", stderr: "auth required" });
+    });
+    const health = new RuntimeHealthCheck(
+      { execute } as never,
+      baseConfigs as never,
+      makeMockLogger() as never,
+    );
+
+    await expect(health.runPreflight()).rejects.toThrow(PreflightError);
+    const codexResult = health.getLastResult()?.results.find((r) => r.runtime === "codex");
     expect(codexResult?.authCheck.ok).toBe(false);
     expect(codexResult?.authCheck.error).toContain("Exit code 1");
+    expect(codexResult?.authCheck.error).toContain("auth required");
   });
 
-  it("fails the codex auth check when exit code is 0 but no PONG is found in output", async () => {
-    const execute = vi.fn((opts: ProcessSpawnOptions) => {
-      if (opts.args[0] === "--version") return Promise.resolve(ok("v1\n"));
-      if (opts.command === "claude" && opts.args[0] === "auth") return Promise.resolve(ok('{"loggedIn": true}'));
-      if (opts.command === "codex" && opts.args[0] === "exec") return Promise.resolve(ok("nothing useful", "", 0));
-      return Promise.reject(new Error("unexpected"));
+  it("fails with a generic message when exit is 0 but no PONG is present", async () => {
+    const execute = vi.fn(async (opts: ProcessSpawnOptions) => {
+      if (isVersionCall(opts)) return okResult({ stdout: "v1\n" });
+      if (opts.command === "claude") return okResult({ stdout: '{"loggedIn": true}' });
+      return okResult({ exitCode: 0, stdout: "no response" });
     });
-    const check = new RuntimeHealthCheck({ execute } as never, configs, makeLogger() as never);
+    const health = new RuntimeHealthCheck(
+      { execute } as never,
+      baseConfigs as never,
+      makeMockLogger() as never,
+    );
 
-    await expect(check.runPreflight()).rejects.toThrow(PreflightError);
-    const codexResult = check.getLastResult()?.results.find((r) => r.runtime === "codex");
+    await expect(health.runPreflight()).rejects.toThrow(PreflightError);
+    const codexResult = health.getLastResult()?.results.find((r) => r.runtime === "codex");
     expect(codexResult?.authCheck.ok).toBe(false);
     expect(codexResult?.authCheck.error).toContain("did not return expected response");
   });
 
-  it("catches a rejected processRunner.execute() during the binary check and reports the error message", async () => {
-    const failure = new Error("spawn ENOENT");
-    const execute = vi.fn((opts: ProcessSpawnOptions) => {
-      if (opts.command === "claude" && opts.args[0] === "--version") return Promise.reject(failure);
-      if (opts.command === "codex" && opts.args[0] === "--version") return Promise.resolve(ok("codex 4.5\n"));
-      if (opts.command === "codex" && opts.args[0] === "exec") return Promise.resolve(ok("PONG"));
-      return Promise.reject(new Error("unexpected"));
+  it("passes when exit is non-zero but PONG is still present in the output", async () => {
+    const execute = vi.fn(async (opts: ProcessSpawnOptions) => {
+      if (isVersionCall(opts)) return okResult({ stdout: "v1\n" });
+      if (opts.command === "claude") return okResult({ stdout: '{"loggedIn": true}' });
+      return okResult({ exitCode: 1, stdout: "PONG", stderr: "warning: deprecated" });
     });
-    const check = new RuntimeHealthCheck({ execute } as never, configs, makeLogger() as never);
+    const health = new RuntimeHealthCheck(
+      { execute } as never,
+      baseConfigs as never,
+      makeMockLogger() as never,
+    );
 
-    await expect(check.runPreflight()).rejects.toThrow(PreflightError);
-    const claudeResult = check.getLastResult()?.results.find((r) => r.runtime === "claude-code");
-    expect(claudeResult?.binaryCheck.ok).toBe(false);
-    expect(claudeResult?.binaryCheck.error).toBe("spawn ENOENT");
-  });
-
-  it("catches a non-Error rejection during the binary check and stringifies it", async () => {
-    const execute = vi.fn((opts: ProcessSpawnOptions) => {
-      if (opts.command === "claude" && opts.args[0] === "--version") return Promise.reject("raw string failure");
-      if (opts.command === "codex" && opts.args[0] === "--version") return Promise.resolve(ok("codex 4.5\n"));
-      if (opts.command === "codex" && opts.args[0] === "exec") return Promise.resolve(ok("PONG"));
-      return Promise.reject(new Error("unexpected"));
-    });
-    const check = new RuntimeHealthCheck({ execute } as never, configs, makeLogger() as never);
-
-    await expect(check.runPreflight()).rejects.toThrow(PreflightError);
-    const claudeResult = check.getLastResult()?.results.find((r) => r.runtime === "claude-code");
-    expect(claudeResult?.binaryCheck.error).toBe("raw string failure");
-  });
-
-  it("catches a rejected processRunner.execute() during the auth check and reports the error message", async () => {
-    const failure = new Error("stdin write failed");
-    const execute = vi.fn((opts: ProcessSpawnOptions) => {
-      if (opts.args[0] === "--version") return Promise.resolve(ok("v1\n"));
-      if (opts.command === "claude" && opts.args[0] === "auth") return Promise.reject(failure);
-      if (opts.command === "codex" && opts.args[0] === "exec") return Promise.resolve(ok("PONG"));
-      return Promise.reject(new Error("unexpected"));
-    });
-    const check = new RuntimeHealthCheck({ execute } as never, configs, makeLogger() as never);
-
-    await expect(check.runPreflight()).rejects.toThrow(PreflightError);
-    const claudeResult = check.getLastResult()?.results.find((r) => r.runtime === "claude-code");
-    expect(claudeResult?.authCheck.ok).toBe(false);
-    expect(claudeResult?.authCheck.error).toBe("stdin write failed");
+    const result = await health.runPreflight();
+    expect(result.ok).toBe(true);
+    const codexResult = result.results.find((r) => r.runtime === "codex");
+    expect(codexResult?.authCheck.ok).toBe(true);
   });
 });
 
-describe("RuntimeHealthCheck — exitCodeOnly auth-check branch (cursor)", () => {
-  // AGENT_STAGES never routes to "cursor" as a required runtime, so runPreflight()
-  // never reaches this branch. Exercise it directly against the cursor config,
-  // the same way probeRuntime() would if cursor were ever required.
-  it("fails on a non-zero exit code", async () => {
-    const check = new RuntimeHealthCheck(
-      { execute: vi.fn().mockResolvedValue(ok("", "cursor not logged in", 1)) } as never,
-      configs,
-      makeLogger() as never,
-    );
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- reaching a private method on purpose
-    const authResult = await (check as any).checkAuth(configs.cursor);
-    expect(authResult).toEqual({
-      ok: false,
-      durationMs: expect.any(Number),
-      error: "Exit code 1: cursor not logged in",
+describe("RuntimeHealthCheck.runPreflight — logging on failure", () => {
+  it("logs an error summary of failures via logger.error when preflight fails", async () => {
+    const execute = vi.fn(async (opts: ProcessSpawnOptions) => {
+      if (isVersionCall(opts) && opts.command === "claude") {
+        return okResult({ exitCode: 1, stderr: "boom" });
+      }
+      if (isVersionCall(opts)) return okResult({ stdout: "v1\n" });
+      return okResult({ stdout: "PONG" });
     });
-  });
-
-  it("passes on exit code 0 without needing a pattern match", async () => {
-    const check = new RuntimeHealthCheck(
-      { execute: vi.fn().mockResolvedValue(ok("ready")) } as never,
-      configs,
-      makeLogger() as never,
+    const logger = makeMockLogger();
+    const health = new RuntimeHealthCheck(
+      { execute } as never,
+      baseConfigs as never,
+      logger as never,
     );
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- reaching a private method on purpose
-    const authResult = await (check as any).checkAuth(configs.cursor);
-    expect(authResult).toEqual({ ok: true, durationMs: expect.any(Number) });
+
+    await expect(health.runPreflight()).rejects.toThrow(PreflightError);
+    expect(logger.error).toHaveBeenCalledWith(
+      expect.objectContaining({
+        failures: expect.arrayContaining([expect.objectContaining({ runtime: "claude-code" })]),
+      }),
+      "Preflight FAILED: one or more agent runtimes are not ready",
+    );
   });
 });

@@ -4,13 +4,13 @@ import userEvent from "@testing-library/user-event";
 import { ConfirmDialog } from "./ConfirmDialog.tsx";
 
 describe("ConfirmDialog", () => {
-  it("renders nothing when closed", () => {
+  it("renders nothing when open is false", () => {
     const { container } = render(
       <ConfirmDialog
         open={false}
-        title="Title"
-        description="Description"
-        confirmLabel="Confirm"
+        title="Delete run"
+        description="Are you sure?"
+        confirmLabel="Delete"
         onConfirm={vi.fn()}
         onCancel={vi.fn()}
       />,
@@ -18,83 +18,43 @@ describe("ConfirmDialog", () => {
     expect(container.firstChild).toBeNull();
   });
 
-  it("renders title, description, and buttons when open", () => {
+  it("renders title, description, and confirm label when open", () => {
     render(
       <ConfirmDialog
         open={true}
-        title="Approve Plan"
-        description="This will approve the plan."
-        confirmLabel="Approve & Start"
+        title="Delete run"
+        description="Are you sure?"
+        confirmLabel="Delete"
         onConfirm={vi.fn()}
         onCancel={vi.fn()}
       />,
     );
-    expect(screen.getByText("Approve Plan")).toBeDefined();
-    expect(screen.getByText("This will approve the plan.")).toBeDefined();
-    expect(screen.getByRole("button", { name: "Approve & Start" })).toBeDefined();
-    expect(screen.getByRole("button", { name: "Cancel" })).toBeDefined();
+    expect(screen.getByText("Delete run")).toBeDefined();
+    expect(screen.getByText("Are you sure?")).toBeDefined();
+    expect(screen.getByRole("button", { name: "Delete" })).toBeDefined();
   });
 
-  it("calls onConfirm with undefined when there is no notes prop", async () => {
-    const onConfirm = vi.fn();
+  it("does not render the notes textarea when notes prop is absent", () => {
     render(
       <ConfirmDialog
         open={true}
-        title="Title"
-        description="Desc"
-        confirmLabel="Confirm"
-        onConfirm={onConfirm}
+        title="Delete run"
+        description="Are you sure?"
+        confirmLabel="Delete"
+        onConfirm={vi.fn()}
         onCancel={vi.fn()}
       />,
     );
-    await userEvent.click(screen.getByRole("button", { name: "Confirm" }));
-    expect(onConfirm).toHaveBeenCalledWith(undefined);
+    expect(screen.queryByRole("textbox")).toBeNull();
   });
 
-  it("renders the notes textarea using provided label/placeholder and forwards trimmed text on confirm", async () => {
-    const onConfirm = vi.fn();
+  it("renders notes textarea with default label/placeholder when notes prop is an empty object", () => {
     render(
       <ConfirmDialog
         open={true}
-        title="Title"
-        description="Desc"
-        confirmLabel="Confirm"
-        notes={{ label: "Notes label", placeholder: "Type here..." }}
-        onConfirm={onConfirm}
-        onCancel={vi.fn()}
-      />,
-    );
-    expect(screen.getByText("Notes label")).toBeDefined();
-    const textarea = screen.getByPlaceholderText("Type here...");
-    await userEvent.type(textarea, "  some note  ");
-    await userEvent.click(screen.getByRole("button", { name: "Confirm" }));
-    expect(onConfirm).toHaveBeenCalledWith("some note");
-  });
-
-  it("calls onConfirm with undefined when notes prop is present but the textarea is empty", async () => {
-    const onConfirm = vi.fn();
-    render(
-      <ConfirmDialog
-        open={true}
-        title="Title"
-        description="Desc"
-        confirmLabel="Confirm"
-        notes={{}}
-        onConfirm={onConfirm}
-        onCancel={vi.fn()}
-      />,
-    );
-    await userEvent.click(screen.getByRole("button", { name: "Confirm" }));
-    expect(onConfirm).toHaveBeenCalledWith(undefined);
-  });
-
-  it("uses default notes label/placeholder when notes object provides none", () => {
-    render(
-      <ConfirmDialog
-        open={true}
-        title="Title"
-        description="Desc"
-        confirmLabel="Confirm"
+        title="Delete run"
+        description="Are you sure?"
+        confirmLabel="Delete"
         notes={{}}
         onConfirm={vi.fn()}
         onCancel={vi.fn()}
@@ -106,20 +66,107 @@ describe("ConfirmDialog", () => {
     ).toBeDefined();
   });
 
+  it("renders custom notes label and placeholder when provided", () => {
+    render(
+      <ConfirmDialog
+        open={true}
+        title="Delete run"
+        description="Are you sure?"
+        confirmLabel="Delete"
+        notes={{ label: "Custom label", placeholder: "Custom placeholder" }}
+        onConfirm={vi.fn()}
+        onCancel={vi.fn()}
+      />,
+    );
+    expect(screen.getByText("Custom label")).toBeDefined();
+    expect(screen.getByPlaceholderText("Custom placeholder")).toBeDefined();
+  });
+
+  it("calls onConfirm with undefined when notes prop is absent", async () => {
+    const onConfirm = vi.fn();
+    render(
+      <ConfirmDialog
+        open={true}
+        title="Delete run"
+        description="Are you sure?"
+        confirmLabel="Delete"
+        onConfirm={onConfirm}
+        onCancel={vi.fn()}
+      />,
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Delete" }));
+    expect(onConfirm).toHaveBeenCalledWith(undefined);
+  });
+
+  it("calls onConfirm with undefined when notes prop is present but textarea is empty", async () => {
+    const onConfirm = vi.fn();
+    render(
+      <ConfirmDialog
+        open={true}
+        title="Delete run"
+        description="Are you sure?"
+        confirmLabel="Delete"
+        notes={{}}
+        onConfirm={onConfirm}
+        onCancel={vi.fn()}
+      />,
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Delete" }));
+    expect(onConfirm).toHaveBeenCalledWith(undefined);
+  });
+
+  it("calls onConfirm with undefined when the note is only whitespace", async () => {
+    const onConfirm = vi.fn();
+    render(
+      <ConfirmDialog
+        open={true}
+        title="Delete run"
+        description="Are you sure?"
+        confirmLabel="Delete"
+        notes={{}}
+        onConfirm={onConfirm}
+        onCancel={vi.fn()}
+      />,
+    );
+    const textarea = screen.getByRole("textbox");
+    await userEvent.type(textarea, "   ");
+    await userEvent.click(screen.getByRole("button", { name: "Delete" }));
+    expect(onConfirm).toHaveBeenCalledWith(undefined);
+  });
+
+  it("calls onConfirm with the trimmed note text when notes are filled in", async () => {
+    const onConfirm = vi.fn();
+    render(
+      <ConfirmDialog
+        open={true}
+        title="Delete run"
+        description="Are you sure?"
+        confirmLabel="Delete"
+        notes={{}}
+        onConfirm={onConfirm}
+        onCancel={vi.fn()}
+      />,
+    );
+    const textarea = screen.getByRole("textbox");
+    await userEvent.type(textarea, "  keep an eye on X  ");
+    await userEvent.click(screen.getByRole("button", { name: "Delete" }));
+    expect(onConfirm).toHaveBeenCalledWith("keep an eye on X");
+  });
+
   it("calls onCancel when the Cancel button is clicked", async () => {
     const onCancel = vi.fn();
     render(
       <ConfirmDialog
         open={true}
-        title="Title"
-        description="Desc"
-        confirmLabel="Confirm"
+        title="Delete run"
+        description="Are you sure?"
+        confirmLabel="Delete"
         onConfirm={vi.fn()}
         onCancel={onCancel}
       />,
     );
     await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
-    expect(onCancel).toHaveBeenCalledTimes(1);
+    expect(onCancel).toHaveBeenCalledOnce();
   });
 
   it("calls onCancel when the backdrop is clicked", async () => {
@@ -127,25 +174,40 @@ describe("ConfirmDialog", () => {
     const { container } = render(
       <ConfirmDialog
         open={true}
-        title="Title"
-        description="Desc"
-        confirmLabel="Confirm"
+        title="Delete run"
+        description="Are you sure?"
+        confirmLabel="Delete"
         onConfirm={vi.fn()}
         onCancel={onCancel}
       />,
     );
-    const backdrop = container.querySelector(".absolute.inset-0");
+    const backdrop = container.querySelector(".backdrop-blur-sm");
     expect(backdrop).not.toBeNull();
     await userEvent.click(backdrop as Element);
-    expect(onCancel).toHaveBeenCalledTimes(1);
+    expect(onCancel).toHaveBeenCalledOnce();
   });
 
-  it("applies destructive variant styling to the confirm button", () => {
+  it("shows the default variant styling when variant is not provided", () => {
     render(
       <ConfirmDialog
         open={true}
-        title="Title"
-        description="Desc"
+        title="Approve"
+        description="Approve plan?"
+        confirmLabel="Approve"
+        onConfirm={vi.fn()}
+        onCancel={vi.fn()}
+      />,
+    );
+    const confirmBtn = screen.getByRole("button", { name: "Approve" });
+    expect(confirmBtn.className).toContain("bg-accent");
+  });
+
+  it("applies destructive styling when variant is destructive", () => {
+    render(
+      <ConfirmDialog
+        open={true}
+        title="Delete"
+        description="This cannot be undone."
         confirmLabel="Delete"
         variant="destructive"
         onConfirm={vi.fn()}
@@ -156,61 +218,45 @@ describe("ConfirmDialog", () => {
     expect(confirmBtn.className).toContain("bg-state-blocked");
   });
 
-  it("applies default variant styling to the confirm button when variant is omitted", () => {
+  it("shows a loading state and disables both buttons and the textarea", () => {
     render(
       <ConfirmDialog
         open={true}
-        title="Title"
-        description="Desc"
-        confirmLabel="Confirm"
-        onConfirm={vi.fn()}
-        onCancel={vi.fn()}
-      />,
-    );
-    const confirmBtn = screen.getByRole("button", { name: "Confirm" });
-    expect(confirmBtn.className).toContain("bg-accent");
-  });
-
-  it("shows a loading spinner and 'Working...' text, and disables both buttons, when loading", () => {
-    render(
-      <ConfirmDialog
-        open={true}
-        title="Title"
-        description="Desc"
-        confirmLabel="Confirm"
-        loading={true}
-        onConfirm={vi.fn()}
-        onCancel={vi.fn()}
-      />,
-    );
-    expect(screen.getByText("Working...")).toBeDefined();
-    expect((screen.getByRole("button", { name: "Cancel" }) as HTMLButtonElement).disabled).toBe(
-      true,
-    );
-    expect((screen.getByRole("button", { name: /Working/ }) as HTMLButtonElement).disabled).toBe(
-      true,
-    );
-  });
-
-  it("disables the notes textarea while loading", () => {
-    render(
-      <ConfirmDialog
-        open={true}
-        title="Title"
-        description="Desc"
-        confirmLabel="Confirm"
+        title="Delete"
+        description="This cannot be undone."
+        confirmLabel="Delete"
         notes={{}}
         loading={true}
         onConfirm={vi.fn()}
         onCancel={vi.fn()}
       />,
     );
+    expect(screen.getByText("Working...")).toBeDefined();
     expect(
-      (
-        screen.getByPlaceholderText(
-          "Optional: anything the next agent should know...",
-        ) as HTMLTextAreaElement
-      ).disabled,
+      (screen.getByRole("button", { name: /working/i }) as HTMLButtonElement).disabled,
     ).toBe(true);
+    expect((screen.getByRole("button", { name: "Cancel" }) as HTMLButtonElement).disabled).toBe(
+      true,
+    );
+    expect((screen.getByRole("textbox") as HTMLTextAreaElement).disabled).toBe(true);
+  });
+
+  it("resets the note field after confirming", async () => {
+    const onConfirm = vi.fn();
+    render(
+      <ConfirmDialog
+        open={true}
+        title="Delete"
+        description="This cannot be undone."
+        confirmLabel="Delete"
+        notes={{}}
+        onConfirm={onConfirm}
+        onCancel={vi.fn()}
+      />,
+    );
+    const textarea = screen.getByRole("textbox") as HTMLTextAreaElement;
+    await userEvent.type(textarea, "note text");
+    await userEvent.click(screen.getByRole("button", { name: "Delete" }));
+    expect(textarea.value).toBe("");
   });
 });

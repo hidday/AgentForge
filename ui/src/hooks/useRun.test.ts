@@ -9,122 +9,133 @@ vi.mock("@/api/client.ts", () => ({
   },
 }));
 
-let sseCallback: ((event: DashboardEvent) => void) | null = null;
+let sseHandler: ((event: DashboardEvent) => void) | null = null;
 vi.mock("./useSSE.ts", () => ({
   useSSE: vi.fn((cb: (event: DashboardEvent) => void) => {
-    sseCallback = cb;
+    sseHandler = cb;
   }),
 }));
 
-import { api } from "@/api/client.ts";
 import { useRun } from "./useRun.ts";
+import { api } from "@/api/client.ts";
 
 const mockApi = api as unknown as { getRun: ReturnType<typeof vi.fn> };
 
-const RUN: Run = {
-  id: "r1",
-  linearIssueId: "li1",
-  linearIssueIdentifier: "ENG-1",
-  linearIssueDescription: null,
-  linearIssueTitle: "Title",
-  linearIssueUrl: null,
-  repo: "org/repo",
-  branchName: null,
-  prNumber: null,
-  state: "Planning",
-  planVersion: 1,
-  approvedPlanVersion: null,
-  plannerRuntime: null,
-  executorRuntime: null,
-  reviewerRuntime: null,
-  remediationRuntime: null,
-  workingDirectory: "/tmp",
-  latestArtifactVersion: 0,
-  createdAt: "2024-01-01T00:00:00Z",
-  updatedAt: "2024-01-01T00:00:00Z",
-};
-const ARTIFACTS: Artifact[] = [];
-const EVENTS: RunEventRecord[] = [];
+function makeRun(overrides: Partial<Run> = {}): Run {
+  return {
+    id: "run-1",
+    linearIssueId: "li-1",
+    linearIssueIdentifier: "ENG-1",
+    linearIssueDescription: null,
+    linearIssueTitle: "Title",
+    linearIssueUrl: null,
+    repo: "org/repo",
+    branchName: null,
+    prNumber: null,
+    state: "Planning",
+    planVersion: 1,
+    approvedPlanVersion: null,
+    plannerRuntime: null,
+    executorRuntime: null,
+    reviewerRuntime: null,
+    remediationRuntime: null,
+    workingDirectory: "/tmp",
+    latestArtifactVersion: 1,
+    createdAt: "2024-01-01T00:00:00Z",
+    updatedAt: "2024-01-01T00:00:00Z",
+    ...overrides,
+  };
+}
 
 describe("useRun", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    sseCallback = null;
+    sseHandler = null;
   });
 
   it("starts in a loading state with null data and no error", () => {
     mockApi.getRun.mockReturnValue(new Promise(() => {}));
-    const { result } = renderHook(() => useRun("r1"));
-
+    const { result } = renderHook(() => useRun("run-1"));
     expect(result.current.loading).toBe(true);
     expect(result.current.data).toBeNull();
     expect(result.current.error).toBeNull();
   });
 
-  it("resolves with run detail data and clears loading", async () => {
-    mockApi.getRun.mockResolvedValue({ run: RUN, artifacts: ARTIFACTS, events: EVENTS });
-    const { result } = renderHook(() => useRun("r1"));
+  it("fetches the run on mount and populates data on success", async () => {
+    const run = makeRun();
+    const artifacts: Artifact[] = [];
+    const events: RunEventRecord[] = [];
+    mockApi.getRun.mockResolvedValue({ run, artifacts, events });
+
+    const { result } = renderHook(() => useRun("run-1"));
 
     await waitFor(() => expect(result.current.loading).toBe(false));
-    expect(result.current.data).toEqual({ run: RUN, artifacts: ARTIFACTS, events: EVENTS });
+    expect(mockApi.getRun).toHaveBeenCalledWith("run-1");
+    expect(result.current.data).toEqual({ run, artifacts, events });
     expect(result.current.error).toBeNull();
-    expect(mockApi.getRun).toHaveBeenCalledWith("r1");
   });
 
-  it("sets an error message and clears loading when the request fails", async () => {
-    mockApi.getRun.mockRejectedValue(new Error("not found"));
-    const { result } = renderHook(() => useRun("r1"));
+  it("sets an error message and clears loading when the fetch rejects with an Error", async () => {
+    mockApi.getRun.mockRejectedValue(new Error("boom"));
+
+    const { result } = renderHook(() => useRun("run-1"));
 
     await waitFor(() => expect(result.current.loading).toBe(false));
-    expect(result.current.error).toBe("not found");
+    expect(result.current.error).toBe("boom");
     expect(result.current.data).toBeNull();
   });
 
-  it("falls back to a generic error message for non-Error rejections", async () => {
-    mockApi.getRun.mockRejectedValue("oops");
-    const { result } = renderHook(() => useRun("r1"));
+  it("falls back to a generic error message when the rejection is not an Error instance", async () => {
+    mockApi.getRun.mockRejectedValue("not an error object");
+
+    const { result } = renderHook(() => useRun("run-1"));
 
     await waitFor(() => expect(result.current.loading).toBe(false));
     expect(result.current.error).toBe("Failed to fetch run");
   });
 
-  it("refetches when an SSE event for the same runId arrives", async () => {
-    mockApi.getRun.mockResolvedValue({ run: RUN, artifacts: ARTIFACTS, events: EVENTS });
-    const { result } = renderHook(() => useRun("r1"));
+  it("re-fetches when refetch() is called", async () => {
+    const run = makeRun();
+    mockApi.getRun.mockResolvedValue({ run, artifacts: [], events: [] });
+
+    const { result } = renderHook(() => useRun("run-1"));
     await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(mockApi.getRun).toHaveBeenCalledTimes(1);
 
-    const updatedRun = { ...RUN, state: "Implementing" };
-    mockApi.getRun.mockResolvedValue({ run: updatedRun, artifacts: ARTIFACTS, events: EVENTS });
-
-    act(() => {
-      sseCallback!({ type: "run:state-changed", runId: "r1" });
-    });
-
-    await waitFor(() => expect(result.current.data?.run.state).toBe("Implementing"));
-  });
-
-  it("ignores SSE events for a different runId", async () => {
-    mockApi.getRun.mockResolvedValue({ run: RUN, artifacts: ARTIFACTS, events: EVENTS });
-    const { result } = renderHook(() => useRun("r1"));
-    await waitFor(() => expect(result.current.loading).toBe(false));
-
-    mockApi.getRun.mockClear();
-    act(() => {
-      sseCallback!({ type: "run:state-changed", runId: "other-run" });
-    });
-
-    expect(mockApi.getRun).not.toHaveBeenCalled();
-  });
-
-  it("refetch() can be called manually", async () => {
-    mockApi.getRun.mockResolvedValue({ run: RUN, artifacts: ARTIFACTS, events: EVENTS });
-    const { result } = renderHook(() => useRun("r1"));
-    await waitFor(() => expect(result.current.loading).toBe(false));
-
-    mockApi.getRun.mockClear();
     await act(async () => {
       await result.current.refetch();
     });
+    expect(mockApi.getRun).toHaveBeenCalledTimes(2);
+  });
+
+  it("re-fetches on an SSE event for the same runId", async () => {
+    const run = makeRun();
+    mockApi.getRun.mockResolvedValue({ run, artifacts: [], events: [] });
+
+    renderHook(() => useRun("run-1"));
+    await waitFor(() => expect(mockApi.getRun).toHaveBeenCalledTimes(1));
+
+    expect(sseHandler).not.toBeNull();
+    await act(async () => {
+      sseHandler!({ type: "run:state-changed", runId: "run-1" });
+    });
+
+    await waitFor(() => expect(mockApi.getRun).toHaveBeenCalledTimes(2));
+  });
+
+  it("ignores an SSE event for a different runId", async () => {
+    const run = makeRun();
+    mockApi.getRun.mockResolvedValue({ run, artifacts: [], events: [] });
+
+    renderHook(() => useRun("run-1"));
+    await waitFor(() => expect(mockApi.getRun).toHaveBeenCalledTimes(1));
+
+    await act(async () => {
+      sseHandler!({ type: "run:state-changed", runId: "other-run" });
+    });
+
+    // Give any stray microtask a chance to run, then assert no extra fetch happened.
+    await new Promise((r) => setTimeout(r, 0));
     expect(mockApi.getRun).toHaveBeenCalledTimes(1);
   });
 });

@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { ArtifactRepository } from "../../src/orchestrator/artifactRepository.js";
+import type { PrismaClient } from "../../src/generated/prisma/client.js";
 
 function makeRow(overrides: Record<string, unknown> = {}) {
   return {
@@ -7,114 +8,101 @@ function makeRow(overrides: Record<string, unknown> = {}) {
     runId: "run-1",
     type: "Plan",
     version: 1,
-    payloadJson: { summary: "hello" },
+    payloadJson: { summary: "hi" },
     rawText: "{}",
     createdAt: new Date("2026-01-01T00:00:00Z"),
     ...overrides,
   };
 }
 
-function buildPrismaMock() {
+function makePrisma(overrides: Record<string, unknown> = {}) {
   return {
     aiArtifact: {
       create: vi.fn(),
       findMany: vi.fn(),
       findFirst: vi.fn(),
+      ...overrides,
     },
-  };
+  } as unknown as PrismaClient;
 }
 
 describe("ArtifactRepository", () => {
   describe("create", () => {
-    it("passes params through to prisma with payloadJson cast and returns the mapped artifact", async () => {
-      const prisma = buildPrismaMock();
+    it("passes params through to prisma and maps the returned row", async () => {
       const row = makeRow();
-      prisma.aiArtifact.create.mockResolvedValue(row);
-      const repo = new ArtifactRepository(prisma as never);
+      const create = vi.fn().mockResolvedValue(row);
+      const prisma = makePrisma({ create });
+      const repo = new ArtifactRepository(prisma);
 
       const result = await repo.create({
         runId: "run-1",
         type: "Plan",
         version: 1,
-        payloadJson: { summary: "hello" },
+        payloadJson: { summary: "hi" },
         rawText: "{}",
       });
 
-      expect(prisma.aiArtifact.create).toHaveBeenCalledWith({
+      expect(create).toHaveBeenCalledWith({
         data: {
           runId: "run-1",
           type: "Plan",
           version: 1,
-          payloadJson: { summary: "hello" },
+          payloadJson: { summary: "hi" },
           rawText: "{}",
         },
       });
-      expect(result).toEqual({
-        id: "artifact-1",
-        runId: "run-1",
-        type: "Plan",
-        version: 1,
-        payloadJson: { summary: "hello" },
-        rawText: "{}",
-        createdAt: row.createdAt,
-      });
+      expect(result).toEqual({ ...row, type: "Plan" });
     });
   });
 
   describe("findByRunId", () => {
-    it("queries by runId ordered by createdAt desc and maps every row", async () => {
-      const prisma = buildPrismaMock();
-      prisma.aiArtifact.findMany.mockResolvedValue([
-        makeRow({ id: "a", version: 2 }),
-        makeRow({ id: "b", version: 1 }),
-      ]);
-      const repo = new ArtifactRepository(prisma as never);
+    it("orders by createdAt desc and maps every row", async () => {
+      const rows = [makeRow({ id: "a" }), makeRow({ id: "b", type: "Review" })];
+      const findMany = vi.fn().mockResolvedValue(rows);
+      const prisma = makePrisma({ findMany });
+      const repo = new ArtifactRepository(prisma);
 
       const result = await repo.findByRunId("run-1");
 
-      expect(prisma.aiArtifact.findMany).toHaveBeenCalledWith({
+      expect(findMany).toHaveBeenCalledWith({
         where: { runId: "run-1" },
         orderBy: { createdAt: "desc" },
       });
       expect(result.map((a) => a.id)).toEqual(["a", "b"]);
+      expect(result[1].type).toBe("Review");
     });
 
-    it("returns an empty array when the run has no artifacts", async () => {
-      const prisma = buildPrismaMock();
-      prisma.aiArtifact.findMany.mockResolvedValue([]);
-      const repo = new ArtifactRepository(prisma as never);
+    it("returns an empty array when there are no artifacts", async () => {
+      const findMany = vi.fn().mockResolvedValue([]);
+      const prisma = makePrisma({ findMany });
+      const repo = new ArtifactRepository(prisma);
 
-      const result = await repo.findByRunId("run-empty");
-
-      expect(result).toEqual([]);
+      expect(await repo.findByRunId("run-none")).toEqual([]);
     });
   });
 
   describe("findLatestByType", () => {
-    it("queries by runId and type, ordered by version desc, and returns the mapped artifact", async () => {
-      const prisma = buildPrismaMock();
-      const row = makeRow({ type: "Review", version: 3 });
-      prisma.aiArtifact.findFirst.mockResolvedValue(row);
-      const repo = new ArtifactRepository(prisma as never);
+    it("filters by runId and type, orders by version desc, and maps the row", async () => {
+      const row = makeRow({ version: 3 });
+      const findFirst = vi.fn().mockResolvedValue(row);
+      const prisma = makePrisma({ findFirst });
+      const repo = new ArtifactRepository(prisma);
 
-      const result = await repo.findLatestByType("run-1", "Review");
+      const result = await repo.findLatestByType("run-1", "Plan");
 
-      expect(prisma.aiArtifact.findFirst).toHaveBeenCalledWith({
-        where: { runId: "run-1", type: "Review" },
+      expect(findFirst).toHaveBeenCalledWith({
+        where: { runId: "run-1", type: "Plan" },
         orderBy: { version: "desc" },
       });
-      expect(result?.type).toBe("Review");
       expect(result?.version).toBe(3);
     });
 
     it("returns null when no artifact of that type exists", async () => {
-      const prisma = buildPrismaMock();
-      prisma.aiArtifact.findFirst.mockResolvedValue(null);
-      const repo = new ArtifactRepository(prisma as never);
+      const findFirst = vi.fn().mockResolvedValue(null);
+      const prisma = makePrisma({ findFirst });
+      const repo = new ArtifactRepository(prisma);
 
-      const result = await repo.findLatestByType("run-1", "Plan");
-
-      expect(result).toBeNull();
+      expect(await repo.findLatestByType("run-1", "Review")).toBeNull();
     });
   });
 });

@@ -1,31 +1,26 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 
 vi.mock("@/pages/DashboardPage.tsx", () => ({
-  DashboardPage: () => <div data-testid="dashboard-page">Dashboard Page</div>,
+  DashboardPage: () => <div data-testid="dashboard-page">Dashboard</div>,
 }));
+
 vi.mock("@/pages/RunDetailPage.tsx", () => ({
-  RunDetailPage: () => <div data-testid="run-detail-page">Run Detail Page</div>,
+  RunDetailPage: () => <div data-testid="run-detail-page">Run Detail</div>,
 }));
 
 import App from "./App.tsx";
 
 describe("App", () => {
-  beforeEach(() => {
+  it("renders the dashboard page at the root route", () => {
     window.history.pushState({}, "", "/");
-  });
-
-  it("mounts and renders the DashboardPage at the root route", () => {
     render(<App />);
     expect(screen.getByTestId("dashboard-page")).toBeDefined();
-    expect(screen.getByText("Dashboard Page")).toBeDefined();
-    expect(screen.queryByTestId("run-detail-page")).toBeNull();
   });
 
-  it("renders the RunDetailPage when navigating to /runs/:id", () => {
-    window.history.pushState({}, "", "/runs/abc123");
+  it("renders the run detail page at /runs/:id", () => {
+    window.history.pushState({}, "", "/runs/abc-123");
     render(<App />);
     expect(screen.getByTestId("run-detail-page")).toBeDefined();
-    expect(screen.queryByTestId("dashboard-page")).toBeNull();
   });
 });

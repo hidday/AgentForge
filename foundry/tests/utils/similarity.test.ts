@@ -7,93 +7,86 @@ import {
 } from "../../src/utils/similarity.js";
 
 describe("extractTrigrams", () => {
-  it("extracts overlapping 3-character sequences, lowercased", () => {
-    expect(extractTrigrams("ABCD")).toEqual(new Set(["abc", "bcd"]));
+  it("extracts overlapping 3-char sequences, lowercased and punctuation-stripped", () => {
+    expect(extractTrigrams("Add-Auth!")).toEqual(new Set(["add", "dda", "dau", "aut", "uth"]));
   });
 
-  it("strips punctuation before extracting trigrams", () => {
-    expect(extractTrigrams("a-b,c!d")).toEqual(extractTrigrams("abcd"));
-  });
-
-  it("returns an empty set for input shorter than 3 characters", () => {
-    expect(extractTrigrams("ab").size).toBe(0);
-  });
-
-  it("returns an empty set for an empty string", () => {
-    expect(extractTrigrams("").size).toBe(0);
+  it("returns an empty set for strings shorter than 3 characters", () => {
+    expect(extractTrigrams("ab")).toEqual(new Set());
+    expect(extractTrigrams("")).toEqual(new Set());
   });
 });
 
 describe("trigramSimilarity", () => {
-  it("returns 0 when both inputs are empty (boundary: both trigram sets empty)", () => {
+  it("returns 0 when both inputs are empty", () => {
     expect(trigramSimilarity("", "")).toBe(0);
   });
 
-  it("returns 0 when both inputs normalize to fewer than 3 characters", () => {
-    expect(trigramSimilarity("ab", "!!")).toBe(0);
+  it("returns 0 when one input is empty and the other is not (no overlap, non-zero union)", () => {
+    expect(trigramSimilarity("", "auth middleware")).toBe(0);
+    expect(trigramSimilarity("auth middleware", "")).toBe(0);
   });
 
-  it("returns 1 for identical non-empty strings", () => {
-    expect(trigramSimilarity("hello world", "hello world")).toBe(1);
+  it("returns 1 for identical strings", () => {
+    expect(trigramSimilarity("auth middleware", "auth middleware")).toBe(1);
   });
 
-  it("returns 0 for completely disjoint strings", () => {
-    expect(trigramSimilarity("aaa", "zzz")).toBe(0);
-  });
-
-  it("returns a value strictly between 0 and 1 for partial overlap", () => {
-    const score = trigramSimilarity("hello world", "hello there");
+  it("returns a value strictly between 0 and 1 for partially overlapping strings", () => {
+    const score = trigramSimilarity("auth middleware", "auth middlewhere");
     expect(score).toBeGreaterThan(0);
     expect(score).toBeLessThan(1);
-  });
-
-  it("returns 0 when only one side is empty", () => {
-    expect(trigramSimilarity("", "non-empty text")).toBe(0);
   });
 });
 
 describe("scoreSkillRelevance", () => {
-  const baseSkill = {
-    taskCategory: "database migrations",
-    skillMarkdown: "How to safely run database migrations in production environments.",
-  };
-
-  it("scores using taskCategory and skillMarkdown when name/description are absent", () => {
-    const score = scoreSkillRelevance(baseSkill, "database migrations");
+  it("scores against taskCategory and skillMarkdown when name/description are absent", () => {
+    const score = scoreSkillRelevance(
+      { taskCategory: "auth middleware", skillMarkdown: "Use JWT for auth." },
+      "add auth middleware",
+    );
     expect(score).toBeGreaterThan(0);
   });
 
-  it("includes the name field (with dashes replaced by spaces) in the scoring", () => {
-    const skill = { ...baseSkill, name: "database-migrations-guide" };
-    const score = scoreSkillRelevance(skill, "database migrations guide");
-    const withoutName = scoreSkillRelevance(baseSkill, "database migrations guide");
-    expect(score).toBeGreaterThanOrEqual(withoutName);
+  it("includes name (hyphens replaced with spaces) and description in the max when present", () => {
+    const withExtras = scoreSkillRelevance(
+      {
+        taskCategory: "unrelated-category",
+        skillMarkdown: "unrelated markdown content",
+        name: "auth-middleware-jwt",
+        description: "Use when adding auth middleware with JWT.",
+      },
+      "add auth middleware with jwt",
+    );
+    const withoutExtras = scoreSkillRelevance(
+      { taskCategory: "unrelated-category", skillMarkdown: "unrelated markdown content" },
+      "add auth middleware with jwt",
+    );
+    expect(withExtras).toBeGreaterThan(withoutExtras);
   });
 
-  it("includes the description field in the scoring", () => {
-    const skill = { ...baseSkill, description: "zero downtime schema changes" };
-    const score = scoreSkillRelevance(skill, "zero downtime schema changes");
-    const withoutDescription = scoreSkillRelevance(baseSkill, "zero downtime schema changes");
-    expect(score).toBeGreaterThanOrEqual(withoutDescription);
-  });
-
-  it("ignores a null name and null description", () => {
-    const skill = { ...baseSkill, name: null, description: null };
-    expect(() => scoreSkillRelevance(skill, "database migrations")).not.toThrow();
+  it("only slices the first 200 chars of skillMarkdown for scoring", () => {
+    const longMarkdown = "z".repeat(500) + "auth middleware jwt tokens";
+    const score = scoreSkillRelevance(
+      { taskCategory: "unrelated", skillMarkdown: longMarkdown },
+      "auth middleware jwt tokens",
+    );
+    // The matching text is past char 200, so it must not contribute to the score.
+    expect(score).toBe(0);
   });
 });
 
 describe("maxNoveltyOverlap", () => {
-  it("returns 0 for an empty existing-skills array", () => {
-    expect(maxNoveltyOverlap([], "anything")).toBe(0);
+  it("returns 0 for an empty skills array", () => {
+    expect(maxNoveltyOverlap([], "add auth middleware")).toBe(0);
   });
 
-  it("returns the maximum relevance score across all existing skills", () => {
+  it("returns the maximum relevance score across all skills", () => {
     const skills = [
-      { taskCategory: "unrelated topic", skillMarkdown: "totally different content here" },
-      { taskCategory: "database migrations", skillMarkdown: "database migrations guide" },
+      { taskCategory: "database migration", skillMarkdown: "Run alembic migrations." },
+      { taskCategory: "auth middleware", skillMarkdown: "Use JWT tokens for auth middleware." },
     ];
-    const score = maxNoveltyOverlap(skills, "database migrations");
-    expect(score).toBe(scoreSkillRelevance(skills[1], "database migrations"));
+    const overlap = maxNoveltyOverlap(skills, "add auth middleware with jwt");
+    const directScore = scoreSkillRelevance(skills[1]!, "add auth middleware with jwt");
+    expect(overlap).toBe(directScore);
   });
 });

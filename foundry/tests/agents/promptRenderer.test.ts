@@ -1,79 +1,103 @@
 import { describe, it, expect } from "vitest";
 import { loadPromptTemplate, renderTemplate } from "../../src/agents/promptRenderer.js";
 
-describe("promptRenderer", () => {
-  describe("loadPromptTemplate", () => {
-    it("reads a prompt template file's contents from the prompts directory", () => {
-      const template = loadPromptTemplate("reviewer.system.md");
-
-      expect(typeof template).toBe("string");
-      expect(template.length).toBeGreaterThan(0);
-      expect(template).toContain("code reviewer");
-    });
-
-    it("throws when the requested template file does not exist", () => {
-      expect(() => loadPromptTemplate("does-not-exist.md")).toThrow();
-    });
+describe("loadPromptTemplate", () => {
+  it("reads an existing prompt template file from src/prompts", () => {
+    const content = loadPromptTemplate("planner.system.md");
+    expect(typeof content).toBe("string");
+    expect(content.length).toBeGreaterThan(0);
   });
 
-  describe("renderTemplate", () => {
-    it("substitutes a simple top-level string variable", () => {
-      const result = renderTemplate("Hello {{name}}!", { name: "World" });
-      expect(result).toBe("Hello World!");
-    });
+  it("throws when the template file does not exist", () => {
+    expect(() => loadPromptTemplate("does-not-exist.md")).toThrow();
+  });
+});
 
-    it("substitutes a nested-path variable via dot notation", () => {
-      const result = renderTemplate("Issue: {{issue.title}}", {
-        issue: { title: "Fix the bug" },
-      });
-      expect(result).toBe("Issue: Fix the bug");
-    });
+describe("renderTemplate", () => {
+  it("replaces a simple flat variable", () => {
+    expect(renderTemplate("Hello {{name}}!", { name: "World" })).toBe("Hello World!");
+  });
 
-    it("renders numbers and booleans as their string forms", () => {
-      const result = renderTemplate("count={{count}} done={{done}}", {
-        count: 42,
-        done: false,
-      });
-      expect(result).toBe("count=42 done=false");
-    });
+  it("resolves a nested dotted path", () => {
+    expect(renderTemplate("{{a.b.c}}", { a: { b: { c: "deep value" } } })).toBe("deep value");
+  });
 
-    it("renders null and undefined values as an empty string", () => {
-      const result = renderTemplate("[{{a}}][{{b}}]", { a: null, b: undefined });
-      expect(result).toBe("[][]");
-    });
+  it("renders null and undefined values as an empty string", () => {
+    expect(renderTemplate("[{{x}}]", { x: null })).toBe("[]");
+    expect(renderTemplate("[{{x}}]", { x: undefined })).toBe("[]");
+  });
 
-    it("JSON-stringifies a plain object value that isn't null/string/number/boolean/array", () => {
-      const result = renderTemplate("checks={{checks}}", {
-        checks: { lint: "pass", typecheck: "pass" },
-      });
-      expect(result).toBe('checks={"lint":"pass","typecheck":"pass"}');
-    });
+  it("renders a missing top-level key as an empty string", () => {
+    expect(renderTemplate("[{{missing}}]", {})).toBe("[]");
+  });
 
-    it("renders a list of objects as a bulleted key/value list", () => {
-      const result = renderTemplate("{{steps}}", {
-        steps: [
-          { id: "s1", title: "Step 1" },
-          { id: "s2", title: "Step 2" },
-        ],
-      });
-      expect(result).toBe("  - id: s1\n  - title: Step 1\n  - id: s2\n  - title: Step 2");
-    });
+  it("passes a string value through unchanged", () => {
+    expect(renderTemplate("{{s}}", { s: "already a string" })).toBe("already a string");
+  });
 
-    it("renders a list of primitives as a numbered list", () => {
-      const result = renderTemplate("{{items}}", { items: ["a", "b", "c"] });
-      expect(result).toBe("1. a\n2. b\n3. c");
-    });
+  it("stringifies a number value", () => {
+    expect(renderTemplate("{{n}}", { n: 42 })).toBe("42");
+  });
 
-    it("leaves the placeholder untouched when a path segment resolves through a non-object value", () => {
-      const result = renderTemplate("{{plan.summary.nested}}", {
-        plan: { summary: "just a string" },
-      });
-      expect(result).toBe("{{plan.summary.nested}}");
-    });
+  it("stringifies boolean values (both true and false)", () => {
+    expect(renderTemplate("{{t}}", { t: true })).toBe("true");
+    expect(renderTemplate("{{f}}", { f: false })).toBe("false");
+  });
 
-    it("leaves the placeholder untouched when an intermediate path segment is missing entirely", () => {
-      const result = renderTemplate("{{issue.missing.value}}", { issue: { title: "x" } });
-      expect(result).toBe("{{issue.missing.value}}");
+  it("JSON-stringifies a plain object value", () => {
+    const result = renderTemplate("{{obj}}", { obj: { foo: "bar", n: 1 } });
+    expect(result).toBe(JSON.stringify({ foo: "bar", n: 1 }));
+  });
+
+  it("renders an array of primitives as a numbered list", () => {
+    const result = renderTemplate("{{items}}", { items: ["a", "b", "c"] });
+    expect(result).toBe("1. a\n2. b\n3. c");
+  });
+
+  it("renders an array of numbers/booleans as a numbered list with stringified values", () => {
+    const result = renderTemplate("{{items}}", { items: [1, false, 2] });
+    expect(result).toBe("1. 1\n2. false\n3. 2");
+  });
+
+  it("renders an array of plain objects as key/value bullet blocks", () => {
+    const result = renderTemplate("{{items}}", {
+      items: [
+        { id: "s1", title: "Step 1" },
+        { id: "s2", title: "Step 2" },
+      ],
     });
+    expect(result).toBe("  - id: s1\n  - title: Step 1\n  - id: s2\n  - title: Step 2");
+  });
+
+  it("uses toDisplayString for nested values inside array-of-object items, including nested objects and nulls", () => {
+    const result = renderTemplate("{{items}}", {
+      items: [{ id: "s1", meta: { nested: true }, note: null, count: 3 }],
+    });
+    expect(result).toBe(
+      `  - id: s1\n  - meta: ${JSON.stringify({ nested: true })}\n  - note: \n  - count: 3`,
+    );
+  });
+
+  it("renders an empty array as an empty string", () => {
+    expect(renderTemplate("[{{items}}]", { items: [] })).toBe("[]");
+  });
+
+  it("leaves the placeholder untouched when the path breaks on a non-object intermediate value", () => {
+    const result = renderTemplate("{{a.b.c}}", { a: { b: "not an object" } });
+    expect(result).toBe("{{a.b.c}}");
+  });
+
+  it("leaves the placeholder untouched when the first path segment resolves to a non-object", () => {
+    const result = renderTemplate("{{a.b}}", { a: "just a string" });
+    expect(result).toBe("{{a.b}}");
+  });
+
+  it("renders multiple distinct placeholders in a single template", () => {
+    const result = renderTemplate("{{a}} and {{b}} and {{a}}", { a: "X", b: "Y" });
+    expect(result).toBe("X and Y and X");
+  });
+
+  it("leaves non-placeholder text untouched", () => {
+    expect(renderTemplate("no placeholders here", {})).toBe("no placeholders here");
   });
 });

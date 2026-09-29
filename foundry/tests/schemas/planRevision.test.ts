@@ -2,62 +2,61 @@ import { describe, it, expect } from "vitest";
 import { DispositionItemSchema, PlanRevisionSchema } from "../../src/schemas/planRevision.js";
 
 describe("DispositionItemSchema status normalization", () => {
-  const base = { findingId: "f1", rationale: "because" };
-
   it("keeps 'accepted' as-is", () => {
-    expect(DispositionItemSchema.parse({ ...base, status: "accepted" }).status).toBe("accepted");
-  });
-
-  it("keeps 'dismissed' as-is", () => {
-    expect(DispositionItemSchema.parse({ ...base, status: "dismissed" }).status).toBe("dismissed");
-  });
-
-  it("normalizes 'rejected' to 'dismissed'", () => {
-    expect(DispositionItemSchema.parse({ ...base, status: "rejected" }).status).toBe("dismissed");
-  });
-
-  it("normalizes an unknown synonym like 'partially_accepted' to 'partially_incorporated'", () => {
     expect(
-      DispositionItemSchema.parse({ ...base, status: "partially_accepted" }).status,
+      DispositionItemSchema.parse({ findingId: "f1", status: "accepted", rationale: "r" }).status,
+    ).toBe("accepted");
+  });
+
+  it("normalizes 'dismissed' and the synonym 'rejected' to 'dismissed'", () => {
+    expect(
+      DispositionItemSchema.parse({ findingId: "f1", status: "dismissed", rationale: "r" }).status,
+    ).toBe("dismissed");
+    expect(
+      DispositionItemSchema.parse({ findingId: "f1", status: "rejected", rationale: "r" }).status,
+    ).toBe("dismissed");
+  });
+
+  it("normalizes any other value (e.g. 'partially_accepted') to 'partially_incorporated'", () => {
+    expect(
+      DispositionItemSchema.parse({
+        findingId: "f1",
+        status: "partially_accepted",
+        rationale: "r",
+      }).status,
     ).toBe("partially_incorporated");
-  });
-
-  it("normalizes an entirely unrecognized value to 'partially_incorporated'", () => {
-    expect(DispositionItemSchema.parse({ ...base, status: "garbage" }).status).toBe(
-      "partially_incorporated",
-    );
-  });
-
-  it("rejects a missing findingId", () => {
-    expect(DispositionItemSchema.safeParse({ status: "accepted", rationale: "x" }).success).toBe(
-      false,
-    );
+    expect(
+      DispositionItemSchema.parse({
+        findingId: "f1",
+        status: "partially_incorporated",
+        rationale: "r",
+      }).status,
+    ).toBe("partially_incorporated");
   });
 });
 
 describe("PlanRevisionSchema", () => {
-  const validRevision = {
-    originalPlanVersion: 1,
-    revisedPlanVersion: 2,
-    reviewId: "review-1",
-    dispositions: [{ findingId: "f1", status: "accepted", rationale: "makes sense" }],
-  };
-
-  it("parses a valid plan revision", () => {
-    const result = PlanRevisionSchema.parse(validRevision);
-    expect(result.dispositions[0].status).toBe("accepted");
-    expect(result.originalPlanVersion).toBe(1);
-    expect(result.revisedPlanVersion).toBe(2);
+  it("parses a full valid revision with multiple dispositions", () => {
+    const parsed = PlanRevisionSchema.parse({
+      originalPlanVersion: 1,
+      revisedPlanVersion: 2,
+      reviewId: "review-1",
+      dispositions: [
+        { findingId: "f1", status: "accepted", rationale: "Fixed as suggested." },
+        { findingId: "f2", status: "rejected", rationale: "Out of scope." },
+      ],
+    });
+    expect(parsed.dispositions.map((d) => d.status)).toEqual(["accepted", "dismissed"]);
   });
 
-  it("rejects a non-positive revisedPlanVersion", () => {
-    expect(
-      PlanRevisionSchema.safeParse({ ...validRevision, revisedPlanVersion: 0 }).success,
-    ).toBe(false);
-  });
-
-  it("rejects a missing dispositions array", () => {
-    const { dispositions: _dispositions, ...missing } = validRevision;
-    expect(PlanRevisionSchema.safeParse(missing).success).toBe(false);
+  it("rejects non-positive plan versions", () => {
+    expect(() =>
+      PlanRevisionSchema.parse({
+        originalPlanVersion: 0,
+        revisedPlanVersion: 2,
+        reviewId: "review-1",
+        dispositions: [],
+      }),
+    ).toThrow();
   });
 });

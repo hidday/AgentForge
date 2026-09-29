@@ -9,167 +9,198 @@ import {
 } from "../../src/schemas/taskBundle.js";
 
 const validIssue = {
-  id: "issue-1",
-  title: "Fix the bug",
+  id: "LIN-1",
+  title: "Fix bug",
   description: "Something is broken",
   labels: ["bug"],
   priority: 2,
 };
 
 const validRepo = {
-  name: "svc-a",
+  name: "acme/repo",
   defaultBranch: "main",
-  workingBranch: "feature/issue-1",
-  repoPath: "/repos/svc-a",
+  workingBranch: "feature/x",
+  repoPath: "./workspace",
   allowedPaths: ["src/"],
-  protectedPaths: ["src/generated/"],
+  protectedPaths: [".github/"],
 };
 
 const validConstraints = {
-  requiredChecks: ["lint", "test"],
+  requiredChecks: ["lint"],
   maxFilesChanged: 10,
   maxDiffLines: 500,
-  forbiddenPatterns: [],
-  mustNotTouch: [],
+  forbiddenPatterns: ["eval("],
+  mustNotTouch: ["prisma/migrations/"],
 };
 
 const validRelatedIssue = {
-  id: "issue-parent",
+  id: "LIN-2",
   title: "Parent issue",
   description: "Parent description",
-  state: "in_progress",
+  state: "Todo",
   labels: [],
   priority: 1,
 };
 
-const validBundle = {
-  issue: validIssue,
-  repo: validRepo,
-  constraints: validConstraints,
-  definitionOfDone: ["Tests pass"],
-};
-
 describe("IssueSchema", () => {
-  it("parses a valid issue", () => {
-    expect(IssueSchema.parse(validIssue)).toEqual(validIssue);
+  it("accepts a fully populated issue", () => {
+    const result = IssueSchema.parse({
+      ...validIssue,
+      project: "Backend",
+      cycle: "Sprint 1",
+    });
+    expect(result.project).toBe("Backend");
+    expect(result.cycle).toBe("Sprint 1");
   });
 
-  it("accepts optional project and cycle fields", () => {
-    const withOptional = { ...validIssue, project: "proj-1", cycle: "cycle-1" };
-    expect(IssueSchema.parse(withOptional)).toEqual(withOptional);
+  it("accepts an issue without the optional project/cycle fields", () => {
+    const result = IssueSchema.parse(validIssue);
+    expect(result.project).toBeUndefined();
+    expect(result.cycle).toBeUndefined();
   });
 
-  it("rejects a missing required field", () => {
-    const { title: _title, ...missingTitle } = validIssue;
-    expect(IssueSchema.safeParse(missingTitle).success).toBe(false);
+  it("rejects priority below the minimum boundary", () => {
+    expect(() => IssueSchema.parse({ ...validIssue, priority: -1 })).toThrow();
   });
 
-  it("rejects a priority outside the 0-4 range", () => {
-    expect(IssueSchema.safeParse({ ...validIssue, priority: 5 }).success).toBe(false);
-    expect(IssueSchema.safeParse({ ...validIssue, priority: -1 }).success).toBe(false);
+  it("rejects priority above the maximum boundary", () => {
+    expect(() => IssueSchema.parse({ ...validIssue, priority: 5 })).toThrow();
+  });
+
+  it("accepts priority at the min (0) and max (4) boundaries", () => {
+    expect(IssueSchema.parse({ ...validIssue, priority: 0 }).priority).toBe(0);
+    expect(IssueSchema.parse({ ...validIssue, priority: 4 }).priority).toBe(4);
   });
 
   it("rejects a non-integer priority", () => {
-    expect(IssueSchema.safeParse({ ...validIssue, priority: 1.5 }).success).toBe(false);
+    expect(() => IssueSchema.parse({ ...validIssue, priority: 1.5 })).toThrow();
   });
 
-  it("rejects the wrong type for labels", () => {
-    expect(IssueSchema.safeParse({ ...validIssue, labels: "bug" }).success).toBe(false);
+  it("rejects a missing required field", () => {
+    const { title: _title, ...withoutTitle } = validIssue;
+    expect(() => IssueSchema.parse(withoutTitle)).toThrow();
+  });
+
+  it("rejects labels that are not an array of strings", () => {
+    expect(() => IssueSchema.parse({ ...validIssue, labels: [1, 2] })).toThrow();
   });
 });
 
 describe("RepoConfigSchema", () => {
-  it("parses a valid repo config", () => {
+  it("accepts a valid repo config", () => {
     expect(RepoConfigSchema.parse(validRepo)).toEqual(validRepo);
   });
 
   it("rejects a missing required field", () => {
-    const { repoPath: _repoPath, ...missing } = validRepo;
-    expect(RepoConfigSchema.safeParse(missing).success).toBe(false);
+    const { repoPath: _repoPath, ...rest } = validRepo;
+    expect(() => RepoConfigSchema.parse(rest)).toThrow();
+  });
+
+  it("rejects non-string entries in allowedPaths", () => {
+    expect(() => RepoConfigSchema.parse({ ...validRepo, allowedPaths: [1] })).toThrow();
   });
 });
 
 describe("ConstraintsSchema", () => {
-  it("parses valid constraints", () => {
+  it("accepts valid constraints", () => {
     expect(ConstraintsSchema.parse(validConstraints)).toEqual(validConstraints);
   });
 
-  it("rejects a non-positive maxFilesChanged", () => {
-    expect(
-      ConstraintsSchema.safeParse({ ...validConstraints, maxFilesChanged: 0 }).success,
-    ).toBe(false);
+  it("rejects maxFilesChanged that is zero (not positive)", () => {
+    expect(() =>
+      ConstraintsSchema.parse({ ...validConstraints, maxFilesChanged: 0 }),
+    ).toThrow();
   });
 
-  it("rejects a non-positive maxDiffLines", () => {
-    expect(
-      ConstraintsSchema.safeParse({ ...validConstraints, maxDiffLines: -5 }).success,
-    ).toBe(false);
+  it("rejects a negative maxDiffLines", () => {
+    expect(() =>
+      ConstraintsSchema.parse({ ...validConstraints, maxDiffLines: -5 }),
+    ).toThrow();
+  });
+
+  it("rejects a non-integer maxFilesChanged", () => {
+    expect(() =>
+      ConstraintsSchema.parse({ ...validConstraints, maxFilesChanged: 1.5 }),
+    ).toThrow();
   });
 });
 
 describe("RelatedIssueSchema", () => {
-  it("parses a valid related issue", () => {
-    expect(RelatedIssueSchema.parse(validRelatedIssue)).toEqual(validRelatedIssue);
+  it("accepts a related issue with optional identifier and url", () => {
+    const result = RelatedIssueSchema.parse({
+      ...validRelatedIssue,
+      identifier: "LIN-2",
+      url: "https://example.com",
+    });
+    expect(result.identifier).toBe("LIN-2");
   });
 
-  it("accepts optional identifier and url", () => {
-    const withOptional = { ...validRelatedIssue, identifier: "ENG-1", url: "https://example.com" };
-    expect(RelatedIssueSchema.parse(withOptional)).toEqual(withOptional);
+  it("accepts a related issue without identifier/url", () => {
+    const result = RelatedIssueSchema.parse(validRelatedIssue);
+    expect(result.identifier).toBeUndefined();
+    expect(result.url).toBeUndefined();
   });
 
-  it("rejects a missing required field", () => {
-    const { state: _state, ...missing } = validRelatedIssue;
-    expect(RelatedIssueSchema.safeParse(missing).success).toBe(false);
+  it("rejects priority outside 0-4", () => {
+    expect(() => RelatedIssueSchema.parse({ ...validRelatedIssue, priority: 7 })).toThrow();
   });
 });
 
 describe("RelatedContextSchema", () => {
-  it("parses with both parent and blockers", () => {
-    const context = { parent: validRelatedIssue, blockers: [validRelatedIssue] };
-    expect(RelatedContextSchema.parse(context)).toEqual(context);
+  it("accepts a context with a parent and blockers", () => {
+    const result = RelatedContextSchema.parse({
+      parent: validRelatedIssue,
+      blockers: [validRelatedIssue],
+    });
+    expect(result.blockers).toHaveLength(1);
   });
 
-  it("parses with parent omitted", () => {
-    const context = { blockers: [] };
-    expect(RelatedContextSchema.parse(context)).toEqual(context);
+  it("accepts a context with no parent and empty blockers", () => {
+    const result = RelatedContextSchema.parse({ blockers: [] });
+    expect(result.parent).toBeUndefined();
+    expect(result.blockers).toEqual([]);
   });
 
-  it("rejects a missing blockers field", () => {
-    expect(RelatedContextSchema.safeParse({ parent: validRelatedIssue }).success).toBe(false);
+  it("rejects a context missing the required blockers array", () => {
+    expect(() => RelatedContextSchema.parse({})).toThrow();
   });
 });
 
 describe("TaskBundleSchema", () => {
-  it("parses a fully valid task bundle without relatedContext", () => {
+  const validBundle = {
+    issue: validIssue,
+    repo: validRepo,
+    constraints: validConstraints,
+    definitionOfDone: ["All tests pass"],
+  };
+
+  it("accepts a minimal valid bundle without relatedContext", () => {
     const result = TaskBundleSchema.parse(validBundle);
-    expect(result).toEqual(validBundle);
+    expect(result.relatedContext).toBeUndefined();
   });
 
-  it("parses a fully valid task bundle with relatedContext", () => {
-    const bundle = {
+  it("accepts a full bundle including relatedContext", () => {
+    const result = TaskBundleSchema.parse({
       ...validBundle,
-      relatedContext: { parent: validRelatedIssue, blockers: [validRelatedIssue] },
-    };
-    expect(TaskBundleSchema.parse(bundle)).toEqual(bundle);
+      relatedContext: { parent: validRelatedIssue, blockers: [] },
+    });
+    expect(result.relatedContext?.parent?.id).toBe(validRelatedIssue.id);
   });
 
-  it("fails when a required top-level field is missing", () => {
-    const { constraints: _constraints, ...missing } = validBundle;
-    const result = TaskBundleSchema.safeParse(missing);
-    expect(result.success).toBe(false);
-    if (!result.success) {
-      expect(result.error.issues.some((i) => i.path.includes("constraints"))).toBe(true);
-    }
+  it("rejects a bundle with an invalid nested issue", () => {
+    expect(() =>
+      TaskBundleSchema.parse({ ...validBundle, issue: { ...validIssue, priority: 99 } }),
+    ).toThrow();
   });
 
-  it("fails when a nested field has the wrong type", () => {
-    const invalid = { ...validBundle, issue: { ...validIssue, priority: "high" } };
-    const result = TaskBundleSchema.safeParse(invalid);
-    expect(result.success).toBe(false);
+  it("rejects a bundle missing definitionOfDone", () => {
+    const { definitionOfDone: _dod, ...rest } = validBundle;
+    expect(() => TaskBundleSchema.parse(rest)).toThrow();
   });
 
-  it("fails when definitionOfDone is not an array", () => {
-    const invalid = { ...validBundle, definitionOfDone: "done" };
-    expect(TaskBundleSchema.safeParse(invalid).success).toBe(false);
+  it("rejects a bundle with a malformed relatedContext", () => {
+    expect(() =>
+      TaskBundleSchema.parse({ ...validBundle, relatedContext: { parent: {} } }),
+    ).toThrow();
   });
 });
