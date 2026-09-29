@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, waitFor, act } from "@testing-library/react";
+import { render, screen, waitFor, act, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { LinearSyncDialog } from "./LinearSyncDialog.tsx";
 import type { DashboardEvent } from "@/hooks/useSSE.ts";
@@ -452,6 +452,113 @@ describe("LinearSyncDialog", () => {
     });
     expect(onClose).toHaveBeenCalledOnce(); // not re-triggered a second time
     expect(onIngested).toHaveBeenCalledOnce();
+  });
+
+  it("clears the pending min-loader timer on unmount", async () => {
+    const clearTimeoutSpy = vi.spyOn(global, "clearTimeout");
+    mockApi.ingestIssues.mockReturnValue(new Promise(() => {}));
+
+    const { unmount } = render(
+      <LinearSyncDialog open={true} onClose={vi.fn()} onIngested={vi.fn()} />,
+    );
+
+    await waitFor(() => expect(screen.getByText(issueA.title)).toBeDefined());
+    fireEvent.click(screen.getByRole("button", { name: /start 2 runs/i }));
+
+    // Both issues observed right away -> schedules a real pending timeout
+    // (elapsed is well under MIN_LOADER_MS).
+    fireSSE({ type: "run:created", runId: "run-a", issueId: issueA.id });
+    fireSSE({ type: "run:created", runId: "run-b", issueId: issueB.id });
+
+    clearTimeoutSpy.mockClear();
+    unmount();
+
+    // The unmount cleanup effect must clear the outstanding timer so it
+    // can't fire against unmounted state.
+    expect(clearTimeoutSpy).toHaveBeenCalled();
+    clearTimeoutSpy.mockRestore();
+  });
+
+  it("does not schedule a duplicate min-loader timer when the HTTP response settles while one is already pending", async () => {
+    const onClose = vi.fn();
+    const onIngestComplete = vi.fn();
+    let resolveIngest!: (v: { ok: boolean; started: string[]; skipped: string[] }) => void;
+    mockApi.ingestIssues.mockReturnValue(
+      new Promise((resolve) => {
+        resolveIngest = resolve;
+      }),
+    );
+
+    render(
+      <LinearSyncDialog
+        open={true}
+        onClose={onClose}
+        onIngested={vi.fn()}
+        onIngestComplete={onIngestComplete}
+      />,
+    );
+
+    await waitFor(() => expect(screen.getByText(issueA.title)).toBeDefined());
+    fireEvent.click(screen.getByRole("button", { name: /start 2 runs/i }));
+
+    // SSE observes both issues right away -> schedules the delayed close.
+    fireSSE({ type: "run:created", runId: "run-a", issueId: issueA.id });
+    fireSSE({ type: "run:created", runId: "run-b", issueId: issueB.id });
+
+    // The HTTP response settles BEFORE the min-loader window elapses. The
+    // resulting maybeAutoClose() call must see the already-pending timer
+    // and bail out instead of scheduling a second one.
+    await act(async () => {
+      resolveIngest({ ok: true, started: [issueA.id, issueB.id], skipped: [] });
+    });
+
+    await act(async () => {
+      vi.advanceTimersByTime(700);
+    });
+
+    // A duplicate timer would have fired onClose/onIngestComplete twice.
+    await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
+    expect(onIngestComplete).toHaveBeenCalledOnce();
+    expect(onIngestComplete).toHaveBeenCalledWith({ started: 2, skipped: 0 });
+  });
+
+  it("shows a generic error message when ingestIssues rejects with a non-Error value", async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    mockApi.ingestIssues.mockRejectedValue("socket hang up");
+
+    render(<LinearSyncDialog open={true} onClose={vi.fn()} onIngested={vi.fn()} />);
+
+    await waitFor(() => expect(screen.getByText(issueA.title)).toBeDefined());
+    await user.click(screen.getByRole("button", { name: /start 2 runs/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/failed to ingest issues/i)).toBeDefined();
+    });
+  });
+
+  it("does not call onIngested when the ingest response reports zero started issues", async () => {
+    const onClose = vi.fn();
+    const onIngested = vi.fn();
+    mockApi.ingestIssues.mockResolvedValue({
+      ok: true,
+      started: [],
+      skipped: [issueA.id, issueB.id],
+    });
+
+    render(<LinearSyncDialog open={true} onClose={onClose} onIngested={onIngested} />);
+
+    await waitFor(() => expect(screen.getByText(issueA.title)).toBeDefined());
+    fireEvent.click(screen.getByRole("button", { name: /start 2 runs/i }));
+
+    // Let the resolved ingestIssues promise settle, then let the min-loader
+    // window elapse so the dialog auto-closes from the settled response.
+    await act(async () => {});
+    await act(async () => {
+      vi.advanceTimersByTime(700);
+    });
+
+    await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
+    expect(onIngested).not.toHaveBeenCalled();
   });
 
   it("ignores SSE events that aren't run:created and events for issues outside the pending set", async () => {

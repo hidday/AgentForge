@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor, act } from "@testing-library/react";
+import { render, screen, waitFor, act, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { Artifact } from "@/api/client.ts";
 
@@ -296,6 +296,24 @@ describe("ChatPanel", () => {
 
     await userEvent.click(screen.getByRole("button", { name: /chat with agent/i }));
     expect(screen.getByPlaceholderText(/ask the agent/i)).toBeDefined();
+  });
+
+  it("submitting the form directly with a blank/whitespace-only input is a no-op", async () => {
+    render(<ChatPanel runId={RUN_ID} artifacts={[]} />);
+
+    const input = screen.getByPlaceholderText(/ask the agent/i);
+    const form = input.closest("form");
+    expect(form).not.toBeNull();
+
+    // The Send button is disabled for empty input, so drive the form's
+    // submit event directly (e.g. as native Enter-to-submit would) to
+    // exercise the handler's own `!trimmed` guard.
+    fireEvent.submit(form!);
+
+    // Guard short-circuits before any request is issued or loading state
+    // is entered.
+    expect(mockApi.sendChatMessage).not.toHaveBeenCalled();
+    expect(screen.queryByText(/agent is thinking/i)).toBeNull();
   });
 
   it("auto-scrolls to the bottom when the message count changes", () => {
