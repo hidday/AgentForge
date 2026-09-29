@@ -178,6 +178,16 @@ describe("AnswerResearcherAgent.run()", () => {
     expect(prompt).toContain("*(blocks execution)*");
   });
 
+  it("omits the Open Questions section entirely when the plan has no open questions", async () => {
+    const { agent, getUserPrompt } = buildAgent();
+    const plan = { ...makePlan(), openQuestions: [] };
+
+    await agent.run(plan, makeTaskBundle(), "run-1");
+
+    const prompt = getUserPrompt();
+    expect(prompt).not.toContain("## Open Questions to Research");
+  });
+
   it("renders the Prior Human Answers section when humanAnswers are provided", async () => {
     const { agent, getUserPrompt } = buildAgent();
 
@@ -198,6 +208,18 @@ describe("AnswerResearcherAgent.run()", () => {
 
     const prompt = getUserPrompt();
     expect(prompt).not.toContain("## Prior Human Answers");
+  });
+
+  it("omits the Open Questions to Research section when the plan has no open questions", async () => {
+    const { agent, getUserPrompt } = buildAgent();
+    const plan = makePlan();
+    plan.openQuestions = [];
+
+    await agent.run(plan, makeTaskBundle(), "run-1");
+
+    const prompt = getUserPrompt();
+    expect(prompt).not.toContain("## Open Questions to Research");
+    expect(prompt).not.toContain("{{openQuestionsSection}}");
   });
 
   it("renders the task bundle (issue title/description, repo info) into the user prompt", async () => {

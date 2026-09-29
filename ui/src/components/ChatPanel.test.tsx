@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor, act } from "@testing-library/react";
+import { render, screen, waitFor, act, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { Artifact } from "@/api/client.ts";
 
@@ -214,6 +214,40 @@ describe("ChatPanel", () => {
     expect(screen.queryByText("Failing question")).toBeNull();
   });
 
+  it("falls back to a generic error message when a non-Error value is rejected", async () => {
+    mockApi.sendChatMessage.mockRejectedValue("network exploded");
+
+    render(<ChatPanel runId={RUN_ID} artifacts={[]} />);
+    const input = screen.getByPlaceholderText(/ask the agent/i);
+    await userEvent.type(input, "Failing question");
+    await userEvent.click(screen.getByRole("button", { name: /send/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText("Chat request failed")).toBeDefined();
+    });
+  });
+
+  it("renders an empty bubble when a ChatMessage artifact has no content field", () => {
+    const artifacts: Artifact[] = [
+      {
+        id: "a1",
+        runId: RUN_ID,
+        type: "ChatMessage",
+        version: 1,
+        payloadJson: { role: "user" },
+        rawText: "",
+        createdAt: "2024-01-01T00:00:01Z",
+      },
+    ];
+    render(<ChatPanel runId={RUN_ID} artifacts={artifacts} />);
+
+    // The message count badge confirms a message was derived from the
+    // artifact despite the missing `content` field (defaults to "").
+    expect(screen.getByText("1")).toBeDefined();
+    // No markdown/user text content is rendered since content defaulted to "".
+    expect(screen.queryByTestId("markdown-content")).toBeNull();
+  });
+
   it("message list does not change from artifact-derived count when only local state changes", async () => {
     let resolveRequest!: (v: { reply: string; durationMs: number }) => void;
     mockApi.sendChatMessage.mockReturnValue(
@@ -250,5 +284,52 @@ describe("ChatPanel", () => {
       // "New question" should NOT appear
       expect(screen.queryByText("New question")).toBeNull();
     });
+  });
+
+  it("collapses and re-expands the panel when the header is clicked", async () => {
+    render(<ChatPanel runId={RUN_ID} artifacts={[]} />);
+
+    expect(screen.getByPlaceholderText(/ask the agent/i)).toBeDefined();
+
+    await userEvent.click(screen.getByRole("button", { name: /chat with agent/i }));
+    expect(screen.queryByPlaceholderText(/ask the agent/i)).toBeNull();
+
+    await userEvent.click(screen.getByRole("button", { name: /chat with agent/i }));
+    expect(screen.getByPlaceholderText(/ask the agent/i)).toBeDefined();
+  });
+
+  it("submitting the form directly with a blank/whitespace-only input is a no-op", async () => {
+    render(<ChatPanel runId={RUN_ID} artifacts={[]} />);
+
+    const input = screen.getByPlaceholderText(/ask the agent/i);
+    const form = input.closest("form");
+    expect(form).not.toBeNull();
+
+    // The Send button is disabled for empty input, so drive the form's
+    // submit event directly (e.g. as native Enter-to-submit would) to
+    // exercise the handler's own `!trimmed` guard.
+    fireEvent.submit(form!);
+
+    // Guard short-circuits before any request is issued or loading state
+    // is entered.
+    expect(mockApi.sendChatMessage).not.toHaveBeenCalled();
+    expect(screen.queryByText(/agent is thinking/i)).toBeNull();
+  });
+
+  it("auto-scrolls to the bottom when the message count changes", () => {
+    const scrollIntoViewMock = vi.fn();
+    Element.prototype.scrollIntoView = scrollIntoViewMock;
+
+    const { rerender } = render(<ChatPanel runId={RUN_ID} artifacts={[]} />);
+    scrollIntoViewMock.mockClear();
+
+    rerender(
+      <ChatPanel
+        runId={RUN_ID}
+        artifacts={[makeArtifact("user", "Hi", "a1", "2026-01-01T00:00:00Z")]}
+      />,
+    );
+
+    expect(scrollIntoViewMock).toHaveBeenCalledWith({ behavior: "smooth" });
   });
 });

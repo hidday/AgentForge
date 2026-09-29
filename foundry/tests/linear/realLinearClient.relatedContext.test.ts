@@ -166,6 +166,37 @@ describe("RealLinearClient.getRelatedContext", () => {
     expect(ctx.blockers[0].id).toBe("blocker-id");
   });
 
+  it("treats a missing inverseRelations connection as no blockers", async () => {
+    const focus = makeFakeIssue({
+      id: "focus-id",
+      parent: Promise.resolve(null),
+      inverseRelations: () =>
+        Promise.resolve(null as unknown as { nodes: Array<{ id: string; type: string; issue: Promise<FakeIssue> }> }),
+    });
+
+    issuesById.set("focus-id", focus);
+
+    const ctx = await client.getRelatedContext("focus-id");
+
+    expect(ctx.blockers).toEqual([]);
+  });
+
+  it("defaults a related issue's labels to an empty array when the labels connection is missing", async () => {
+    const parent = makeFakeIssue({
+      id: "parent-id",
+      identifier: "PRY-100",
+      labels: () => Promise.resolve(null),
+    });
+    const focus = makeFakeIssue({ id: "focus-id", parent: Promise.resolve(parent) });
+
+    issuesById.set("focus-id", focus);
+    issuesById.set("parent-id", parent);
+
+    const ctx = await client.getRelatedContext("focus-id");
+
+    expect(ctx.parent?.labels).toEqual([]);
+  });
+
   it("returns empty when there are no relations", async () => {
     const focus = makeFakeIssue({
       id: "focus-id",
@@ -209,6 +240,40 @@ describe("RealLinearClient.getRelatedContext", () => {
     expect(ctx.blockers[0].id).toBe("blocker-id");
   });
 
+  it("logs a warning and drops a blocker whose relation.issue fails to hydrate", async () => {
+    const goodBlocker = makeFakeIssue({ id: "blocker-good", identifier: "PRY-101" });
+    const hydrationError = new Error("issue fetch failed");
+    const focus = makeFakeIssue({
+      id: "focus-id",
+      parent: Promise.resolve(null),
+      inverseRelations: () =>
+        Promise.resolve({
+          nodes: [
+            {
+              id: "rel-bad",
+              type: "blocks",
+              issue: Promise.reject(hydrationError),
+            },
+            { id: "rel-good", type: "blocks", issue: Promise.resolve(goodBlocker) },
+          ],
+        }),
+    });
+
+    issuesById.set("focus-id", focus);
+    issuesById.set("blocker-good", goodBlocker);
+
+    const logger = (client as unknown as { logger: { warn: ReturnType<typeof vi.fn> } }).logger;
+
+    const ctx = await client.getRelatedContext("focus-id");
+
+    expect(ctx.blockers).toHaveLength(1);
+    expect(ctx.blockers[0].id).toBe("blocker-good");
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.objectContaining({ relationId: "rel-bad", focusIssueId: "focus-id" }),
+      "Failed to hydrate blocker issue from relation",
+    );
+  });
+
   it("treats null description as empty string", async () => {
     const parent = makeFakeIssue({
       id: "parent-id",
@@ -226,5 +291,23 @@ describe("RealLinearClient.getRelatedContext", () => {
     const ctx = await client.getRelatedContext("focus-id");
 
     expect(ctx.parent?.description).toBe("");
+  });
+
+  it("defaults a related issue's state to 'Unknown' when the SDK resolves no state", async () => {
+    const parent = makeFakeIssue({
+      id: "parent-id",
+      identifier: "PRY-100",
+      // The SDK types `state` as non-nullable, but it can resolve to null/undefined
+      // in practice (e.g. a deleted workflow state); cast to simulate that.
+      state: Promise.resolve(null) as unknown as Promise<{ id: string; name: string }>,
+    });
+    const focus = makeFakeIssue({ id: "focus-id", parent: Promise.resolve(parent) });
+
+    issuesById.set("focus-id", focus);
+    issuesById.set("parent-id", parent);
+
+    const ctx = await client.getRelatedContext("focus-id");
+
+    expect(ctx.parent?.state).toBe("Unknown");
   });
 });
