@@ -306,10 +306,10 @@ export function createHarness(opts: HarnessOptions = {}) {
         score: 0.95,
         scoreRationale: "Fixed",
       });
+      // Mirrors RemediationAgent: persists a v2 ExecutionReport + Remediation
+      // artifact, but NOT a new Review.
       addArtifact("ExecutionReport", executionReport, 2);
-      // A remediated run is re-reviewed as approved.
-      addArtifact("Review", makeReview({ reviewId: "rev-2" }), 2);
-      return {
+      const remediation = {
         reviewId: "rev-1",
         resolution: [
           { findingId: "f1", status: "accepted", action: "Fixed the bug", rationale: "Valid" },
@@ -317,6 +317,8 @@ export function createHarness(opts: HarnessOptions = {}) {
         readyForHumanReview: true,
         executionReport,
       };
+      addArtifact("Remediation", remediation);
+      return remediation;
     }),
   };
 
