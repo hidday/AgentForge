@@ -459,6 +459,31 @@ describe("RealLinearClient", () => {
     });
   });
 
+  describe("getRelatedContext field defaults", () => {
+    it("defaults a related issue's state to Unknown when null", async () => {
+      const parent = {
+        id: "parent-id",
+        identifier: "PRY-100",
+        title: "Parent",
+        description: "desc",
+        priority: 1,
+        url: "https://linear.app/team/issue/PRY-100",
+        state: Promise.resolve(null),
+        labels: () => Promise.resolve({ nodes: [] }),
+      };
+      const focus = {
+        id: "focus-id",
+        parent: Promise.resolve(parent),
+        inverseRelations: () => Promise.resolve({ nodes: [] }),
+      };
+      installFakeSdk(client, { issue: vi.fn().mockResolvedValue(focus) });
+
+      const ctx = await client.getRelatedContext("focus-id");
+
+      expect(ctx.parent?.state).toBe("Unknown");
+    });
+  });
+
   describe("getRelatedContext error handling", () => {
     it("logs a warning and drops a blocker whose relation.issue rejects", async () => {
       const failingRelation = {
@@ -515,6 +540,36 @@ describe("RealLinearClient", () => {
       installFakeSdk(client, { issue: vi.fn().mockResolvedValue(fake) });
 
       expect(await client.listLabels("issue-1")).toEqual([]);
+    });
+
+    it("returns an empty array and caches nothing when nodes is undefined", async () => {
+      const fake = makeFakeIssue({
+        id: "issue-1",
+        labels: () => Promise.resolve({ nodes: undefined } as never),
+      });
+      installFakeSdk(client, { issue: vi.fn().mockResolvedValue(fake) });
+
+      expect(await client.listLabels("issue-1")).toEqual([]);
+    });
+  });
+
+  describe("resolveStateId (via updateIssueState)", () => {
+    it("defaults to an empty state map when the team's states connection has no nodes", async () => {
+      const fake = makeFakeIssue({ id: "issue-1" });
+      const team = vi.fn().mockResolvedValue({
+        id: "team-1",
+        states: () => Promise.resolve({ nodes: undefined }),
+      });
+      const updateIssue = vi.fn();
+      installFakeSdk(client, { issue: vi.fn().mockResolvedValue(fake), team, updateIssue });
+
+      await client.updateIssueState("issue-1", "Done");
+
+      expect(updateIssue).not.toHaveBeenCalled();
+      expect(logger.warn).toHaveBeenCalledWith(
+        { issueId: "issue-1", stateName: "Done", teamId: "team-1" },
+        "Could not find workflow state by name",
+      );
     });
   });
 });
