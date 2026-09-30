@@ -157,6 +157,17 @@ describe("GET /api/linear/pending", () => {
     expect(res.statusCode).toBe(500);
     expect(res.json()).toEqual({ error: "Linear API down" });
   });
+
+  it("stringifies a non-Error rejection from discoverPendingIssues", async () => {
+    // eslint-disable-next-line @typescript-eslint/prefer-promise-reject-errors
+    const discoverPendingIssues = vi.fn().mockRejectedValue("Linear API down");
+    const { app } = await buildApp({ linearPollService: { discoverPendingIssues } });
+
+    const res = await app.inject({ method: "GET", url: "/api/linear/pending" });
+
+    expect(res.statusCode).toBe(500);
+    expect(res.json()).toEqual({ error: "Linear API down" });
+  });
 });
 
 describe("POST /api/linear/ingest", () => {
@@ -217,6 +228,21 @@ describe("POST /api/linear/ingest", () => {
 
   it("returns 500 with the error message when startRunsForIssues throws", async () => {
     const startRunsForIssues = vi.fn().mockRejectedValue(new Error("db unavailable"));
+    const { app } = await buildApp({ linearPollService: { startRunsForIssues } });
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/linear/ingest",
+      payload: { issueIds: ["LIN-1"] },
+    });
+
+    expect(res.statusCode).toBe(500);
+    expect(res.json()).toEqual({ error: "db unavailable" });
+  });
+
+  it("stringifies a non-Error rejection from startRunsForIssues", async () => {
+    // eslint-disable-next-line @typescript-eslint/prefer-promise-reject-errors
+    const startRunsForIssues = vi.fn().mockRejectedValue("db unavailable");
     const { app } = await buildApp({ linearPollService: { startRunsForIssues } });
 
     const res = await app.inject({
