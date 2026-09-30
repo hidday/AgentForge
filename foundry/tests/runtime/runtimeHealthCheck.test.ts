@@ -218,6 +218,22 @@ describe("RuntimeHealthCheck.runPreflight — success and failure paths", () => 
     expect(codexResult?.authCheck.error).toContain("Auth probe timed out after");
   });
 
+  it("catches a non-Error throw during the auth check and stringifies it", async () => {
+    const processRunner = makeProcessRunner();
+    processRunner.execute.mockImplementation(async (opts: { args: string[]; command: string }) => {
+      if (opts.args.includes("--version")) return ok("v1.0.0");
+      // eslint-disable-next-line @typescript-eslint/no-throw-literal
+      throw "raw auth failure";
+    });
+
+    const logger = makeMockLogger();
+    const check = new RuntimeHealthCheck(processRunner as never, configs, logger as never);
+    await expect(check.runPreflight()).rejects.toThrow(PreflightError);
+
+    const codexResult = check.getLastResult()?.results.find((r) => r.runtime === "codex");
+    expect(codexResult?.authCheck.error).toBe("raw auth failure");
+  });
+
   it("catches a thrown error during the auth check", async () => {
     const processRunner = makeProcessRunner();
     processRunner.execute.mockImplementation(async (opts: { args: string[]; command: string }) => {
@@ -303,6 +319,27 @@ describe("RuntimeHealthCheck.runPreflight — success and failure paths", () => 
     expect(cursorResult?.authCheck.ok).toBe(false);
     expect(cursorResult?.authCheck.error).toContain("Exit code 1");
     expect(cursorResult?.authCheck.error).toContain("not logged in");
+  });
+
+  it("falls back to stdout in the exitCodeOnly error message when stderr is empty", async () => {
+    const processRunner = makeProcessRunner();
+    processRunner.execute.mockImplementation(async (opts: { command: string; args: string[] }) => {
+      if (opts.args.includes("--version")) return ok("v1.0.0");
+      if (opts.command === "cursor-agent") {
+        return { stdout: "printed on stdout only", stderr: "", exitCode: 1, durationMs: 5, timedOut: false };
+      }
+      return ok('{"loggedIn": true}');
+    });
+
+    const logger = makeMockLogger();
+    const check = new RuntimeHealthCheck(processRunner as never, configs, logger as never);
+    vi.spyOn(check, "getRequiredRuntimes").mockReturnValue(
+      new Set<AgentRuntime>(["claude-code", "codex", "cursor"]),
+    );
+
+    await expect(check.runPreflight()).rejects.toThrow(PreflightError);
+    const cursorResult = check.getLastResult()?.results.find((r) => r.runtime === "cursor");
+    expect(cursorResult?.authCheck.error).toContain("printed on stdout only");
   });
 
   it("succeeds the exitCodeOnly branch (cursor) on zero exit with no pattern needed", async () => {

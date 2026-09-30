@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { z } from "zod";
 import { OutputParser } from "../../src/runtime/outputParser.js";
 import { OutputParseError } from "../../src/utils/errors.js";
@@ -88,6 +88,23 @@ describe("OutputParser.parseJson", () => {
       const e = err as OutputParseError;
       expect(e.message).toContain("Failed to parse JSON");
       expect(e.rawOutput).toContain("{not valid json");
+    }
+  });
+
+  it("stringifies a non-Error value thrown by the JSON parser", () => {
+    const parseSpy = vi.spyOn(JSON, "parse").mockImplementation(() => {
+      // eslint-disable-next-line @typescript-eslint/no-throw-literal
+      throw "raw non-error failure";
+    });
+    try {
+      parser.parseJson("{}");
+      expect.unreachable();
+    } catch (err) {
+      expect(err).toBeInstanceOf(OutputParseError);
+      const e = err as OutputParseError;
+      expect(e.message).toBe("Failed to parse JSON: raw non-error failure");
+    } finally {
+      parseSpy.mockRestore();
     }
   });
 

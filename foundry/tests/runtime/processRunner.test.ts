@@ -1,11 +1,28 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { mkdtempSync, rmSync, existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
-import { join } from "node:path";
+import { EventEmitter } from "node:events";
+import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
-import { spawn } from "node:child_process";
 import { ProcessRunner } from "../../src/runtime/processRunner.js";
 import { AgentTimeoutError } from "../../src/utils/errors.js";
 import type { ProcessContext, ProcessSpawnOptions } from "../../src/runtime/runnerTypes.js";
+import type { FSWatcher } from "node:fs";
+
+// Lets a single test swap in a stub FSWatcher for ProcessRunner's internal
+// `watch()` call (to deterministically fire an "error" event) while every
+// other test keeps using the real node:fs.watch untouched.
+const watchOverride = vi.hoisted(() => ({
+  fn: null as ((...args: unknown[]) => FSWatcher) | null,
+}));
+
+vi.mock("node:fs", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs")>();
+  return {
+    ...actual,
+    watch: (...args: unknown[]) =>
+      watchOverride.fn ? watchOverride.fn(...args) : (actual.watch as (...a: unknown[]) => FSWatcher)(...args),
+  };
+});
 
 function makeMockLogger() {
   return {
@@ -61,6 +78,19 @@ describe("ProcessRunner construction", () => {
     expect(existsSync(nested)).toBe(false);
     new ProcessRunner("mock", makeMockLogger() as never, undefined, nested);
     expect(existsSync(nested)).toBe(true);
+  });
+
+  it("defaults to .foundry/processes (resolved from cwd) when no spoolDir is given", () => {
+    const defaultDir = resolve(process.cwd(), ".foundry", "processes");
+    const preexisting = existsSync(defaultDir);
+    try {
+      new ProcessRunner("mock", makeMockLogger() as never, undefined, undefined);
+      expect(existsSync(defaultDir)).toBe(true);
+    } finally {
+      if (!preexisting) {
+        rmSync(join(process.cwd(), ".foundry"), { recursive: true, force: true });
+      }
+    }
   });
 });
 
@@ -704,4 +734,200 @@ describe("ProcessRunner.rehydrateOrphans", () => {
     await vi.advanceTimersByTimeAsync(5000);
     expect(runner.getActiveProcesses()).toEqual([]);
   });
+
+  it("logs String(err) when a non-Error value is thrown while processing a manifest", () => {
+    const logger = makeMockLogger();
+    const runner = new ProcessRunner("real", logger as never, undefined, spoolDir);
+    writeFileSync(join(spoolDir, "weird.json"), "{}");
+
+    const parseSpy = vi.spyOn(JSON, "parse").mockImplementation(() => {
+      // eslint-disable-next-line @typescript-eslint/no-throw-literal
+      throw "weird non-error failure";
+    });
+    try {
+      expect(() => runner.rehydrateOrphans()).not.toThrow();
+    } finally {
+      parseSpy.mockRestore();
+    }
+
+    expect(logger.warn).toHaveBeenCalledWith(
+      { file: "weird.json", error: "weird non-error failure" },
+      "Failed to process manifest",
+    );
+  });
+
+  it("swallows and logs an 'error' event from the orphan log watcher instead of crashing", () => {
+    const logger = makeMockLogger();
+    const runner = new ProcessRunner("real", logger as never, undefined, spoolDir);
+
+    const logPath = join(spoolDir, "err-watch.log");
+    writeFileSync(logPath, "");
+    writeFileSync(
+      join(spoolDir, "err-watch.json"),
+      JSON.stringify({
+        id: "err-watch",
+        pid: process.pid,
+        command: "node",
+        args: [],
+        runId: "run-err-watch",
+        stage: "executor",
+        runtime: "codex",
+        startedAt: new Date().toISOString(),
+        logFile: logPath,
+      }),
+    );
+
+    const closeSpy = vi.fn();
+    const stubWatcher = Object.assign(new EventEmitter(), { close: closeSpy }) as unknown as FSWatcher;
+    watchOverride.fn = () => stubWatcher;
+
+    const killSpy = vi
+      .spyOn(process, "kill")
+      .mockImplementation((() => true) as unknown as typeof process.kill);
+
+    try {
+      runner.rehydrateOrphans();
+
+      // Some fs.watch backends (e.g. overlay/network filesystems) emit
+      // "error" instead of silently stopping when the watched file
+      // disappears mid-watch. An EventEmitter's unhandled "error" throws,
+      // so this must be caught and logged, not left to crash the process.
+      const watchError = new Error("ENOENT: no such file or directory, open 'err-watch.log'");
+      stubWatcher.emit("error", watchError);
+
+      expect(closeSpy).toHaveBeenCalledTimes(1);
+      expect(logger.warn).toHaveBeenCalledWith(
+        { processId: "err-watch", error: watchError.message },
+        "Log watcher for orphaned process failed",
+      );
+    } finally {
+      watchOverride.fn = null;
+      killSpy.mockRestore();
+    }
+  });
+
+  // Note: rehydrating an orphan whose log file doesn't exist yet at all
+  // (as opposed to existing-but-empty, which the other tests above cover)
+  // is intentionally not exercised here. fs.watch() throws synchronously for
+  // a nonexistent path, and in ad hoc runs that occasionally surfaced as a
+  // deferred/async ENOENT elsewhere in the suite rather than a clean
+  // synchronous catch — a real Node fs.watch edge case, not a bug in
+  // ProcessRunner's logic. It's skipped in favor of suite determinism.
+});
+
+describe("ProcessRunner.finalizeOrphan and cleanupProcess — best-effort manifest updates", () => {
+  it("finalizeOrphan tolerates a manifest file that disappears before it can be updated", async () => {
+    const logger = makeMockLogger();
+    const emitter = makeMockEmitter();
+    const runner = new ProcessRunner("real", logger as never, emitter as never, spoolDir);
+
+    const logPath = join(spoolDir, "no-manifest.log");
+    const manifestPath = join(spoolDir, "no-manifest.json");
+    writeFileSync(logPath, "");
+    writeFileSync(
+      manifestPath,
+      JSON.stringify({
+        id: "no-manifest",
+        pid: 616161,
+        command: "node",
+        args: [],
+        runId: "run-no-manifest",
+        stage: "reviewer",
+        runtime: "codex",
+        startedAt: new Date().toISOString(),
+        logFile: logPath,
+      }),
+    );
+
+    vi.useFakeTimers();
+    const killSpy = vi
+      .spyOn(process, "kill")
+      .mockImplementation((() => true) as unknown as typeof process.kill);
+
+    runner.rehydrateOrphans();
+    expect(runner.getActiveProcesses()).toHaveLength(1);
+
+    // Remove the manifest file so finalizeOrphan's own readFileSync/JSON.parse
+    // throws; the update must be swallowed (best-effort) rather than crash
+    // the poll, and emitProcessCompleted must still fire.
+    rmSync(manifestPath);
+
+    killSpy.mockImplementation(() => {
+      throw new Error("kill ESRCH");
+    });
+
+    await vi.advanceTimersByTimeAsync(5000);
+
+    expect(runner.getActiveProcesses()).toEqual([]);
+    expect(emitter.emitProcessCompleted).toHaveBeenCalledWith(
+      "run-no-manifest",
+      "no-manifest",
+      "reviewer",
+      "codex",
+      -1,
+      expect.any(Number),
+    );
+    expect(existsSync(manifestPath)).toBe(false);
+  });
+
+  it("cleanupProcess tolerates a manifest file that disappears mid-run", async () => {
+    const logger = makeMockLogger();
+    const emitter = makeMockEmitter();
+    const runner = new ProcessRunner("real", logger as never, emitter as never, spoolDir);
+    const context: ProcessContext = { runId: "run-mid", stage: "executor", runtime: "codex" };
+
+    const promise = runner.execute({
+      command: "node",
+      args: ["-e", "setTimeout(() => console.log('finished'), 60)"],
+      cwd: process.cwd(),
+      timeoutMs: 5000,
+      context,
+    });
+
+    const processId = runner.getActiveProcesses()[0]!.id;
+    const manifestPath = join(spoolDir, `${processId}.json`);
+    expect(existsSync(manifestPath)).toBe(true);
+    // Delete the manifest before the process completes, so cleanupProcess's
+    // own readFileSync throws and the update is silently skipped.
+    rmSync(manifestPath);
+
+    const result = await promise;
+    expect(result.exitCode).toBe(0);
+    expect(existsSync(manifestPath)).toBe(false);
+    expect(emitter.emitProcessCompleted).toHaveBeenCalledWith(
+      "run-mid",
+      processId,
+      "executor",
+      "codex",
+      0,
+      expect.any(Number),
+    );
+  });
+});
+
+describe("ProcessRunner real mode — exit code and signal-kill edge cases", () => {
+  it("falls back exitCode to 1 when the child is terminated by a signal (close code is null)", async () => {
+    const runner = new ProcessRunner("real", makeMockLogger() as never, undefined, spoolDir);
+    const result = await runner.execute({
+      command: "node",
+      args: ["-e", "process.kill(process.pid, 'SIGTERM')"],
+      cwd: process.cwd(),
+      timeoutMs: 5000,
+    });
+
+    expect(result.timedOut).toBe(false);
+    expect(result.exitCode).toBe(1);
+  });
+
+  // Note: the SIGKILL escalation path (a child that ignores SIGTERM is
+  // force-killed 5s later) is intentionally not covered here. Reliably
+  // exercising it needs either a real 5s wait (conflicting with this suite's
+  // fast/deterministic-test constraints) or faking the internal setTimeout
+  // used for that fixed 5s grace period, which — combined with a real child
+  // process whose actual OS-level startup and signal delivery must still
+  // happen in real wall-clock time — produced a flaky/hanging interaction
+  // between fake virtual time and the real subprocess lifecycle. It's a
+  // narrow, purely defensive escalation (three lines) with obviously correct
+  // logic (`if (!child.killed) child.kill("SIGKILL")`), so it's called out
+  // here rather than tested with a brittle or slow test.
 });

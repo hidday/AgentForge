@@ -222,6 +222,18 @@ export class ProcessRunner {
       }
     });
 
+    // An FSWatcher is an EventEmitter: if the watched file/directory is
+    // removed out from under it (e.g. external cleanup of the spool dir)
+    // some backends emit "error" instead of just closing, and an
+    // EventEmitter's unhandled "error" event throws and crashes the process.
+    watcher.on("error", (err) => {
+      this.logger.warn(
+        { processId, error: err instanceof Error ? err.message : String(err) },
+        "Log watcher for orphaned process failed",
+      );
+      watcher.close();
+    });
+
     const pollInterval = setInterval(() => {
       try {
         process.kill(this.activeProcesses.get(processId)?.pid ?? 0, 0);
