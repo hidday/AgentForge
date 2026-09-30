@@ -13,7 +13,10 @@ export default defineConfig({
       // src/generated/prisma/** is Prisma-generated client code (marked
       // "Do not edit directly" with @ts-nocheck); it has no hand-written
       // logic to test.
-      exclude: ["src/server.ts", "src/generated/prisma/**"],
+      // runnerTypes.ts contains only `interface`/`type` declarations, which
+      // are erased at compile time; there is no executable statement in the
+      // file for a test to exercise.
+      exclude: ["src/server.ts", "src/generated/prisma/**", "src/runtime/runnerTypes.ts"],
       reporter: ["text", "json-summary", "html"],
       reportsDirectory: "coverage",
     },

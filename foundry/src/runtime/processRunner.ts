@@ -146,6 +146,7 @@ export class ProcessRunner {
 
           const logPath = join(this.spoolDir, `${manifest.id}.log`);
           const logStream = createWriteStream(logPath, { flags: "a" });
+          this.attachLogStreamErrorHandler(manifest.id, logStream);
 
           const entry: ActiveProcessEntry = {
             id: manifest.id,
@@ -193,6 +194,18 @@ export class ProcessRunner {
         );
       }
     }
+  }
+
+  // A WriteStream is an EventEmitter: if its underlying file can't be
+  // opened or written to (e.g. the spool dir is removed out from under it),
+  // an unhandled "error" event throws and crashes the process.
+  private attachLogStreamErrorHandler(processId: string, logStream: WriteStream): void {
+    logStream.on("error", (err) => {
+      this.logger.warn(
+        { processId, error: err instanceof Error ? err.message : String(err) },
+        "Log stream for agent process failed",
+      );
+    });
   }
 
   private tailLogForOrphan(processId: string, logPath: string): void {
@@ -311,6 +324,7 @@ export class ProcessRunner {
       if (context && processId && child.pid) {
         const logPath = join(this.spoolDir, `${processId}.log`);
         const logStream = createWriteStream(logPath, { flags: "a" });
+        this.attachLogStreamErrorHandler(processId, logStream);
 
         entry = {
           id: processId,

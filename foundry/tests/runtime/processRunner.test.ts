@@ -756,7 +756,7 @@ describe("ProcessRunner.rehydrateOrphans", () => {
     );
   });
 
-  it("swallows and logs an 'error' event from the orphan log watcher instead of crashing", () => {
+  it("swallows and logs an 'error' event from the orphan log watcher instead of crashing", async () => {
     const logger = makeMockLogger();
     const runner = new ProcessRunner("real", logger as never, undefined, spoolDir);
 
@@ -781,6 +781,7 @@ describe("ProcessRunner.rehydrateOrphans", () => {
     const stubWatcher = Object.assign(new EventEmitter(), { close: closeSpy }) as unknown as FSWatcher;
     watchOverride.fn = () => stubWatcher;
 
+    vi.useFakeTimers();
     const killSpy = vi
       .spyOn(process, "kill")
       .mockImplementation((() => true) as unknown as typeof process.kill);
@@ -801,6 +802,13 @@ describe("ProcessRunner.rehydrateOrphans", () => {
         "Log watcher for orphaned process failed",
       );
     } finally {
+      // Let the orphan-poll interval "kill" and finalize (closing its real
+      // logStream) before teardown removes spoolDir, so no real fs resource
+      // is left dangling past this test.
+      killSpy.mockImplementation(() => {
+        throw new Error("kill ESRCH");
+      });
+      await vi.advanceTimersByTimeAsync(5000);
       watchOverride.fn = null;
       killSpy.mockRestore();
     }
