@@ -125,6 +125,27 @@ describe("POST /api/runs/:id/actions/approve-plan", () => {
     await new Promise((resolve) => setImmediate(resolve));
     expect(mockOrchestrator.runExecution).toHaveBeenCalled();
   });
+
+  it("stringifies a non-Error rejection from approvePlan", async () => {
+    // eslint-disable-next-line @typescript-eslint/prefer-promise-reject-errors
+    const { app } = await buildApp({ approvePlan: vi.fn().mockRejectedValue("plain string failure") });
+
+    const res = await app.inject({ method: "POST", url: "/api/runs/run-1/actions/approve-plan" });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toEqual({ error: "plain string failure" });
+  });
+
+  it("does not throw when the background runExecution rejects with a non-Error value", async () => {
+    // eslint-disable-next-line @typescript-eslint/prefer-promise-reject-errors
+    const { app, mockOrchestrator } = await buildApp({ runExecution: vi.fn().mockRejectedValue("boom") });
+
+    const res = await app.inject({ method: "POST", url: "/api/runs/run-1/actions/approve-plan" });
+
+    expect(res.statusCode).toBe(200);
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(mockOrchestrator.runExecution).toHaveBeenCalled();
+  });
 });
 
 describe("POST /api/runs/:id/actions/re-review-plan", () => {
@@ -157,6 +178,45 @@ describe("POST /api/runs/:id/actions/re-review-plan", () => {
 
     expect(res.statusCode).toBe(400);
     expect(res.json()).toEqual({ error: "sync failure" });
+  });
+
+  it("still returns 200 and logs when the background runManualReReview rejects", async () => {
+    const { app, mockOrchestrator } = await buildApp({
+      runManualReReview: vi.fn().mockRejectedValue(new Error("background failure")),
+    });
+
+    const res = await app.inject({ method: "POST", url: "/api/runs/run-1/actions/re-review-plan" });
+
+    expect(res.statusCode).toBe(200);
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(mockOrchestrator.runManualReReview).toHaveBeenCalled();
+  });
+
+  it("stringifies a non-Error synchronous throw from runManualReReview", async () => {
+    const { app } = await buildApp({
+      runManualReReview: vi.fn().mockImplementation(() => {
+        // eslint-disable-next-line @typescript-eslint/no-throw-literal
+        throw "plain string failure";
+      }),
+    });
+
+    const res = await app.inject({ method: "POST", url: "/api/runs/run-1/actions/re-review-plan" });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toEqual({ error: "plain string failure" });
+  });
+
+  it("does not throw when the background runManualReReview rejects with a non-Error value", async () => {
+    const { app, mockOrchestrator } = await buildApp({
+      // eslint-disable-next-line @typescript-eslint/prefer-promise-reject-errors
+      runManualReReview: vi.fn().mockRejectedValue("background failure"),
+    });
+
+    const res = await app.inject({ method: "POST", url: "/api/runs/run-1/actions/re-review-plan" });
+
+    expect(res.statusCode).toBe(200);
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(mockOrchestrator.runManualReReview).toHaveBeenCalled();
   });
 });
 
@@ -191,6 +251,45 @@ describe("POST /api/runs/:id/actions/revise-plan", () => {
     expect(res.statusCode).toBe(400);
     expect(res.json()).toEqual({ error: "sync failure" });
   });
+
+  it("still returns 200 and logs when the background runManualPlanRevision rejects", async () => {
+    const { app, mockOrchestrator } = await buildApp({
+      runManualPlanRevision: vi.fn().mockRejectedValue(new Error("background failure")),
+    });
+
+    const res = await app.inject({ method: "POST", url: "/api/runs/run-1/actions/revise-plan" });
+
+    expect(res.statusCode).toBe(200);
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(mockOrchestrator.runManualPlanRevision).toHaveBeenCalled();
+  });
+
+  it("stringifies a non-Error synchronous throw from runManualPlanRevision", async () => {
+    const { app } = await buildApp({
+      runManualPlanRevision: vi.fn().mockImplementation(() => {
+        // eslint-disable-next-line @typescript-eslint/no-throw-literal
+        throw "plain string failure";
+      }),
+    });
+
+    const res = await app.inject({ method: "POST", url: "/api/runs/run-1/actions/revise-plan" });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toEqual({ error: "plain string failure" });
+  });
+
+  it("does not throw when the background runManualPlanRevision rejects with a non-Error value", async () => {
+    const { app, mockOrchestrator } = await buildApp({
+      // eslint-disable-next-line @typescript-eslint/prefer-promise-reject-errors
+      runManualPlanRevision: vi.fn().mockRejectedValue("background failure"),
+    });
+
+    const res = await app.inject({ method: "POST", url: "/api/runs/run-1/actions/revise-plan" });
+
+    expect(res.statusCode).toBe(200);
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(mockOrchestrator.runManualPlanRevision).toHaveBeenCalled();
+  });
 });
 
 describe("POST /api/runs/:id/actions/approve-review", () => {
@@ -212,6 +311,16 @@ describe("POST /api/runs/:id/actions/approve-review", () => {
     const { app } = await buildApp({
       approveHumanReview: vi.fn().mockRejectedValue(new Error("Wrong state")),
     });
+
+    const res = await app.inject({ method: "POST", url: "/api/runs/run-1/actions/approve-review" });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toEqual({ error: "Wrong state" });
+  });
+
+  it("stringifies a non-Error rejection from approveHumanReview", async () => {
+    // eslint-disable-next-line @typescript-eslint/prefer-promise-reject-errors
+    const { app } = await buildApp({ approveHumanReview: vi.fn().mockRejectedValue("Wrong state") });
 
     const res = await app.inject({ method: "POST", url: "/api/runs/run-1/actions/approve-review" });
 
@@ -257,6 +366,19 @@ describe("POST /api/runs/:id/actions/pause", () => {
     expect(res.statusCode).toBe(400);
     expect(res.json()).toEqual({ error: "cannot pause" });
   });
+
+  it("stringifies a non-Error rejection from handleCommand", async () => {
+    const { app, mockRunRepo } = await buildApp({
+      // eslint-disable-next-line @typescript-eslint/prefer-promise-reject-errors
+      handleCommand: vi.fn().mockRejectedValue("cannot pause"),
+    });
+    mockRunRepo.findById.mockResolvedValue(makeRun());
+
+    const res = await app.inject({ method: "POST", url: "/api/runs/run-1/actions/pause" });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toEqual({ error: "cannot pause" });
+  });
 });
 
 describe("POST /api/runs/:id/actions/resume", () => {
@@ -288,6 +410,19 @@ describe("POST /api/runs/:id/actions/resume", () => {
   it("returns 400 when handleCommand throws", async () => {
     const { app, mockRunRepo } = await buildApp({
       handleCommand: vi.fn().mockRejectedValue(new Error("cannot resume")),
+    });
+    mockRunRepo.findById.mockResolvedValue(makeRun());
+
+    const res = await app.inject({ method: "POST", url: "/api/runs/run-1/actions/resume" });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toEqual({ error: "cannot resume" });
+  });
+
+  it("stringifies a non-Error rejection from handleCommand", async () => {
+    const { app, mockRunRepo } = await buildApp({
+      // eslint-disable-next-line @typescript-eslint/prefer-promise-reject-errors
+      handleCommand: vi.fn().mockRejectedValue("cannot resume"),
     });
     mockRunRepo.findById.mockResolvedValue(makeRun());
 
@@ -350,6 +485,20 @@ describe("POST /api/runs/:id/actions/retry", () => {
   it("still responds 200 when the triggered background retry method rejects", async () => {
     const { app, mockRunRepo, mockOrchestrator } = await buildApp({
       retryRun: vi.fn().mockRejectedValue(new Error("agent crashed")),
+    });
+    mockRunRepo.findById.mockResolvedValue(makeRun({ state: RunState.Todo }));
+
+    const res = await app.inject({ method: "POST", url: "/api/runs/run-1/actions/retry" });
+
+    expect(res.statusCode).toBe(200);
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(mockOrchestrator.retryRun).toHaveBeenCalledWith("run-1");
+  });
+
+  it("does not throw when the triggered background retry method rejects with a non-Error value", async () => {
+    const { app, mockRunRepo, mockOrchestrator } = await buildApp({
+      // eslint-disable-next-line @typescript-eslint/prefer-promise-reject-errors
+      retryRun: vi.fn().mockRejectedValue("agent crashed"),
     });
     mockRunRepo.findById.mockResolvedValue(makeRun({ state: RunState.Todo }));
 

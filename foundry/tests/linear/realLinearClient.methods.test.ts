@@ -469,7 +469,7 @@ describe("RealLinearClient", () => {
         priority: 1,
         url: "https://linear.app/team/issue/PRY-100",
         state: Promise.resolve(null),
-        labels: () => Promise.resolve({ nodes: [] }),
+        labels: () => Promise.resolve({ nodes: undefined } as never),
       };
       const focus = {
         id: "focus-id",
@@ -481,6 +481,20 @@ describe("RealLinearClient", () => {
       const ctx = await client.getRelatedContext("focus-id");
 
       expect(ctx.parent?.state).toBe("Unknown");
+      expect(ctx.parent?.labels).toEqual([]);
+    });
+
+    it("defaults blockers to an empty array when inverseRelations has no nodes", async () => {
+      const focus = {
+        id: "focus-id",
+        parent: Promise.resolve(null),
+        inverseRelations: () => Promise.resolve({ nodes: undefined } as never),
+      };
+      installFakeSdk(client, { issue: vi.fn().mockResolvedValue(focus) });
+
+      const ctx = await client.getRelatedContext("focus-id");
+
+      expect(ctx.blockers).toEqual([]);
     });
   });
 

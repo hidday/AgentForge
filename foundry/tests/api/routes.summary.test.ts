@@ -178,6 +178,26 @@ describe("GET /api/runs/:id/summary", () => {
     expect(body.plan.steps).toEqual([]);
   });
 
+  it("falls back to String(r) when a risk object cannot be JSON.stringify'd (e.g. circular reference)", async () => {
+    const { app, mockRunRepo, mockArtifactRepo } = await buildApp();
+    mockRunRepo.findById.mockResolvedValue(makeRun());
+
+    const circular: Record<string, unknown> = {};
+    circular.self = circular;
+    const planPayload = { summary: "Circular risk", risks: [circular] };
+
+    mockArtifactRepo.findLatestByType.mockImplementation((_runId: string, type: string) => {
+      if (type === "Plan") return Promise.resolve(makeArtifact("Plan", 1, planPayload));
+      return Promise.resolve(null);
+    });
+
+    const res = await app.inject({ method: "GET", url: "/api/runs/run-1/summary" });
+
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as { plan: { risks: string[] } };
+    expect(body.plan.risks).toEqual(["[object Object]"]);
+  });
+
   it("defaults openQuestions to [] and riskTexts to [] when the plan omits them", async () => {
     const { app, mockRunRepo, mockArtifactRepo } = await buildApp();
     mockRunRepo.findById.mockResolvedValue(makeRun());
