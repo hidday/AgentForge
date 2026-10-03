@@ -214,6 +214,62 @@ describe("ChatPanel", () => {
     expect(screen.queryByText("Failing question")).toBeNull();
   });
 
+  it("collapsing the panel via the header hides the message list and input form", async () => {
+    render(<ChatPanel runId={RUN_ID} artifacts={[]} />);
+
+    // Open by default
+    expect(screen.getByPlaceholderText(/ask the agent/i)).toBeDefined();
+
+    const header = screen.getByText("Chat with Agent").closest("button") as HTMLButtonElement;
+    await userEvent.click(header);
+
+    expect(screen.queryByPlaceholderText(/ask the agent/i)).toBeNull();
+    expect(screen.queryByText(/No messages yet/i)).toBeNull();
+
+    // Clicking again re-opens it
+    await userEvent.click(header);
+    expect(screen.getByPlaceholderText(/ask the agent/i)).toBeDefined();
+  });
+
+  it("scrolls the message anchor into view when scrollIntoView is available on the element", async () => {
+    const scrollIntoViewMock = vi.fn();
+    const originalScrollIntoView = window.HTMLElement.prototype.scrollIntoView;
+    window.HTMLElement.prototype.scrollIntoView = scrollIntoViewMock;
+
+    try {
+      mockApi.sendChatMessage.mockResolvedValue({ reply: "Response", durationMs: 100 });
+      render(<ChatPanel runId={RUN_ID} artifacts={[]} />);
+
+      // Mount triggers the auto-scroll effect once.
+      expect(scrollIntoViewMock).toHaveBeenCalledWith({ behavior: "smooth" });
+
+      scrollIntoViewMock.mockClear();
+      const input = screen.getByPlaceholderText(/ask the agent/i);
+      await userEvent.type(input, "Hello");
+      await userEvent.click(screen.getByRole("button", { name: /send/i }));
+
+      // isLoading flips true then false, each triggering the scroll effect again.
+      await waitFor(() => {
+        expect(scrollIntoViewMock).toHaveBeenCalledWith({ behavior: "smooth" });
+      });
+    } finally {
+      window.HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+    }
+  });
+
+  it("falls back to a generic error message when the rejection is not an Error instance", async () => {
+    mockApi.sendChatMessage.mockRejectedValue("a plain string rejection");
+
+    render(<ChatPanel runId={RUN_ID} artifacts={[]} />);
+    const input = screen.getByPlaceholderText(/ask the agent/i);
+    await userEvent.type(input, "Question");
+    await userEvent.click(screen.getByRole("button", { name: /send/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText("Chat request failed")).toBeDefined();
+    });
+  });
+
   it("message list does not change from artifact-derived count when only local state changes", async () => {
     let resolveRequest!: (v: { reply: string; durationMs: number }) => void;
     mockApi.sendChatMessage.mockReturnValue(
