@@ -67,6 +67,15 @@ describe("MockGitHubClient", () => {
     expect(client.getCreatedPRs().size).toBe(0);
   });
 
+  it("getPRDiff returns a fixed, non-empty synthetic diff string", async () => {
+    const client = new MockGitHubClient();
+
+    const diff = await client.getPRDiff("owner/repo", 100);
+
+    expect(diff).toContain("diff --git a/src/handler.ts b/src/handler.ts");
+    expect(diff).toContain("export async function handleRequest");
+  });
+
   it("commentOnPR and listPRComments: listPRComments always resolves empty (stub)", async () => {
     const client = new MockGitHubClient();
     await client.commentOnPR("owner/repo", 100, "a comment");

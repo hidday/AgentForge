@@ -225,9 +225,8 @@ describe("RealGitHubClient", () => {
     });
 
     it("treats a non-Error 422 rejection as non-field-validation and looks up the existing PR", async () => {
-      octokit.pulls.create.mockRejectedValue(statusError(422));
-      // Overwrite with a plain object carrying only `status`, no message, to
-      // exercise the `err instanceof Error ? ... : String(err)` false branch.
+      // A plain object carrying only `status`, no message, exercises the
+      // `err instanceof Error ? ... : String(err)` false branch.
       octokit.pulls.create.mockRejectedValue({ status: 422 });
       octokit.pulls.list.mockResolvedValue({ data: [{ number: 88 }] });
 
@@ -449,6 +448,17 @@ describe("RealGitHubClient", () => {
       ).resolves.toBeUndefined();
       expect(logger.warn).toHaveBeenCalled();
     });
+
+    it("stringifies a non-Error rejection when logging the warning", async () => {
+      octokit.pulls.createReplyForReviewComment.mockRejectedValue("a plain string failure");
+
+      await client.replyToReviewComment("owner/repo", 10, 500, "reply body");
+
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.objectContaining({ error: "a plain string failure" }),
+        "Failed to reply to PR review comment, skipping",
+      );
+    });
   });
 
   describe("submitPRReview", () => {
@@ -499,6 +509,16 @@ describe("RealGitHubClient", () => {
       await expect(
         client.submitPRReview("owner/repo", 10, "note", "REQUEST_CHANGES"),
       ).rejects.toThrow('GitHub submitPRReview failed for "owner/repo"');
+    });
+
+    it("wraps a non-Error rejection (stringified) instead of matching the own-PR regex", async () => {
+      octokit.pulls.createReview.mockRejectedValue({ weird: "shape" });
+
+      await expect(
+        client.submitPRReview("owner/repo", 10, "note", "REQUEST_CHANGES"),
+      ).rejects.toThrow('GitHub submitPRReview failed for "owner/repo"');
+      // Confirms the fallback path was not taken for a non-Error rejection.
+      expect(octokit.pulls.createReview).toHaveBeenCalledTimes(1);
     });
   });
 });
