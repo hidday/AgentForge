@@ -205,11 +205,14 @@ describe("OrchestratorService -- cleanupRunWorktree (exercised via a terminal tr
   });
 
   it("also cleans up when a run transitions to Failed (e.g. clarification exhausted)", async () => {
-    const { deps, runRepo, artifactRepo, eventRepo, plannerAgent, gitService } = buildDeps();
+    const { deps, runRepo, artifactRepo, eventRepo, plannerAgent, gitService } = buildDeps({
+      answerResearcherAgent: undefined,
+    });
     const svc = new OrchestratorService(deps as never);
 
     const run = makeRun({ state: RunState.HumanClarificationNeeded, workingDirectory: "/repo/.worktrees/run-1" });
     runRepo.findById.mockResolvedValue(run);
+    runRepo.update.mockResolvedValue(makeRun({ state: RunState.Planning, planVersion: 2 }));
     gitService.resolveMainRepoPath.mockReturnValue("/repo");
 
     const plan = makePlan({ openQuestions: [{ id: "q1", question: "Required?", requiredForExecution: true }] });
