@@ -232,6 +232,90 @@ describe("buildChatSystemPrompt", () => {
     expect(result).not.toContain("x".repeat(4001));
   });
 
+  it("includes open questions in the Current Plan section", () => {
+    const planArtifact = makeArtifact({
+      type: "Plan",
+      version: 1,
+      payloadJson: {
+        summary: "Plan with open questions",
+        steps: [],
+        openQuestions: [{ id: "q1", question: "Should we use Postgres?" }, "q2 as a string"],
+      },
+    });
+    const result = buildChatSystemPrompt(makeRun(), [planArtifact]);
+    expect(result).toContain("**Open Questions:**");
+    expect(result).toContain("Should we use Postgres?");
+    expect(result).toContain("q2 as a string");
+  });
+
+  it("omits the Current Plan section entirely when the Plan artifact has no renderable fields", () => {
+    const planArtifact = makeArtifact({ type: "Plan", version: 1, payloadJson: {} });
+    const result = buildChatSystemPrompt(makeRun(), [planArtifact]);
+    expect(result).not.toContain("## Current Plan");
+  });
+
+  it("includes Plan Review Findings section when a PlanReview artifact is present", () => {
+    const artifact = makeArtifact({
+      type: "PlanReview",
+      version: 1,
+      payloadJson: {
+        summary: "The plan looks mostly complete.",
+        findings: [
+          {
+            id: "pf1",
+            severity: "important",
+            title: "Missing error handling",
+            details: "No handling for malformed input",
+          },
+        ],
+      },
+    });
+    const result = buildChatSystemPrompt(makeRun(), [artifact]);
+    expect(result).toContain("## Plan Review Findings");
+    expect(result).toContain("The plan looks mostly complete.");
+    expect(result).toContain("[important] Missing error handling");
+    expect(result).toContain("No handling for malformed input");
+  });
+
+  it("omits the Plan Review Findings section when no PlanReview artifact is present", () => {
+    const result = buildChatSystemPrompt(makeRun(), []);
+    expect(result).not.toContain("## Plan Review Findings");
+  });
+
+  it("omits the Plan Review Findings section when the PlanReview artifact has no summary or findings", () => {
+    const artifact = makeArtifact({ type: "PlanReview", version: 1, payloadJson: {} });
+    const result = buildChatSystemPrompt(makeRun(), [artifact]);
+    expect(result).not.toContain("## Plan Review Findings");
+  });
+
+  it("includes Code Review Findings section when a Review artifact is present", () => {
+    const artifact = makeArtifact({
+      type: "Review",
+      version: 1,
+      payloadJson: {
+        summary: "One blocker found.",
+        findings: [
+          {
+            id: "f1",
+            severity: "blocker",
+            title: "Null pointer",
+            details: "Crashes on null input",
+          },
+        ],
+      },
+    });
+    const result = buildChatSystemPrompt(makeRun(), [artifact]);
+    expect(result).toContain("## Code Review Findings");
+    expect(result).toContain("One blocker found.");
+    expect(result).toContain("[blocker] Null pointer");
+    expect(result).toContain("Crashes on null input");
+  });
+
+  it("omits the Code Review Findings section when no Review artifact is present", () => {
+    const result = buildChatSystemPrompt(makeRun(), []);
+    expect(result).not.toContain("## Code Review Findings");
+  });
+
   it("uses the Plan artifact with the highest version when multiple exist", () => {
     const planV1 = makeArtifact({
       type: "Plan",

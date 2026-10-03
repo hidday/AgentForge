@@ -254,4 +254,132 @@ describe("GitService", () => {
       await expect(svc.currentBranch("/nonexistent")).rejects.toThrow(GitError);
     });
   });
+
+  describe("fetch", () => {
+    it("throws GitError when the repo has no such remote", async () => {
+      await expect(svc.fetch(repoPath)).rejects.toThrow(GitError);
+    });
+
+    it("succeeds and logs when a remote exists", async () => {
+      const bareDir = mkdtempSync(join(tmpdir(), "gitservice-fetch-bare-"));
+      git(["clone", "--bare", repoPath, bareDir], tmpdir());
+      git(["remote", "add", "origin", bareDir], repoPath);
+      await expect(svc.fetch(repoPath)).resolves.toBeUndefined();
+      rmSync(bareDir, { recursive: true, force: true });
+    });
+  });
+
+  describe("createWorktree error handling", () => {
+    it("throws GitError when the start point does not exist", async () => {
+      const wtPath = join(repoPath, ".worktrees", "bad-wt");
+      await expect(
+        svc.createWorktree(repoPath, wtPath, "feature-x", "origin/does-not-exist"),
+      ).rejects.toThrow(GitError);
+    });
+  });
+
+  describe("pruneWorktrees", () => {
+    it("resolves without throwing on a healthy repo", async () => {
+      await expect(svc.pruneWorktrees(repoPath)).resolves.toBeUndefined();
+    });
+
+    it("warns instead of throwing when the git command fails", async () => {
+      const warnings: unknown[][] = [];
+      const warnLogger = {
+        ...noopLogger,
+        warn: (...args: unknown[]) => warnings.push(args),
+      };
+      const failSvc = new GitService(warnLogger as never);
+      await expect(failSvc.pruneWorktrees("/nonexistent")).resolves.toBeUndefined();
+      expect(warnings.length).toBe(1);
+    });
+  });
+
+  describe("removeWorktree error handling", () => {
+    it("warns instead of throwing when the worktree does not exist", async () => {
+      const warnings: unknown[][] = [];
+      const warnLogger = {
+        ...noopLogger,
+        warn: (...args: unknown[]) => warnings.push(args),
+      };
+      const failSvc = new GitService(warnLogger as never);
+      await expect(
+        failSvc.removeWorktree(repoPath, join(repoPath, ".worktrees", "nope")),
+      ).resolves.toBeUndefined();
+      expect(warnings.length).toBe(1);
+    });
+  });
+
+  describe("remoteBranchExists", () => {
+    let bareDir: string;
+
+    beforeEach(() => {
+      bareDir = mkdtempSync(join(tmpdir(), "gitservice-remote-bare-"));
+      git(["clone", "--bare", repoPath, bareDir], tmpdir());
+      git(["remote", "add", "origin", bareDir], repoPath);
+      git(["fetch", "origin"], repoPath);
+    });
+
+    afterEach(() => {
+      rmSync(bareDir, { recursive: true, force: true });
+    });
+
+    it("returns true when origin/<branch> exists", async () => {
+      expect(await svc.remoteBranchExists(repoPath, "main")).toBe(true);
+    });
+
+    it("returns false when origin/<branch> does not exist", async () => {
+      expect(await svc.remoteBranchExists(repoPath, "nonexistent-branch")).toBe(false);
+    });
+  });
+
+  describe("push", () => {
+    it("throws GitError when there is no configured remote to push to", async () => {
+      await expect(svc.push(repoPath, "main")).rejects.toThrow(GitError);
+    });
+
+    it("pushes successfully to a configured remote", async () => {
+      const bareDir = mkdtempSync(join(tmpdir(), "gitservice-push-bare-"));
+      git(["clone", "--bare", repoPath, bareDir], tmpdir());
+      git(["remote", "add", "origin", bareDir], repoPath);
+
+      await expect(svc.push(repoPath, "main")).resolves.toBeUndefined();
+
+      const branches = git(["branch", "-a"], bareDir);
+      expect(branches).toContain("main");
+      rmSync(bareDir, { recursive: true, force: true });
+    });
+  });
+
+  describe("commitAndPush", () => {
+    it("asserts the branch, commits, and pushes in sequence", async () => {
+      const bareDir = mkdtempSync(join(tmpdir(), "gitservice-candp-bare-"));
+      git(["clone", "--bare", repoPath, bareDir], tmpdir());
+      git(["remote", "add", "origin", bareDir], repoPath);
+      writeFileSync(join(repoPath, "newfile.txt"), "content");
+
+      await svc.commitAndPush(repoPath, "main", "add newfile");
+
+      const log = git(["log", "--oneline"], repoPath);
+      expect(log).toContain("add newfile");
+      const remoteLog = git(["log", "--oneline", "main"], bareDir);
+      expect(remoteLog).toContain("add newfile");
+      rmSync(bareDir, { recursive: true, force: true });
+    });
+
+    it("throws BranchMismatchError and never pushes when on the wrong branch", async () => {
+      git(["checkout", "-b", "other"], repoPath);
+      await expect(svc.commitAndPush(repoPath, "main", "msg")).rejects.toThrow(
+        BranchMismatchError,
+      );
+    });
+  });
+
+  describe("commitAll error handling", () => {
+    it("throws GitError when the working directory is not a git repo", async () => {
+      const notARepo = mkdtempSync(join(tmpdir(), "gitservice-notrepo-"));
+      await expect(svc.commitAll(notARepo, "msg")).rejects.toThrow(GitError);
+      rmSync(notARepo, { recursive: true, force: true });
+    });
+  });
 });
