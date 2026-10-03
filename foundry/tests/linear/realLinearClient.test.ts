@@ -197,6 +197,26 @@ describe("RealLinearClient", () => {
 
       expect(results).toEqual([]);
     });
+
+    it("defaults project, team, cycle to undefined and labels to [] when absent", async () => {
+      const issue = makeFakeIssue({
+        id: "b",
+        project: Promise.resolve(null),
+        cycle: Promise.resolve(null),
+        team: Promise.resolve(null),
+        labels: () => Promise.resolve(null),
+      });
+      sdk.issues.mockResolvedValue({ nodes: [issue] });
+
+      const results = await client.searchIssues({ state: "Todo" });
+
+      expect(results[0]).toMatchObject({
+        project: undefined,
+        team: undefined,
+        cycle: undefined,
+        labels: [],
+      });
+    });
   });
 
   describe("postComment", () => {
@@ -230,6 +250,20 @@ describe("RealLinearClient", () => {
 
       expect(sdk.updateIssue).not.toHaveBeenCalled();
       expect(logger.warn).toHaveBeenCalled();
+    });
+
+    it("treats a missing states connection as empty (no match found)", async () => {
+      const issue = makeFakeIssue({ id: "issue-1", team: Promise.resolve({ id: "team-1", key: "PRY" }) });
+      sdk.issue.mockResolvedValue(issue);
+      sdk.team.mockResolvedValue({ states: () => Promise.resolve(null) });
+
+      await client.updateIssueState("issue-1", "Done");
+
+      expect(sdk.updateIssue).not.toHaveBeenCalled();
+      expect(logger.warn).toHaveBeenCalledWith(
+        { issueId: "issue-1", stateName: "Done", teamId: "team-1" },
+        "Could not find workflow state by name",
+      );
     });
 
     it("resolves the state id and calls updateIssue", async () => {

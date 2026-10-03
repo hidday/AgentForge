@@ -240,6 +240,25 @@ describe("RealLinearClient.getRelatedContext", () => {
     );
   });
 
+  it("defaults a related issue's state to 'Unknown' when the SDK returns no state", async () => {
+    const parent = makeFakeIssue({
+      id: "parent-id",
+      identifier: "PRY-100",
+      state: Promise.resolve(null as unknown as { id: string; name: string }),
+    });
+    const focus = makeFakeIssue({
+      id: "focus-id",
+      parent: Promise.resolve(parent),
+    });
+
+    issuesById.set("focus-id", focus);
+    issuesById.set("parent-id", parent);
+
+    const ctx = await client.getRelatedContext("focus-id");
+
+    expect(ctx.parent?.state).toBe("Unknown");
+  });
+
   it("treats null description as empty string", async () => {
     const parent = makeFakeIssue({
       id: "parent-id",
