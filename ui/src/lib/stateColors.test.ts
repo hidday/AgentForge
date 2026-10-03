@@ -111,8 +111,8 @@ describe("formatStateName", () => {
     expect(formatStateName("Todo")).toBe("Todo");
   });
 
-  it("handles a state that is already all-caps per word boundary (AIBlocked)", () => {
-    expect(formatStateName("AIBlocked")).toBe("A IBlocked");
+  it("inserts a space before every consecutive capital letter (AIBlocked)", () => {
+    expect(formatStateName("AIBlocked")).toBe("A I Blocked");
   });
 
   it("trims any resulting leading space", () => {

@@ -33,12 +33,19 @@ describe("WorkflowStepper", () => {
     expect(container).toBeDefined();
   });
 
-  it("marks all steps completed when state is Done", () => {
+  it("marks all prior steps completed when state is Done", () => {
     render(<WorkflowStepper currentState="Done" events={[]} />);
-    const doneLabel = screen.getByText("Done");
-    expect(doneLabel.className).toContain("text-state-done");
+    // Earlier steps are both "completed" (effectiveIdx > idx) and resolve to
+    // the done styling since isCurrent is false for them.
     const humanReviewLabel = screen.getByText("Human Review");
     expect(humanReviewLabel.className).toContain("text-state-done");
+    // The terminal "Done" row is both isCompleted (currentState === "Done")
+    // and isCurrent (state === currentState); twMerge keeps the later
+    // "text-accent" class over the earlier "text-state-done" one for the
+    // conflicting text-color utility.
+    const doneLabel = screen.getByText("Done");
+    expect(doneLabel.className).toContain("text-accent");
+    expect(doneLabel.className).not.toContain("text-state-done");
   });
 
   it("renders a relative timestamp for a state with a recorded transition event", () => {
