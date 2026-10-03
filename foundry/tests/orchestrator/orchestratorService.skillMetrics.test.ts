@@ -16,11 +16,11 @@ describe("OrchestratorService -- skill retrieval/metrics (exercised via startRun
       .mockResolvedValueOnce({ ...todoRun, workingDirectory: "/tmp/worktree", branchName: "ai/run-1" })
       .mockResolvedValue(makeRun({ state: RunState.Planning }));
     runRepo.updateState
-      .mockResolvedValueOnce(makeRun({ state: RunState.Planning }))
-      .mockResolvedValueOnce(makeRun({ state: RunState.PlanReview }))
-      .mockResolvedValueOnce(makeRun({ state: RunState.AwaitingPlanApproval }));
+      .mockResolvedValueOnce(makeRun({ state: RunState.Planning, linearIssueTitle: "Fix bug" }))
+      .mockResolvedValueOnce(makeRun({ state: RunState.PlanReview, linearIssueTitle: "Fix bug" }))
+      .mockResolvedValueOnce(makeRun({ state: RunState.AwaitingPlanApproval, linearIssueTitle: "Fix bug" }));
     // requireRun() inside runPlanReview() looks the run up again by id.
-    runRepo.findById.mockResolvedValue(makeRun({ state: RunState.PlanReview }));
+    runRepo.findById.mockResolvedValue(makeRun({ state: RunState.PlanReview, linearIssueTitle: "Fix bug" }));
 
     (deps.linearClient.getIssue as ReturnType<typeof vi.fn>).mockResolvedValue({
       id: "LIN-1", title: "Fix bug", description: "A real bug", branchName: "ai/lin-1", labels: [], priority: 0,
@@ -105,7 +105,7 @@ describe("OrchestratorService -- skill retrieval/metrics (exercised via startRun
 
 describe("OrchestratorService -- updateSkillMetrics (exercised via a terminal transition)", () => {
   it("increments success for every unique injected skill id when the run reaches Done", async () => {
-    const { deps, runRepo, artifactRepo, agentSkillRepo, eventRepo, distillationAgent } = buildDeps();
+    const { deps, runRepo, agentSkillRepo, eventRepo, distillationAgent } = buildDeps();
     const svc = new OrchestratorService(deps as never);
 
     const run = makeRun({ state: RunState.ReadyForHumanReview });
@@ -128,7 +128,6 @@ describe("OrchestratorService -- updateSkillMetrics (exercised via a terminal tr
     expect(agentSkillRepo.incrementSuccess).toHaveBeenCalledWith("s1");
     expect(agentSkillRepo.incrementSuccess).toHaveBeenCalledWith("s2");
     expect(agentSkillRepo.archiveIfLowUtility).toHaveBeenCalledWith(updatedSkill);
-    expect(artifactRepo).toBeDefined();
   });
 
   it("logs a warning and continues when updating a skill metric throws", async () => {
@@ -232,8 +231,11 @@ describe("OrchestratorService -- cleanupRunWorktree (exercised via a terminal tr
       { id: "e3", runId: "run-1", eventType: RunEvent.NEEDS_HUMAN_CLARIFICATION, source: "planner-agent", payloadJson: {}, createdAt: new Date() },
     ]);
     runRepo.updateState
-      .mockResolvedValueOnce(makeRun({ state: RunState.Planning }))
-      .mockResolvedValueOnce(makeRun({ state: RunState.Failed, workingDirectory: "/repo/.worktrees/run-1" }));
+      .mockResolvedValueOnce(makeRun({ state: RunState.Planning })) // CLARIFICATION_PROVIDED
+      .mockResolvedValueOnce(makeRun({ state: RunState.PlanReview })) // PLAN_CREATED
+      .mockResolvedValueOnce(
+        makeRun({ state: RunState.Failed, workingDirectory: "/repo/.worktrees/run-1" }),
+      ); // CLARIFICATION_EXHAUSTED
 
     const result = await svc.answerQuestions("run-1", [{ questionId: "q1", answer: "still unsure" }]);
 

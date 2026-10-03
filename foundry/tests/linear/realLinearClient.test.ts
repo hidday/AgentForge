@@ -217,6 +217,15 @@ describe("RealLinearClient", () => {
         labels: [],
       });
     });
+
+    it("defaults a null description to an empty string", async () => {
+      const issue = makeFakeIssue({ id: "c", description: null });
+      sdk.issues.mockResolvedValue({ nodes: [issue] });
+
+      const results = await client.searchIssues({ state: "Todo" });
+
+      expect(results[0].description).toBe("");
+    });
   });
 
   describe("postComment", () => {

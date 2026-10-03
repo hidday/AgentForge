@@ -240,6 +240,40 @@ describe("RealLinearClient.getRelatedContext", () => {
     );
   });
 
+  it("treats a null inverseRelations connection as no blockers", async () => {
+    const focus = makeFakeIssue({
+      id: "focus-id",
+      parent: Promise.resolve(null),
+      inverseRelations: () =>
+        Promise.resolve(null as unknown as { nodes: Array<{ id: string; type: string; issue: Promise<FakeIssue> }> }),
+    });
+
+    issuesById.set("focus-id", focus);
+
+    const ctx = await client.getRelatedContext("focus-id");
+
+    expect(ctx.blockers).toEqual([]);
+  });
+
+  it("defaults a related issue's labels to [] when the labels connection is null", async () => {
+    const parent = makeFakeIssue({
+      id: "parent-id",
+      identifier: "PRY-100",
+      labels: () => Promise.resolve(null as unknown as { nodes: Array<{ id: string; name: string }> }),
+    });
+    const focus = makeFakeIssue({
+      id: "focus-id",
+      parent: Promise.resolve(parent),
+    });
+
+    issuesById.set("focus-id", focus);
+    issuesById.set("parent-id", parent);
+
+    const ctx = await client.getRelatedContext("focus-id");
+
+    expect(ctx.parent?.labels).toEqual([]);
+  });
+
   it("defaults a related issue's state to 'Unknown' when the SDK returns no state", async () => {
     const parent = makeFakeIssue({
       id: "parent-id",
