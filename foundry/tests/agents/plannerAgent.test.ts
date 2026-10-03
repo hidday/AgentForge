@@ -352,6 +352,7 @@ describe("PlannerAgent.run()", () => {
           assumptions: ["Assumption A"],
           openQuestions: [
             { id: "q1", question: "Is this safe?", requiredForExecution: true },
+            { id: "q2", question: "Any naming preference?", requiredForExecution: false },
           ],
           risks: ["Risk A"],
           steps: [{ id: "s1", title: "Old step", description: "Old description" }],

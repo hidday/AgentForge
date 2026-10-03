@@ -110,11 +110,15 @@ describe("OrchestratorService.retryRun", () => {
 
 describe("OrchestratorService.runPlanning", () => {
   it("re-plans using prior artifacts (rejection context, human/researched answers, plan review) when present", async () => {
-    const { deps, runRepo, artifactRepo, plannerAgent } = buildDeps();
+    const { deps, runRepo, artifactRepo, plannerAgent } = buildDeps({
+      answerResearcherAgent: undefined,
+    });
     const svc = new OrchestratorService(deps as never);
 
     const run = makeRun({ state: RunState.Planning, planVersion: 1 });
-    runRepo.findById.mockResolvedValue(run);
+    runRepo.findById
+      .mockResolvedValueOnce(run)
+      .mockResolvedValue(makeRun({ state: RunState.PlanReview }));
     (deps.linearClient.getIssue as ReturnType<typeof vi.fn>).mockResolvedValue({
       id: "LIN-1", title: "Test", description: "Test", branchName: "ai/lin-1", labels: [], priority: 0,
     });
@@ -169,7 +173,9 @@ describe("OrchestratorService.runPlanning", () => {
   });
 
   it("pauses for clarification when the retried plan still has blocking questions", async () => {
-    const { deps, runRepo, artifactRepo, plannerAgent } = buildDeps();
+    const { deps, runRepo, artifactRepo, plannerAgent } = buildDeps({
+      answerResearcherAgent: undefined,
+    });
     const svc = new OrchestratorService(deps as never);
 
     const run = makeRun({ state: RunState.Planning, planVersion: 1 });
