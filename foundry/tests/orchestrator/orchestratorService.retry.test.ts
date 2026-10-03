@@ -21,6 +21,7 @@ describe("OrchestratorService.retryRun", () => {
       name: "test-repo", defaultBranch: "main", allowedPaths: ["src/"], protectedPaths: [],
       constraints: { requiredChecks: [], maxFilesChanged: 10, maxDiffLines: 500, forbiddenPatterns: [], mustNotTouch: [] },
     });
+    gitService.resolveMainRepoPath.mockReturnValue("/repo");
     runRepo.update
       .mockResolvedValueOnce(makeRun({ workingDirectory: "/repo/.worktrees/run-1", branchName: "ai/run-1" }))
       .mockResolvedValue(makeRun({ state: RunState.Planning, planVersion: 1 }));
@@ -93,8 +94,9 @@ describe("OrchestratorService.retryRun", () => {
     });
     runRepo.update.mockResolvedValue(makeRun({ state: RunState.Planning, planVersion: 1 }));
     runRepo.updateState
-      .mockResolvedValueOnce(makeRun({ state: RunState.Planning }))
-      .mockResolvedValueOnce(makeRun({ state: RunState.HumanClarificationNeeded }));
+      .mockResolvedValueOnce(makeRun({ state: RunState.Planning })) // RUN_REQUESTED
+      .mockResolvedValueOnce(makeRun({ state: RunState.PlanReview })) // PLAN_CREATED
+      .mockResolvedValueOnce(makeRun({ state: RunState.HumanClarificationNeeded })); // NEEDS_HUMAN_CLARIFICATION
 
     artifactRepo.findLatestByType.mockResolvedValue(null);
     plannerAgent.run.mockResolvedValue(
@@ -185,7 +187,9 @@ describe("OrchestratorService.runPlanning", () => {
     });
     artifactRepo.findLatestByType.mockResolvedValue(null);
     runRepo.update.mockResolvedValue(makeRun({ state: RunState.Planning, planVersion: 2 }));
-    runRepo.updateState.mockResolvedValueOnce(makeRun({ state: RunState.HumanClarificationNeeded }));
+    runRepo.updateState
+      .mockResolvedValueOnce(makeRun({ state: RunState.PlanReview })) // PLAN_CREATED
+      .mockResolvedValueOnce(makeRun({ state: RunState.HumanClarificationNeeded })); // NEEDS_HUMAN_CLARIFICATION
 
     plannerAgent.run.mockResolvedValue(
       makePlan({ planVersion: 2, openQuestions: [{ id: "q1", question: "Which?", requiredForExecution: true }] }),

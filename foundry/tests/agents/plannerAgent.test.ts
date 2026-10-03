@@ -370,6 +370,8 @@ describe("PlannerAgent.run()", () => {
       expect(prompt).toContain("**Assumptions:**\n- Assumption A");
       expect(prompt).toContain("**Open Questions:**");
       expect(prompt).toContain("[q1] Is this safe? *(blocks execution)*");
+      expect(prompt).toContain("[q2] Any naming preference?");
+      expect(prompt).not.toContain("[q2] Any naming preference? *(blocks execution)*");
       expect(prompt).toContain("Old test plan");
       expect(prompt).toContain("Use this as the starting point for the new plan");
     });
