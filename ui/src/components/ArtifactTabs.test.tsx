@@ -158,6 +158,13 @@ describe("ArtifactTabs", () => {
     expect(screen.getByText(/No rejection feedback recorded/i)).toBeDefined();
   });
 
+  it("shows 'No dispositions recorded' for a PlanRevision artifact with an empty dispositions array", () => {
+    const artifacts = [makeArtifact("PlanRevision", { dispositions: [] })];
+    render(<ArtifactTabs artifacts={artifacts} />);
+    expect(screen.getByRole("button", { name: "Plan Revision" })).toBeDefined();
+    expect(screen.getByText(/No dispositions recorded/i)).toBeDefined();
+  });
+
   it("renders PlanRevision disposition status badges for each known status and the default fallback", () => {
     const artifacts = [
       makeArtifact("PlanRevision", {

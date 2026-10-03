@@ -99,6 +99,27 @@ describe("RunsTable", () => {
     expect(screen.queryByTitle("Open in Linear")).toBeNull();
   });
 
+  it("stops the Linear link's click from propagating past React's root listener", async () => {
+    const user = userEvent.setup();
+    renderTable([makeRun({ linearIssueUrl: "https://linear.app/issue/ENG-1" })]);
+    const link = screen.getByTitle("Open in Linear");
+
+    // React 18's root listener sits on the render container, which is a
+    // descendant of document.body. Native bubbling reaches body only after
+    // passing through (and being handled by) that root listener, so a
+    // document.body listener observes whether React's synthetic
+    // stopPropagation call also halted native propagation.
+    const bodyClickSpy = vi.fn();
+    document.body.addEventListener("click", bodyClickSpy);
+
+    try {
+      await user.click(link);
+      expect(bodyClickSpy).not.toHaveBeenCalled();
+    } finally {
+      document.body.removeEventListener("click", bodyClickSpy);
+    }
+  });
+
   it("shows approve/reject plan actions for AwaitingPlanApproval and calls the API", async () => {
     const user = userEvent.setup();
     const onAction = vi.fn();

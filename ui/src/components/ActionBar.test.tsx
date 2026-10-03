@@ -162,6 +162,15 @@ describe("ActionBar", () => {
     await userEvent.click(freshBtn);
     expect(freshBtn.className).toContain("bg-accent");
 
+    // Switch back to iterate mode to exercise the setRejectMode("iterate") handler too
+    const iterateBtn = screen.getByText("Revise plan").closest("button") as HTMLButtonElement;
+    await userEvent.click(iterateBtn);
+    expect(iterateBtn.className).toContain("bg-accent");
+    expect(freshBtn.className).not.toContain("bg-accent");
+
+    // And back to fresh for the actual assertion below
+    await userEvent.click(freshBtn);
+
     const confirmButtons = screen.getAllByRole("button", { name: /Reject Plan/i });
     await userEvent.click(confirmButtons[confirmButtons.length - 1]);
 
@@ -284,6 +293,17 @@ describe("ActionBar", () => {
       expect(screen.queryByText(/send it back for re-planning/i)).toBeNull();
     });
     expect(onAction).not.toHaveBeenCalled();
+  });
+
+  it("cancelling the generic confirm dialog closes it without calling the API", async () => {
+    render(<ActionBar runId={RUN_ID} state="Planning" onAction={vi.fn()} />);
+    await userEvent.click(screen.getByRole("button", { name: /^Pause$/i }));
+    expect(document.querySelector(".relative.z-10")).not.toBeNull();
+
+    await userEvent.click(within(getConfirmDialog()).getByRole("button", { name: "Cancel" }));
+
+    expect(document.querySelector(".relative.z-10")).toBeNull();
+    expect(mockApi.pauseRun).not.toHaveBeenCalled();
   });
 
   it("shows the 'Working...' loading state while the reject confirm action is pending", async () => {

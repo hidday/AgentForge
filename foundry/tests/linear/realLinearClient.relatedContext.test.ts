@@ -209,6 +209,37 @@ describe("RealLinearClient.getRelatedContext", () => {
     expect(ctx.blockers[0].id).toBe("blocker-id");
   });
 
+  it("skips a blocker whose relation fails to hydrate and logs a warning instead of throwing", async () => {
+    const goodBlocker = makeFakeIssue({ id: "blocker-id", identifier: "PRY-101" });
+    const hydrationError = new Error("GraphQL fetch failed");
+    const focus = makeFakeIssue({
+      id: "focus-id",
+      parent: Promise.resolve(null),
+      inverseRelations: () =>
+        Promise.resolve({
+          nodes: [
+            { id: "rel-bad", type: "blocks", issue: Promise.reject(hydrationError) },
+            { id: "rel-good", type: "blocks", issue: Promise.resolve(goodBlocker) },
+          ],
+        }),
+    });
+
+    issuesById.set("focus-id", focus);
+    issuesById.set("blocker-id", goodBlocker);
+
+    const logger = makeLogger();
+    (client as unknown as { logger: typeof logger }).logger = logger;
+
+    const ctx = await client.getRelatedContext("focus-id");
+
+    expect(ctx.blockers).toHaveLength(1);
+    expect(ctx.blockers[0].id).toBe("blocker-id");
+    expect(logger.warn).toHaveBeenCalledWith(
+      { err: hydrationError, relationId: "rel-bad", focusIssueId: "focus-id" },
+      "Failed to hydrate blocker issue from relation",
+    );
+  });
+
   it("treats null description as empty string", async () => {
     const parent = makeFakeIssue({
       id: "parent-id",

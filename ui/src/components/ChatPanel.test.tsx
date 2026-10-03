@@ -51,6 +51,23 @@ describe("ChatPanel", () => {
     expect(screen.getByText(/No messages yet/i)).toBeDefined();
   });
 
+  it("falls back to an empty string when a ChatMessage artifact payload has no content field", () => {
+    const artifacts: Artifact[] = [
+      {
+        id: "a1",
+        runId: "run-1",
+        type: "ChatMessage",
+        version: 1,
+        payloadJson: { role: "user" },
+        rawText: "",
+        createdAt: "2024-01-01T00:00:01Z",
+      },
+    ];
+    render(<ChatPanel runId={RUN_ID} artifacts={artifacts} />);
+    // The empty-state message should not show, since there IS one message (with empty content)
+    expect(screen.queryByText(/No messages yet/i)).toBeNull();
+  });
+
   it("renders user and assistant messages from ChatMessage artifacts in chronological order", () => {
     const artifacts: Artifact[] = [
       makeArtifact("assistant", "Second message", "a2", "2024-01-01T00:00:02Z"),

@@ -73,6 +73,30 @@ function makeDistillationOutput(decision: {
   };
 }
 
+function makePlanArtifact(payloadJson: unknown) {
+  return {
+    id: "plan-artifact-1",
+    runId: "run-1",
+    type: "Plan" as const,
+    version: 1,
+    payloadJson,
+    rawText: JSON.stringify(payloadJson),
+    createdAt: new Date(),
+  };
+}
+
+function makeRemediationArtifact(payloadJson: unknown) {
+  return {
+    id: "remediation-artifact-1",
+    runId: "run-1",
+    type: "Remediation" as const,
+    version: 1,
+    payloadJson,
+    rawText: JSON.stringify(payloadJson),
+    createdAt: new Date(),
+  };
+}
+
 function buildDeps(overrides: Record<string, unknown> = {}) {
   const agentRunner = { run: vi.fn() };
   const artifactRepo = { findLatestByType: vi.fn(), findByRunId: vi.fn(), create: vi.fn() };
@@ -427,6 +451,315 @@ describe("DistillationAgent", () => {
       const totalUses = skill.successCount + skill.failureCount;
       const shouldArchive = skill.utilityScore < 0.2 && totalUses >= 5;
       expect(shouldArchive).toBe(false);
+    });
+  });
+
+  describe("(j) planSummary / executionOutcome / remediationSummary rendering", () => {
+    it("renders a field-aware plan summary when a valid Plan artifact exists", async () => {
+      const deps = buildDeps();
+      deps.agentSkillRepo.findActiveByRepo.mockResolvedValue([]);
+      const originalExecutionArtifact = (
+        await deps.artifactRepo.findLatestByType("run-1", "ExecutionReport")
+      ) as unknown;
+      deps.artifactRepo.findLatestByType.mockImplementation((_runId: string, type: string) => {
+        if (type === "Plan") {
+          return Promise.resolve(
+            makePlanArtifact({
+              planVersion: 1,
+              summary: "Add JWT auth middleware",
+              assumptions: ["Fastify is used"],
+              openQuestions: [],
+              risks: ["Breaking existing clients"],
+              steps: [{ id: "s1", title: "Create middleware", description: "JWT verify" }],
+              testPlan: "Unit test the middleware",
+              confidence: 0.9,
+            }),
+          );
+        }
+        if (type === "ExecutionReport") return Promise.resolve(originalExecutionArtifact);
+        return Promise.resolve(null);
+      });
+      deps.agentRunner.run.mockResolvedValue(
+        makeDistillationOutput({ shouldPersist: false, reason: "nothing novel" }),
+      );
+
+      const agent = buildAgent(deps);
+      await agent.run("run-1", makeRun());
+
+      const userPrompt = (deps.agentRunner.run.mock.calls[0] as [unknown, { prompt: string }])[1]
+        .prompt;
+      expect(userPrompt).toContain("Add JWT auth middleware");
+      expect(userPrompt).toContain("Create middleware");
+      expect(userPrompt).toContain("Breaking existing clients");
+      expect(userPrompt).toContain("Confidence");
+    });
+
+    it("falls back to truncated JSON when the Plan artifact payload fails schema validation", async () => {
+      const deps = buildDeps();
+      deps.agentSkillRepo.findActiveByRepo.mockResolvedValue([]);
+      const execArtifact = await deps.artifactRepo.findLatestByType("run-1", "ExecutionReport");
+      deps.artifactRepo.findLatestByType.mockImplementation((_runId: string, type: string) => {
+        if (type === "Plan") return Promise.resolve(makePlanArtifact({ notAPlan: true }));
+        if (type === "ExecutionReport") return Promise.resolve(execArtifact);
+        return Promise.resolve(null);
+      });
+      deps.agentRunner.run.mockResolvedValue(
+        makeDistillationOutput({ shouldPersist: false, reason: "nothing novel" }),
+      );
+
+      const agent = buildAgent(deps);
+      await agent.run("run-1", makeRun());
+
+      const userPrompt = (deps.agentRunner.run.mock.calls[0] as [unknown, { prompt: string }])[1]
+        .prompt;
+      expect(userPrompt).toContain("notAPlan");
+    });
+
+    it("renders a field-aware remediation summary when a valid Remediation artifact exists", async () => {
+      const deps = buildDeps();
+      deps.agentSkillRepo.findActiveByRepo.mockResolvedValue([]);
+      const execArtifact = await deps.artifactRepo.findLatestByType("run-1", "ExecutionReport");
+      deps.artifactRepo.findLatestByType.mockImplementation((_runId: string, type: string) => {
+        if (type === "ExecutionReport") return Promise.resolve(execArtifact);
+        if (type === "Remediation") {
+          return Promise.resolve(
+            makeRemediationArtifact({
+              reviewId: "rev-001",
+              resolution: [
+                {
+                  findingId: "f1",
+                  status: "accepted",
+                  action: "Added null guard",
+                  rationale: "Real bug",
+                },
+              ],
+              readyForHumanReview: true,
+              executionReport: {
+                executionVersion: 2,
+                summary: "Fixed",
+                filesChanged: ["src/foo.ts"],
+                checks: {
+                  lint: { status: "pass", details: "ok" },
+                  typecheck: { status: "pass", details: "ok" },
+                  tests: { status: "pass", details: "ok" },
+                },
+                notes: [],
+                prDraftCreated: true,
+                score: 0.9,
+                scoreRationale: "Great",
+              },
+            }),
+          );
+        }
+        return Promise.resolve(null);
+      });
+      deps.agentRunner.run.mockResolvedValue(
+        makeDistillationOutput({ shouldPersist: false, reason: "nothing novel" }),
+      );
+
+      const agent = buildAgent(deps);
+      await agent.run("run-1", makeRun());
+
+      const userPrompt = (deps.agentRunner.run.mock.calls[0] as [unknown, { prompt: string }])[1]
+        .prompt;
+      expect(userPrompt).toContain("Remediation Summary");
+      expect(userPrompt).toContain("Added null guard");
+    });
+
+    it("includes an existingSkillsSummary listing when active skills exist", async () => {
+      const deps = buildDeps();
+      deps.agentSkillRepo.findActiveByRepo.mockResolvedValue([
+        makeSkill({
+          name: "rate-limiting",
+          taskCategory: "api rate limiting",
+          skillMarkdown: "Use Redis token buckets for rate limiting.",
+        }),
+      ]);
+      // Use a task query that does NOT overlap with the existing skill so the
+      // novelty gate passes and the LLM call (and thus the prompt) is reached.
+      deps.agentRunner.run.mockResolvedValue(
+        makeDistillationOutput({ shouldPersist: false, reason: "nothing novel" }),
+      );
+
+      const agent = buildAgent(deps);
+      await agent.run("run-1", makeRun({ linearIssueTitle: "Totally unrelated feature work" }));
+
+      expect(deps.agentRunner.run).toHaveBeenCalled();
+      const userPrompt = (deps.agentRunner.run.mock.calls[0] as [unknown, { prompt: string }])[1]
+        .prompt;
+      expect(userPrompt).toContain("[rate-limiting] api rate limiting");
+      expect(userPrompt).toContain("Use Redis token buckets");
+    });
+  });
+
+  describe("(k) shouldPersist=true but required fields missing", () => {
+    it("skips persisting and emits reason=missing_required_skill_fields when taskCategory is blank", async () => {
+      const deps = buildDeps();
+      deps.agentSkillRepo.findActiveByRepo.mockResolvedValue([]);
+      deps.agentRunner.run.mockResolvedValue(
+        makeDistillationOutput({
+          shouldPersist: true,
+          reason: "insight",
+          taskCategory: "   ",
+          skillMarkdown: "Some markdown",
+        }),
+      );
+
+      const agent = buildAgent(deps);
+      await agent.run("run-1", makeRun());
+
+      expect(deps.agentSkillRepo.create).not.toHaveBeenCalled();
+      expect(deps.agentSkillRepo.displaceAndCreate).not.toHaveBeenCalled();
+      expect(deps.eventRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          payloadJson: expect.objectContaining({
+            shouldPersist: false,
+            reason: "missing_required_skill_fields",
+          }),
+        }),
+      );
+    });
+
+    it("skips persisting when skillMarkdown is blank", async () => {
+      const deps = buildDeps();
+      deps.agentSkillRepo.findActiveByRepo.mockResolvedValue([]);
+      deps.agentRunner.run.mockResolvedValue(
+        makeDistillationOutput({
+          shouldPersist: true,
+          reason: "insight",
+          taskCategory: "auth",
+          skillMarkdown: "   ",
+        }),
+      );
+
+      const agent = buildAgent(deps);
+      await agent.run("run-1", makeRun());
+
+      expect(deps.agentSkillRepo.create).not.toHaveBeenCalled();
+      expect(deps.eventRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          payloadJson: expect.objectContaining({
+            shouldPersist: false,
+            reason: "missing_required_skill_fields",
+          }),
+        }),
+      );
+    });
+  });
+
+  describe("(l) shouldPersist=false still records the model's taskCategory when present", () => {
+    it("includes decision.taskCategory in the emitted event payload", async () => {
+      const deps = buildDeps();
+      deps.agentSkillRepo.findActiveByRepo.mockResolvedValue([]);
+      deps.agentRunner.run.mockResolvedValue(
+        makeDistillationOutput({
+          shouldPersist: false,
+          reason: "already covered",
+          taskCategory: "auth middleware",
+        }),
+      );
+
+      const agent = buildAgent(deps);
+      await agent.run("run-1", makeRun());
+
+      expect(deps.eventRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          payloadJson: expect.objectContaining({
+            shouldPersist: false,
+            taskCategory: "auth middleware",
+          }),
+        }),
+      );
+    });
+
+    it("records taskCategory=null when the model omits it", async () => {
+      const deps = buildDeps();
+      deps.agentSkillRepo.findActiveByRepo.mockResolvedValue([]);
+      deps.agentRunner.run.mockResolvedValue(
+        makeDistillationOutput({ shouldPersist: false, reason: "trivial" }),
+      );
+
+      const agent = buildAgent(deps);
+      await agent.run("run-1", makeRun());
+
+      expect(deps.eventRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          payloadJson: expect.objectContaining({ shouldPersist: false, taskCategory: null }),
+        }),
+      );
+    });
+  });
+
+  describe("(m) description fallback and skill name normalization", () => {
+    it("falls back to a generated description when decision.description is whitespace-only", async () => {
+      const deps = buildDeps();
+      deps.agentSkillRepo.findActiveByRepo.mockResolvedValue([]);
+      deps.agentSkillRepo.countActiveByRepo.mockResolvedValue(0);
+      deps.agentRunner.run.mockResolvedValue(
+        makeDistillationOutput({
+          shouldPersist: true,
+          reason: "insight",
+          name: "auth-middleware",
+          description: "   ",
+          skillMarkdown: "Use JWT.",
+          taskCategory: "auth middleware",
+        }),
+      );
+
+      const agent = buildAgent(deps);
+      await agent.run("run-1", makeRun({ repo: "acme/api" }));
+
+      expect(deps.agentSkillRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          description: "Use when working on auth middleware in acme/api.",
+        }),
+      );
+    });
+
+    it("slugifies an invalid skill name returned by the model", async () => {
+      const deps = buildDeps();
+      deps.agentSkillRepo.findActiveByRepo.mockResolvedValue([]);
+      deps.agentSkillRepo.countActiveByRepo.mockResolvedValue(0);
+      deps.agentRunner.run.mockResolvedValue(
+        makeDistillationOutput({
+          shouldPersist: true,
+          reason: "insight",
+          name: "Not A Valid Name!!",
+          description: "desc",
+          skillMarkdown: "Use JWT.",
+          taskCategory: "Auth Middleware Setup",
+        }),
+      );
+
+      const agent = buildAgent(deps);
+      await agent.run("run-1", makeRun());
+
+      expect(deps.agentSkillRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({ name: "auth-middleware-setup" }),
+      );
+    });
+
+    it("keeps a model-provided name unchanged when it is already valid kebab-case", async () => {
+      const deps = buildDeps();
+      deps.agentSkillRepo.findActiveByRepo.mockResolvedValue([]);
+      deps.agentSkillRepo.countActiveByRepo.mockResolvedValue(0);
+      deps.agentRunner.run.mockResolvedValue(
+        makeDistillationOutput({
+          shouldPersist: true,
+          reason: "insight",
+          name: "valid-kebab-name",
+          description: "desc",
+          skillMarkdown: "Use JWT.",
+          taskCategory: "auth",
+        }),
+      );
+
+      const agent = buildAgent(deps);
+      await agent.run("run-1", makeRun());
+
+      expect(deps.agentSkillRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({ name: "valid-kebab-name" }),
+      );
     });
   });
 

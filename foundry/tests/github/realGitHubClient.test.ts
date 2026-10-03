@@ -93,6 +93,14 @@ describe("RealGitHubClient", () => {
         'Invalid repo format "not-a-valid-repo"',
       );
     });
+
+    it("stringifies a non-Error rejection (e.g. a plain string) in the error detail", async () => {
+      octokit.repos.get.mockRejectedValue("just a string failure");
+
+      await expect(client.verifyRepoAccess("owner/repo")).rejects.toThrow(
+        "Original: just a string failure",
+      );
+    });
   });
 
   describe("getDefaultBranch", () => {
@@ -214,6 +222,18 @@ describe("RealGitHubClient", () => {
       await expect(
         client.createDraftPR("owner/repo", "head", "main", "Title", "Body"),
       ).rejects.toThrow('GitHub createDraftPR failed for "owner/repo"');
+    });
+
+    it("treats a non-Error 422 rejection as non-field-validation and looks up the existing PR", async () => {
+      octokit.pulls.create.mockRejectedValue(statusError(422));
+      // Overwrite with a plain object carrying only `status`, no message, to
+      // exercise the `err instanceof Error ? ... : String(err)` false branch.
+      octokit.pulls.create.mockRejectedValue({ status: 422 });
+      octokit.pulls.list.mockResolvedValue({ data: [{ number: 88 }] });
+
+      const result = await client.createDraftPR("owner/repo", "head", "main", "Title", "Body");
+
+      expect(result).toBe(88);
     });
   });
 

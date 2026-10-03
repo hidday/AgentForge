@@ -97,6 +97,19 @@ describe("AgentOutputPanel", () => {
     expect(screen.getByText("parsed-form")).toBeDefined();
   });
 
+  it("clears the elapsed-timer interval on unmount", () => {
+    vi.useFakeTimers();
+    try {
+      const proc = makeProcess();
+      const { unmount } = render(<AgentOutputPanel processes={[proc]} output="" />);
+      const clearSpy = vi.spyOn(globalThis, "clearInterval");
+      unmount();
+      expect(clearSpy).toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("shows the raw-view placeholder text when output is an empty string but a process is active", async () => {
     const proc = makeProcess();
     render(<AgentOutputPanel processes={[proc]} output="" />);
