@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { EventEmitter } from "node:events";
-import { mkdtempSync, readFileSync, existsSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, existsSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
@@ -52,12 +52,18 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.useRealTimers();
-  try {
-    rmSync(spoolDir, { recursive: true, force: true });
-  } catch {
-    // best effort cleanup
-  }
+  // Deliberately not removing spoolDir here: the real fs.WriteStream used
+  // for process logs flushes asynchronously (createWriteStream's open() is
+  // scheduled on the libuv thread pool), so deleting the directory right
+  // after a test can race an in-flight write/close and surface as an
+  // unhandled ENOENT error attributed to an unrelated later test. Leaving
+  // these small per-test temp dirs behind is harmless (OS temp cleanup).
 });
+
+/** Give any in-flight async fs writes (log stream flush) a chance to land on disk. */
+function flushFs() {
+  return new Promise((r) => setTimeout(r, 50));
+}
 
 describe("ProcessRunner construction", () => {
   it("creates the spool directory on construction", () => {
@@ -391,6 +397,7 @@ describe("ProcessRunner.getProcessOutput", () => {
     child.stdout.emit("data", Buffer.from("logged to disk"));
     child.emit("close", 0);
     await promise;
+    await flushFs();
 
     expect(runner.getActiveProcesses()).toHaveLength(0);
     expect(runner.getProcessOutput(processId)).toContain("logged to disk");

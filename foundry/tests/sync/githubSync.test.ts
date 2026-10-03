@@ -353,6 +353,27 @@ describe("GitHubSyncService.postRemediationResolutions", () => {
     expect(summaryBody).toContain(":warning:");
   });
 
+  it("falls back to a question-mark icon for an unrecognized resolution status", async () => {
+    const githubClient = makeGithubClient();
+    const service = new GitHubSyncService(githubClient as never, makeLogger() as never);
+    // Cast past the ResolutionStatus union to exercise the `?? ":grey_question:"`
+    // fallback for a status the icon map doesn't recognize.
+    const resolutions = [
+      makeResolution({ findingId: "f1", status: "mystery" as ResolutionItem["status"] }),
+    ];
+
+    await service.postRemediationResolutions("owner/repo", 42, resolutions, { f1: 500 });
+
+    expect(githubClient.replyToReviewComment).toHaveBeenCalledWith(
+      "owner/repo",
+      42,
+      500,
+      expect.stringContaining(":grey_question:") as unknown as string,
+    );
+    const summaryBody = githubClient.commentOnPR.mock.calls[0][2] as string;
+    expect(summaryBody).toContain(":grey_question:");
+  });
+
   it("posts a summary comment with one row per resolution, replacing underscores with spaces", async () => {
     const githubClient = makeGithubClient();
     const service = new GitHubSyncService(githubClient as never, makeLogger() as never);
