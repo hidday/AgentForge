@@ -264,17 +264,16 @@ describe("RunDetailPage", () => {
   });
 
   it("shows the OpenQuestionsPanel for HumanClarificationNeeded with all open questions", () => {
+    const openQuestions = [
+      { id: "q1", question: "Required?", requiredForExecution: true },
+      { id: "q2", question: "Optional?", requiredForExecution: false },
+    ];
     const planArtifact: Artifact = {
       id: "a1",
       runId: "run-1",
       type: "Plan",
       version: 1,
-      payloadJson: {
-        openQuestions: [
-          { id: "q1", question: "Required?", requiredForExecution: true },
-          { id: "q2", question: "Optional?", requiredForExecution: false },
-        ],
-      },
+      payloadJson: { openQuestions },
       rawText: "",
       createdAt: "2024-01-01T00:00:00Z",
     };
@@ -294,7 +293,7 @@ describe("RunDetailPage", () => {
     expect(screen.getByTestId("open-questions-panel")).toBeDefined();
     expect(openQuestionsSpy).toHaveBeenCalledWith(
       expect.objectContaining({
-        questions: planArtifact.payloadJson.openQuestions,
+        questions: openQuestions,
         readOnly: false,
         runState: "HumanClarificationNeeded",
       }),
@@ -305,17 +304,16 @@ describe("RunDetailPage", () => {
   });
 
   it("shows only optional questions for AwaitingPlanApproval", () => {
+    const openQuestions = [
+      { id: "q1", question: "Required?", requiredForExecution: true },
+      { id: "q2", question: "Optional?", requiredForExecution: false },
+    ];
     const planArtifact: Artifact = {
       id: "a1",
       runId: "run-1",
       type: "Plan",
       version: 1,
-      payloadJson: {
-        openQuestions: [
-          { id: "q1", question: "Required?", requiredForExecution: true },
-          { id: "q2", question: "Optional?", requiredForExecution: false },
-        ],
-      },
+      payloadJson: { openQuestions },
       rawText: "",
       createdAt: "2024-01-01T00:00:00Z",
     };
@@ -334,7 +332,7 @@ describe("RunDetailPage", () => {
 
     expect(openQuestionsSpy).toHaveBeenCalledWith(
       expect.objectContaining({
-        questions: [planArtifact.payloadJson.openQuestions[1]],
+        questions: [openQuestions[1]],
         runState: "AwaitingPlanApproval",
       }),
     );

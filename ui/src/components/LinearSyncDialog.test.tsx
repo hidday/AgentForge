@@ -382,7 +382,7 @@ describe("LinearSyncDialog", () => {
     await user.click(screen.getByRole("button", { name: /start 2 runs/i }));
 
     // Unrelated event types and ids should be no-ops.
-    fireSSE({ type: "run:updated", runId: "run-a", issueId: issueA.id });
+    fireSSE({ type: "run:state-changed", runId: "run-a", issueId: issueA.id });
     fireSSE({ type: "run:created", runId: "run-z" });
     fireSSE({ type: "run:created", runId: "run-z", issueId: "not-pending" });
 
