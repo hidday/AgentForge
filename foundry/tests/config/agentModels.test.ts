@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { resolveAgentModel, tierForStage } from "../../src/config/agentModels.js";
 import type { Env } from "../../src/config/env.js";
+import type { Stage } from "../../src/schemas/cliProtocol.js";
 
 const env = {
   CLAUDE_CODE_MODEL: "claude-fable-5",
@@ -30,5 +31,17 @@ describe("agentModels", () => {
     expect(tierForStage("reviewer")).toBe("review");
     expect(resolveAgentModel("plan-reviewer", env)).toBe("gpt-5.6-sol");
     expect(resolveAgentModel("reviewer", env)).toBe("gpt-5.6-sol");
+  });
+
+  it("throws for a stage with no known tier mapping (defensive exhaustiveness check)", () => {
+    // tierForStage falls back to `undefined` for a stage outside the known
+    // Stage union; resolveAgentModel's switch then hits its `default` arm
+    // and throws rather than silently returning no model. We deliberately
+    // bypass the Stage type to exercise that runtime guard.
+    const bogusStage = "not-a-real-stage" as unknown as Stage;
+    expect(tierForStage(bogusStage)).toBeUndefined();
+    expect(() => resolveAgentModel(bogusStage, env)).toThrow(
+      "Unknown agent model tier: undefined",
+    );
   });
 });

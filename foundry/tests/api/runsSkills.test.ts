@@ -119,6 +119,49 @@ async function buildApp(overrides: {
   return { app, mockOrchestrator, mockEventRepo, mockAgentSkillRepo };
 }
 
+describe("GET /api/runs/:id/skills — defensive empty-id guard", () => {
+  it("returns 400 directly from the handler when params.id is an empty string", async () => {
+    // Fastify's router never dispatches to this handler with an empty :id
+    // segment, but the handler still guards against it defensively. We
+    // invoke the registered handler directly to exercise that boundary.
+    const routes: Record<string, (request: unknown, reply: unknown) => unknown> = {};
+    const fakeApp = {
+      get: vi.fn((path: string, handler: (request: unknown, reply: unknown) => unknown) => {
+        routes[path] = handler;
+      }),
+      post: vi.fn(),
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    };
+    const mockOrchestrator = {
+      getRunRepo: () => ({}),
+      getArtifactRepo: () => ({}),
+      getEventRepo: () => ({ findByRunId: vi.fn() }),
+      getAgentSkillRepo: () => null,
+    };
+    const mockEmitter = { on: vi.fn(), off: vi.fn() };
+
+    registerApiRoutes(
+      fakeApp as never,
+      mockOrchestrator as never,
+      mockEmitter as never,
+      {} as never,
+    );
+
+    const handler = routes["/api/runs/:id/skills"];
+    expect(handler).toBeDefined();
+
+    const codeFn = vi.fn().mockReturnThis();
+    const sendFn = vi.fn();
+    const reply = { code: codeFn, send: sendFn };
+    const request = { params: { id: "" } };
+
+    await handler(request, reply);
+
+    expect(codeFn).toHaveBeenCalledWith(400);
+    expect(sendFn).toHaveBeenCalledWith({ error: "runId is required" });
+  });
+});
+
 describe("GET /api/runs/:id/skills", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -275,6 +318,155 @@ describe("GET /api/runs/:id/skills", () => {
         "auth middleware",
         eventTime,
       );
+    });
+  });
+
+  describe("(r) Injection event payload omits skillIds", () => {
+    it("defaults to an empty id list and returns no injectedSkills", async () => {
+      const events = [
+        {
+          id: "event-1",
+          runId: "run-1",
+          eventType: "SKILL_INJECTION",
+          source: "orchestrator",
+          payloadJson: {},
+          createdAt: new Date(),
+        },
+      ];
+
+      const { app } = await buildApp({ events });
+
+      const response = await app.inject({ method: "GET", url: "/api/runs/run-1/skills" });
+
+      expect(response.statusCode).toBe(200);
+      const body = response.json() as { injectedSkills: unknown[] };
+      expect(body.injectedSkills).toEqual([]);
+    });
+  });
+
+  describe("(s) Distillation event payload omits shouldPersist and reason", () => {
+    it("defaults shouldPersist to false and reason to an empty string", async () => {
+      const events = [
+        {
+          id: "event-1",
+          runId: "run-1",
+          eventType: "SKILL_DISTILLATION",
+          source: "distillation-agent",
+          payloadJson: { taskCategory: null, displacedSkillId: null },
+          createdAt: new Date(),
+        },
+      ];
+
+      const { app } = await buildApp({ events });
+
+      const response = await app.inject({ method: "GET", url: "/api/runs/run-1/skills" });
+
+      expect(response.statusCode).toBe(200);
+      const body = response.json() as {
+        distillationDecision: { shouldPersist: boolean; reason: string } | null;
+      };
+      expect(body.distillationDecision?.shouldPersist).toBe(false);
+      expect(body.distillationDecision?.reason).toBe("");
+    });
+  });
+
+  describe("(p) No agentSkillRepo available: SKILL_INJECTION events present but repo is null", () => {
+    it("returns an empty injectedSkills array instead of throwing", async () => {
+      const events = [
+        {
+          id: "event-1",
+          runId: "run-1",
+          eventType: "SKILL_INJECTION",
+          source: "orchestrator",
+          payloadJson: { skillIds: ["skill-id-1"] },
+          createdAt: new Date(),
+        },
+      ];
+
+      const mockRunRepo = { findById: vi.fn().mockResolvedValue(makeRun()), findAll: vi.fn() };
+      const mockArtifactRepo = { findByRunId: vi.fn().mockResolvedValue([]) };
+      const mockEventRepo = { findByRunId: vi.fn().mockResolvedValue(events), create: vi.fn() };
+      const mockOrchestrator = {
+        getRunRepo: () => mockRunRepo,
+        getArtifactRepo: () => mockArtifactRepo,
+        getEventRepo: () => mockEventRepo,
+        getAgentSkillRepo: () => null,
+      };
+      const mockEmitter = { on: vi.fn(), off: vi.fn() };
+      const mockProcessRunner = {
+        getActiveProcesses: vi.fn().mockReturnValue([]),
+        getProcessOutput: vi.fn().mockReturnValue(null),
+      };
+
+      const app = Fastify({ logger: false });
+      registerApiRoutes(
+        app,
+        mockOrchestrator as never,
+        mockEmitter as never,
+        mockProcessRunner as never,
+      );
+      await app.ready();
+
+      const response = await app.inject({ method: "GET", url: "/api/runs/run-1/skills" });
+
+      expect(response.statusCode).toBe(200);
+      const body = response.json() as { injectedSkills: unknown[]; distilledSkill: unknown };
+      expect(body.injectedSkills).toEqual([]);
+      expect(body.distilledSkill).toBeNull();
+    });
+  });
+
+  describe("(q) Distillation shouldPersist=true but agentSkillRepo is null", () => {
+    it("returns the distillationDecision without a distilledSkill", async () => {
+      const events = [
+        {
+          id: "event-1",
+          runId: "run-1",
+          eventType: "SKILL_DISTILLATION",
+          source: "distillation-agent",
+          payloadJson: {
+            shouldPersist: true,
+            reason: "architectural insight",
+            taskCategory: "auth middleware",
+            displacedSkillId: null,
+          },
+          createdAt: new Date(),
+        },
+      ];
+
+      const mockRunRepo = { findById: vi.fn().mockResolvedValue(makeRun()), findAll: vi.fn() };
+      const mockArtifactRepo = { findByRunId: vi.fn().mockResolvedValue([]) };
+      const mockEventRepo = { findByRunId: vi.fn().mockResolvedValue(events), create: vi.fn() };
+      const mockOrchestrator = {
+        getRunRepo: () => mockRunRepo,
+        getArtifactRepo: () => mockArtifactRepo,
+        getEventRepo: () => mockEventRepo,
+        getAgentSkillRepo: () => null,
+      };
+      const mockEmitter = { on: vi.fn(), off: vi.fn() };
+      const mockProcessRunner = {
+        getActiveProcesses: vi.fn().mockReturnValue([]),
+        getProcessOutput: vi.fn().mockReturnValue(null),
+      };
+
+      const app = Fastify({ logger: false });
+      registerApiRoutes(
+        app,
+        mockOrchestrator as never,
+        mockEmitter as never,
+        mockProcessRunner as never,
+      );
+      await app.ready();
+
+      const response = await app.inject({ method: "GET", url: "/api/runs/run-1/skills" });
+
+      expect(response.statusCode).toBe(200);
+      const body = response.json() as {
+        distillationDecision: { shouldPersist: boolean } | null;
+        distilledSkill: unknown;
+      };
+      expect(body.distillationDecision?.shouldPersist).toBe(true);
+      expect(body.distilledSkill).toBeNull();
     });
   });
 

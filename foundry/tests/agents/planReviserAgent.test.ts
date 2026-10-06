@@ -103,7 +103,7 @@ function buildPlanReviserAgent() {
     logger as never,
   );
 
-  return { agent, getPrompt: () => capturedPrompt };
+  return { agent, logger, getPrompt: () => capturedPrompt };
 }
 
 describe("PlanReviserAgent.run() relatedContext rendering", () => {
@@ -149,5 +149,43 @@ describe("PlanReviserAgent.run() relatedContext rendering", () => {
     expect(prompt).not.toContain("BEGIN BACKGROUND CONTEXT");
     expect(prompt).not.toContain("Background: Related Linear Context");
     expect(prompt).not.toContain("{{relatedContextSection}}");
+  });
+});
+
+describe("PlanReviserAgent.run() operator note", () => {
+  it("injects the operator note into the user prompt and logs hasOperatorNote=true", async () => {
+    const { agent, getPrompt, logger } = buildPlanReviserAgent();
+    const bundle = makeTaskBundle();
+
+    await agent.run(makePlan(), makePlanReview(), bundle, "run-1", {
+      operatorNote: "Keep the dismissed nit dismissed, but revisit the blocker.",
+    });
+
+    const prompt = getPrompt();
+    expect(prompt).toContain("## Operator Note");
+    expect(prompt).toContain("Keep the dismissed nit dismissed, but revisit the blocker.");
+    expect(prompt).not.toContain("{{operatorNoteSection}}");
+
+    const startLog = logger.info.mock.calls.find(
+      (c: unknown[]) => c[1] === "Starting plan reviser agent (Claude CLI, boss mode)",
+    );
+    const payload = startLog?.[0] as Record<string, unknown> | undefined;
+    expect(payload?.hasOperatorNote).toBe(true);
+  });
+
+  it("omits the operator note section and logs hasOperatorNote=false when no note is given", async () => {
+    const { agent, getPrompt, logger } = buildPlanReviserAgent();
+    const bundle = makeTaskBundle();
+
+    await agent.run(makePlan(), makePlanReview(), bundle, "run-1");
+
+    const prompt = getPrompt();
+    expect(prompt).not.toContain("## Operator Note");
+
+    const startLog = logger.info.mock.calls.find(
+      (c: unknown[]) => c[1] === "Starting plan reviser agent (Claude CLI, boss mode)",
+    );
+    const payload = startLog?.[0] as Record<string, unknown> | undefined;
+    expect(payload?.hasOperatorNote).toBe(false);
   });
 });

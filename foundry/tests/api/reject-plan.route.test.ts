@@ -155,4 +155,48 @@ describe("POST /api/runs/:id/actions/reject-plan", () => {
     const body = JSON.parse(response.body) as { error: string };
     expect(body.error).toBe("Invalid state transition");
   });
+
+  it("returns 400 with a stringified message when a non-Error is thrown", async () => {
+    const { app, mockOrchestrator } = await buildApp();
+    mockOrchestrator.rejectPlan.mockRejectedValue("raw string failure");
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/actions/reject-plan",
+      payload: {},
+    });
+
+    expect(response.statusCode).toBe(400);
+    const body = JSON.parse(response.body) as { error: string };
+    expect(body.error).toBe("raw string failure");
+  });
+
+  it("accepts mode='fresh' and forwards it to rejectPlan", async () => {
+    const run = makeRun();
+    const { app, mockOrchestrator } = await buildApp();
+    mockOrchestrator.rejectPlan.mockResolvedValue(run);
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/actions/reject-plan",
+      payload: { context: "start over", mode: "fresh" },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(mockOrchestrator.rejectPlan).toHaveBeenCalledWith("run-1", "start over", "api", "fresh");
+  });
+
+  it("returns 400 when mode is not one of the valid values", async () => {
+    const { app } = await buildApp();
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/actions/reject-plan",
+      payload: { mode: "bogus-mode" },
+    });
+
+    expect(response.statusCode).toBe(400);
+    const body = JSON.parse(response.body) as { error: string };
+    expect(body.error).toContain("mode must be one of");
+  });
 });

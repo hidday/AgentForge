@@ -251,4 +251,70 @@ describe("ChatPanel", () => {
       expect(screen.queryByText("New question")).toBeNull();
     });
   });
+
+  it("collapses and re-expands the message list when the header is clicked", async () => {
+    const artifacts: Artifact[] = [
+      makeArtifact("user", "Hello there", "a1", "2024-01-01T00:00:01Z"),
+    ];
+    render(<ChatPanel runId={RUN_ID} artifacts={artifacts} />);
+
+    // Starts open
+    expect(screen.getByText("Hello there")).toBeDefined();
+
+    const header = screen.getByRole("button", { name: /chat with agent/i });
+    await userEvent.click(header);
+    expect(screen.queryByText("Hello there")).toBeNull();
+    expect(screen.queryByPlaceholderText(/ask the agent/i)).toBeNull();
+
+    await userEvent.click(header);
+    expect(screen.getByText("Hello there")).toBeDefined();
+  });
+
+  it("calls scrollIntoView on the bottom anchor when the message count changes (if supported by the DOM)", async () => {
+    const scrollIntoViewMock = vi.fn();
+    const originalScrollIntoView = (
+      window.HTMLElement.prototype as unknown as { scrollIntoView?: () => void }
+    ).scrollIntoView;
+    window.HTMLElement.prototype.scrollIntoView = scrollIntoViewMock;
+
+    try {
+      mockApi.sendChatMessage.mockResolvedValue({ reply: "ok", durationMs: 10 });
+      render(<ChatPanel runId={RUN_ID} artifacts={[]} />);
+
+      const input = screen.getByPlaceholderText(/ask the agent/i);
+      await userEvent.type(input, "Trigger a scroll");
+      await userEvent.click(screen.getByRole("button", { name: /send/i }));
+
+      await waitFor(() => {
+        expect(scrollIntoViewMock).toHaveBeenCalledWith({ behavior: "smooth" });
+      });
+    } finally {
+      window.HTMLElement.prototype.scrollIntoView = originalScrollIntoView as never;
+    }
+  });
+
+  it("renders an empty message body when the ChatMessage payload has no content field", () => {
+    const artifacts: Artifact[] = [
+      { ...makeArtifact("user", "", "a1", "2024-01-01T00:00:01Z"), payloadJson: { role: "user" } },
+    ];
+    const { container } = render(<ChatPanel runId={RUN_ID} artifacts={artifacts} />);
+
+    // One message bubble is rendered, with no visible text content.
+    const bubble = container.querySelector(".whitespace-pre-wrap");
+    expect(bubble).not.toBeNull();
+    expect(bubble?.textContent).toBe("");
+  });
+
+  it("falls back to a generic error message when sendChatMessage rejects with a non-Error value", async () => {
+    mockApi.sendChatMessage.mockRejectedValue("network dropped");
+
+    render(<ChatPanel runId={RUN_ID} artifacts={[]} />);
+    const input = screen.getByPlaceholderText(/ask the agent/i);
+    await userEvent.type(input, "Failing question");
+    await userEvent.click(screen.getByRole("button", { name: /send/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText("Chat request failed")).toBeDefined();
+    });
+  });
 });
