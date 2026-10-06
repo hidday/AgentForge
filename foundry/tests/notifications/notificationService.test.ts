@@ -335,6 +335,68 @@ describe("NotificationService.sendHumanRequest", () => {
     expect(body.text).not.toContain("Linear:");
   });
 
+  it("renders '(untitled)', a truncated long context, and mixed required/non-required questions in the email subject, HTML, and text bodies", async () => {
+    fetchMock.mockResolvedValue({ ok: true, status: 200, text: vi.fn() });
+
+    const svc = new NotificationService(
+      { emailFrom: "a@b.com", emailTo: "dev@b.com", resendApiKey: "key" },
+      makeLogger(),
+    );
+    const longContext = "x".repeat(2500);
+    const payload = makePayload({
+      linearIssue: { id: "raw-id-3", title: null, url: "https://linear.app/team/issue/X" },
+      context: longContext,
+      openQuestions: [
+        { id: "q1", question: "Required one?", requiredForExecution: true },
+        { id: "q2", question: "Optional one?", requiredForExecution: false },
+      ],
+    });
+
+    const result = await svc.sendHumanRequest(payload);
+    expect(result.email).toEqual({ attempted: true, ok: true });
+
+    const [, init] = fetchMock.mock.calls[0];
+    const body = JSON.parse(init.body);
+
+    expect(body.subject).toContain("(untitled)");
+    expect(body.html).toContain("(untitled)");
+    expect(body.text).toContain("(untitled)");
+
+    // Long context is truncated with an ellipsis, not reproduced in full.
+    expect(body.html).toContain("…");
+    expect(body.html).not.toContain(longContext);
+    expect(body.text).toContain("…");
+    expect(body.text).not.toContain(longContext);
+
+    // Both the required and non-required question render, with the
+    // "[required]" marker present only for the required one.
+    expect(body.html).toContain("Required one?");
+    expect(body.html).toContain("Optional one?");
+    expect(body.html).toContain("<strong>[required]</strong> Required one?");
+    expect(body.html).not.toContain("[required]</strong> Optional one?");
+    expect(body.text).toContain("[required] Required one?");
+    expect(body.text).toContain("- Optional one?");
+    expect(body.text).not.toContain("[required] Optional one?");
+  });
+
+  it("marks email failed with a stringified error when a non-Error value is thrown", async () => {
+    fetchMock.mockRejectedValue("email transport exploded");
+
+    const logger = makeLogger();
+    const svc = new NotificationService(
+      { emailFrom: "a@b.com", emailTo: "dev@b.com", resendApiKey: "key" },
+      logger,
+    );
+    const result = await svc.sendHumanRequest(makePayload());
+
+    expect(result.email.ok).toBe(false);
+    expect(result.email.error).toBe("email transport exploded");
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.objectContaining({ runId: "run-1", error: "email transport exploded" }),
+      "Email notification failed",
+    );
+  });
+
   it("maps every HumanRequestReason to a distinct label via the email subject", async () => {
     fetchMock.mockResolvedValue({ ok: true, status: 200, text: vi.fn() });
     const svc = new NotificationService(

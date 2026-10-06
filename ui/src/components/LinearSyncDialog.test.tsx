@@ -372,6 +372,128 @@ describe("LinearSyncDialog", () => {
     expect(onClose).toHaveBeenCalledOnce();
   });
 
+  it("toggleOne can re-select an issue it previously deselected", async () => {
+    render(
+      <LinearSyncDialog open={true} onClose={vi.fn()} onIngested={vi.fn()} />,
+    );
+    await waitFor(() => expect(screen.getByText(issueA.title)).toBeDefined());
+
+    const checkboxes = screen.getAllByRole("checkbox");
+    await userEvent.click(checkboxes[1]); // deselect issueA
+    expect(screen.getByRole("button", { name: /^start 1 run$/i })).toBeDefined();
+
+    await userEvent.click(checkboxes[1]); // re-select issueA
+    expect(screen.getByRole("button", { name: /start 2 runs/i })).toBeDefined();
+  });
+
+  it("clears a pending min-delay auto-close timer when the dialog is closed and reopened", async () => {
+    const onClose = vi.fn();
+    const onIngestComplete = vi.fn();
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+
+    // First cycle never resolves over HTTP — only the SSE path matters here.
+    mockApi.ingestIssues.mockReturnValue(new Promise(() => {}));
+
+    const { rerender } = render(
+      <LinearSyncDialog
+        open={true}
+        onClose={onClose}
+        onIngested={vi.fn()}
+        onIngestComplete={onIngestComplete}
+      />,
+    );
+    await waitFor(() => expect(screen.getByText(issueA.title)).toBeDefined());
+
+    await user.click(screen.getByRole("button", { name: /start 2 runs/i }));
+    // Both issues observed via SSE immediately, but we're still inside the
+    // MIN_LOADER_MS window, so the close is scheduled rather than immediate.
+    fireSSE({ type: "run:created", runId: "run-a", issueId: issueA.id });
+    fireSSE({ type: "run:created", runId: "run-b", issueId: issueB.id });
+    expect(onClose).not.toHaveBeenCalled();
+
+    // Parent closes the dialog before the scheduled close can fire...
+    rerender(
+      <LinearSyncDialog
+        open={false}
+        onClose={onClose}
+        onIngested={vi.fn()}
+        onIngestComplete={onIngestComplete}
+      />,
+    );
+    // ...and reopens it. The reopen effect must clear the stale timer so it
+    // can never fire against the new (unrelated) dialog cycle.
+    mockApi.fetchPendingIssues.mockResolvedValue({ issues: [issueA, issueB] });
+    rerender(
+      <LinearSyncDialog
+        open={true}
+        onClose={onClose}
+        onIngested={vi.fn()}
+        onIngestComplete={onIngestComplete}
+      />,
+    );
+    await waitFor(() => expect(screen.getByText(issueA.title)).toBeDefined());
+
+    // Advance well past MIN_LOADER_MS — if the stale timer survived, this
+    // would spuriously close the freshly-reopened dialog.
+    await act(async () => {
+      vi.advanceTimersByTime(2000);
+    });
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it("fires an optimistic onIngestComplete from SSE, then an authoritative one once ingestIssues resolves", async () => {
+    const onClose = vi.fn();
+    const onIngested = vi.fn();
+    const onIngestComplete = vi.fn();
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+
+    let resolveIngest!: (v: { ok: boolean; started: string[]; skipped: string[] }) => void;
+    mockApi.ingestIssues.mockReturnValue(
+      new Promise((res) => {
+        resolveIngest = res;
+      }),
+    );
+
+    render(
+      <LinearSyncDialog
+        open={true}
+        onClose={onClose}
+        onIngested={onIngested}
+        onIngestComplete={onIngestComplete}
+      />,
+    );
+    await waitFor(() => expect(screen.getByText(issueA.title)).toBeDefined());
+
+    await user.click(screen.getByRole("button", { name: /start 2 runs/i }));
+
+    // SSE confirms both runs before the HTTP response lands.
+    fireSSE({ type: "run:created", runId: "run-a", issueId: issueA.id });
+    fireSSE({ type: "run:created", runId: "run-b", issueId: issueB.id });
+
+    await act(async () => {
+      vi.advanceTimersByTime(700);
+    });
+
+    await waitFor(() => {
+      expect(onClose).toHaveBeenCalledOnce();
+      // Optimistic summary, synthesized from the pending ids.
+      expect(onIngestComplete).toHaveBeenNthCalledWith(1, { started: 2, skipped: 0 });
+    });
+
+    // The authoritative HTTP response now resolves.
+    await act(async () => {
+      resolveIngest({ ok: true, started: [issueA.id, issueB.id], skipped: [] });
+    });
+
+    await waitFor(() => {
+      expect(onIngested).toHaveBeenCalledOnce();
+      expect(onIngestComplete).toHaveBeenCalledTimes(2);
+      expect(onIngestComplete).toHaveBeenNthCalledWith(2, { started: 2, skipped: 0 });
+    });
+    // onClose is only ever triggered once, from the SSE-driven path.
+    expect(onClose).toHaveBeenCalledOnce();
+  });
+
   it("renders nothing when open is false", () => {
     const { container } = render(
       <LinearSyncDialog open={false} onClose={vi.fn()} onIngested={vi.fn()} />,
