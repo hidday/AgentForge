@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { z } from "zod";
 import { OutputParser } from "../../src/runtime/outputParser.js";
 import { OutputParseError } from "../../src/utils/errors.js";
@@ -105,6 +105,30 @@ describe("OutputParser.parseJson()", () => {
   it("throws OutputParseError on empty-string input", () => {
     const parser = new OutputParser();
     expect(() => parser.parseJson("")).toThrow(OutputParseError);
+  });
+
+  it("stringifies a non-Error value thrown by JSON.parse via String(err)", () => {
+    const parser = new OutputParser();
+    // JSON.parse always throws a SyntaxError (an Error) in practice, so the
+    // non-Error branch of `err instanceof Error ? err.message : String(err)`
+    // is exercised here by making JSON.parse itself throw a plain value.
+    const parseSpy = vi.spyOn(JSON, "parse").mockImplementation(() => {
+      // eslint-disable-next-line @typescript-eslint/no-throw-literal
+      throw "weird-non-error-thrown-value";
+    });
+
+    try {
+      expect(() => parser.parseJson("{}")).toThrow(OutputParseError);
+      try {
+        parser.parseJson("{}");
+        expect.unreachable("should have thrown");
+      } catch (err) {
+        const e = err as OutputParseError;
+        expect(e.message).toBe("Failed to parse JSON: weird-non-error-thrown-value");
+      }
+    } finally {
+      parseSpy.mockRestore();
+    }
   });
 
   it("truncates the rawOutput head to the first 500 chars for long malformed blocks", () => {

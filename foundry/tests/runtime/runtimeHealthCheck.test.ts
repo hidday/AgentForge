@@ -168,6 +168,27 @@ describe("RuntimeHealthCheck.runPreflight()", () => {
     expect(claudeResult?.binaryCheck.error).toBe("ENOENT: spawn claude");
   });
 
+  it("stringifies a non-Error value thrown by processRunner.execute during the binary check", async () => {
+    const execute = vi.fn(async (opts: ProcessSpawnOptions) => {
+      if (opts.command === "claude" && opts.args.includes("--version")) {
+        // eslint-disable-next-line @typescript-eslint/no-throw-literal
+        throw "plain-string-binary-failure";
+      }
+      if (opts.command === "codex") {
+        if (opts.args.includes("--version")) return okResult("0.9.0");
+        return okResult("PONG received");
+      }
+      throw new Error(`unexpected command ${opts.command}`);
+    });
+
+    const health = new RuntimeHealthCheck({ execute } as never, configs, logger as never);
+    await expect(health.runPreflight()).rejects.toThrow(PreflightError);
+
+    const claudeResult = health.getLastResult()?.results.find((r) => r.runtime === "claude-code");
+    expect(claudeResult?.binaryCheck.ok).toBe(false);
+    expect(claudeResult?.binaryCheck.error).toBe("plain-string-binary-failure");
+  });
+
   it("truncates a multi-line version string to its first line, capped at 100 chars", async () => {
     const longLine = "v".repeat(150);
     const execute = vi.fn(async (opts: ProcessSpawnOptions) => {
@@ -252,6 +273,28 @@ describe("RuntimeHealthCheck.runPreflight()", () => {
     expect(claudeResult?.authCheck.error).toBe("socket hang up");
   });
 
+  it("stringifies a non-Error value thrown by processRunner.execute during the auth probe", async () => {
+    const execute = vi.fn(async (opts: ProcessSpawnOptions) => {
+      if (opts.command === "claude") {
+        if (opts.args.includes("--version")) return okResult("1.0.0");
+        // eslint-disable-next-line @typescript-eslint/no-throw-literal
+        throw "plain-string-auth-failure";
+      }
+      if (opts.command === "codex") {
+        if (opts.args.includes("--version")) return okResult("0.9.0");
+        return okResult("PONG received");
+      }
+      throw new Error(`unexpected command ${opts.command}`);
+    });
+
+    const health = new RuntimeHealthCheck({ execute } as never, configs, logger as never);
+    await expect(health.runPreflight()).rejects.toThrow(PreflightError);
+
+    const claudeResult = health.getLastResult()?.results.find((r) => r.runtime === "claude-code");
+    expect(claudeResult?.authCheck.ok).toBe(false);
+    expect(claudeResult?.authCheck.error).toBe("plain-string-auth-failure");
+  });
+
   describe("exitCodeOnly auth check (cursor-style config probed directly)", () => {
     const exitCodeOnlyConfigs = {
       "claude-code": configs["claude-code"],
@@ -309,6 +352,32 @@ describe("RuntimeHealthCheck.runPreflight()", () => {
       expect(codexResult?.authCheck.ok).toBe(false);
       expect(codexResult?.authCheck.error).toContain("Exit code 3");
       expect(codexResult?.authCheck.error).toContain("not logged in");
+    });
+
+    it("falls back to stdout in the error message when exitCodeOnly fails with empty stderr", async () => {
+      const execute = vi.fn(async (opts: ProcessSpawnOptions) => {
+        if (opts.command === "claude") {
+          if (opts.args.includes("--version")) return okResult("1.0.0");
+          return okResult('{"loggedIn": true}');
+        }
+        if (opts.command === "codex") {
+          if (opts.args.includes("--version")) return okResult("0.9.0");
+          // stderr is empty; the error message must fall back to stdout.
+          return okResult("denied: no active session", { exitCode: 3, stderr: "" });
+        }
+        throw new Error(`unexpected command ${opts.command}`);
+      });
+
+      const health = new RuntimeHealthCheck(
+        { execute } as never,
+        exitCodeOnlyConfigs as never,
+        logger as never,
+      );
+      await expect(health.runPreflight()).rejects.toThrow(PreflightError);
+      const codexResult = health.getLastResult()?.results.find((r) => r.runtime === "codex");
+      expect(codexResult?.authCheck.ok).toBe(false);
+      expect(codexResult?.authCheck.error).toContain("Exit code 3");
+      expect(codexResult?.authCheck.error).toContain("denied: no active session");
     });
   });
 

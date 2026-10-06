@@ -8,6 +8,16 @@ import {
   mkdirSync,
   rmSync,
 } from "node:fs";
+
+// Only readFileSync is wrapped (default: pass through to the real
+// implementation) so a single test can make it fail for one specific path,
+// deterministically exercising the synchronous try/catch guards around it in
+// ProcessRunner — without resorting to OS-dependent tricks (permissions,
+// directories-as-files) that risk unhandled stream errors or flakiness.
+vi.mock("node:fs", async () => {
+  const actual = await vi.importActual<typeof import("node:fs")>("node:fs");
+  return { ...actual, readFileSync: vi.fn(actual.readFileSync) };
+});
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ProcessRunner } from "../../src/runtime/processRunner.js";
@@ -105,6 +115,19 @@ describe("ProcessRunner constructor", () => {
     expect(existsSync(freshDir)).toBe(false);
     new ProcessRunner("real", makeMockLogger() as never, undefined, freshDir);
     expect(existsSync(freshDir)).toBe(true);
+  });
+
+  it("defaults to .foundry/processes (resolved from cwd) when no spoolDir is given", () => {
+    const defaultDir = join(process.cwd(), ".foundry", "processes");
+    const preExisted = existsSync(defaultDir);
+    try {
+      new ProcessRunner("real", makeMockLogger() as never, undefined, undefined);
+      expect(existsSync(defaultDir)).toBe(true);
+    } finally {
+      if (!preExisted) {
+        rmSync(join(process.cwd(), ".foundry"), { recursive: true, force: true });
+      }
+    }
   });
 });
 
@@ -288,6 +311,88 @@ describe("ProcessRunner.execute() — real mode, normal completion", () => {
       expect.anything(),
       "Process completed",
     );
+  });
+
+  it("includes only the last 500 characters of a large stdout chunk in the emitted process-output event", async () => {
+    const child = createFakeChild();
+    spawnMock.mockReturnValue(child);
+    const emitter = makeMockEmitter();
+    const runner = new ProcessRunner("real", makeMockLogger() as never, emitter as never, spoolDir);
+    const context = makeContext();
+
+    const resultPromise = runner.execute(baseOptions({ context }));
+
+    const bigChunk = "y".repeat(600) + "[END]";
+    child.stdout.emit("data", Buffer.from(bigChunk));
+
+    expect(emitter.emitProcessOutput).toHaveBeenCalledTimes(1);
+    const [, , emittedChunk] = emitter.emitProcessOutput.mock.calls[0]!;
+    expect(emittedChunk.length).toBe(500);
+    expect(emittedChunk.endsWith("[END]")).toBe(true);
+    expect(emittedChunk.startsWith("y")).toBe(true);
+
+    child.emit("close", 0);
+    await resultPromise;
+  });
+
+  it("does not double-count emitProcessCompleted when close fires after an error already cleaned up the process", async () => {
+    const child = createFakeChild();
+    spawnMock.mockReturnValue(child);
+    const emitter = makeMockEmitter();
+    const logger = makeMockLogger();
+    const runner = new ProcessRunner("real", logger as never, emitter as never, spoolDir);
+    const context = makeContext();
+
+    const resultPromise = runner.execute(baseOptions({ context }));
+    expect(runner.getActiveProcesses()).toHaveLength(1);
+
+    child.emit("error", new Error("boom"));
+    await expect(resultPromise).rejects.toThrow("boom");
+
+    expect(emitter.emitProcessCompleted).toHaveBeenCalledTimes(1);
+    expect(runner.getActiveProcesses()).toHaveLength(0);
+
+    // Simulate Node also emitting "close" after "error" for the same child.
+    // cleanupProcess's `if (!entry) return;` guard must prevent a second
+    // completion event / crash since the entry was already removed above.
+    expect(() => child.emit("close", 1)).not.toThrow();
+    expect(emitter.emitProcessCompleted).toHaveBeenCalledTimes(1);
+    expect(logger.info).toHaveBeenCalledWith(
+      expect.objectContaining({ command: "echo" }),
+      "Process completed",
+    );
+  });
+
+  it("swallows a manifest read/write failure in cleanupProcess (best-effort update) and still completes normally", async () => {
+    const child = createFakeChild();
+    spawnMock.mockReturnValue(child);
+    const emitter = makeMockEmitter();
+    const runner = new ProcessRunner("real", makeMockLogger() as never, emitter as never, spoolDir);
+    const context = makeContext();
+
+    const resultPromise = runner.execute(baseOptions({ context }));
+    const processId = runner.getActiveProcesses()[0]!.id;
+    const manifestPath = join(spoolDir, `${processId}.json`);
+    expect(existsSync(manifestPath)).toBe(true);
+
+    // Replace the manifest file with a directory so readFileSync in
+    // cleanupProcess throws (EISDIR), exercising the best-effort catch.
+    rmSync(manifestPath, { force: true });
+    mkdirSync(manifestPath);
+
+    child.emit("close", 0);
+    const result = await resultPromise;
+
+    expect(result.exitCode).toBe(0);
+    expect(emitter.emitProcessCompleted).toHaveBeenCalledWith(
+      context.runId,
+      processId,
+      context.stage,
+      context.runtime,
+      0,
+      expect.any(Number),
+    );
+    expect(runner.getActiveProcesses()).toHaveLength(0);
   });
 });
 
@@ -683,6 +788,223 @@ describe("ProcessRunner.rehydrateOrphans()", () => {
       const finalManifest = JSON.parse(readFileSync(join(spoolDir, "orphan-alive.json"), "utf-8"));
       expect(finalManifest.exitCode).toBe(-1);
       expect(typeof finalManifest.completedAt).toBe("string");
+    } finally {
+      killSpy.mockRestore();
+    }
+  });
+
+  it("falls back to an empty rolling buffer when the orphan's log file cannot be read", async () => {
+    vi.useFakeTimers();
+    const logger = makeMockLogger();
+    const emitter = makeMockEmitter();
+    const runner = new ProcessRunner("real", logger as never, emitter as never, spoolDir);
+
+    // A real, readable file on disk (so createWriteStream's append and
+    // fs.watch both behave normally, with no risk of an unhandled stream
+    // error or OS-dependent directory-watch semantics). We selectively make
+    // *readFileSync* fail for this specific path to deterministically exercise
+    // the two synchronous try/catch guards around it: the orphan rehydration's
+    // initial rollingBuffer hydration, and tailLogForOrphan's initial lastSize
+    // read. Neither of these is the live fs.watch change-callback itself.
+    const logPath = join(spoolDir, "orphan-unreadable.log");
+    writeFileSync(logPath, "existing content");
+
+    const manifest = {
+      id: "orphan-unreadable",
+      pid: process.pid,
+      command: "claude",
+      args: [],
+      runId: "run-unreadable",
+      stage: "executor",
+      runtime: "claude-code",
+      startedAt: new Date().toISOString(),
+      logFile: logPath,
+    };
+    writeFileSync(join(spoolDir, "orphan-unreadable.json"), JSON.stringify(manifest));
+
+    const { readFileSync: actualReadFileSync } =
+      await vi.importActual<typeof import("node:fs")>("node:fs");
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (readFileSync as any).mockImplementation((...args: any[]) => {
+      if (args[0] === logPath) {
+        throw new Error("Simulated unreadable log file");
+      }
+      return actualReadFileSync(...(args as Parameters<typeof actualReadFileSync>));
+    });
+
+    const killSpy = vi.spyOn(process, "kill").mockImplementation(((pid: number) => {
+      if (pid === process.pid) return true as never;
+      throw new Error("ESRCH");
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    }) as any);
+
+    try {
+      runner.rehydrateOrphans();
+
+      expect(runner.getActiveProcesses()).toHaveLength(1);
+      // rollingBuffer stayed "" because both reads of logPath failed above.
+      expect(runner.getProcessOutput("orphan-unreadable")).toBe("");
+
+      // Drain the poll interval deterministically so no real timer/watcher
+      // leaks past this test.
+      killSpy.mockImplementation(() => {
+        throw new Error("ESRCH");
+      });
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(runner.getActiveProcesses()).toHaveLength(0);
+    } finally {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (readFileSync as any).mockImplementation(actualReadFileSync);
+      killSpy.mockRestore();
+    }
+  });
+
+  it("logs a non-Error thrown value via String(err) when rehydrating a manifest fails for a non-Error reason", () => {
+    const logger = makeMockLogger();
+    const throwingEmitter = {
+      emitProcessStarted: vi.fn(() => {
+        // eslint-disable-next-line @typescript-eslint/no-throw-literal
+        throw "boom-plain-string";
+      }),
+      emitProcessOutput: vi.fn(),
+      emitProcessCompleted: vi.fn(),
+    };
+    const runner = new ProcessRunner("real", logger as never, throwingEmitter as never, spoolDir);
+
+    const logPath = join(spoolDir, "orphan-throws.log");
+    writeFileSync(logPath, "some log content");
+
+    const manifest = {
+      id: "orphan-throws",
+      pid: process.pid,
+      command: "claude",
+      args: [],
+      runId: "run-throws",
+      stage: "executor",
+      runtime: "claude-code",
+      startedAt: new Date().toISOString(),
+      logFile: logPath,
+    };
+    writeFileSync(join(spoolDir, "orphan-throws.json"), JSON.stringify(manifest));
+
+    expect(() => runner.rehydrateOrphans()).not.toThrow();
+
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.objectContaining({ file: "orphan-throws.json", error: "boom-plain-string" }),
+      "Failed to process manifest",
+    );
+  });
+
+  it("defaults to pid 0 and returns early from finalizeOrphan when the active entry has already been removed before the liveness poll fires", async () => {
+    vi.useFakeTimers();
+    const logger = makeMockLogger();
+    const emitter = makeMockEmitter();
+    const runner = new ProcessRunner("real", logger as never, emitter as never, spoolDir);
+
+    const logPath = join(spoolDir, "orphan-earlyexit.log");
+    writeFileSync(logPath, "log content");
+
+    const manifest = {
+      id: "orphan-earlyexit",
+      pid: process.pid,
+      command: "claude",
+      args: [],
+      runId: "run-earlyexit",
+      stage: "executor",
+      runtime: "claude-code",
+      startedAt: new Date().toISOString(),
+      logFile: logPath,
+    };
+    writeFileSync(join(spoolDir, "orphan-earlyexit.json"), JSON.stringify(manifest));
+
+    const killSpy = vi.spyOn(process, "kill").mockImplementation(((pid: number) => {
+      if (pid === process.pid) return true as never;
+      // The poll fallback (`?.pid ?? 0`) calls kill(0, 0) once the entry is
+      // gone; make that throw so the catch path (finalizeOrphan) runs.
+      throw new Error("ESRCH");
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    }) as any);
+
+    try {
+      runner.rehydrateOrphans();
+      expect(runner.getActiveProcesses()).toHaveLength(1);
+
+      // Simulate the entry having already been cleaned up through another
+      // path by the time the next liveness poll tick runs.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (runner as any).activeProcesses.delete("orphan-earlyexit");
+
+      await vi.advanceTimersByTimeAsync(5_000);
+
+      expect(killSpy).toHaveBeenCalledWith(0, 0);
+      // finalizeOrphan's `if (!entry) return;` guard means no completion
+      // event fires and nothing is logged for an already-gone entry.
+      expect(emitter.emitProcessCompleted).not.toHaveBeenCalled();
+      expect(logger.info).not.toHaveBeenCalledWith(
+        expect.objectContaining({ processId: "orphan-earlyexit" }),
+        "Orphaned process has exited",
+      );
+    } finally {
+      killSpy.mockRestore();
+    }
+  });
+
+  it("swallows a manifest read/write failure in finalizeOrphan (best-effort update) and still emits completion", async () => {
+    vi.useFakeTimers();
+    const logger = makeMockLogger();
+    const emitter = makeMockEmitter();
+    const runner = new ProcessRunner("real", logger as never, emitter as never, spoolDir);
+
+    const logPath = join(spoolDir, "orphan-badmanifest.log");
+    writeFileSync(logPath, "log content");
+    const manifestPath = join(spoolDir, "orphan-badmanifest.json");
+
+    const manifest = {
+      id: "orphan-badmanifest",
+      pid: process.pid,
+      command: "claude",
+      args: [],
+      runId: "run-badmanifest",
+      stage: "executor",
+      runtime: "claude-code",
+      startedAt: new Date().toISOString(),
+      logFile: logPath,
+    };
+    writeFileSync(manifestPath, JSON.stringify(manifest));
+
+    let killCallCount = 0;
+    const killSpy = vi.spyOn(process, "kill").mockImplementation(((pid: number) => {
+      killCallCount += 1;
+      if (killCallCount > 1) {
+        throw new Error("ESRCH");
+      }
+      return true as never;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    }) as any);
+
+    try {
+      runner.rehydrateOrphans();
+      expect(runner.getActiveProcesses()).toHaveLength(1);
+
+      // Remove the manifest file out from under finalizeOrphan so its
+      // readFileSync throws (ENOENT) and the best-effort catch is hit.
+      rmSync(manifestPath, { force: true });
+
+      await vi.advanceTimersByTimeAsync(5_000);
+
+      expect(runner.getActiveProcesses()).toHaveLength(0);
+      expect(emitter.emitProcessCompleted).toHaveBeenCalledWith(
+        "run-badmanifest",
+        "orphan-badmanifest",
+        "executor",
+        "claude-code",
+        -1,
+        expect.any(Number),
+      );
+      expect(logger.info).toHaveBeenCalledWith(
+        expect.objectContaining({ processId: "orphan-badmanifest" }),
+        "Orphaned process has exited",
+      );
     } finally {
       killSpy.mockRestore();
     }
