@@ -9,6 +9,12 @@ describe("Markdown", () => {
     expect(heading.textContent).toBe("Hello");
   });
 
+  it("renders a level-2 heading as an h2 element", () => {
+    render(<Markdown>## Section heading</Markdown>);
+    const heading = screen.getByRole("heading", { level: 2 });
+    expect(heading.textContent).toBe("Section heading");
+  });
+
   it("renders a level-3 heading as an h3 element", () => {
     render(<Markdown>### Sub heading</Markdown>);
     const heading = screen.getByRole("heading", { level: 3 });

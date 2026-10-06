@@ -93,6 +93,9 @@ describe("RunDetailPage", () => {
     vi.clearAllMocks();
     mockUseRunSkills.mockReturnValue(defaultSkills);
     mockUseActiveProcesses.mockReturnValue(defaultProcesses);
+    // jsdom does not implement scrollIntoView; stub it so the
+    // scrollToQuestions handler can run without throwing.
+    Element.prototype.scrollIntoView = vi.fn();
   });
 
   it("renders a loading indicator while the run is loading", () => {
@@ -189,7 +192,7 @@ describe("RunDetailPage", () => {
     expect(screen.getByText("issue-ab")).toBeDefined();
   });
 
-  it("shows the open questions panel for HumanClarificationNeeded state with required questions", () => {
+  it("shows the open questions panel for HumanClarificationNeeded state with required questions", async () => {
     const run = makeRun({ state: "HumanClarificationNeeded" });
     const artifacts: Artifact[] = [
       {
@@ -219,7 +222,13 @@ describe("RunDetailPage", () => {
     expect(panel).toBeDefined();
     expect(screen.getAllByText("What auth method?").length).toBeGreaterThan(0);
     // Required question -> Answer Questions action bar button should appear.
-    expect(screen.getByRole("button", { name: /answer questions/i })).toBeDefined();
+    const answerBtn = screen.getByRole("button", { name: /answer questions/i });
+    expect(answerBtn).toBeDefined();
+
+    // Clicking it triggers the scrollToQuestions handler; it should not throw
+    // even though jsdom's scrollIntoView is a no-op stub.
+    const user = userEvent.setup();
+    await user.click(answerBtn);
   });
 
   it("shows optional questions panel for AwaitingPlanApproval state and hides it when there are none", () => {

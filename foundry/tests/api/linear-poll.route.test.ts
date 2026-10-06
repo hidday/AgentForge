@@ -147,4 +147,18 @@ describe("POST /api/linear/ingest", () => {
     expect(res.statusCode).toBe(500);
     expect(res.json()).toEqual({ error: "db unavailable" });
   });
+
+  it("returns 500 with a stringified message when a non-Error is thrown", async () => {
+    const startRunsForIssues = vi.fn().mockRejectedValue("raw string failure");
+    const { app } = await buildApp({ startRunsForIssues });
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/linear/ingest",
+      payload: { issueIds: ["LIN-1"] },
+    });
+
+    expect(res.statusCode).toBe(500);
+    expect(res.json()).toEqual({ error: "raw string failure" });
+  });
 });

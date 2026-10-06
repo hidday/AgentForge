@@ -93,6 +93,19 @@ describe("POST /api/runs/:id/actions/approve-review", () => {
     expect(res.statusCode).toBe(400);
     expect(res.json()).toEqual({ error: "wrong state" });
   });
+
+  it("returns 400 with a stringified message when a non-Error is thrown", async () => {
+    const { app, mockOrchestrator } = await buildApp();
+    mockOrchestrator.approveHumanReview.mockRejectedValue("raw string failure");
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/actions/approve-review",
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toEqual({ error: "raw string failure" });
+  });
 });
 
 describe("POST /api/runs/:id/actions/pause", () => {
@@ -133,6 +146,18 @@ describe("POST /api/runs/:id/actions/pause", () => {
     expect(res.statusCode).toBe(400);
     expect(res.json()).toEqual({ error: "no linear client configured" });
   });
+
+  it("returns 400 with a stringified message when a non-Error is thrown", async () => {
+    const run = makeRun();
+    const { app, mockRunRepo, mockOrchestrator } = await buildApp();
+    mockRunRepo.findById.mockResolvedValue(run);
+    mockOrchestrator.handleCommand.mockRejectedValue("raw string failure");
+
+    const res = await app.inject({ method: "POST", url: "/api/runs/run-1/actions/pause" });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toEqual({ error: "raw string failure" });
+  });
 });
 
 describe("POST /api/runs/:id/actions/resume", () => {
@@ -172,5 +197,17 @@ describe("POST /api/runs/:id/actions/resume", () => {
 
     expect(res.statusCode).toBe(400);
     expect(res.json()).toEqual({ error: "boom" });
+  });
+
+  it("returns 400 with a stringified message when a non-Error is thrown", async () => {
+    const run = makeRun();
+    const { app, mockRunRepo, mockOrchestrator } = await buildApp();
+    mockRunRepo.findById.mockResolvedValue(run);
+    mockOrchestrator.handleCommand.mockRejectedValue("raw string failure");
+
+    const res = await app.inject({ method: "POST", url: "/api/runs/run-1/actions/resume" });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toEqual({ error: "raw string failure" });
   });
 });

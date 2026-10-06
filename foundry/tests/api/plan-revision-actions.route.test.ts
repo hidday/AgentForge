@@ -104,6 +104,22 @@ describe("POST /api/runs/:id/actions/re-review-plan", () => {
     await new Promise((resolve) => setImmediate(resolve));
     expect(mockOrchestrator.runManualReReview).toHaveBeenCalled();
   });
+
+  it("logs a stringified message when the fire-and-forget promise rejects with a non-Error", async () => {
+    const { app, mockOrchestrator } = await buildApp({
+      runManualReReview: vi.fn().mockRejectedValue("raw string failure"),
+    });
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/actions/re-review-plan",
+      payload: {},
+    });
+
+    expect(res.statusCode).toBe(200);
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(mockOrchestrator.runManualReReview).toHaveBeenCalled();
+  });
 });
 
 describe("POST /api/runs/:id/actions/revise-plan", () => {
@@ -158,5 +174,38 @@ describe("POST /api/runs/:id/actions/revise-plan", () => {
     expect(res.statusCode).toBe(200);
     await new Promise((resolve) => setImmediate(resolve));
     expect(mockOrchestrator.runManualPlanRevision).toHaveBeenCalled();
+  });
+
+  it("logs a stringified message when the fire-and-forget promise rejects with a non-Error", async () => {
+    const { app, mockOrchestrator } = await buildApp({
+      runManualPlanRevision: vi.fn().mockRejectedValue("raw string failure"),
+    });
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/actions/revise-plan",
+      payload: {},
+    });
+
+    expect(res.statusCode).toBe(200);
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(mockOrchestrator.runManualPlanRevision).toHaveBeenCalled();
+  });
+
+  it("returns 400 with a stringified message when a non-Error is thrown synchronously", async () => {
+    const { app } = await buildApp({
+      runManualPlanRevision: vi.fn(() => {
+        throw "boom";
+      }),
+    });
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/actions/revise-plan",
+      payload: {},
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toEqual({ error: "boom" });
   });
 });

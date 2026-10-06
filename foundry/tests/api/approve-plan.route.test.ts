@@ -186,4 +186,22 @@ describe("POST /api/runs/:id/actions/approve-plan", () => {
     await new Promise((resolve) => setImmediate(resolve));
     expect(mockOrchestrator.runExecution).toHaveBeenCalled();
   });
+
+  it("logs a stringified message when the fire-and-forget runExecution rejects with a non-Error", async () => {
+    const run = makeRun();
+    const { app, mockOrchestrator } = await buildApp({
+      runExecution: vi.fn().mockRejectedValue("raw string failure"),
+    });
+    mockOrchestrator.approvePlan.mockResolvedValue(run);
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/actions/approve-plan",
+      payload: {},
+    });
+
+    expect(res.statusCode).toBe(200);
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(mockOrchestrator.runExecution).toHaveBeenCalled();
+  });
 });

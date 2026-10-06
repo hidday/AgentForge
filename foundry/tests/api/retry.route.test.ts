@@ -133,4 +133,18 @@ describe("POST /api/runs/:id/actions/retry", () => {
     await new Promise((resolve) => setImmediate(resolve));
     expect(mockOrchestrator.retryRun).toHaveBeenCalledWith("run-1");
   });
+
+  it("logs a stringified message when the fire-and-forget retry promise rejects with a non-Error", async () => {
+    const run = makeRun(RunState.Todo);
+    const { app, mockRunRepo, mockOrchestrator } = await buildApp({
+      retryRun: vi.fn().mockRejectedValue("raw string failure"),
+    });
+    mockRunRepo.findById.mockResolvedValue(run);
+
+    const res = await app.inject({ method: "POST", url: "/api/runs/run-1/actions/retry" });
+
+    expect(res.statusCode).toBe(200);
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(mockOrchestrator.retryRun).toHaveBeenCalledWith("run-1");
+  });
 });
