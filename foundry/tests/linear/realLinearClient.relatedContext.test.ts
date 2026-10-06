@@ -209,6 +209,30 @@ describe("RealLinearClient.getRelatedContext", () => {
     expect(ctx.blockers[0].id).toBe("blocker-id");
   });
 
+  it("filters out a blocker relation whose issue fails to hydrate, keeping the others", async () => {
+    const goodBlocker = makeFakeIssue({ id: "blocker-id", identifier: "PRY-101" });
+    const brokenRelationIssue = Promise.reject(new Error("network error"));
+    const focus = makeFakeIssue({
+      id: "focus-id",
+      parent: Promise.resolve(null),
+      inverseRelations: () =>
+        Promise.resolve({
+          nodes: [
+            { id: "rel-broken", type: "blocks", issue: brokenRelationIssue },
+            { id: "rel-ok", type: "blocks", issue: Promise.resolve(goodBlocker) },
+          ],
+        }),
+    });
+
+    issuesById.set("focus-id", focus);
+    issuesById.set("blocker-id", goodBlocker);
+
+    const ctx = await client.getRelatedContext("focus-id");
+
+    expect(ctx.blockers).toHaveLength(1);
+    expect(ctx.blockers[0].id).toBe("blocker-id");
+  });
+
   it("treats null description as empty string", async () => {
     const parent = makeFakeIssue({
       id: "parent-id",

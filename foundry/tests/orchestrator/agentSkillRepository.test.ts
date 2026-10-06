@@ -258,11 +258,15 @@ describe("AgentSkillRepository", () => {
     it("scores active skills by relevance and returns the top k as SkillDocuments, sorted descending", async () => {
       const relevant = makeSkill({
         id: "relevant",
+        name: "auth-middleware",
+        description: "Use when adding or changing auth middleware in this repo.",
         taskCategory: "auth middleware",
         skillMarkdown: "Use JWT tokens with RS256 for stateless auth middleware.",
       });
       const irrelevant = makeSkill({
         id: "irrelevant",
+        name: "database-pool-tuning",
+        description: "Use when tuning database connection pool size.",
         taskCategory: "database optimization",
         skillMarkdown: "Always cache DB connections and tune pool size.",
       });

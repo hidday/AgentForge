@@ -195,6 +195,35 @@ describe("ExecutorAgent.run()", () => {
     expect(githubClient.createDraftPR).not.toHaveBeenCalled();
   });
 
+  it("logs isRetry=true when only existingBranch is set on retry (no existingPR)", async () => {
+    const { agent, logger, githubClient } = buildAgent();
+
+    await agent.run(makePlan(), makeTaskBundle(), "run-1", { existingBranch: "ai/lin-1" });
+
+    const startLog = logger.info.mock.calls.find(
+      (c: unknown[]) => c[1] === "Starting executor agent",
+    );
+    const payload = startLog?.[0] as Record<string, unknown> | undefined;
+    expect(payload?.isRetry).toBe(true);
+    // No existingPR, so a new draft PR should still be created.
+    expect(githubClient.createDraftPR).toHaveBeenCalledTimes(1);
+  });
+
+  it("logs isRetry=false when a retry context is passed but has neither existingBranch nor existingPR", async () => {
+    const { agent, logger } = buildAgent();
+
+    await agent.run(makePlan(), makeTaskBundle(), "run-1", {
+      existingBranch: null,
+      existingPR: null,
+    });
+
+    const startLog = logger.info.mock.calls.find(
+      (c: unknown[]) => c[1] === "Starting executor agent",
+    );
+    const payload = startLog?.[0] as Record<string, unknown> | undefined;
+    expect(payload?.isRetry).toBe(false);
+  });
+
   it("injects the operator note into the user prompt and logs hasOperatorNote=true", async () => {
     const { agent, getUserPrompt, logger } = buildAgent();
 

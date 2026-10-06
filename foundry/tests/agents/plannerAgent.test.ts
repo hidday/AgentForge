@@ -307,6 +307,57 @@ describe("PlannerAgent.run()", () => {
     });
   });
 
+  describe("planReviewFindings injection", () => {
+    it("renders '## AI Plan Review Findings' with the summary and each finding line", async () => {
+      const { agent, getPrompt } = buildPlannerAgent();
+      const bundle = makeTaskBundle();
+
+      await agent.run(bundle, "run-1", {
+        planReviewFindings: {
+          summary: "Plan is mostly solid but missing rollback steps.",
+          findings: [
+            {
+              id: "f1",
+              severity: "important",
+              title: "No rollback plan",
+              details: "Migration step has no documented rollback.",
+            },
+            {
+              id: "f2",
+              severity: "nit",
+              title: "Vague step description",
+              details: "Step 2 could be more specific.",
+            },
+          ],
+        },
+      });
+
+      const prompt = getPrompt();
+      expect(prompt).toContain("## AI Plan Review Findings (from previous plan)");
+      expect(prompt).toContain(
+        "**Review Summary:** Plan is mostly solid but missing rollback steps.",
+      );
+      expect(prompt).toContain(
+        "- **[important] No rollback plan** (f1): Migration step has no documented rollback.",
+      );
+      expect(prompt).toContain(
+        "- **[nit] Vague step description** (f2): Step 2 could be more specific.",
+      );
+      expect(prompt).toContain("Incorporate these findings into the revised plan where appropriate.");
+    });
+
+    it("does NOT include the planReviewSection when planReviewFindings is absent", async () => {
+      const { agent, getPrompt } = buildPlannerAgent();
+      const bundle = makeTaskBundle();
+
+      await agent.run(bundle, "run-1");
+
+      const prompt = getPrompt();
+      expect(prompt).not.toContain("AI Plan Review Findings");
+      expect(prompt).not.toContain("{{planReviewSection}}");
+    });
+  });
+
   describe("previousPlan injection", () => {
     function makePreviousPlan(overrides: Partial<Plan> = {}): Plan {
       return {
