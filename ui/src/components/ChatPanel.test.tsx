@@ -292,4 +292,29 @@ describe("ChatPanel", () => {
       window.HTMLElement.prototype.scrollIntoView = originalScrollIntoView as never;
     }
   });
+
+  it("renders an empty message body when the ChatMessage payload has no content field", () => {
+    const artifacts: Artifact[] = [
+      { ...makeArtifact("user", "", "a1", "2024-01-01T00:00:01Z"), payloadJson: { role: "user" } },
+    ];
+    const { container } = render(<ChatPanel runId={RUN_ID} artifacts={artifacts} />);
+
+    // One message bubble is rendered, with no visible text content.
+    const bubble = container.querySelector(".whitespace-pre-wrap");
+    expect(bubble).not.toBeNull();
+    expect(bubble?.textContent).toBe("");
+  });
+
+  it("falls back to a generic error message when sendChatMessage rejects with a non-Error value", async () => {
+    mockApi.sendChatMessage.mockRejectedValue("network dropped");
+
+    render(<ChatPanel runId={RUN_ID} artifacts={[]} />);
+    const input = screen.getByPlaceholderText(/ask the agent/i);
+    await userEvent.type(input, "Failing question");
+    await userEvent.click(screen.getByRole("button", { name: /send/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText("Chat request failed")).toBeDefined();
+    });
+  });
 });

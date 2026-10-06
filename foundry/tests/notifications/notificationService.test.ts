@@ -315,6 +315,26 @@ describe("NotificationService.sendHumanRequest", () => {
     expect(actionsBlock.elements).toHaveLength(1);
   });
 
+  it("omits the Linear issue link from the email HTML body when linearIssue.url is absent", async () => {
+    fetchMock.mockResolvedValue({ ok: true, status: 200, text: vi.fn() });
+
+    const svc = new NotificationService(
+      { emailFrom: "a@b.com", emailTo: "dev@b.com", resendApiKey: "key" },
+      makeLogger(),
+    );
+    const payload = makePayload({
+      linearIssue: { id: "raw-id-2", title: "No link issue", url: null },
+    });
+
+    await svc.sendHumanRequest(payload);
+
+    const [, init] = fetchMock.mock.calls[0];
+    const body = JSON.parse(init.body);
+    expect(body.html).not.toContain("Open Linear issue");
+    expect(body.html).toContain("Open run");
+    expect(body.text).not.toContain("Linear:");
+  });
+
   it("maps every HumanRequestReason to a distinct label via the email subject", async () => {
     fetchMock.mockResolvedValue({ ok: true, status: 200, text: vi.fn() });
     const svc = new NotificationService(
