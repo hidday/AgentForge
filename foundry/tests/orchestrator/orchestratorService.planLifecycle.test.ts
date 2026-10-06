@@ -9,6 +9,40 @@ import {
   makePlanReview,
   buildFullDeps,
 } from "./testHelpers.js";
+import type { Plan } from "../../src/schemas/plan.js";
+import type { PlanReview } from "../../src/schemas/planReview.js";
+
+/**
+ * In production, PlannerAgent/PlanReviewerAgent/PlanReviserAgent persist
+ * their own artifacts (orchestratorService only reads them back via
+ * artifactRepo.findLatestByType). These helpers make the mocked agent "run"
+ * also write into the same in-memory store used by findLatestByType.
+ */
+function wirePlanner(built: ReturnType<typeof buildFullDeps>, plan: Plan) {
+  built.plannerAgent.run.mockImplementation(async () => {
+    await built.artifactRepo.create({
+      runId: "run-1",
+      type: "Plan",
+      version: plan.planVersion,
+      payloadJson: plan,
+      rawText: JSON.stringify(plan),
+    });
+    return plan;
+  });
+}
+
+function wirePlanReviewer(built: ReturnType<typeof buildFullDeps>, planReview: PlanReview) {
+  built.planReviewerAgent.run.mockImplementation(async () => {
+    await built.artifactRepo.create({
+      runId: "run-1",
+      type: "PlanReview",
+      version: 1,
+      payloadJson: planReview,
+      rawText: JSON.stringify(planReview),
+    });
+    return planReview;
+  });
+}
 
 describe("OrchestratorService -- getters", () => {
   it("exposes the underlying dependency instances via their getters", () => {
@@ -296,9 +330,8 @@ describe("OrchestratorService.runManualPlanRevision", () => {
       run,
       artifacts: [makeArtifact({ type: "Plan", version: 1, payloadJson: plan })],
     });
-    built.planReviewerAgent.run.mockResolvedValue(
-      makePlanReview({ overallVerdict: "changes_requested", findings: [] }),
-    );
+    const planReview = makePlanReview({ overallVerdict: "changes_requested", findings: [] });
+    wirePlanReviewer(built, planReview);
     built.planReviserAgent.run.mockResolvedValue({
       revision: { dispositions: [] },
       revisedPlan: makePlan({ planVersion: 2 }),
@@ -336,15 +369,15 @@ describe("OrchestratorService.runManualPlanRevision", () => {
 
 describe("OrchestratorService.runPlanning (retry planning)", () => {
   it("re-runs the planner with planVersionOverride = planVersion + 1 and injects prior context artifacts", async () => {
-    const run = makeRun({ state: RunState.HumanClarificationNeeded, planVersion: 2 });
+    const run = makeRun({ state: RunState.Planning, planVersion: 2 });
     const previousPlan = makePlan({ planVersion: 2 });
     const built = buildFullDeps({
       run,
       artifacts: [makeArtifact({ type: "Plan", version: 2, payloadJson: previousPlan })],
     });
     const newPlan = makePlan({ planVersion: 3, openQuestions: [] });
-    built.plannerAgent.run.mockResolvedValue(newPlan);
-    built.planReviewerAgent.run.mockResolvedValue(makePlanReview({ overallVerdict: "approved" }));
+    wirePlanner(built, newPlan);
+    wirePlanReviewer(built, makePlanReview({ overallVerdict: "approved" }));
 
     const svc = new OrchestratorService(built.deps as never);
     const result = await svc.runPlanning("run-1");
@@ -358,7 +391,7 @@ describe("OrchestratorService.runPlanning (retry planning)", () => {
   });
 
   it("pauses for human clarification again when the re-plan still has blocking questions", async () => {
-    const run = makeRun({ state: RunState.HumanClarificationNeeded, planVersion: 1 });
+    const run = makeRun({ state: RunState.Planning, planVersion: 1 });
     const previousPlan = makePlan({ planVersion: 1 });
     const built = buildFullDeps({
       run,
@@ -383,8 +416,8 @@ describe("OrchestratorService.retryRun", () => {
     const run = makeRun({ state: RunState.Todo, branchName: null, planVersion: 1 });
     const built = buildFullDeps({ run });
     const newPlan = makePlan({ planVersion: 2, openQuestions: [] });
-    built.plannerAgent.run.mockResolvedValue(newPlan);
-    built.planReviewerAgent.run.mockResolvedValue(makePlanReview({ overallVerdict: "approved" }));
+    wirePlanner(built, newPlan);
+    wirePlanReviewer(built, makePlanReview({ overallVerdict: "approved" }));
     built.repoRegistry.getRepoByName.mockReturnValue({
       name: "test-repo",
       defaultBranch: "main",
@@ -409,8 +442,8 @@ describe("OrchestratorService.retryRun", () => {
     const run = makeRun({ state: RunState.Todo, branchName: "ai/run-1", planVersion: 1 });
     const built = buildFullDeps({ run });
     const newPlan = makePlan({ planVersion: 2, openQuestions: [] });
-    built.plannerAgent.run.mockResolvedValue(newPlan);
-    built.planReviewerAgent.run.mockResolvedValue(makePlanReview({ overallVerdict: "approved" }));
+    wirePlanner(built, newPlan);
+    wirePlanReviewer(built, makePlanReview({ overallVerdict: "approved" }));
 
     const svc = new OrchestratorService(built.deps as never);
     await svc.retryRun("run-1");

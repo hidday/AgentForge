@@ -204,6 +204,62 @@ describe("useActiveProcesses", () => {
     expect(result.current.output).toBe("");
   });
 
+  it("uses fallback defaults for optional fields missing from a 'process:started' event", async () => {
+    mockApi.getActiveProcesses.mockResolvedValue({ processes: [] });
+    const { result } = renderHook(() => useActiveProcesses(RUN_ID));
+    await waitFor(() => expect(mockApi.getActiveProcesses).toHaveBeenCalled());
+
+    const before = Date.now();
+    act(() => {
+      // Deliberately omit processId/command/stage/runtime/timestamp to exercise
+      // the `?? ""` / `?? new Date().toISOString()` fallback branches.
+      sseHandler!({ type: "process:started", runId: RUN_ID });
+    });
+    const after = Date.now();
+
+    expect(result.current.processes).toHaveLength(1);
+    const entry = result.current.processes[0]!;
+    expect(entry.id).toBe("");
+    expect(entry.command).toBe("");
+    expect(entry.stage).toBe("");
+    expect(entry.runtime).toBe("");
+    expect(entry.pid).toBe(0);
+    expect(entry.elapsedMs).toBe(0);
+    // startedAt falls back to "now" when no timestamp is given.
+    const startedAtMs = new Date(entry.startedAt).getTime();
+    expect(startedAtMs).toBeGreaterThanOrEqual(before);
+    expect(startedAtMs).toBeLessThanOrEqual(after);
+  });
+
+  it("does not update state after unmount when getProcessOutput resolves late (cancelled guard)", async () => {
+    const proc = process("p1");
+    mockApi.getActiveProcesses.mockResolvedValue({ processes: [proc] });
+
+    let resolveOutput!: (v: { processId: string; output: string }) => void;
+    mockApi.getProcessOutput.mockReturnValue(
+      new Promise((res) => {
+        resolveOutput = res;
+      }),
+    );
+
+    const { result, unmount } = renderHook(() => useActiveProcesses(RUN_ID));
+
+    // Wait for the initial processes fetch to resolve and getProcessOutput to be invoked.
+    await waitFor(() => expect(mockApi.getProcessOutput).toHaveBeenCalledWith("p1"));
+    expect(result.current.processes).toEqual([proc]);
+
+    // Unmount before the in-flight getProcessOutput call resolves.
+    unmount();
+
+    await act(async () => {
+      resolveOutput({ processId: "p1", output: "late output" });
+      await Promise.resolve();
+    });
+
+    // Output must not have been applied post-unmount (cancelled guard at line 28).
+    expect(result.current.output).toBe("");
+  });
+
   it("cancels a pending fetch when unmounted before it resolves", async () => {
     let resolveProcesses!: (v: { processes: ReturnType<typeof process>[] }) => void;
     mockApi.getActiveProcesses.mockReturnValue(

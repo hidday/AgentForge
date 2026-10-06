@@ -295,6 +295,7 @@ export function buildFullDeps(opts: {
   const reviewerAgent = { run: vi.fn() };
   const remediationAgent = { run: vi.fn() };
 
+
   const gitService = {
     setupRunWorktree: vi
       .fn()
@@ -330,6 +331,12 @@ export function buildFullDeps(opts: {
     run: vi.fn().mockResolvedValue(undefined),
   };
 
+  // Not included in `deps` by default (see below): OrchestratorDeps treats
+  // answerResearcherAgent as optional, and maybeResearchAndReplan short-
+  // circuits entirely when it's undefined. This keeps tests that don't care
+  // about the answer-research path from having to mock its return value just
+  // because their plan happens to carry open questions. Tests that DO want
+  // to exercise that path pass `overrides: { answerResearcherAgent: {...} }`.
   const answerResearcherAgent = {
     run: vi.fn(),
   };
@@ -354,7 +361,9 @@ export function buildFullDeps(opts: {
     dashboardEmitter,
     agentSkillRepo,
     distillationAgent,
-    answerResearcherAgent,
+    // Intentionally omitted here (left undefined) -- see the comment above
+    // `answerResearcherAgent`'s declaration. Pass it via `overrides` to
+    // enable the answer-research path in a specific test.
     ...opts.overrides,
   };
 
