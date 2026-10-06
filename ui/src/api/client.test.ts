@@ -174,6 +174,15 @@ describe("api client", () => {
     });
   });
 
+  it("reReviewPlan(runId) with no note sends an empty body object", async () => {
+    (fetch as ReturnType<typeof vi.fn>).mockResolvedValue(jsonResponse({ ok: true, runId: "r1" }));
+
+    await api.reReviewPlan("r1");
+
+    const call = (fetch as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(JSON.parse(call[1].body as string)).toEqual({});
+  });
+
   it("revisePlan(runId, note) POSTs to the revise-plan action", async () => {
     (fetch as ReturnType<typeof vi.fn>).mockResolvedValue(jsonResponse({ ok: true, runId: "r1" }));
 
@@ -184,6 +193,15 @@ describe("api client", () => {
       method: "POST",
       body: JSON.stringify({ note: "please revise" }),
     });
+  });
+
+  it("revisePlan(runId) with no note sends an empty body object", async () => {
+    (fetch as ReturnType<typeof vi.fn>).mockResolvedValue(jsonResponse({ ok: true, runId: "r1" }));
+
+    await api.revisePlan("r1");
+
+    const call = (fetch as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(JSON.parse(call[1].body as string)).toEqual({});
   });
 
   it("approveReview(runId) POSTs with no body", async () => {
