@@ -494,6 +494,103 @@ describe("LinearSyncDialog", () => {
     expect(onClose).toHaveBeenCalledOnce();
   });
 
+  it("does not call onIngested when ingestIssues resolves with nothing started", async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    const onIngested = vi.fn();
+    const onIngestComplete = vi.fn();
+
+    mockApi.ingestIssues.mockResolvedValue({ ok: true, started: [], skipped: [issueA.id, issueB.id] });
+
+    render(
+      <LinearSyncDialog
+        open={true}
+        onClose={vi.fn()}
+        onIngested={onIngested}
+        onIngestComplete={onIngestComplete}
+      />,
+    );
+    await waitFor(() => expect(screen.getByText(issueA.title)).toBeDefined());
+
+    await user.click(screen.getByRole("button", { name: /start 2 runs/i }));
+    await act(async () => {
+      vi.advanceTimersByTime(700);
+    });
+
+    await waitFor(() => {
+      expect(onIngestComplete).toHaveBeenCalledWith({ started: 0, skipped: 2 });
+    });
+    expect(onIngested).not.toHaveBeenCalled();
+  });
+
+  describe("SSE event filtering", () => {
+    it("ignores events that are not 'run:created', events without an issueId, and events for issues outside the current batch", async () => {
+      const onClose = vi.fn();
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+      mockApi.ingestIssues.mockReturnValue(new Promise(() => {}));
+
+      render(
+        <LinearSyncDialog open={true} onClose={onClose} onIngested={vi.fn()} />,
+      );
+      await waitFor(() => expect(screen.getByText(issueA.title)).toBeDefined());
+
+      await user.click(screen.getByRole("button", { name: /start 2 runs/i }));
+
+      // None of these should move the needle toward auto-closing.
+      fireSSE({ type: "process:started" } as unknown as DashboardEvent);
+      fireSSE({ type: "run:created" } as unknown as DashboardEvent); // no issueId
+      fireSSE({ type: "run:created", runId: "run-x", issueId: "not-in-batch" });
+
+      await act(async () => {
+        vi.advanceTimersByTime(2000);
+      });
+      expect(onClose).not.toHaveBeenCalled();
+
+      // Completing the real batch still closes the dialog normally.
+      fireSSE({ type: "run:created", runId: "run-a", issueId: issueA.id });
+      fireSSE({ type: "run:created", runId: "run-b", issueId: issueB.id });
+      await act(async () => {
+        vi.advanceTimersByTime(700);
+      });
+      await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
+    });
+
+    it("ignores a duplicate run:created event for an issue already observed, without scheduling a second close", async () => {
+      const onClose = vi.fn();
+      const onIngestComplete = vi.fn();
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+      mockApi.ingestIssues.mockReturnValue(new Promise(() => {}));
+
+      render(
+        <LinearSyncDialog
+          open={true}
+          onClose={onClose}
+          onIngested={vi.fn()}
+          onIngestComplete={onIngestComplete}
+        />,
+      );
+      await waitFor(() => expect(screen.getByText(issueA.title)).toBeDefined());
+
+      await user.click(screen.getByRole("button", { name: /start 2 runs/i }));
+
+      fireSSE({ type: "run:created", runId: "run-a", issueId: issueA.id });
+      fireSSE({ type: "run:created", runId: "run-b", issueId: issueB.id });
+      // Duplicate — already seen, and a close is already scheduled.
+      fireSSE({ type: "run:created", runId: "run-a-again", issueId: issueA.id });
+      expect(onClose).not.toHaveBeenCalled();
+
+      await act(async () => {
+        vi.advanceTimersByTime(700);
+      });
+
+      // Closes exactly once, with the correct (non-duplicated) summary.
+      await waitFor(() => {
+        expect(onClose).toHaveBeenCalledOnce();
+        expect(onIngestComplete).toHaveBeenCalledOnce();
+        expect(onIngestComplete).toHaveBeenCalledWith({ started: 2, skipped: 0 });
+      });
+    });
+  });
+
   it("renders nothing when open is false", () => {
     const { container } = render(
       <LinearSyncDialog open={false} onClose={vi.fn()} onIngested={vi.fn()} />,
