@@ -48,6 +48,13 @@ function makePlan(): Plan {
 function buildPlanReviewerAgent() {
   let capturedPrompt = "";
 
+  const logger = {
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+    debug: vi.fn(),
+  };
+
   const agentRunner = {
     run: vi.fn().mockImplementation(
       async (
@@ -74,20 +81,13 @@ function buildPlanReviewerAgent() {
     create: vi.fn().mockResolvedValue({ id: "artifact-new" }),
   };
 
-  const logger = {
-    info: vi.fn(),
-    warn: vi.fn(),
-    error: vi.fn(),
-    debug: vi.fn(),
-  };
-
   const agent = new PlanReviewerAgent(
     agentRunner as never,
     artifactRepo as never,
     logger as never,
   );
 
-  return { agent, getPrompt: () => capturedPrompt };
+  return { agent, logger, getPrompt: () => capturedPrompt };
 }
 
 describe("PlanReviewerAgent.run() relatedContext rendering", () => {

@@ -337,6 +337,14 @@ describe("parseClaudeOutput – partial line noise filtering", () => {
     const result = parseClaudeOutput("Processing files...");
     expect(result).toEqual<ParsedBlock[]>([{ type: "raw", content: "Processing files..." }]);
   });
+
+  it("filters a partial line matching only the stop_reason/stop_sequence null pair, with no other noise markers", () => {
+    // Deliberately excludes any token/usage keys (so METADATA_NOISE_RE does not
+    // match) and parent_tool_use_id/session_id, to isolate the stop_reason +
+    // stop_sequence null-pair branch in isNoiseLine.
+    const fragment = '"foo":"bar","stop_reason":null,"stop_sequence":null,"other":1}';
+    expect(parseClaudeOutput(fragment)).toEqual([]);
+  });
 });
 
 // ---------------------------------------------------------------------------
