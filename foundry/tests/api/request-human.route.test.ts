@@ -37,10 +37,12 @@ interface BuildAppOptions {
     slack: { attempted: boolean; ok: boolean; error?: string };
     email: { attempted: boolean; ok: boolean; error?: string };
   }>;
+  run?: ReturnType<typeof makeRun> | null;
+  routeOptions?: { uiBaseUrl?: string; debounceHours?: number };
 }
 
 async function buildApp(opts: BuildAppOptions = {}) {
-  const run = makeRun();
+  const run = opts.run === undefined ? makeRun() : opts.run;
 
   const mockRunRepo = {
     findById: vi.fn().mockResolvedValue(run),
@@ -94,6 +96,14 @@ async function buildApp(opts: BuildAppOptions = {}) {
     sendHumanRequest,
   };
 
+  const routeOptions: Record<string, unknown> = { notificationService: notificationService as never };
+  if (opts.routeOptions) {
+    Object.assign(routeOptions, opts.routeOptions);
+  } else {
+    routeOptions.uiBaseUrl = "http://localhost:5173";
+    routeOptions.debounceHours = 6;
+  }
+
   const app = Fastify({ logger: false });
   registerApiRoutes(
     app,
@@ -101,11 +111,7 @@ async function buildApp(opts: BuildAppOptions = {}) {
     mockEmitter as never,
     mockProcessRunner as never,
     undefined,
-    {
-      notificationService: notificationService as never,
-      uiBaseUrl: "http://localhost:5173",
-      debounceHours: 6,
-    },
+    routeOptions as never,
   );
   await app.ready();
 
@@ -233,5 +239,98 @@ describe("POST /api/runs/:id/actions/request-human", () => {
     expect(body.notified).toEqual({ slack: false, email: false });
     expect(sendHumanRequest).not.toHaveBeenCalled();
     expect(mockEventRepo.create).toHaveBeenCalledTimes(1);
+  });
+
+  it("returns 404 when the run does not exist", async () => {
+    const { app, sendHumanRequest } = await buildApp({ run: null });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/runs/missing/actions/request-human",
+      payload: { reason: "plan_ambiguous", summary: "hi" },
+    });
+
+    expect(response.statusCode).toBe(404);
+    expect(JSON.parse(response.body)).toEqual({ error: "Run not found" });
+    expect(sendHumanRequest).not.toHaveBeenCalled();
+  });
+
+  it("uses default debounceHours (6) and uiBaseUrl when options are not provided", async () => {
+    const { app, sendHumanRequest } = await buildApp({ routeOptions: {} });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/actions/request-human",
+      payload: { reason: "plan_ambiguous", summary: "default options test" },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(sendHumanRequest).toHaveBeenCalledTimes(1);
+    const payload = sendHumanRequest.mock.calls[0][0] as { runUrl: string };
+    expect(payload.runUrl).toBe("http://localhost:5173/runs/run-1");
+  });
+
+  it("does not debounce on an event of a different eventType", async () => {
+    const recentTs = new Date(Date.now() - 60 * 60 * 1000);
+    const { app, sendHumanRequest } = await buildApp({
+      existingEvents: [
+        {
+          eventType: "SOME_OTHER_EVENT",
+          createdAt: recentTs,
+          payloadJson: { reason: "plan_ambiguous" },
+        },
+      ],
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/actions/request-human",
+      payload: { reason: "plan_ambiguous", summary: "unrelated event type" },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(JSON.parse(response.body).debounced).toBe(false);
+    expect(sendHumanRequest).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not debounce when the matching event is older than the debounce window", async () => {
+    const staleTs = new Date(Date.now() - 7 * 60 * 60 * 1000); // 7h ago, window is 6h
+    const { app, sendHumanRequest } = await buildApp({
+      existingEvents: [
+        {
+          eventType: RunEvent.HUMAN_REQUESTED,
+          createdAt: staleTs,
+          payloadJson: { reason: "plan_ambiguous" },
+        },
+      ],
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/actions/request-human",
+      payload: { reason: "plan_ambiguous", summary: "stale previous notification" },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(JSON.parse(response.body).debounced).toBe(false);
+    expect(sendHumanRequest).toHaveBeenCalledTimes(1);
+  });
+
+  it("omits the linear issue identifier when the run has none", async () => {
+    const runWithoutIdentifier = makeRun();
+    runWithoutIdentifier.linearIssueIdentifier = null as unknown as string;
+    const { app, sendHumanRequest } = await buildApp({ run: runWithoutIdentifier });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/actions/request-human",
+      payload: { reason: "plan_ambiguous", summary: "no identifier" },
+    });
+
+    expect(response.statusCode).toBe(200);
+    const payload = sendHumanRequest.mock.calls[0][0] as {
+      linearIssue: { identifier?: string };
+    };
+    expect(payload.linearIssue.identifier).toBeUndefined();
   });
 });

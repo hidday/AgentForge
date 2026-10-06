@@ -110,6 +110,10 @@ describe("DashboardPage", () => {
       makeRun({ id: "run-1", state: "Implementing", linearIssueTitle: "First run" }),
       makeRun({ id: "run-2", state: "Done", linearIssueTitle: "Second run" }),
       makeRun({ id: "run-3", state: "AIBlocked", linearIssueTitle: "Third run" }),
+      // An unmapped state falls back to the "idle" bucket in the stats count
+      // (not surfaced by any of the visible stat tiles, but exercises the
+      // `?? "idle"` fallback branch).
+      makeRun({ id: "run-4", state: "SomeUnknownState", linearIssueTitle: "Fourth run" }),
     ];
     mockUseRuns.mockReturnValue({
       runs,
@@ -123,11 +127,12 @@ describe("DashboardPage", () => {
     expect(screen.getByText("First run")).toBeDefined();
     expect(screen.getByText("Second run")).toBeDefined();
     expect(screen.getByText("Third run")).toBeDefined();
+    expect(screen.getByText("Fourth run")).toBeDefined();
 
-    // Stats bar: Total should reflect all 3 runs.
+    // Stats bar: Total should reflect all 4 runs.
     const totalLabel = screen.getByText("Total");
     const totalStat = totalLabel.previousElementSibling;
-    expect(totalStat?.textContent).toBe("3");
+    expect(totalStat?.textContent).toBe("4");
   });
 
   it("renders the empty state when there are no runs", () => {

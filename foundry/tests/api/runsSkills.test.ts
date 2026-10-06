@@ -278,6 +278,106 @@ describe("GET /api/runs/:id/skills", () => {
     });
   });
 
+  describe("(p) No agentSkillRepo available: SKILL_INJECTION events present but repo is null", () => {
+    it("returns an empty injectedSkills array instead of throwing", async () => {
+      const events = [
+        {
+          id: "event-1",
+          runId: "run-1",
+          eventType: "SKILL_INJECTION",
+          source: "orchestrator",
+          payloadJson: { skillIds: ["skill-id-1"] },
+          createdAt: new Date(),
+        },
+      ];
+
+      const mockRunRepo = { findById: vi.fn().mockResolvedValue(makeRun()), findAll: vi.fn() };
+      const mockArtifactRepo = { findByRunId: vi.fn().mockResolvedValue([]) };
+      const mockEventRepo = { findByRunId: vi.fn().mockResolvedValue(events), create: vi.fn() };
+      const mockOrchestrator = {
+        getRunRepo: () => mockRunRepo,
+        getArtifactRepo: () => mockArtifactRepo,
+        getEventRepo: () => mockEventRepo,
+        getAgentSkillRepo: () => null,
+      };
+      const mockEmitter = { on: vi.fn(), off: vi.fn() };
+      const mockProcessRunner = {
+        getActiveProcesses: vi.fn().mockReturnValue([]),
+        getProcessOutput: vi.fn().mockReturnValue(null),
+      };
+
+      const app = Fastify({ logger: false });
+      registerApiRoutes(
+        app,
+        mockOrchestrator as never,
+        mockEmitter as never,
+        mockProcessRunner as never,
+      );
+      await app.ready();
+
+      const response = await app.inject({ method: "GET", url: "/api/runs/run-1/skills" });
+
+      expect(response.statusCode).toBe(200);
+      const body = response.json() as { injectedSkills: unknown[]; distilledSkill: unknown };
+      expect(body.injectedSkills).toEqual([]);
+      expect(body.distilledSkill).toBeNull();
+    });
+  });
+
+  describe("(q) Distillation shouldPersist=true but agentSkillRepo is null", () => {
+    it("returns the distillationDecision without a distilledSkill", async () => {
+      const events = [
+        {
+          id: "event-1",
+          runId: "run-1",
+          eventType: "SKILL_DISTILLATION",
+          source: "distillation-agent",
+          payloadJson: {
+            shouldPersist: true,
+            reason: "architectural insight",
+            taskCategory: "auth middleware",
+            displacedSkillId: null,
+          },
+          createdAt: new Date(),
+        },
+      ];
+
+      const mockRunRepo = { findById: vi.fn().mockResolvedValue(makeRun()), findAll: vi.fn() };
+      const mockArtifactRepo = { findByRunId: vi.fn().mockResolvedValue([]) };
+      const mockEventRepo = { findByRunId: vi.fn().mockResolvedValue(events), create: vi.fn() };
+      const mockOrchestrator = {
+        getRunRepo: () => mockRunRepo,
+        getArtifactRepo: () => mockArtifactRepo,
+        getEventRepo: () => mockEventRepo,
+        getAgentSkillRepo: () => null,
+      };
+      const mockEmitter = { on: vi.fn(), off: vi.fn() };
+      const mockProcessRunner = {
+        getActiveProcesses: vi.fn().mockReturnValue([]),
+        getProcessOutput: vi.fn().mockReturnValue(null),
+      };
+
+      const app = Fastify({ logger: false });
+      registerApiRoutes(
+        app,
+        mockOrchestrator as never,
+        mockEmitter as never,
+        mockProcessRunner as never,
+      );
+      await app.ready();
+
+      const response = await app.inject({ method: "GET", url: "/api/runs/run-1/skills" });
+
+      expect(response.statusCode).toBe(200);
+      const body = response.json() as {
+        distillationDecision: { shouldPersist: boolean } | null;
+        distilledSkill: unknown;
+      };
+      expect(body.distillationDecision?.shouldPersist).toBe(true);
+      expect(body.distilledSkill).toBeNull();
+    });
+  });
+
   describe("(k) Empty case: no SKILL_INJECTION or SKILL_DISTILLATION events", () => {
     it("returns { injectedSkills: [], distillationDecision: null } with status 200", async () => {
       const { app } = await buildApp({ events: [] });

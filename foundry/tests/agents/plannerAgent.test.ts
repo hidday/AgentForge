@@ -367,6 +367,7 @@ describe("PlannerAgent.run()", () => {
         assumptions: ["Assume Postgres is already configured"],
         openQuestions: [
           { id: "q1", question: "Should we cache results?", requiredForExecution: true },
+          { id: "q2", question: "Preferred cache TTL?", requiredForExecution: false },
         ],
         risks: ["Migration could be slow on large tables"],
         steps: [
@@ -397,6 +398,8 @@ describe("PlannerAgent.run()", () => {
       expect(prompt).toContain("Migration could be slow on large tables");
       expect(prompt).toContain("**Open Questions:**");
       expect(prompt).toContain("[q1] Should we cache results? *(blocks execution)*");
+      expect(prompt).toContain("[q2] Preferred cache TTL?");
+      expect(prompt).not.toContain("[q2] Preferred cache TTL? *(blocks execution)*");
       expect(prompt).toContain("**Test Plan:** Run the migration test suite");
       expect(prompt).toContain("Use this as the starting point for the new plan");
     });

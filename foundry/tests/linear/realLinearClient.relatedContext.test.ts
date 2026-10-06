@@ -233,6 +233,42 @@ describe("RealLinearClient.getRelatedContext", () => {
     expect(ctx.blockers[0].id).toBe("blocker-id");
   });
 
+  it("treats a missing inverseRelations nodes field as no blockers", async () => {
+    const focus = makeFakeIssue({
+      id: "focus-id",
+      parent: Promise.resolve(null),
+      inverseRelations: (() =>
+        Promise.resolve({})) as unknown as FakeIssue["inverseRelations"],
+    });
+
+    issuesById.set("focus-id", focus);
+
+    const ctx = await client.getRelatedContext("focus-id");
+
+    expect(ctx.blockers).toEqual([]);
+  });
+
+  it("defaults a related issue's labels and state when those fields are missing", async () => {
+    const parent = makeFakeIssue({
+      id: "parent-id",
+      identifier: "PRY-100",
+      labels: (() => Promise.resolve({})) as unknown as FakeIssue["labels"],
+      state: Promise.resolve(null) as unknown as FakeIssue["state"],
+    });
+    const focus = makeFakeIssue({
+      id: "focus-id",
+      parent: Promise.resolve(parent),
+    });
+
+    issuesById.set("focus-id", focus);
+    issuesById.set("parent-id", parent);
+
+    const ctx = await client.getRelatedContext("focus-id");
+
+    expect(ctx.parent?.labels).toEqual([]);
+    expect(ctx.parent?.state).toBe("Unknown");
+  });
+
   it("treats null description as empty string", async () => {
     const parent = makeFakeIssue({
       id: "parent-id",

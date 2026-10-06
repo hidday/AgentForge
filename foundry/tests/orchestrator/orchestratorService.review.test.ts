@@ -39,7 +39,17 @@ describe("OrchestratorService.runReview", () => {
       ],
     });
     built.githubClient.getPRDiff.mockResolvedValue("diff --git a/x b/x");
-    built.reviewerAgent.run.mockResolvedValue(makeReview({ overallVerdict: "approved" }));
+    const approvedReview = makeReview({ overallVerdict: "approved" });
+    built.reviewerAgent.run.mockImplementation(async () => {
+      await built.artifactRepo.create({
+        runId: "run-1",
+        type: "Review",
+        version: 1,
+        payloadJson: approvedReview,
+        rawText: "{}",
+      });
+      return approvedReview;
+    });
 
     const svc = new OrchestratorService(built.deps as never);
     await svc.runReview("run-1");
@@ -54,30 +64,24 @@ describe("OrchestratorService.runReview", () => {
     );
   });
 
-  it("does not fetch a PR diff when run.prNumber is not set, and passes an empty string", async () => {
+  it("assertCanReview rejects before any diff fetch when the run has no PR number", async () => {
+    // assertCanReview requires run.prNumber, so runReview never reaches the
+    // `run.prNumber ? getPRDiff(...) : ""` branch without one -- confirms the
+    // PR-existence policy check runs first.
     const run = makeRun({ state: RunState.AIReview, prNumber: null });
-    const plan = makePlan();
     const report = makeExecutionReport();
     const built = buildFullDeps({
       run,
       artifacts: [
-        makeArtifact({ type: "Plan", version: 1, payloadJson: plan }),
         makeArtifact({ type: "ExecutionReport", version: 1, payloadJson: report }),
       ],
     });
-    built.reviewerAgent.run.mockResolvedValue(makeReview({ overallVerdict: "approved" }));
 
     const svc = new OrchestratorService(built.deps as never);
-    await svc.runReview("run-1");
+    await expect(svc.runReview("run-1")).rejects.toThrow("Cannot review without an existing PR");
 
     expect(built.githubClient.getPRDiff).not.toHaveBeenCalled();
-    expect(built.reviewerAgent.run).toHaveBeenCalledWith(
-      plan,
-      report,
-      "",
-      expect.anything(),
-      "run-1",
-    );
+    expect(built.reviewerAgent.run).not.toHaveBeenCalled();
   });
 
   it("verdict=approved: transitions to ReadyForHumanReview via REVIEW_APPROVED, does not post findings, calls markReady", async () => {
@@ -168,42 +172,7 @@ describe("OrchestratorService.runReview", () => {
     );
   });
 
-  it("verdict=changes_requested with findings but NO PR number: does not post findings to GitHub", async () => {
-    const run = makeRun({ state: RunState.AIReview, prNumber: null });
-    const plan = makePlan();
-    const report = makeExecutionReport();
-    const built = buildFullDeps({
-      run,
-      artifacts: [
-        makeArtifact({ type: "Plan", version: 1, payloadJson: plan }),
-        makeArtifact({ type: "ExecutionReport", version: 1, payloadJson: report }),
-      ],
-    });
-    const changesReview = makeReview({
-      overallVerdict: "changes_requested",
-      findings: [
-        { id: "f1", severity: "important", type: "bug", file: "a.ts", title: "t", details: "d" },
-      ],
-    });
-    built.reviewerAgent.run.mockImplementation(async () => {
-      await built.artifactRepo.create({
-        runId: "run-1",
-        type: "Review",
-        version: 1,
-        payloadJson: changesReview,
-        rawText: "{}",
-      });
-      return changesReview;
-    });
-    built.remediationAgent.run.mockRejectedValue(new Error("stop-here"));
-
-    const svc = new OrchestratorService(built.deps as never);
-    await expect(svc.runReview("run-1")).rejects.toThrow("stop-here");
-
-    expect(built.githubSync.postReviewFindings).not.toHaveBeenCalled();
-  });
-
-  it("verdict=changes_requested with zero findings: does not post findings even with a PR", async () => {
+  it("verdict=changes_requested with zero findings: does not post findings to GitHub even with a PR, and still chains into remediation (which then rejects on policy)", async () => {
     const run = makeRun({ state: RunState.AIReview, prNumber: 7 });
     const plan = makePlan();
     const report = makeExecutionReport();
@@ -225,12 +194,16 @@ describe("OrchestratorService.runReview", () => {
       });
       return changesReview;
     });
-    built.remediationAgent.run.mockRejectedValue(new Error("stop-here"));
 
     const svc = new OrchestratorService(built.deps as never);
-    await expect(svc.runReview("run-1")).rejects.toThrow("stop-here");
+    // runRemediation's own policy check (assertCanRemediate) requires at
+    // least one finding, so the chained call surfaces that instead.
+    await expect(svc.runReview("run-1")).rejects.toThrow(
+      "Cannot remediate without review findings",
+    );
 
     expect(built.githubSync.postReviewFindings).not.toHaveBeenCalled();
+    expect(built.remediationAgent.run).not.toHaveBeenCalled();
   });
 
   it("sets reviewerRuntime to 'codex' on the run", async () => {

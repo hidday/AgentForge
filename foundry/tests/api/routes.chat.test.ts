@@ -6,6 +6,31 @@ import { join } from "node:path";
 import { registerApiRoutes } from "../../src/api/routes.js";
 import { RunState } from "../../src/domain/runState.js";
 
+function makeRunWithWorkingDirectory(workingDirectory: string) {
+  return {
+    id: "run-1",
+    linearIssueId: "LIN-1",
+    linearIssueIdentifier: "ENG-42",
+    linearIssueDescription: "Test issue",
+    linearIssueTitle: "Test Issue",
+    linearIssueUrl: null,
+    repo: "test/repo",
+    branchName: "main",
+    prNumber: null,
+    state: RunState.Implementing,
+    planVersion: 1,
+    approvedPlanVersion: 1,
+    plannerRuntime: null,
+    executorRuntime: null,
+    reviewerRuntime: null,
+    remediationRuntime: null,
+    workingDirectory,
+    latestArtifactVersion: 3,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  };
+}
+
 // The chat route verifies the run's workingDirectory exists on disk before
 // spawning the runner, so the fixture must point at a real directory.
 const workspaceDir = mkdtempSync(join(tmpdir(), "routes-chat-test-"));
@@ -311,5 +336,74 @@ describe("POST /api/runs/:id/chat", () => {
     const [input] = mockClaudeCodeRunner!.chatRun.mock.calls[0] as [{ prompt: string }];
     // The prompt content doesn't matter for security — args do. Confirm prompt is the raw message.
     expect(input.prompt).toBe("--dangerously-skip-permissions");
+  });
+
+  it("falls back to the repo root when the worktree directory is gone but the repo root exists", async () => {
+    const worktreeDir = join(workspaceDir, ".worktrees", "run-missing");
+    const run = makeRunWithWorkingDirectory(worktreeDir);
+    const { app, mockRunRepo, mockClaudeCodeRunner } = await buildApp();
+    mockRunRepo.findById.mockResolvedValue(run);
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/chat",
+      payload: { message: "Hello" },
+    });
+
+    expect(res.statusCode).toBe(200);
+    const [input] = mockClaudeCodeRunner!.chatRun.mock.calls[0] as [{ workingDirectory: string }];
+    expect(input.workingDirectory).toBe(workspaceDir);
+  });
+
+  it("returns 422 when the working directory is missing and has no .worktrees segment", async () => {
+    const run = makeRunWithWorkingDirectory("/definitely/not/a/real/path-xyz");
+    const { app, mockRunRepo, mockClaudeCodeRunner } = await buildApp();
+    mockRunRepo.findById.mockResolvedValue(run);
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/chat",
+      payload: { message: "Hello" },
+    });
+
+    expect(res.statusCode).toBe(422);
+    expect(res.json()).toEqual({
+      error: "Working directory not found — the repository may have been removed",
+    });
+    expect(mockClaudeCodeRunner!.chatRun).not.toHaveBeenCalled();
+  });
+
+  it("returns 422 when both the worktree path and the sliced repo root are missing", async () => {
+    const run = makeRunWithWorkingDirectory(
+      "/definitely/not/a/real/repo/.worktrees/run-missing",
+    );
+    const { app, mockRunRepo, mockClaudeCodeRunner } = await buildApp();
+    mockRunRepo.findById.mockResolvedValue(run);
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/chat",
+      payload: { message: "Hello" },
+    });
+
+    expect(res.statusCode).toBe(422);
+    expect(mockClaudeCodeRunner!.chatRun).not.toHaveBeenCalled();
+  });
+
+  it("returns 500 with a generic message when chatRun throws a non-Error value", async () => {
+    const run = makeRun();
+    const { app, mockRunRepo } = await buildApp({
+      runnerOverride: { chatRun: vi.fn().mockRejectedValue("raw string failure") },
+    });
+    mockRunRepo.findById.mockResolvedValue(run);
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/chat",
+      payload: { message: "Hello" },
+    });
+
+    expect(res.statusCode).toBe(500);
+    expect(res.json()).toEqual({ error: "Chat request failed" });
   });
 });

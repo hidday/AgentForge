@@ -217,6 +217,21 @@ describe("RealLinearClient.searchIssues", () => {
     expect(result.team).toBeUndefined();
     expect(result.labels).toEqual([]);
   });
+
+  it("treats a missing labels connection and null description as empty defaults", async () => {
+    const issue = makeFakeIssue({
+      id: "i1",
+      description: null,
+      labels: (() => Promise.resolve({})) as unknown as FakeIssue["labels"],
+    });
+    const issuesFn = vi.fn().mockResolvedValue({ nodes: [issue] });
+    const { client } = buildClient({ issues: issuesFn });
+
+    const [result] = await client.searchIssues({ state: "Todo" });
+
+    expect(result.labels).toEqual([]);
+    expect(result.description).toBe("");
+  });
 });
 
 describe("RealLinearClient.postComment", () => {
@@ -533,5 +548,41 @@ describe("RealLinearClient.listLabels", () => {
     const names = await client.listLabels("issue-1");
 
     expect(names).toEqual([]);
+  });
+
+  it("returns an empty array and caches nothing when the labels connection itself is missing nodes", async () => {
+    const issue = makeFakeIssue({
+      id: "issue-1",
+      labels: (() => Promise.resolve({})) as unknown as FakeIssue["labels"],
+    });
+    const { client } = buildClient({ issue: vi.fn().mockResolvedValue(issue) });
+
+    const names = await client.listLabels("issue-1");
+
+    expect(names).toEqual([]);
+  });
+});
+
+describe("RealLinearClient resolveStateId via updateIssueState", () => {
+  it("treats a missing states connection nodes field as no known states", async () => {
+    const issue = makeFakeIssue({ id: "issue-1" });
+    const team = vi.fn().mockResolvedValue({
+      id: "team-1",
+      states: () => Promise.resolve({}),
+    });
+    const updateIssue = vi.fn();
+    const { client, logger } = buildClient({
+      issue: vi.fn().mockResolvedValue(issue),
+      team,
+      updateIssue,
+    });
+
+    await client.updateIssueState("issue-1", "Done");
+
+    expect(updateIssue).not.toHaveBeenCalled();
+    expect(logger.warn).toHaveBeenCalledWith(
+      { issueId: "issue-1", stateName: "Done", teamId: "team-1" },
+      "Could not find workflow state by name",
+    );
   });
 });

@@ -75,4 +75,58 @@ describe("DistilledSkillPanel", () => {
 
     expect(screen.getByText(/content could not be loaded/i)).toBeDefined();
   });
+
+  it("renders a loading indicator and nothing else when loading is true", () => {
+    render(
+      <DistilledSkillPanel
+        distilledSkill={null}
+        distillationDecision={null}
+        loading
+      />,
+    );
+
+    expect(screen.getByText(/loading distilled skill/i)).toBeDefined();
+    expect(screen.queryByText("Distilled Skill")).toBeNull();
+  });
+
+  it("loading takes precedence even when a skill and decision are also provided", () => {
+    render(
+      <DistilledSkillPanel
+        distilledSkill={skill}
+        distillationDecision={decision}
+        loading
+      />,
+    );
+
+    expect(screen.getByText(/loading distilled skill/i)).toBeDefined();
+    expect(screen.queryByText("dev-env-pause-resume-footguns")).toBeNull();
+  });
+
+  it("renders the error message and nothing else when error is set", () => {
+    render(
+      <DistilledSkillPanel
+        distilledSkill={null}
+        distillationDecision={null}
+        error="Failed to load distilled skill"
+      />,
+    );
+
+    expect(screen.getByText("Failed to load distilled skill")).toBeDefined();
+    expect(screen.queryByText("Distilled Skill")).toBeNull();
+    expect(screen.queryByText(/loading distilled skill/i)).toBeNull();
+  });
+
+  it("loading takes precedence over error when both are set", () => {
+    render(
+      <DistilledSkillPanel
+        distilledSkill={null}
+        distillationDecision={null}
+        loading
+        error="Boom"
+      />,
+    );
+
+    expect(screen.getByText(/loading distilled skill/i)).toBeDefined();
+    expect(screen.queryByText("Boom")).toBeNull();
+  });
 });

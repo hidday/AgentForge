@@ -15,6 +15,12 @@ describe("Markdown", () => {
     expect(heading.textContent).toBe("Sub heading");
   });
 
+  it("renders a level-4 heading as an h4 element", () => {
+    render(<Markdown>#### Smallest heading</Markdown>);
+    const heading = screen.getByRole("heading", { level: 4 });
+    expect(heading.textContent).toBe("Smallest heading");
+  });
+
   it("renders a fenced code block with the block styling (whitespace-pre)", () => {
     const { container } = render(<Markdown>{"```js\nconst x = 1;\n```"}</Markdown>);
     const code = container.querySelector("code");
