@@ -40,4 +40,23 @@ describe("stateMachine - clarification transitions", () => {
     expect(validEvents).toHaveLength(1);
     expect(validEvents).toContain(RunEvent.RESET_TO_TODO);
   });
+
+  it("Done is terminal: throws StateTransitionError for any event (no state map entry)", () => {
+    expect(() => transition(RunState.Done, RunEvent.RESET_TO_TODO)).toThrow(
+      'No transition from state "Done" for event "RESET_TO_TODO"',
+    );
+  });
+
+  it("getValidEvents for Done (a state with no outgoing transitions) returns an empty array", () => {
+    const validEvents = getValidEvents(RunState.Done);
+    expect(validEvents).toEqual([]);
+  });
+
+  it("throws StateTransitionError for a valid state with an event not in its transition map", () => {
+    // Planning has a state map (PLAN_CREATED, BLOCKED, NEEDS_HUMAN_CLARIFICATION)
+    // but no entry for HUMAN_APPROVED.
+    expect(() => transition(RunState.Planning, RunEvent.HUMAN_APPROVED)).toThrow(
+      'No transition from state "Planning" for event "HUMAN_APPROVED"',
+    );
+  });
 });
