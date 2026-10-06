@@ -450,6 +450,25 @@ describe("parseClaudeOutput – edge cases", () => {
     expect(parseClaudeOutput(line)).toEqual([]);
   });
 
+  it("produces no block for a line that parses to a bare JSON primitive (e.g. a number)", () => {
+    // A truthy, non-array, non-object parse result (number/boolean) skips both the
+    // array branch and the object branch, producing no block and no raw fallback.
+    expect(parseClaudeOutput("42")).toEqual([]);
+  });
+
+  it("produces no block when tool_use_result is neither a string nor an object (e.g. a number)", () => {
+    const line = JSON.stringify({ tool_use_result: 42 });
+    expect(parseClaudeOutput(line)).toEqual([]);
+  });
+
+  it("produces no block for a content_block_start event whose content_block is not a tool_use", () => {
+    const line = JSON.stringify({
+      type: "content_block_start",
+      content_block: { type: "text", text: "" },
+    });
+    expect(parseClaudeOutput(line)).toEqual([]);
+  });
+
   it("filters metadata from a mixed stream of content and noise", () => {
     const raw = ndjoin(
       JSON.stringify({ type: "message_start", message: { id: "msg_1", model: "claude-sonnet-4-20250514" } }),
