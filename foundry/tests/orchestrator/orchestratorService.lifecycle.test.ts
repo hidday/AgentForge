@@ -1660,8 +1660,15 @@ describe("OrchestratorService transitionAndRecord side-effects on terminal state
         1,
         makePlan({ openQuestions: [{ id: "q1", question: "?", requiredForExecution: true }] }),
       ),
+      makeArtifact("TaskBundle", 1, makeTaskBundle()),
     ];
     const built = buildDeps({ run, artifacts, withAgentSkillRepo: true });
+    built.setPlan(
+      makePlan({
+        planVersion: 2,
+        openQuestions: [{ id: "q1", question: "still unresolved", requiredForExecution: true }],
+      }),
+    );
     built.eventStore.push(
       {
         id: "evt-injection-1",

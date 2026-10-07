@@ -74,6 +74,16 @@ describe("ProcessRunner construction", () => {
       { recursive: true },
     );
   });
+
+  it("falls back to the default .foundry/processes spool directory when none is given", () => {
+    const logger = makeLogger();
+    new ProcessRunner("mock", logger as never, undefined);
+
+    expect(fsMock.mkdirSync).toHaveBeenCalledWith(
+      expect.stringContaining(".foundry/processes"),
+      { recursive: true },
+    );
+  });
 });
 
 describe("ProcessRunner.execute() dispatch", () => {
@@ -708,6 +718,23 @@ describe("ProcessRunner.rehydrateOrphans()", () => {
     );
   });
 
+  it("stringifies a non-Error throw when a manifest file cannot be processed", () => {
+    const logger = makeLogger();
+    const runner = new ProcessRunner("real", logger as never, undefined, "/tmp/spool");
+    fsMock.readdirSync.mockReturnValue(["corrupt2.json"]);
+    // eslint-disable-next-line @typescript-eslint/no-throw-literal
+    fsMock.readFileSync.mockImplementation(() => {
+      throw "a raw string failure";
+    });
+
+    expect(() => runner.rehydrateOrphans()).not.toThrow();
+
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.objectContaining({ file: "corrupt2.json", error: "a raw string failure" }),
+      "Failed to process manifest",
+    );
+  });
+
   it("rehydrates a live orphan: tracks it, emits process:started, and tails its log for new output", () => {
     vi.useFakeTimers();
     const logger = makeLogger();
@@ -908,6 +935,76 @@ describe("ProcessRunner.rehydrateOrphans()", () => {
     expect(readCallCount).toBeGreaterThanOrEqual(3);
 
     killSpy.mockRestore();
+  });
+
+  it("falls back to pid 0 for the liveness probe and still finalizes when the entry vanished before the poll fired", () => {
+    vi.useFakeTimers();
+    const emitter = makeEmitter();
+    const runner = new ProcessRunner("real", makeLogger() as never, emitter as never, "/tmp/spool");
+
+    fsMock.readdirSync.mockReturnValue(["live6.json"]);
+    fsMock.readFileSync.mockReturnValue(
+      JSON.stringify({
+        id: "live-6",
+        pid: 2020,
+        command: "claude",
+        args: [],
+        runId: "run-14",
+        stage: "planner",
+        runtime: "claude-code",
+        startedAt: "2025-01-01T00:00:00.000Z",
+      }),
+    );
+    fsMock.watch.mockImplementation(() => ({ close: vi.fn() }));
+    const killSpy = vi.spyOn(process, "kill").mockImplementation(() => true);
+
+    runner.rehydrateOrphans();
+    expect(runner.getActiveProcesses()).toHaveLength(1);
+
+    // Race: the entry is gone by the time the next poll tick runs.
+    (runner as unknown as { activeProcesses: Map<string, unknown> }).activeProcesses.delete(
+      "live-6",
+    );
+    killSpy.mockImplementation(() => {
+      throw new Error("ESRCH");
+    });
+
+    expect(() => vi.advanceTimersByTime(5_000)).not.toThrow();
+
+    expect(killSpy).toHaveBeenCalledWith(0, 0);
+    // finalizeOrphan is a no-op since the entry was already gone.
+    expect(emitter.emitProcessCompleted).not.toHaveBeenCalled();
+
+    killSpy.mockRestore();
+  });
+
+  it("finalizeOrphan is a no-op when called for a processId that is not tracked", () => {
+    const runner = new ProcessRunner("real", makeLogger() as never, undefined, "/tmp/spool");
+
+    expect(() =>
+      (runner as unknown as { finalizeOrphan: (id: string) => void }).finalizeOrphan(
+        "never-existed",
+      ),
+    ).not.toThrow();
+    expect(fsMock.writeFileSync).not.toHaveBeenCalled();
+  });
+
+  it("cleanupProcess is a no-op when called for a processId that is not tracked", () => {
+    const emitter = makeEmitter();
+    const logger = makeLogger();
+    const runner = new ProcessRunner("real", logger as never, emitter as never, "/tmp/spool");
+
+    expect(() =>
+      (
+        runner as unknown as {
+          cleanupProcess: (id: string, exitCode: number, durationMs: number) => void;
+        }
+      ).cleanupProcess("never-existed", 0, 10),
+    ).not.toThrow();
+
+    expect(logger.info).not.toHaveBeenCalled();
+    expect(emitter.emitProcessCompleted).not.toHaveBeenCalled();
+    expect(fsMock.writeFileSync).not.toHaveBeenCalled();
   });
 
   it("finalizeOrphan best-effort swallows a manifest update failure", () => {
