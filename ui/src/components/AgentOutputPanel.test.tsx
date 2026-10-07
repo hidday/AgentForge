@@ -1,8 +1,19 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { AgentOutputPanel } from "./AgentOutputPanel.tsx";
 import type { ActiveProcess } from "@/api/client.ts";
+
+// parseClaudeOutput never currently emits a "error"-typed block (see
+// parseClaudeOutput.test.ts), but BlockRenderer still has a render path for
+// it (ParsedBlock["type"] includes "error"). Spy on the real implementation
+// so every other test keeps exercising genuine parsing, and only override
+// the return value for the one test that needs an "error" block.
+vi.mock("@/lib/parseClaudeOutput.ts", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/parseClaudeOutput.ts")>();
+  return { ...actual, parseClaudeOutput: vi.fn(actual.parseClaudeOutput) };
+});
+import { parseClaudeOutput } from "@/lib/parseClaudeOutput.ts";
 
 function makeProcess(overrides: Partial<ActiveProcess> = {}): ActiveProcess {
   return {
@@ -64,6 +75,14 @@ describe("AgentOutputPanel", () => {
     expect(screen.getByText("Error: boom")).toBeDefined();
   });
 
+  it("renders a successful (non-error) tool_result without the Error label", () => {
+    const output = JSON.stringify({ tool_use_result: "file listing: a.ts, b.ts" });
+    render(<AgentOutputPanel processes={[]} output={output} />);
+
+    expect(screen.getByText("file listing: a.ts, b.ts")).toBeDefined();
+    expect(screen.queryByText("Error")).toBeNull();
+  });
+
   it("toggles a tool_use block's input visibility when clicked", async () => {
     const output = JSON.stringify({
       type: "content_block_start",
@@ -103,5 +122,29 @@ describe("AgentOutputPanel", () => {
     expect(screen.queryByText("Waiting for output...")).toBeNull();
     await userEvent.click(screen.getByText("claude-code"));
     expect(screen.getByText("Waiting for output...")).toBeDefined();
+  });
+
+  it("renders elapsed time in minutes and seconds once over a minute has passed", () => {
+    const startedAt = new Date(Date.now() - 65_000).toISOString();
+    render(<AgentOutputPanel processes={[makeProcess({ startedAt })]} output="" />);
+
+    expect(screen.getByText(/^1m \d+s$/)).toBeDefined();
+  });
+
+  it("falls back to 'Waiting for output...' in the raw view when output is empty but a process is active", async () => {
+    render(<AgentOutputPanel processes={[makeProcess()]} output="" />);
+
+    await userEvent.click(screen.getByText("raw"));
+    expect(screen.getByText("Waiting for output...")).toBeDefined();
+  });
+
+  it("renders an error block with warning styling when the parser produces one", () => {
+    (parseClaudeOutput as ReturnType<typeof vi.fn>).mockReturnValueOnce([
+      { type: "error", content: "The model returned a malformed tool call" },
+    ]);
+
+    render(<AgentOutputPanel processes={[]} output="anything" />);
+
+    expect(screen.getByText("The model returned a malformed tool call")).toBeDefined();
   });
 });

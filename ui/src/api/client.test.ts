@@ -110,6 +110,13 @@ describe("api client", () => {
       const [, options] = (fetch as ReturnType<typeof vi.fn>).mock.calls[0];
       expect(JSON.parse(options.body as string)).toEqual({ context: "restart", mode: "fresh" });
     });
+
+    it("sends context: undefined when no context is provided", async () => {
+      (fetch as ReturnType<typeof vi.fn>).mockResolvedValue(jsonResponse({ ok: true, state: "PlanRevision" }));
+      await api.rejectPlan("r1");
+      const [, options] = (fetch as ReturnType<typeof vi.fn>).mock.calls[0];
+      expect(JSON.parse(options.body as string)).toEqual({ mode: "iterate" });
+    });
   });
 
   describe("reReviewPlan", () => {
@@ -120,6 +127,13 @@ describe("api client", () => {
         "/api/runs/r1/actions/re-review-plan",
         expect.objectContaining({ method: "POST" }),
       );
+    });
+
+    it("sends note: undefined when no note is provided", async () => {
+      (fetch as ReturnType<typeof vi.fn>).mockResolvedValue(jsonResponse({ ok: true, runId: "r1" }));
+      await api.reReviewPlan("r1");
+      const [, options] = (fetch as ReturnType<typeof vi.fn>).mock.calls[0];
+      expect(JSON.parse(options.body as string)).toEqual({});
     });
   });
 
