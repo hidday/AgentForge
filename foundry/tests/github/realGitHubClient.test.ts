@@ -427,6 +427,14 @@ describe("RealGitHubClient", () => {
         client.replyToReviewComment("org/repo", 10, 555, "reply"),
       ).resolves.toBeUndefined();
     });
+
+    it("stringifies a non-Error rejection in the warning log and does not throw", async () => {
+      octokitInstance.pulls.createReplyForReviewComment.mockRejectedValue("plain string error");
+      const client = makeClient();
+      await expect(
+        client.replyToReviewComment("org/repo", 10, 555, "reply"),
+      ).resolves.toBeUndefined();
+    });
   });
 
   describe("submitPRReview", () => {
@@ -475,6 +483,14 @@ describe("RealGitHubClient", () => {
       const client = makeClient();
       await expect(
         client.submitPRReview("org/repo", 10, "Just noting", "COMMENT"),
+      ).rejects.toThrow(/GitHub submitPRReview failed/);
+    });
+
+    it("wraps a non-Error rejection instead of matching the own-PR fallback regex", async () => {
+      octokitInstance.pulls.createReview.mockRejectedValue({ weird: "object" });
+      const client = makeClient();
+      await expect(
+        client.submitPRReview("org/repo", 10, "Needs work", "REQUEST_CHANGES"),
       ).rejects.toThrow(/GitHub submitPRReview failed/);
     });
   });
