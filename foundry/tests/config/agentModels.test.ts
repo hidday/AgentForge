@@ -31,4 +31,13 @@ describe("agentModels", () => {
     expect(resolveAgentModel("plan-reviewer", env)).toBe("gpt-5.6-sol");
     expect(resolveAgentModel("reviewer", env)).toBe("gpt-5.6-sol");
   });
+
+  it("throws for a stage with no configured tier", () => {
+    // Guards against a Stage being added without a corresponding STAGE_TIERS
+    // entry: tierForStage would silently return undefined and resolveAgentModel
+    // must fail loudly rather than returning a bogus model.
+    expect(() => resolveAgentModel("not-a-real-stage" as never, env)).toThrow(
+      /Unknown agent model tier/,
+    );
+  });
 });
