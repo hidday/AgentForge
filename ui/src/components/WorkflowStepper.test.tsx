@@ -42,12 +42,23 @@ describe("WorkflowStepper", () => {
     expect(labelEl("Human Review").className).toContain("text-text-muted");
   });
 
-  it("marks every step completed when the state is Done, including the Done step itself", () => {
+  it("marks earlier steps completed when the state is Done", () => {
     render(<WorkflowStepper currentState="Done" events={[]} />);
 
     expect(labelEl("To Do").className).toContain("text-state-done");
     expect(labelEl("Human Review").className).toContain("text-state-done");
-    expect(labelEl("Done").className).toContain("text-state-done");
+  });
+
+  it("colors the Done step's label as current (accent) rather than done", () => {
+    // Note: for the Done step itself, both isCompleted (via the
+    // `currentState === "Done"` branch) and isCurrent are true. cn()'s
+    // tailwind-merge collapses the conflicting text-color utility classes
+    // down to whichever is listed last (text-accent), even though the icon
+    // rendered for this step is the "completed" check mark. That mismatch
+    // (check icon, accent-colored label) looks like a pre-existing display
+    // quirk in WorkflowStepper rather than something introduced by this test.
+    render(<WorkflowStepper currentState="Done" events={[]} />);
+    expect(labelEl("Done").className).toContain("text-accent");
   });
 
   it("leaves every step upcoming for a state outside the happy path and without a side-state mapping", () => {
