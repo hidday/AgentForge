@@ -319,7 +319,7 @@ describe("LinearSyncDialog", () => {
 
     await userEvent.click(screen.getByRole("button", { name: /start 2 runs/i }));
 
-    fireSSE({ type: "run:failed", runId: "run-x" });
+    fireSSE({ type: "run:state-changed", runId: "run-x" });
     fireSSE({ type: "run:created", runId: "run-x" } as unknown as DashboardEvent);
     fireSSE({ type: "run:created", runId: "run-x", issueId: "not-selected" });
 
