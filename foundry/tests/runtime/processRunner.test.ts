@@ -877,6 +877,39 @@ describe("ProcessRunner.rehydrateOrphans()", () => {
     killSpy.mockRestore();
   });
 
+  it("tolerates a missing orphan log file when starting to tail it (no prior size to compare against)", () => {
+    const runner = new ProcessRunner("real", makeLogger() as never, undefined, "/tmp/spool");
+
+    fsMock.readdirSync.mockReturnValue(["live5.json"]);
+    let readCallCount = 0;
+    fsMock.readFileSync.mockImplementation(() => {
+      readCallCount += 1;
+      if (readCallCount === 1) {
+        return JSON.stringify({
+          id: "live-5",
+          pid: 1010,
+          command: "claude",
+          args: [],
+          runId: "run-13",
+          stage: "planner",
+          runtime: "claude-code",
+          startedAt: "2025-01-01T00:00:00.000Z",
+        });
+      }
+      // Every subsequent read (the "existing log" read, and tailLogForOrphan's
+      // own initial size probe) finds no log file yet.
+      throw new Error("ENOENT: no log file yet");
+    });
+    fsMock.watch.mockImplementation(() => ({ close: vi.fn() }));
+    const killSpy = vi.spyOn(process, "kill").mockImplementation(() => true);
+
+    expect(() => runner.rehydrateOrphans()).not.toThrow();
+    expect(runner.getActiveProcesses()).toHaveLength(1);
+    expect(readCallCount).toBeGreaterThanOrEqual(3);
+
+    killSpy.mockRestore();
+  });
+
   it("finalizeOrphan best-effort swallows a manifest update failure", () => {
     const emitter = makeEmitter();
     const logger = makeLogger();
