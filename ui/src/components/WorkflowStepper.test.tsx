@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { WorkflowStepper } from "./WorkflowStepper.tsx";
 import type { RunEventRecord } from "@/api/client.ts";
@@ -81,6 +81,31 @@ describe("WorkflowStepper", () => {
     const planningLabel = labelEl("Planning");
     const container = planningLabel.closest("div")!.parentElement!;
     expect(container.textContent).toContain("just now");
+  });
+
+  it("keeps the earliest recorded timestamp when a state is reached more than once", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2024-01-20T00:00:00Z"));
+    try {
+      render(
+        <WorkflowStepper
+          currentState="Implementing"
+          events={[
+            makeEvent("e1", "Planning", "2024-01-15T00:00:00Z"), // 5 days before "now"
+            makeEvent("e2", "Planning", "2024-01-10T00:00:00Z"), // 10 days before "now"
+          ]}
+        />,
+      );
+
+      const planningLabel = labelEl("Planning");
+      const container = planningLabel.closest("div")!.parentElement!;
+      // The first event recorded for "Planning" (5 days ago) must win over
+      // the later-in-the-array second event (10 days ago).
+      expect(container.textContent).toContain("5d ago");
+      expect(container.textContent).not.toContain("10d ago");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("shows the 'Revising Plan' side panel with an active dot for the PlanRevision side state", () => {

@@ -2135,16 +2135,19 @@ describe("OrchestratorService comment formatting edge cases", () => {
 
 describe("OrchestratorService.retrieveSkillsForPlanning query building", () => {
   it("builds the relevance query from the run's title and a truncated description", async () => {
+    // retryRun (unlike startRun) re-plans using the run's existing title/description
+    // fields rather than overwriting them from a freshly fetched Linear issue, so it
+    // is a direct way to exercise retrieveSkillsForPlanning's query construction.
     const run = makeRun({
+      state: RunState.Todo,
       linearIssueTitle: "Add OAuth support",
       linearIssueDescription: "x".repeat(300),
     });
     const built = buildDeps({ run, withAgentSkillRepo: true });
-    built.runRepo.findActiveByIssueId.mockResolvedValue(null);
     built.setPlanReview(makePlanReview({ overallVerdict: "approved" }));
     const svc = new OrchestratorService(built.deps as never);
 
-    await svc.startRun("LIN-1");
+    await svc.retryRun("run-1");
 
     const queryArg = built.agentSkillRepo?.findTopKByRelevance.mock.calls[0][1] as string;
     expect(queryArg.startsWith("Add OAuth support ")).toBe(true);
