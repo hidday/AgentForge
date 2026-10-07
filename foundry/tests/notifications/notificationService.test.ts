@@ -358,3 +358,100 @@ describe("NotificationService.sendHumanRequest", () => {
     expect(labels.size).toBe(reasons.length);
   });
 });
+
+describe("NotificationService — remaining edge cases", () => {
+  let fetchMock: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("falls back to (untitled) in both the Slack and email subject/body when linearIssue.title is null", async () => {
+    fetchMock.mockResolvedValue({ ok: true, status: 200, text: async () => "" });
+    const service = new NotificationService(
+      {
+        emailFrom: "bot@example.com",
+        slackWebhookUrl: "https://hooks.slack.com/x",
+        emailTo: "ops@example.com",
+        resendApiKey: "re_key",
+      },
+      makeMockLogger(),
+    );
+
+    await service.sendHumanRequest(
+      makePayload({ linearIssue: { id: "issue-1", title: null, url: null } }),
+    );
+
+    const [slackCall, emailCall] = fetchMock.mock.calls as [string, RequestInit][];
+    const slackBody = JSON.parse(slackCall[1].body as string) as { text: string };
+    expect(slackBody.text).toContain("(untitled)");
+
+    const emailBody = JSON.parse(emailCall[1].body as string) as { subject: string; html: string };
+    expect(emailBody.subject).toContain("(untitled)");
+    expect(emailBody.html).toContain("(untitled)");
+  });
+
+  it("stringifies a non-Error rejection from the Slack webhook fetch", async () => {
+    fetchMock.mockRejectedValue("boom, not an Error instance");
+    const service = new NotificationService(
+      { emailFrom: "bot@example.com", slackWebhookUrl: "https://hooks.slack.com/x" },
+      makeMockLogger(),
+    );
+
+    const result = await service.sendHumanRequest(makePayload());
+
+    expect(result.slack.ok).toBe(false);
+    expect(result.slack.error).toBe("boom, not an Error instance");
+  });
+
+  it("stringifies a non-Error rejection from the Resend email fetch", async () => {
+    fetchMock.mockRejectedValue("email boom, not an Error instance");
+    const service = new NotificationService(
+      { emailFrom: "bot@example.com", emailTo: "ops@example.com", resendApiKey: "re_key" },
+      makeMockLogger(),
+    );
+
+    const result = await service.sendHumanRequest(makePayload());
+
+    expect(result.email.ok).toBe(false);
+    expect(result.email.error).toBe("email boom, not an Error instance");
+  });
+
+  it("renders only required open questions with the [required] marker in the email body, and truncates a very long context", async () => {
+    fetchMock.mockResolvedValue({ ok: true, status: 200, text: async () => "" });
+    const service = new NotificationService(
+      { emailFrom: "bot@example.com", emailTo: "ops@example.com", resendApiKey: "re_key" },
+      makeMockLogger(),
+    );
+
+    const longContext = "x".repeat(2500);
+    await service.sendHumanRequest(
+      makePayload({
+        context: longContext,
+        openQuestions: [
+          { id: "q1", question: "Required question?", requiredForExecution: true },
+          { id: "q2", question: "Optional question?", requiredForExecution: false },
+        ],
+      }),
+    );
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const body = JSON.parse(init.body as string) as { html: string; text: string };
+
+    expect(body.html).toContain("[required]</strong> Required question?");
+    expect(body.html).toContain(">Optional question?");
+    expect(body.html).not.toContain("[required]</strong> Optional question?");
+
+    expect(body.text).toContain("[required] Required question?");
+    expect(body.text).toContain("Optional question?");
+    expect(body.text).not.toContain("[required] Optional question?");
+
+    expect(body.text).toContain("…");
+    expect(body.text.length).toBeLessThan(longContext.length);
+  });
+});

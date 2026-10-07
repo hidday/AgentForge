@@ -37,13 +37,16 @@ interface BuildAppOptions {
     slack: { attempted: boolean; ok: boolean; error?: string };
     email: { attempted: boolean; ok: boolean; error?: string };
   }>;
+  runNotFound?: boolean;
+  runOverrides?: Partial<ReturnType<typeof makeRun>>;
+  omitRouteOptionDefaults?: boolean;
 }
 
 async function buildApp(opts: BuildAppOptions = {}) {
-  const run = makeRun();
+  const run = { ...makeRun(), ...opts.runOverrides };
 
   const mockRunRepo = {
-    findById: vi.fn().mockResolvedValue(run),
+    findById: vi.fn().mockResolvedValue(opts.runNotFound ? null : run),
     findAll: vi.fn(),
   };
   const mockArtifactRepo = {
@@ -101,11 +104,13 @@ async function buildApp(opts: BuildAppOptions = {}) {
     mockEmitter as never,
     mockProcessRunner as never,
     undefined,
-    {
-      notificationService: notificationService as never,
-      uiBaseUrl: "http://localhost:5173",
-      debounceHours: 6,
-    },
+    opts.omitRouteOptionDefaults
+      ? { notificationService: notificationService as never }
+      : {
+          notificationService: notificationService as never,
+          uiBaseUrl: "http://localhost:5173",
+          debounceHours: 6,
+        },
   );
   await app.ready();
 
@@ -233,5 +238,66 @@ describe("POST /api/runs/:id/actions/request-human", () => {
     expect(body.notified).toEqual({ slack: false, email: false });
     expect(sendHumanRequest).not.toHaveBeenCalled();
     expect(mockEventRepo.create).toHaveBeenCalledTimes(1);
+  });
+
+  it("returns 404 when the run does not exist", async () => {
+    const { app } = await buildApp({ runNotFound: true });
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/actions/request-human",
+      payload: { reason: "other", summary: "Manual flag" },
+    });
+    expect(response.statusCode).toBe(404);
+  });
+
+  it("falls back to debounceHours=6 and the default uiBaseUrl when options omit them", async () => {
+    const recentTs = new Date(Date.now() - 60 * 60 * 1000); // 1h ago, within the 6h default window
+    const { app, sendHumanRequest } = await buildApp({
+      omitRouteOptionDefaults: true,
+      existingEvents: [
+        { eventType: RunEvent.HUMAN_REQUESTED, createdAt: recentTs, payloadJson: { reason: "other" } },
+      ],
+    });
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/actions/request-human",
+      payload: { reason: "other", summary: "Manual flag" },
+    });
+    expect(response.statusCode).toBe(200);
+    expect(JSON.parse(response.body).debounced).toBe(true);
+    expect(sendHumanRequest).not.toHaveBeenCalled();
+  });
+
+  it("does not debounce on events outside the window, or events of a different type", async () => {
+    const staleTs = new Date(Date.now() - 100 * 60 * 60 * 1000); // way outside the 6h default window
+    const { app, sendHumanRequest } = await buildApp({
+      omitRouteOptionDefaults: true,
+      existingEvents: [
+        { eventType: "SOME_OTHER_EVENT", createdAt: new Date(), payloadJson: { reason: "other" } },
+        { eventType: RunEvent.HUMAN_REQUESTED, createdAt: staleTs, payloadJson: { reason: "other" } },
+      ],
+    });
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/actions/request-human",
+      payload: { reason: "other", summary: "Manual flag" },
+    });
+    expect(response.statusCode).toBe(200);
+    expect(JSON.parse(response.body).debounced).toBe(false);
+    expect(sendHumanRequest).toHaveBeenCalledTimes(1);
+  });
+
+  it("omits linearIssue.identifier when the run has no linearIssueIdentifier", async () => {
+    const { app, sendHumanRequest } = await buildApp({
+      runOverrides: { linearIssueIdentifier: null as never },
+    });
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/actions/request-human",
+      payload: { reason: "other", summary: "Manual flag" },
+    });
+    expect(response.statusCode).toBe(200);
+    const payload = sendHumanRequest.mock.calls[0][0] as { linearIssue: { identifier?: string } };
+    expect(payload.linearIssue.identifier).toBeUndefined();
   });
 });

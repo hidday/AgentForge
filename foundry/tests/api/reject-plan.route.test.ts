@@ -156,6 +156,20 @@ describe("POST /api/runs/:id/actions/reject-plan", () => {
     expect(body.error).toBe("Invalid state transition");
   });
 
+  it("returns 400 with a stringified message when orchestrator rejects with a non-Error", async () => {
+    const { app, mockOrchestrator } = await buildApp();
+    mockOrchestrator.rejectPlan.mockRejectedValue("not an Error instance");
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/actions/reject-plan",
+      payload: { context: "Some feedback" },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(JSON.parse(response.body)).toEqual({ error: "not an Error instance" });
+  });
+
   it("returns 400 when mode is not one of the valid values", async () => {
     const { app, mockOrchestrator } = await buildApp();
 

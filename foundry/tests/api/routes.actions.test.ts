@@ -94,6 +94,21 @@ describe("POST /api/runs/:id/actions/approve-plan", () => {
     expect(mockOrchestrator.runExecution).toHaveBeenCalledWith(run.id, { note: "Looks good" });
   });
 
+  it("sanitizes a whitespace-only note down to undefined", async () => {
+    const run = makeRun(RunState.Implementing);
+    const { app, mockOrchestrator } = await buildApp();
+    mockOrchestrator.approvePlan.mockResolvedValue(run);
+    mockOrchestrator.runExecution.mockResolvedValue(undefined);
+
+    await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/actions/approve-plan",
+      payload: { note: "   " },
+    });
+
+    expect(mockOrchestrator.approvePlan).toHaveBeenCalledWith("run-1", { note: undefined });
+  });
+
   it("returns 400 when approvePlan rejects", async () => {
     const { app, mockOrchestrator } = await buildApp();
     mockOrchestrator.approvePlan.mockRejectedValue(new Error("Run is not awaiting approval"));
@@ -400,5 +415,150 @@ describe("POST /api/runs/:id/actions/retry", () => {
     expect(response.statusCode).toBe(200);
     await flush();
     expect(mockOrchestrator.retryRun).toHaveBeenCalled();
+  });
+});
+
+describe("non-Error rejections are stringified into the error response", () => {
+  it("approve-plan: stringifies a non-Error throw from approvePlan", async () => {
+    const { app, mockOrchestrator } = await buildApp();
+    mockOrchestrator.approvePlan.mockRejectedValue("not an Error instance");
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/actions/approve-plan",
+      payload: {},
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toEqual({ error: "not an Error instance" });
+  });
+
+  it("re-review-plan: stringifies a non-Error throw from runManualReReview", async () => {
+    const { app, mockOrchestrator } = await buildApp();
+    mockOrchestrator.runManualReReview.mockImplementation(() => {
+      throw "synchronous non-Error throw";
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/actions/re-review-plan",
+      payload: {},
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toEqual({ error: "synchronous non-Error throw" });
+  });
+
+  it("revise-plan: stringifies a non-Error throw from runManualPlanRevision", async () => {
+    const { app, mockOrchestrator } = await buildApp();
+    mockOrchestrator.runManualPlanRevision.mockImplementation(() => {
+      throw "synchronous non-Error throw";
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/actions/revise-plan",
+      payload: {},
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toEqual({ error: "synchronous non-Error throw" });
+  });
+
+  it("approve-review: stringifies a non-Error throw from approveHumanReview", async () => {
+    const { app, mockOrchestrator } = await buildApp();
+    mockOrchestrator.approveHumanReview.mockRejectedValue("not an Error instance");
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/actions/approve-review",
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toEqual({ error: "not an Error instance" });
+  });
+
+  it("pause: stringifies a non-Error throw from handleCommand", async () => {
+    const run = makeRun(RunState.Implementing);
+    const { app, mockRunRepo, mockOrchestrator } = await buildApp();
+    mockRunRepo.findById.mockResolvedValue(run);
+    mockOrchestrator.handleCommand.mockRejectedValue("not an Error instance");
+
+    const response = await app.inject({ method: "POST", url: "/api/runs/run-1/actions/pause" });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toEqual({ error: "not an Error instance" });
+  });
+
+  it("resume: stringifies a non-Error throw from handleCommand", async () => {
+    const run = makeRun(RunState.AIBlocked);
+    const { app, mockRunRepo, mockOrchestrator } = await buildApp();
+    mockRunRepo.findById.mockResolvedValue(run);
+    mockOrchestrator.handleCommand.mockRejectedValue("not an Error instance");
+
+    const response = await app.inject({ method: "POST", url: "/api/runs/run-1/actions/resume" });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toEqual({ error: "not an Error instance" });
+  });
+
+  it("retry: logs a stringified message when the background trigger rejects with a non-Error", async () => {
+    const run = makeRun(RunState.Todo);
+    const { app, mockRunRepo, mockOrchestrator } = await buildApp();
+    mockRunRepo.findById.mockResolvedValue(run);
+    mockOrchestrator.retryRun.mockRejectedValue("not an Error instance");
+
+    const response = await app.inject({ method: "POST", url: "/api/runs/run-1/actions/retry" });
+
+    expect(response.statusCode).toBe(200);
+    await flush();
+    expect(mockOrchestrator.retryRun).toHaveBeenCalled();
+  });
+
+  it("approve-plan: logs a stringified message when the background runExecution rejects with a non-Error", async () => {
+    const run = makeRun(RunState.Implementing);
+    const { app, mockOrchestrator } = await buildApp();
+    mockOrchestrator.approvePlan.mockResolvedValue(run);
+    mockOrchestrator.runExecution.mockRejectedValue("not an Error instance");
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/actions/approve-plan",
+      payload: {},
+    });
+
+    expect(response.statusCode).toBe(200);
+    await flush();
+    expect(mockOrchestrator.runExecution).toHaveBeenCalled();
+  });
+
+  it("re-review-plan: logs a stringified message when the background trigger rejects with a non-Error", async () => {
+    const { app, mockOrchestrator } = await buildApp();
+    mockOrchestrator.runManualReReview.mockRejectedValue("not an Error instance");
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/actions/re-review-plan",
+      payload: {},
+    });
+
+    expect(response.statusCode).toBe(200);
+    await flush();
+    expect(mockOrchestrator.runManualReReview).toHaveBeenCalled();
+  });
+
+  it("revise-plan: logs a stringified message when the background trigger rejects with a non-Error", async () => {
+    const { app, mockOrchestrator } = await buildApp();
+    mockOrchestrator.runManualPlanRevision.mockRejectedValue("not an Error instance");
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/actions/revise-plan",
+      payload: {},
+    });
+
+    expect(response.statusCode).toBe(200);
+    await flush();
+    expect(mockOrchestrator.runManualPlanRevision).toHaveBeenCalled();
   });
 });
