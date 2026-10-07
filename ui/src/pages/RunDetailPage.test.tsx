@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import type { Run, Artifact, RunEventRecord } from "@/api/client.ts";
 
@@ -39,7 +40,11 @@ vi.mock("@/components/EventTimeline.tsx", () => ({
   EventTimeline: () => <div data-testid="event-timeline" />,
 }));
 vi.mock("@/components/ActionBar.tsx", () => ({
-  ActionBar: () => <div data-testid="action-bar" />,
+  ActionBar: ({ onScrollToQuestions }: { onScrollToQuestions?: () => void }) => (
+    <div data-testid="action-bar">
+      <button onClick={onScrollToQuestions}>trigger-scroll-to-questions</button>
+    </div>
+  ),
 }));
 vi.mock("@/components/OpenQuestionsPanel.tsx", () => ({
   OpenQuestionsPanel: ({ questions }: { questions: unknown[] }) => (
@@ -268,6 +273,68 @@ describe("RunDetailPage", () => {
     renderPage();
 
     expect(screen.getByText("ENG-1")).toBeDefined();
+  });
+
+  it("falls back to a slice of linearIssueId when both title and identifier are absent", () => {
+    mockUseRun.mockReturnValue({
+      data: {
+        run: {
+          ...BASE_RUN,
+          linearIssueTitle: null,
+          linearIssueIdentifier: null,
+          linearIssueId: "abcdefgh12345",
+          linearIssueUrl: null,
+        },
+        artifacts: [],
+        events: [],
+      },
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+
+    renderPage();
+
+    expect(screen.getByText("abcdefgh")).toBeDefined();
+  });
+
+  it("scrolls to the open-questions section when ActionBar requests it", async () => {
+    const artifacts: Artifact[] = [
+      {
+        id: "a1",
+        runId: "run-abc12345",
+        type: "Plan",
+        version: 1,
+        payloadJson: {
+          openQuestions: [{ id: "q1", question: "Which env?", requiredForExecution: true }],
+        },
+        rawText: "",
+        createdAt: "2026-01-01T00:00:00Z",
+      },
+    ];
+    mockUseRun.mockReturnValue({
+      data: { run: { ...BASE_RUN, state: "HumanClarificationNeeded" }, artifacts, events: [] },
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+
+    renderPage();
+
+    const scrollIntoViewMock = vi.fn();
+    const originalScrollIntoView = (
+      window.HTMLElement.prototype as unknown as { scrollIntoView?: () => void }
+    ).scrollIntoView;
+    (window.HTMLElement.prototype as unknown as { scrollIntoView: () => void }).scrollIntoView =
+      scrollIntoViewMock;
+
+    try {
+      await userEvent.click(screen.getByRole("button", { name: "trigger-scroll-to-questions" }));
+      expect(scrollIntoViewMock).toHaveBeenCalledWith({ behavior: "smooth", block: "start" });
+    } finally {
+      (window.HTMLElement.prototype as unknown as { scrollIntoView?: () => void }).scrollIntoView =
+        originalScrollIntoView;
+    }
   });
 
   it("passes active process state through to AgentOutputPanel", () => {

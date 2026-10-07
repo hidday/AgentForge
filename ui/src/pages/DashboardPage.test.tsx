@@ -19,9 +19,11 @@ vi.mock("@/components/RunsTable.tsx", () => ({
 vi.mock("@/components/LinearSyncDialog.tsx", () => ({
   LinearSyncDialog: ({
     open,
+    onClose,
     onIngestComplete,
   }: {
     open: boolean;
+    onClose: () => void;
     onIngestComplete: (s: { started: number; skipped: number }) => void;
   }) => (
     <div data-testid="sync-dialog">
@@ -29,6 +31,7 @@ vi.mock("@/components/LinearSyncDialog.tsx", () => ({
       <button onClick={() => onIngestComplete({ started: 3, skipped: 1 })}>
         trigger-ingest-complete
       </button>
+      <button onClick={onClose}>trigger-sync-close</button>
     </div>
   ),
 }));
@@ -159,6 +162,27 @@ describe("DashboardPage", () => {
     expect(screen.getByTestId("sync-dialog-state").textContent).toBe("closed");
     await userEvent.click(screen.getByRole("button", { name: /sync from linear/i }));
     expect(screen.getByTestId("sync-dialog-state").textContent).toBe("open");
+  });
+
+  it("closes the Linear sync dialog when onClose fires", async () => {
+    mockUseRuns.mockReturnValue({ runs: [], loading: false, error: null, refetch: vi.fn() });
+    render(<DashboardPage />);
+
+    await userEvent.click(screen.getByRole("button", { name: /sync from linear/i }));
+    expect(screen.getByTestId("sync-dialog-state").textContent).toBe("open");
+
+    await userEvent.click(screen.getByRole("button", { name: "trigger-sync-close" }));
+    expect(screen.getByTestId("sync-dialog-state").textContent).toBe("closed");
+  });
+
+  it("falls back to the 'idle' stat bucket for a run state not in STATE_CATEGORY_MAP", () => {
+    const runs = [makeRun("r1", "SomeUnmappedFutureState")];
+    mockUseRuns.mockReturnValue({ runs, loading: false, error: null, refetch: vi.fn() });
+    render(<DashboardPage />);
+
+    // Renders without crashing and counts the run under "idle" (not shown
+    // in the stat bar, but exercised via the STATE_CATEGORY_MAP ?? fallback).
+    expect(screen.getByTestId("runs-count").textContent).toBe("1");
   });
 
   it("calls refetch when the runs table triggers onAction", async () => {
