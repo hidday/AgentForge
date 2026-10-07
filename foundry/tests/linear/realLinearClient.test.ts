@@ -89,6 +89,14 @@ describe("RealLinearClient", () => {
       });
     });
 
+    it("treats a null labels connection as an empty labels array", async () => {
+      client.sdk.issue.mockResolvedValue(makeFakeIssue({ labels: () => Promise.resolve(null) }));
+
+      const issue = await client.getIssue("issue-1");
+
+      expect(issue.labels).toEqual([]);
+    });
+
     it("defaults missing description, state, project, team, and cycle", async () => {
       client.sdk.issue.mockResolvedValue(
         makeFakeIssue({
@@ -166,6 +174,23 @@ describe("RealLinearClient", () => {
       const results = await client.searchIssues({ state: "Todo" });
 
       expect(results).toEqual([]);
+    });
+
+    it("defaults labels to an empty array and description to an empty string per issue", async () => {
+      client.sdk.issues.mockResolvedValue({
+        nodes: [
+          makeFakeIssue({
+            id: "a",
+            description: null,
+            labels: () => Promise.resolve(null),
+          }),
+        ],
+      });
+
+      const results = await client.searchIssues({ state: "Todo" });
+
+      expect(results[0].labels).toEqual([]);
+      expect(results[0].description).toBe("");
     });
   });
 

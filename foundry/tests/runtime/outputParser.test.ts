@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { z } from "zod";
 import { OutputParser } from "../../src/runtime/outputParser.js";
 import { OutputParseError } from "../../src/utils/errors.js";
@@ -95,6 +95,22 @@ describe("OutputParser.parseJson()", () => {
       const e = err as OutputParseError;
       expect(e.rawOutput).toHaveLength(500);
       expect(e.rawOutput).toBe(badBlock.slice(0, 500));
+    }
+  });
+
+  it("stringifies a non-Error throw from JSON.parse", () => {
+    const parseSpy = vi.spyOn(JSON, "parse").mockImplementation(() => {
+      // eslint-disable-next-line @typescript-eslint/no-throw-literal
+      throw "a raw string failure";
+    });
+    try {
+      parser.parseJson("{}");
+      expect.fail("should have thrown");
+    } catch (err) {
+      const e = err as OutputParseError;
+      expect(e.message).toBe("Failed to parse JSON: a raw string failure");
+    } finally {
+      parseSpy.mockRestore();
     }
   });
 });

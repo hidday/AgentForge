@@ -155,4 +155,34 @@ describe("POST /api/runs/:id/actions/reject-plan", () => {
     const body = JSON.parse(response.body) as { error: string };
     expect(body.error).toBe("Invalid state transition");
   });
+
+  it("returns 400 when mode is not one of the valid values", async () => {
+    const { app, mockOrchestrator } = await buildApp();
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/actions/reject-plan",
+      payload: { mode: "bogus-mode" },
+    });
+
+    expect(response.statusCode).toBe(400);
+    const body = JSON.parse(response.body) as { error: string };
+    expect(body.error).toBe("mode must be one of: iterate, fresh");
+    expect(mockOrchestrator.rejectPlan).not.toHaveBeenCalled();
+  });
+
+  it("passes mode='fresh' through to orchestrator.rejectPlan when explicitly requested", async () => {
+    const run = makeRun();
+    const { app, mockOrchestrator } = await buildApp();
+    mockOrchestrator.rejectPlan.mockResolvedValue(run);
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/actions/reject-plan",
+      payload: { context: "Start over", mode: "fresh" },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(mockOrchestrator.rejectPlan).toHaveBeenCalledWith("run-1", "Start over", "api", "fresh");
+  });
 });

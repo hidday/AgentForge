@@ -321,6 +321,27 @@ describe("GET /api/runs/:id/summary", () => {
     expect(body.executionReport.executionVersion).toBe(7);
   });
 
+  it("falls back to String(risk) when a risk object can't be JSON.stringify'd (e.g. circular reference)", async () => {
+    const run = makeRun();
+    const circular: Record<string, unknown> = { note: "circular risk" };
+    circular.self = circular;
+    const planArtifact = { version: 1, payloadJson: { summary: "Plan", risks: [circular] } };
+    const findLatestByType = vi.fn().mockImplementation((_runId: string, type: string) =>
+      Promise.resolve(type === "Plan" ? planArtifact : null),
+    );
+    const { app } = await buildApp({
+      runRepo: { findById: vi.fn().mockResolvedValue(run) },
+      artifactRepo: { findLatestByType },
+    });
+
+    const response = await app.inject({ method: "GET", url: "/api/runs/run-1/summary" });
+
+    expect(response.statusCode).toBe(200);
+    const body = response.json() as { plan: { risks: string[] } };
+    expect(body.plan.risks).toHaveLength(1);
+    expect(body.plan.risks[0]).toBe(String(circular));
+  });
+
   it("defaults openQuestions/steps/risks to empty arrays when the plan payload omits them", async () => {
     const run = makeRun();
     const planArtifact = { version: 1, payloadJson: { summary: "Minimal plan" } };

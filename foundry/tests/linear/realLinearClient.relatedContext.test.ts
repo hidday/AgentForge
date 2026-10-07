@@ -209,6 +209,41 @@ describe("RealLinearClient.getRelatedContext", () => {
     expect(ctx.blockers[0].id).toBe("blocker-id");
   });
 
+  it("treats a null inverseRelations connection as having no relations", async () => {
+    const focus = makeFakeIssue({
+      id: "focus-id",
+      parent: Promise.resolve(null),
+      inverseRelations: () => Promise.resolve(null as never),
+    });
+
+    issuesById.set("focus-id", focus);
+
+    const ctx = await client.getRelatedContext("focus-id");
+
+    expect(ctx.blockers).toEqual([]);
+  });
+
+  it("defaults a related issue's null labels connection and null state to empty/Unknown", async () => {
+    const parent = makeFakeIssue({
+      id: "parent-id",
+      identifier: "PRY-100",
+      labels: () => Promise.resolve(null),
+      state: Promise.resolve(null),
+    });
+    const focus = makeFakeIssue({
+      id: "focus-id",
+      parent: Promise.resolve(parent),
+    });
+
+    issuesById.set("focus-id", focus);
+    issuesById.set("parent-id", parent);
+
+    const ctx = await client.getRelatedContext("focus-id");
+
+    expect(ctx.parent?.labels).toEqual([]);
+    expect(ctx.parent?.state).toBe("Unknown");
+  });
+
   it("skips a blocker relation whose issue fails to hydrate, logging a warning", async () => {
     const goodBlocker = makeFakeIssue({ id: "blocker-id", identifier: "PRY-101" });
     const focus = makeFakeIssue({
