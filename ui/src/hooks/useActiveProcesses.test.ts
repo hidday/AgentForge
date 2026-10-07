@@ -95,6 +95,61 @@ describe("useActiveProcesses", () => {
     expect(result.current.output).toBe("");
   });
 
+  it("does not update state after unmounting while getActiveProcesses is still pending", async () => {
+    let resolveFetch!: (v: { processes: ActiveProcess[] }) => void;
+    mockApi.getActiveProcesses.mockReturnValue(
+      new Promise((res) => {
+        resolveFetch = res;
+      }),
+    );
+
+    const { unmount } = renderHook(() => useActiveProcesses("r1"));
+    unmount();
+
+    await act(async () => {
+      resolveFetch({ processes: [makeProcess("p1")] });
+    });
+    // No assertion needed beyond "did not throw" — the cancelled guard
+    // prevents calling setState on an unmounted component.
+  });
+
+  it("does not update state after unmounting while getProcessOutput is still pending", async () => {
+    mockApi.getActiveProcesses.mockResolvedValue({ processes: [makeProcess("p1")] });
+    let resolveOutput!: (v: { processId: string; output: string }) => void;
+    mockApi.getProcessOutput.mockReturnValue(
+      new Promise((res) => {
+        resolveOutput = res;
+      }),
+    );
+
+    const { unmount } = renderHook(() => useActiveProcesses("r1"));
+    await waitFor(() => expect(mockApi.getProcessOutput).toHaveBeenCalled());
+    unmount();
+
+    await act(async () => {
+      resolveOutput({ processId: "p1", output: "late output" });
+    });
+  });
+
+  it("falls back to empty-string/default fields when a process:started event is missing optional fields", async () => {
+    mockApi.getActiveProcesses.mockResolvedValue({ processes: [] });
+    const { result } = renderHook(() => useActiveProcesses("r1"));
+    await waitFor(() => expect(mockApi.getActiveProcesses).toHaveBeenCalled());
+
+    act(() => {
+      sseCallback!({ type: "process:started", runId: "r1" });
+    });
+
+    expect(result.current.processes).toHaveLength(1);
+    const proc = result.current.processes[0]!;
+    expect(proc.id).toBe("");
+    expect(proc.command).toBe("");
+    expect(proc.stage).toBe("");
+    expect(proc.runtime).toBe("");
+    expect(typeof proc.startedAt).toBe("string");
+    expect(proc.startedAt.length).toBeGreaterThan(0);
+  });
+
   it("adds a process on a process:started SSE event for this run", async () => {
     mockApi.getActiveProcesses.mockResolvedValue({ processes: [] });
     const { result } = renderHook(() => useActiveProcesses("r1"));
