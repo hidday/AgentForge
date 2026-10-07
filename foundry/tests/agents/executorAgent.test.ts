@@ -203,6 +203,15 @@ describe("ExecutorAgent.run()", () => {
     expect(getUserPrompt()).not.toContain("## Operator Note");
   });
 
+  it("treats isRetry as true when only existingPR is set (no existingBranch)", async () => {
+    const { agent, logger } = buildAgent();
+
+    await agent.run(makePlan(), makeTaskBundle(), "run-1", { existingPR: 555 });
+
+    const startLog = logger.info.mock.calls.find((c: unknown[]) => c[1] === "Starting executor agent");
+    expect((startLog?.[0] as { isRetry: boolean }).isRetry).toBe(true);
+  });
+
   it("reuses an existing PR number on retry instead of creating a new draft", async () => {
     const { agent, githubClient } = buildAgent();
 
