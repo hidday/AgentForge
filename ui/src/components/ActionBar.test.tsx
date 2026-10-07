@@ -246,6 +246,12 @@ describe("ActionBar", () => {
     await userEvent.click(freshToggle);
     expect(freshToggle.className).toContain("bg-accent");
 
+    // Switching back to "iterate" should re-highlight that toggle.
+    await userEvent.click(iterateToggle);
+    expect(iterateToggle.className).toContain("bg-accent");
+    expect(freshToggle.className).not.toContain("bg-accent");
+    await userEvent.click(freshToggle);
+
     const textarea = screen.getByPlaceholderText(/describe what should change/i);
     await userEvent.type(textarea, "please simplify step 2");
 
