@@ -94,6 +94,38 @@ describe("GitService", () => {
     });
   });
 
+  describe("commitAndPush", () => {
+    let bareDir: string;
+
+    beforeEach(() => {
+      bareDir = mkdtempSync(join(tmpdir(), "gitservice-bare-"));
+      git(["clone", "--bare", repoPath, bareDir], tmpdir());
+      git(["remote", "add", "origin", bareDir], repoPath);
+      git(["fetch", "origin"], repoPath);
+    });
+
+    afterEach(() => {
+      rmSync(bareDir, { recursive: true, force: true });
+    });
+
+    it("asserts the branch, commits all changes, and pushes to origin", async () => {
+      git(["checkout", "-b", "feature/commit-and-push"], repoPath);
+      writeFileSync(join(repoPath, "new.txt"), "hello");
+
+      await svc.commitAndPush(repoPath, "feature/commit-and-push", "a commit");
+
+      expect(await svc.hasChanges(repoPath)).toBe(false);
+      const remoteBranches = git(["branch", "-r"], repoPath);
+      expect(remoteBranches).toContain("origin/feature/commit-and-push");
+    });
+
+    it("rejects with BranchMismatchError when the worktree is on the wrong branch", async () => {
+      await expect(
+        svc.commitAndPush(repoPath, "some-other-branch", "a commit"),
+      ).rejects.toThrow(BranchMismatchError);
+    });
+  });
+
   describe("createWorktree / removeWorktree", () => {
     it("creates a worktree with a new branch", async () => {
       const wtPath = join(repoPath, ".worktrees", "test-wt");
@@ -181,6 +213,49 @@ describe("GitService", () => {
 
       await svc.removeWorktree(repoPath, result.worktreePath);
     });
+
+    it("removes a leftover worktree directory at the target path before recreating it", async () => {
+      const runId = "cafed00d-3456-7890-abcd-ef1234567890";
+      const branchName = "hidday/pry-200-leftover-dir";
+      const shortId = runId.slice(0, 8);
+      const dirName = buildWorktreeDirName(shortId, branchName);
+      const worktreePath = join(repoPath, ".worktrees", dirName);
+
+      // Simulate a leftover worktree directory on disk under a *different*
+      // branch, at the exact path setupRunWorktree will compute.
+      await svc.createWorktree(repoPath, worktreePath, "some-other-branch", "main");
+      expect(existsSync(worktreePath)).toBe(true);
+
+      const result = await svc.setupRunWorktree(repoPath, runId, "main", branchName);
+
+      expect(result.worktreePath).toBe(worktreePath);
+      expect(existsSync(worktreePath)).toBe(true);
+      expect(await svc.currentBranch(worktreePath)).toBe(branchName);
+
+      await svc.removeWorktree(repoPath, result.worktreePath);
+    });
+
+    it("warns and proceeds when origin/<branch> already exists on the remote", async () => {
+      const branchName = "hidday/pry-300-already-on-remote";
+      // Push the branch to origin so origin/<branchName> already exists
+      // before setupRunWorktree runs.
+      git(["push", "origin", `main:refs/heads/${branchName}`], repoPath);
+
+      const warnings: string[] = [];
+      const logger = {
+        ...noopLogger,
+        warn: (_meta: unknown, msg: string) => warnings.push(msg),
+      };
+      const service = new GitService(logger);
+
+      const runId = "f00dface-3456-7890-abcd-ef1234567890";
+      const result = await service.setupRunWorktree(repoPath, runId, "main", branchName);
+
+      expect(existsSync(result.worktreePath)).toBe(true);
+      expect(warnings.some((m) => m.includes("already exists"))).toBe(true);
+
+      await service.removeWorktree(repoPath, result.worktreePath);
+    });
   });
 
   describe("findWorktreeForBranch", () => {
@@ -231,6 +306,13 @@ describe("GitService", () => {
       );
     });
 
+    it("drops the slug entirely when even the first word exceeds the length cap", () => {
+      const hugeWord = "a".repeat(35);
+      expect(buildWorktreeDirName("abcdefgh", `hidday/eng-55-${hugeWord}`)).toBe(
+        "run-abcdefgh-eng-55",
+      );
+    });
+
     it("falls back to run-<shortId> when no issue id is present", () => {
       expect(buildWorktreeDirName("abcdefgh", "hidday/some-branch-name")).toBe(
         "run-abcdefgh",
@@ -252,6 +334,58 @@ describe("GitService", () => {
   describe("error handling", () => {
     it("throws GitError for invalid repo path", async () => {
       await expect(svc.currentBranch("/nonexistent")).rejects.toThrow(GitError);
+    });
+
+    it("GitError stringifies a non-Error cause", () => {
+      const err = new GitError("fetch", "/some/repo", "a plain string failure");
+      expect(err.message).toBe("git fetch failed in /some/repo: a plain string failure");
+      expect(err.name).toBe("GitError");
+    });
+
+    it("fetch() throws GitError when the underlying git command fails", async () => {
+      await expect(svc.fetch("/nonexistent")).rejects.toThrow(GitError);
+    });
+
+    it("createWorktree() throws GitError when the underlying git command fails", async () => {
+      await expect(
+        svc.createWorktree(repoPath, join(repoPath, ".worktrees", "bad"), "x", "not-a-real-ref"),
+      ).rejects.toThrow(GitError);
+    });
+
+    it("findWorktreeForBranch() throws GitError when the underlying git command fails", async () => {
+      await expect(svc.findWorktreeForBranch("/nonexistent", "x")).rejects.toThrow(GitError);
+    });
+
+    it("hasChanges() throws GitError when the underlying git command fails", async () => {
+      await expect(svc.hasChanges("/nonexistent")).rejects.toThrow(GitError);
+    });
+
+    it("commitAll() throws GitError when the underlying git command fails", async () => {
+      await expect(svc.commitAll("/nonexistent", "msg")).rejects.toThrow(GitError);
+    });
+
+    it("push() throws GitError when there is no configured remote", async () => {
+      await expect(svc.push(repoPath, "main")).rejects.toThrow(GitError);
+    });
+
+    it("pruneWorktrees() logs a warning and does not throw when the git command fails", async () => {
+      const warnings: unknown[] = [];
+      const logger = { ...noopLogger, warn: (...args: unknown[]) => warnings.push(args) };
+      const service = new GitService(logger);
+
+      await expect(service.pruneWorktrees("/nonexistent")).resolves.toBeUndefined();
+      expect(warnings.length).toBe(1);
+    });
+
+    it("removeWorktree() logs a warning and does not throw when the git command fails", async () => {
+      const warnings: unknown[] = [];
+      const logger = { ...noopLogger, warn: (...args: unknown[]) => warnings.push(args) };
+      const service = new GitService(logger);
+
+      await expect(
+        service.removeWorktree(repoPath, join(repoPath, ".worktrees", "never-existed")),
+      ).resolves.toBeUndefined();
+      expect(warnings.length).toBe(1);
     });
   });
 });
