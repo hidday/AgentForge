@@ -83,6 +83,12 @@ describe("RealGitHubClient", () => {
         /GitHub getDefaultBranch failed for "org\/repo".*rate limited/,
       );
     });
+
+    it("stringifies a non-Error rejection when wrapping", async () => {
+      octokitInstance.repos.get.mockRejectedValue({ weird: "object" });
+      const client = makeClient();
+      await expect(client.getDefaultBranch("org/repo")).rejects.toThrow(/\[object Object\]/);
+    });
   });
 
   describe("createBranch", () => {
@@ -190,6 +196,16 @@ describe("RealGitHubClient", () => {
       await expect(
         client.createDraftPR("org/repo", "head", "main", "Title", "Body"),
       ).rejects.toThrow(/GitHub createDraftPR failed/);
+    });
+
+    it("treats a non-Error 422 rejection as not field-validation and looks up the existing PR", async () => {
+      octokitInstance.pulls.create.mockRejectedValue({ status: 422 });
+      octokitInstance.pulls.list.mockResolvedValue({ data: [{ number: 88 }] });
+
+      const client = makeClient();
+      const prNumber = await client.createDraftPR("org/repo", "head", "main", "Title", "Body");
+
+      expect(prNumber).toBe(88);
     });
   });
 
