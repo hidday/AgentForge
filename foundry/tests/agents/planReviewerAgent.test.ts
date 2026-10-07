@@ -147,3 +147,25 @@ describe("PlanReviewerAgent.run() relatedContext rendering", () => {
     expect(prompt).not.toContain("{{relatedContextSection}}");
   });
 });
+
+describe("PlanReviewerAgent.run() operator note rendering", () => {
+  it("renders an Operator Note section when an operator note is provided", async () => {
+    const { agent, getPrompt } = buildPlanReviewerAgent();
+
+    await agent.run(makePlan(), makeTaskBundle(), "run-1", {
+      operatorNote: "Double-check the migration step.",
+    });
+
+    const prompt = getPrompt();
+    expect(prompt).toContain("## Operator Note");
+    expect(prompt).toContain("Double-check the migration step.");
+  });
+
+  it("omits the Operator Note section when no operator note is provided", async () => {
+    const { agent, getPrompt } = buildPlanReviewerAgent();
+
+    await agent.run(makePlan(), makeTaskBundle(), "run-1");
+
+    expect(getPrompt()).not.toContain("## Operator Note");
+  });
+});

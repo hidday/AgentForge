@@ -183,6 +183,35 @@ describe("ExecutorAgent.run()", () => {
     expect(githubClient.createDraftPR).toHaveBeenCalledTimes(1);
   });
 
+  it("renders an Operator Note section into the user prompt when an operator note is provided", async () => {
+    const { agent, getUserPrompt } = buildAgent();
+
+    await agent.run(makePlan(), makeTaskBundle(), "run-1", undefined, {
+      operatorNote: "Please avoid touching the billing module.",
+    });
+
+    const userPrompt = getUserPrompt();
+    expect(userPrompt).toContain("## Operator Note");
+    expect(userPrompt).toContain("Please avoid touching the billing module.");
+  });
+
+  it("omits the Operator Note section when no operator note is provided", async () => {
+    const { agent, getUserPrompt } = buildAgent();
+
+    await agent.run(makePlan(), makeTaskBundle(), "run-1");
+
+    expect(getUserPrompt()).not.toContain("## Operator Note");
+  });
+
+  it("treats isRetry as true when only existingPR is set (no existingBranch)", async () => {
+    const { agent, logger } = buildAgent();
+
+    await agent.run(makePlan(), makeTaskBundle(), "run-1", { existingPR: 555 });
+
+    const startLog = logger.info.mock.calls.find((c: unknown[]) => c[1] === "Starting executor agent");
+    expect((startLog?.[0] as { isRetry: boolean }).isRetry).toBe(true);
+  });
+
   it("reuses an existing PR number on retry instead of creating a new draft", async () => {
     const { agent, githubClient } = buildAgent();
 
