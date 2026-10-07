@@ -204,6 +204,18 @@ describe("ActionBar", () => {
     });
   });
 
+  it("closes the confirm dialog without calling the API when Cancel is clicked", async () => {
+    render(<ActionBar runId={RUN_ID} state="AwaitingPlanApproval" onAction={vi.fn()} />);
+
+    await userEvent.click(screen.getByRole("button", { name: /^Approve Plan$/ }));
+    expect(screen.getByRole("heading", { name: "Approve Plan" })).toBeDefined();
+
+    await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
+
+    expect(screen.queryByRole("heading", { name: "Approve Plan" })).toBeNull();
+    expect(mockApi.approvePlan).not.toHaveBeenCalled();
+  });
+
   it("closes the dialog and does not call onAction when the confirmed action rejects", async () => {
     mockApi.approvePlan.mockRejectedValue(new Error("server exploded"));
     const onAction = vi.fn();

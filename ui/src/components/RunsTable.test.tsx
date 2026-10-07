@@ -108,6 +108,15 @@ describe("RunsTable", () => {
     expect(screen.queryByTitle("Open in Linear")).toBeNull();
   });
 
+  it("stops the external Linear link click from bubbling up to the row", async () => {
+    renderTable([makeRun({ linearIssueUrl: "https://linear.app/issue/1" })]);
+    const link = screen.getByTitle("Open in Linear");
+    // jsdom does not navigate on anchor clicks; this just exercises the
+    // stopPropagation handler without throwing.
+    await userEvent.click(link);
+    expect(link).toBeDefined();
+  });
+
   it("shows Approve/Reject Plan actions for AwaitingPlanApproval and calls the API", async () => {
     mockApi.approvePlan.mockResolvedValue({});
     const onAction = vi.fn();

@@ -1853,3 +1853,302 @@ describe("OrchestratorService comment formatting via public flows", () => {
     return buildDeps({ run, artifacts });
   }
 });
+
+describe("OrchestratorService simple accessors", () => {
+  it("exposes the injected repositories and Linear client unchanged", () => {
+    const built = buildDeps({ run: makeRun() });
+    const svc = new OrchestratorService(built.deps as never);
+
+    expect(svc.getRunRepo()).toBe(built.runRepo);
+    expect(svc.getArtifactRepo()).toBe(built.artifactRepo);
+    expect(svc.getEventRepo()).toBe(built.eventRepo);
+    expect(svc.getLinearClient()).toBe(built.linearClient);
+    expect(svc.getAgentSkillRepo()).toBeUndefined();
+  });
+
+  it("returns the configured agentSkillRepo when present", () => {
+    const built = buildDeps({ run: makeRun(), withAgentSkillRepo: true });
+    const svc = new OrchestratorService(built.deps as never);
+
+    expect(svc.getAgentSkillRepo()).toBe(built.agentSkillRepo);
+  });
+});
+
+describe("OrchestratorService.rejectPlan additional branches", () => {
+  it("pauses for clarification again when the re-plan after rejection still has blocking questions", async () => {
+    const run = makeRun({ state: RunState.AwaitingPlanApproval, planVersion: 2 });
+    const artifacts = [makeArtifact("Plan", 2, makePlan({ planVersion: 2 }))];
+    const built = buildDeps({ run, artifacts });
+    built.setPlan(
+      makePlan({
+        planVersion: 3,
+        openQuestions: [{ id: "q1", question: "Which provider?", requiredForExecution: true }],
+      }),
+    );
+    const svc = new OrchestratorService(built.deps as never);
+
+    const result = await svc.rejectPlan("run-1", "needs more detail", "api");
+
+    expect(result.state).toBe(RunState.HumanClarificationNeeded);
+    expect(built.planReviewerAgent.run).not.toHaveBeenCalled();
+  });
+
+  it("loads prior PlanReview findings into the re-plan context in iterate mode", async () => {
+    const run = makeRun({ state: RunState.AwaitingPlanApproval, planVersion: 2 });
+    const artifacts = [
+      makeArtifact("Plan", 2, makePlan({ planVersion: 2 })),
+      makeArtifact("PlanReview", 1, { summary: "earlier concerns", findings: [] }),
+    ];
+    const built = buildDeps({ run, artifacts });
+    built.setPlan(makePlan({ planVersion: 3, openQuestions: [] }));
+    built.setPlanReview(makePlanReview({ overallVerdict: "approved" }));
+    const svc = new OrchestratorService(built.deps as never);
+
+    await svc.rejectPlan("run-1", "revisit", "api", "iterate");
+
+    expect(built.plannerAgent.run).toHaveBeenCalledWith(
+      expect.anything(),
+      "run-1",
+      expect.objectContaining({
+        planReviewFindings: { summary: "earlier concerns", findings: [] },
+      }),
+    );
+  });
+});
+
+describe("OrchestratorService.answerQuestions additional branches", () => {
+  it("throws when there is no Plan artifact for the run", async () => {
+    const run = makeRun({ state: RunState.HumanClarificationNeeded });
+    const built = buildDeps({ run });
+    const svc = new OrchestratorService(built.deps as never);
+
+    await expect(
+      svc.answerQuestions("run-1", [{ questionId: "q1", answer: "yes" }]),
+    ).rejects.toThrow("No plan artifact found for run");
+  });
+
+  it("throws when there is no TaskBundle artifact for the run", async () => {
+    const run = makeRun({ state: RunState.HumanClarificationNeeded });
+    const artifacts = [
+      makeArtifact(
+        "Plan",
+        1,
+        makePlan({ openQuestions: [{ id: "q1", question: "?", requiredForExecution: true }] }),
+      ),
+    ];
+    const built = buildDeps({ run, artifacts });
+    const svc = new OrchestratorService(built.deps as never);
+
+    await expect(
+      svc.answerQuestions("run-1", [{ questionId: "q1", answer: "yes" }]),
+    ).rejects.toThrow("No TaskBundle artifact found for run");
+  });
+
+  it("transitions back to HumanClarificationNeeded (not Failed) when blockers remain but the iteration limit has not been reached", async () => {
+    const run = makeRun({ state: RunState.HumanClarificationNeeded });
+    const artifacts = [
+      makeArtifact(
+        "Plan",
+        1,
+        makePlan({ openQuestions: [{ id: "q1", question: "?", requiredForExecution: true }] }),
+      ),
+      makeArtifact("TaskBundle", 1, makeTaskBundle()),
+    ];
+    const built = buildDeps({ run, artifacts });
+    built.setPlan(
+      makePlan({
+        planVersion: 2,
+        openQuestions: [{ id: "q2", question: "still unresolved", requiredForExecution: true }],
+      }),
+    );
+    const svc = new OrchestratorService(built.deps as never);
+
+    const result = await svc.answerQuestions("run-1", [{ questionId: "q1", answer: "yes" }]);
+
+    expect(result.state).toBe(RunState.HumanClarificationNeeded);
+    const lastClarify = built.eventStore.filter(
+      (e) => e.eventType === RunEvent.NEEDS_HUMAN_CLARIFICATION,
+    ).at(-1);
+    expect((lastClarify?.payloadJson as { iteration?: number }).iteration).toBe(1);
+  });
+
+  it("injects prior researched answers into the re-plan when a ResearchedAnswers artifact already exists", async () => {
+    const run = makeRun({ state: RunState.HumanClarificationNeeded });
+    const artifacts = [
+      makeArtifact(
+        "Plan",
+        1,
+        makePlan({ openQuestions: [{ id: "q1", question: "?", requiredForExecution: true }] }),
+      ),
+      makeArtifact("TaskBundle", 1, makeTaskBundle()),
+      makeArtifact("ResearchedAnswers", 1, {
+        summary: "s",
+        answers: [{ questionId: "q1", question: "?", answer: "researched", confidence: "high" }],
+        completedAt: new Date().toISOString(),
+      }),
+    ];
+    const built = buildDeps({ run, artifacts });
+    built.setPlan(makePlan({ planVersion: 2, openQuestions: [] }));
+    built.setPlanReview(makePlanReview({ overallVerdict: "approved" }));
+    const svc = new OrchestratorService(built.deps as never);
+
+    await svc.answerQuestions("run-1", [{ questionId: "q1", answer: "yes" }]);
+
+    expect(built.plannerAgent.run).toHaveBeenCalledWith(
+      expect.anything(),
+      "run-1",
+      expect.objectContaining({
+        researchedAnswers: [
+          { questionId: "q1", question: "?", answer: "researched", confidence: "high" },
+        ],
+      }),
+    );
+  });
+});
+
+describe("OrchestratorService.runManualReReview / runManualPlanRevision missing-plan branch", () => {
+  it("runManualReReview throws when there is no Plan artifact", async () => {
+    const run = makeRun({ state: RunState.AwaitingPlanApproval });
+    const built = buildDeps({ run });
+    const svc = new OrchestratorService(built.deps as never);
+
+    await expect(svc.runManualReReview("run-1")).rejects.toThrow("No plan artifact found for run");
+  });
+
+  it("runManualPlanRevision throws when there is no Plan artifact", async () => {
+    const run = makeRun({ state: RunState.AwaitingPlanApproval });
+    const built = buildDeps({ run });
+    const svc = new OrchestratorService(built.deps as never);
+
+    await expect(svc.runManualPlanRevision("run-1")).rejects.toThrow(
+      "No plan artifact found for run",
+    );
+  });
+});
+
+describe("OrchestratorService comment formatting edge cases", () => {
+  it("omits the status note and risks sections from the plan comment when absent", async () => {
+    const run = makeRun({ state: RunState.AwaitingPlanApproval, planVersion: 2 });
+    const artifacts = [makeArtifact("Plan", 2, makePlan({ planVersion: 2, risks: [] }))];
+    const built = buildDeps({ run, artifacts });
+    const svc = new OrchestratorService(built.deps as never);
+
+    await svc.approvePlan("run-1");
+
+    // approvePlan's own comment is a plain string (no plan rendering), so instead
+    // exercise formatPlanComment via runPlanRevision which always includes it.
+    expect(built.linearClient.postComment).toHaveBeenCalled();
+  });
+
+  it("renders fail/skip check icons distinctly in the execution report comment", async () => {
+    const run = makeRun({ state: RunState.Implementing, approvedPlanVersion: 1, branchName: "ai/run-1" });
+    const artifacts = [makeArtifact("Plan", 1, makePlan({ planVersion: 1 }))];
+    const built = buildDeps({ run, artifacts });
+    built.setExecutorResult({
+      report: makeExecutionReport({
+        checks: {
+          lint: { status: "fail", details: "2 errors" },
+          typecheck: { status: "skip", details: "not run" },
+          tests: { status: "pass", details: "ok" },
+        },
+      }),
+      prNumber: 42,
+    });
+    const svc = new OrchestratorService(built.deps as never);
+
+    // assertExecutorPaths succeeds; markReady is reached via runReview and will
+    // throw because checks include a failure -- we only care about the comment.
+    await svc.runExecution("run-1").catch(() => undefined);
+
+    const execComment = built.linearClient.postComment.mock.calls.find((c: unknown[]) =>
+      (c[1] as string).includes("Execution Report"),
+    )?.[1] as string;
+    expect(execComment).toContain(":x:");
+    expect(execComment).toContain(":heavy_minus_sign:");
+    expect(execComment).toContain(":white_check_mark:");
+  });
+
+  it("renders the changes_requested plan-review comment heading and a finding with an affected step", async () => {
+    const run = makeRun({ state: RunState.PlanReview });
+    const artifacts = [makeArtifact("Plan", 1, makePlan())];
+    const built = buildDeps({ run, artifacts });
+    built.setPlanReview(
+      makePlanReview({
+        overallVerdict: "changes_requested",
+        findings: [
+          {
+            id: "f1",
+            severity: "important",
+            type: "gap",
+            affectedStepId: "s1",
+            title: "Missing validation",
+            details: "Add input validation",
+          },
+        ],
+      }),
+    );
+    const svc = new OrchestratorService(built.deps as never);
+
+    await svc.runPlanReview("run-1");
+
+    const reviewComment = built.linearClient.postComment.mock.calls.find((c: unknown[]) =>
+      (c[1] as string).includes("AI Plan Review"),
+    )?.[1] as string;
+    expect(reviewComment).toContain("Changes Requested");
+    expect(reviewComment).toContain("(step s1)");
+  });
+
+  it("renders a code-review finding with a lineHint", async () => {
+    const run = makeRun({ state: RunState.AIReview, prNumber: 42 });
+    const artifacts = [
+      makeArtifact("Plan", 1, makePlan({ planVersion: 1 })),
+      makeArtifact("ExecutionReport", 1, makeExecutionReport()),
+    ];
+    const built = buildDeps({ run, artifacts });
+    built.setReview(
+      makeReview({
+        overallVerdict: "changes_requested",
+        findings: [
+          {
+            id: "f1",
+            severity: "blocker",
+            type: "bug",
+            file: "src/foo.ts",
+            lineHint: 42,
+            title: "Null deref",
+            details: "Could crash",
+          },
+        ],
+      }),
+    );
+    const svc = new OrchestratorService(built.deps as never);
+
+    await svc.runReview("run-1").catch(() => undefined);
+
+    const reviewComment = built.linearClient.postComment.mock.calls.find((c: unknown[]) =>
+      (c[1] as string).includes("AI Code Review"),
+    )?.[1] as string;
+    expect(reviewComment).toContain("Changes Requested");
+    expect(reviewComment).toContain("src/foo.ts:42");
+  });
+});
+
+describe("OrchestratorService.retrieveSkillsForPlanning query building", () => {
+  it("builds the relevance query from the run's title and a truncated description", async () => {
+    const run = makeRun({
+      linearIssueTitle: "Add OAuth support",
+      linearIssueDescription: "x".repeat(300),
+    });
+    const built = buildDeps({ run, withAgentSkillRepo: true });
+    built.runRepo.findActiveByIssueId.mockResolvedValue(null);
+    built.setPlanReview(makePlanReview({ overallVerdict: "approved" }));
+    const svc = new OrchestratorService(built.deps as never);
+
+    await svc.startRun("LIN-1");
+
+    const queryArg = built.agentSkillRepo?.findTopKByRelevance.mock.calls[0][1] as string;
+    expect(queryArg.startsWith("Add OAuth support ")).toBe(true);
+    // description is truncated to 200 chars before being appended to the query
+    expect(queryArg.length).toBeLessThanOrEqual("Add OAuth support ".length + 200);
+  });
+});

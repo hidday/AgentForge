@@ -60,10 +60,12 @@ describe("Markdown", () => {
     expect(code.className).not.toContain("block");
   });
 
-  it("renders headings", () => {
-    render(<Markdown>{"# Title\n\n## Subtitle"}</Markdown>);
+  it("renders headings of every supported level", () => {
+    render(<Markdown>{"# Title\n\n## Subtitle\n\n### Section\n\n#### Subsection"}</Markdown>);
     expect(screen.getByText("Title").tagName).toBe("H1");
     expect(screen.getByText("Subtitle").tagName).toBe("H2");
+    expect(screen.getByText("Section").tagName).toBe("H3");
+    expect(screen.getByText("Subsection").tagName).toBe("H4");
   });
 
   it("renders a blockquote", () => {

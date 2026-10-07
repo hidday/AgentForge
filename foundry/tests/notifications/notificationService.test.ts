@@ -250,6 +250,22 @@ describe("NotificationService.sendHumanRequest", () => {
     expect(body.text).toContain("Linear:");
   });
 
+  it("omits the Linear issue link from the email HTML when linearIssue.url is absent", async () => {
+    fetchMock.mockResolvedValue({ ok: true, status: 200, text: async () => "" });
+    const service = new NotificationService(
+      { emailFrom: "bot@example.com", emailTo: "ops@example.com", resendApiKey: "re_key" },
+      makeMockLogger(),
+    );
+
+    await service.sendHumanRequest(
+      makePayload({ linearIssue: { id: "issue-1", title: "No url issue", url: null } }),
+    );
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const body = JSON.parse(init.body as string) as { html: string };
+    expect(body.html).not.toContain("Open Linear issue");
+  });
+
   it("records an email failure and logs a warning when Resend responds non-ok", async () => {
     fetchMock.mockResolvedValue({ ok: false, status: 422, text: async () => "bad request" });
     const logger = makeMockLogger();
