@@ -3,7 +3,9 @@ import { cn, relativeTime, formatTimestamp } from "./utils.ts";
 
 describe("cn", () => {
   it("joins truthy classes and drops falsy ones", () => {
-    expect(cn("a", false && "b", null, undefined, "c")).toBe("a c");
+    const enabled = (flag: boolean) => flag && "b";
+    expect(cn("a", enabled(false), null, undefined, "c")).toBe("a c");
+    expect(cn("a", enabled(true))).toBe("a b");
   });
 
   it("resolves conflicting tailwind classes with the last winning", () => {
