@@ -209,4 +209,32 @@ describe("POST /api/runs/:id/actions/answer-questions", () => {
     const body = JSON.parse(response.body) as { error: string };
     expect(body.error).toContain("Wrong state");
   });
+
+  it("returns 400 with the message when orchestrator throws a plain Error (not Policy/Validation)", async () => {
+    const { app, mockOrchestrator } = await buildApp();
+    mockOrchestrator.answerQuestions.mockRejectedValue(new Error("Unexpected failure"));
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/actions/answer-questions",
+      payload: { answers: [{ questionId: "q1", answer: "yes" }] },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(JSON.parse(response.body)).toEqual({ error: "Unexpected failure" });
+  });
+
+  it("returns 400 with String(err) when orchestrator rejects with a non-Error value", async () => {
+    const { app, mockOrchestrator } = await buildApp();
+    mockOrchestrator.answerQuestions.mockRejectedValue("totally unexpected");
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/actions/answer-questions",
+      payload: { answers: [{ questionId: "q1", answer: "yes" }] },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(JSON.parse(response.body)).toEqual({ error: "totally unexpected" });
+  });
 });

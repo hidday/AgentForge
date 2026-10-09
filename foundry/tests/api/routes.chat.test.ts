@@ -290,6 +290,25 @@ describe("POST /api/runs/:id/chat", () => {
     expect(mockArtifactRepo.create).not.toHaveBeenCalled();
   });
 
+  it("returns 500 when chatRun rejects with a non-Error value", async () => {
+    const run = makeRun();
+    const { app, mockRunRepo, mockArtifactRepo } = await buildApp({
+      runnerOverride: {
+        chatRun: vi.fn().mockRejectedValue("subprocess crashed"),
+      },
+    });
+    mockRunRepo.findById.mockResolvedValue(run);
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/chat",
+      payload: { message: "Hello?" },
+    });
+
+    expect(res.statusCode).toBe(500);
+    expect(mockArtifactRepo.create).not.toHaveBeenCalled();
+  });
+
   it("chatRun receives input that does NOT include --dangerously-skip-permissions", async () => {
     // This test verifies the filtering requirement at the route level.
     // The actual filtering happens in ClaudeCodeRunner.chatRun(); here we

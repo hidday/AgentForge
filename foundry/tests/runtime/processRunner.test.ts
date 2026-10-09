@@ -53,6 +53,7 @@ afterEach(async () => {
   // directory is removed, so they don't throw ENOENT after the test ends.
   await new Promise((resolve) => setImmediate(resolve));
   await new Promise((resolve) => setImmediate(resolve));
+  await new Promise((resolve) => setTimeout(resolve, 150));
   try {
     rmSync(spoolDir, { recursive: true, force: true });
   } catch {
@@ -763,6 +764,161 @@ describe("ProcessRunner — rehydrateOrphans", () => {
     expect(updated.exitCode).toBe(-1);
 
     killSpy.mockRestore();
+  });
+});
+
+describe("ProcessRunner — additional branch coverage", () => {
+  it("rehydrates an alive process whose log file does not exist yet (initial reads hit their catch branches)", () => {
+    const logger = makeMockLogger();
+    const emitter = makeMockEmitter();
+    const runner = new ProcessRunner("real", logger as never, emitter as never, spoolDir);
+    const killSpy = vi.spyOn(process, "kill").mockImplementation(() => {
+      throw new Error("ESRCH");
+    });
+
+    const logPath = join(spoolDir, "nologyet.log");
+    const manifestPath = join(spoolDir, "nologyet.json");
+    writeFileSync(
+      manifestPath,
+      JSON.stringify({
+        id: "nologyet",
+        pid: 777,
+        command: "claude",
+        args: [],
+        runId: "run-nolog",
+        stage: "planner",
+        runtime: "claude-code",
+        startedAt: new Date().toISOString(),
+        logFile: logPath,
+      }),
+    );
+
+    // First process.kill(pid, 0) liveness check in rehydrateOrphans must report
+    // alive; only calls after that (inside tailLogForOrphan's poll) should die.
+    killSpy.mockImplementationOnce(() => true);
+
+    expect(() => runner.rehydrateOrphans()).not.toThrow();
+    expect(runner.getActiveProcesses()).toHaveLength(1);
+    // rollingBuffer stays empty since no log file existed to restore from.
+    expect(runner.getProcessOutput("nologyet")).toBe("");
+
+    killSpy.mockRestore();
+  });
+
+  it("finalizes an orphan gracefully (best-effort) when its manifest file has been removed before it dies", async () => {
+    const logger = makeMockLogger();
+    const emitter = makeMockEmitter();
+    const runner = new ProcessRunner("real", logger as never, emitter as never, spoolDir);
+
+    let callCount = 0;
+    const killSpy = vi.spyOn(process, "kill").mockImplementation(() => {
+      callCount += 1;
+      if (callCount === 1) return true;
+      throw new Error("ESRCH");
+    });
+
+    const logPath = join(spoolDir, "nomanifest.log");
+    writeFileSync(logPath, "output");
+    const manifestPath = join(spoolDir, "nomanifest.json");
+    writeFileSync(
+      manifestPath,
+      JSON.stringify({
+        id: "nomanifest",
+        pid: 888,
+        command: "claude",
+        args: [],
+        runId: "run-nomanifest",
+        stage: "planner",
+        runtime: "claude-code",
+        startedAt: new Date().toISOString(),
+        logFile: logPath,
+      }),
+    );
+
+    vi.useFakeTimers();
+    runner.rehydrateOrphans();
+    expect(runner.getActiveProcesses()).toHaveLength(1);
+
+    // Remove the manifest so finalizeOrphan's readFileSync throws and its
+    // catch (best-effort manifest update) branch is exercised.
+    rmSync(manifestPath, { force: true });
+
+    await vi.advanceTimersByTimeAsync(5_000);
+
+    expect(runner.getActiveProcesses()).toHaveLength(0);
+    expect(emitter.emitProcessCompleted).toHaveBeenCalledWith(
+      "run-nomanifest",
+      "nomanifest",
+      "planner",
+      "claude-code",
+      -1,
+      expect.any(Number),
+    );
+    // finalizeOrphan's manifest write is best-effort; a missing manifest must
+    // not prevent completion from being reported.
+    expect(existsSync(manifestPath)).toBe(false);
+
+    killSpy.mockRestore();
+  });
+
+  it("completes normally (best-effort manifest update) when the manifest file disappears before a tracked process closes", async () => {
+    const logger = makeMockLogger();
+    const emitter = makeMockEmitter();
+    const runner = new ProcessRunner("real", logger as never, emitter as never, spoolDir);
+    const child = makeFakeChild();
+    vi.mocked(spawn).mockReturnValue(child as never);
+
+    const promise = runner.execute({
+      command: "claude",
+      args: [],
+      cwd: "/tmp",
+      timeoutMs: 5000,
+      context: { runId: "run-gone", stage: "planner", runtime: "claude-code" },
+    });
+
+    const [{ id: processId }] = runner.getActiveProcesses();
+    rmSync(join(spoolDir, `${processId}.json`), { force: true });
+
+    child.emit("close", 0);
+    const result = await promise;
+
+    expect(result.exitCode).toBe(0);
+    expect(emitter.emitProcessCompleted).toHaveBeenCalledWith(
+      "run-gone",
+      processId,
+      "planner",
+      "claude-code",
+      0,
+      expect.any(Number),
+    );
+  });
+
+  it("truncates the rolling buffer to the last ROLLING_BUFFER_MAX bytes once output exceeds the cap", async () => {
+    const logger = makeMockLogger();
+    const runner = new ProcessRunner("real", logger as never, undefined, spoolDir);
+    const child = makeFakeChild();
+    vi.mocked(spawn).mockReturnValue(child as never);
+
+    const promise = runner.execute({
+      command: "claude",
+      args: [],
+      cwd: "/tmp",
+      timeoutMs: 5000,
+      context: { runId: "run-big", stage: "executor", runtime: "claude-code" },
+    });
+
+    const [{ id: processId }] = runner.getActiveProcesses();
+    const ROLLING_BUFFER_MAX = 8 * 1024;
+    const bigChunk = "z".repeat(ROLLING_BUFFER_MAX + 1000);
+    child.stdout.emit("data", Buffer.from(bigChunk));
+
+    const buffered = runner.getProcessOutput(processId);
+    expect(buffered).not.toBeNull();
+    expect(buffered!.length).toBe(ROLLING_BUFFER_MAX);
+    expect(buffered).toBe(bigChunk.slice(-ROLLING_BUFFER_MAX));
+
+    child.emit("close", 0);
+    await promise;
   });
 });
 

@@ -124,6 +124,19 @@ describe("GET /api/runs/:id/skills", () => {
     vi.clearAllMocks();
   });
 
+  it("returns 400 when the :id path segment is empty", async () => {
+    const { app, mockEventRepo } = await buildApp();
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/api/runs//skills",
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toEqual({ error: "runId is required" });
+    expect(mockEventRepo.findByRunId).not.toHaveBeenCalled();
+  });
+
   describe("(j) Nominal case: SKILL_INJECTION and SKILL_DISTILLATION events present", () => {
     it("returns correct injectedSkills array and full distillationDecision", async () => {
       const skill1 = makeSkill("skill-id-1");
@@ -330,6 +343,74 @@ describe("GET /api/runs/:id/skills", () => {
       expect(body.injectedSkills).toEqual([]);
       expect(body.distillationDecision?.shouldPersist).toBe(false);
       expect(body.distillationDecision?.displacedSkillId).toBeNull();
+    });
+  });
+
+  describe("(p) SKILL_INJECTION event with no skillIds field falls back to an empty array", () => {
+    it("does not throw and returns an empty injectedSkills array", async () => {
+      const events = [
+        {
+          id: "event-1",
+          runId: "run-1",
+          eventType: "SKILL_INJECTION",
+          source: "orchestrator",
+          payloadJson: {},
+          createdAt: new Date(),
+        },
+      ];
+
+      const { app } = await buildApp({ events });
+
+      const response = await app.inject({
+        method: "GET",
+        url: "/api/runs/run-1/skills",
+      });
+
+      expect(response.statusCode).toBe(200);
+      const body = response.json() as { injectedSkills: unknown[] };
+      expect(body.injectedSkills).toEqual([]);
+    });
+  });
+
+  describe("(q) SKILL_DISTILLATION event with fields omitted falls back to defaults", () => {
+    it("defaults shouldPersist to false and reason to an empty string", async () => {
+      const events = [
+        {
+          id: "event-1",
+          runId: "run-1",
+          eventType: "SKILL_DISTILLATION",
+          source: "distillation-agent",
+          payloadJson: {},
+          createdAt: new Date(),
+        },
+      ];
+
+      const { app } = await buildApp({ events });
+
+      const response = await app.inject({
+        method: "GET",
+        url: "/api/runs/run-1/skills",
+      });
+
+      expect(response.statusCode).toBe(200);
+      const body = response.json() as {
+        distillationDecision: {
+          shouldPersist: boolean;
+          reason: string;
+          taskCategory: string | null;
+          name: string | null;
+          description: string | null;
+          displacedSkillId: string | null;
+        } | null;
+      };
+      expect(body.distillationDecision).toEqual({
+        shouldPersist: false,
+        reason: "",
+        taskCategory: null,
+        name: null,
+        description: null,
+        displacedSkillId: null,
+      });
     });
   });
 

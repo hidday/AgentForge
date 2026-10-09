@@ -383,4 +383,54 @@ describe("RuntimeHealthCheck exitCodeOnly branch (cursor, probed directly)", () 
     expect(auth.error).toContain("Exit code 3");
     expect(auth.error).toContain("not logged in");
   });
+
+  it("falls back to stdout in the error message when stderr is empty (the `stderr || stdout` branch)", async () => {
+    const logger = makeMockLogger();
+    const configs = RuntimeHealthCheck.buildRuntimeConfigs("claude", [], "codex", [], "agent");
+    const execute = vi
+      .fn()
+      .mockResolvedValue(makeProcessResult({ exitCode: 5, stderr: "", stdout: "from stdout" }));
+    const check = new RuntimeHealthCheck({ execute } as never, configs, logger as never);
+
+    type Internal = {
+      checkAuth: (config: (typeof configs)["cursor"]) => Promise<{ ok: boolean; error?: string }>;
+    };
+    const auth = await (check as unknown as Internal).checkAuth(configs.cursor);
+    expect(auth.ok).toBe(false);
+    expect(auth.error).toContain("from stdout");
+  });
+});
+
+describe("RuntimeHealthCheck exception branches (non-Error throwables)", () => {
+  it("checkBinary stringifies a non-Error value thrown by the version probe", async () => {
+    const logger = makeMockLogger();
+    const configs = RuntimeHealthCheck.buildRuntimeConfigs("claude", [], "codex", [], "agent");
+    // eslint-disable-next-line prefer-promise-reject-errors
+    const execute = vi.fn().mockRejectedValue("a plain string rejection");
+    const check = new RuntimeHealthCheck({ execute } as never, configs, logger as never);
+
+    type Internal = {
+      checkBinary: (
+        config: (typeof configs)["claude-code"],
+      ) => Promise<{ ok: boolean; error?: string }>;
+    };
+    const binary = await (check as unknown as Internal).checkBinary(configs["claude-code"]);
+    expect(binary.ok).toBe(false);
+    expect(binary.error).toBe("a plain string rejection");
+  });
+
+  it("checkAuth stringifies a non-Error value thrown by the auth probe", async () => {
+    const logger = makeMockLogger();
+    const configs = RuntimeHealthCheck.buildRuntimeConfigs("claude", [], "codex", [], "agent");
+    // eslint-disable-next-line prefer-promise-reject-errors
+    const execute = vi.fn().mockRejectedValue({ reason: "weird rejection" });
+    const check = new RuntimeHealthCheck({ execute } as never, configs, logger as never);
+
+    type Internal = {
+      checkAuth: (config: (typeof configs)["cursor"]) => Promise<{ ok: boolean; error?: string }>;
+    };
+    const auth = await (check as unknown as Internal).checkAuth(configs.cursor);
+    expect(auth.ok).toBe(false);
+    expect(auth.error).toBe(String({ reason: "weird rejection" }));
+  });
 });
