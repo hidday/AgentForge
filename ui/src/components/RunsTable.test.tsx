@@ -107,6 +107,15 @@ describe("RunsTable", () => {
     expect(link.getAttribute("href")).toBe("https://linear.app/issue/1");
   });
 
+  it("clicking the external Linear link does not throw and keeps the row intact", async () => {
+    renderTable([makeRun({ linearIssueUrl: "https://linear.app/issue/1" })]);
+    const link = screen.getByTitle("Open in Linear");
+
+    await userEvent.click(link);
+
+    expect(screen.getByTitle("Open in Linear")).toBeDefined();
+  });
+
   it("does not render the external Linear link when linearIssueUrl is absent", () => {
     renderTable([makeRun({ linearIssueUrl: null })]);
     expect(screen.queryByTitle("Open in Linear")).toBeNull();

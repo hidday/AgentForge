@@ -1,8 +1,24 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { AgentOutputPanel } from "./AgentOutputPanel.tsx";
 import type { ActiveProcess } from "@/api/client.ts";
+
+// The real parser is used by default (it's exercised directly in most tests
+// below); one test overrides it once to exercise the BlockRenderer's "error"
+// block branch, which the real NDJSON parser never actually emits.
+vi.mock("@/lib/parseClaudeOutput.ts", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("@/lib/parseClaudeOutput.ts")>();
+  return {
+    ...actual,
+    parseClaudeOutput: vi.fn(actual.parseClaudeOutput),
+  };
+});
+
+import { AgentOutputPanel } from "./AgentOutputPanel.tsx";
+import { parseClaudeOutput } from "@/lib/parseClaudeOutput.ts";
+
+const mockParse = parseClaudeOutput as unknown as ReturnType<typeof vi.fn>;
 
 function makeProcess(overrides: Partial<ActiveProcess> = {}): ActiveProcess {
   return {
@@ -147,6 +163,12 @@ describe("AgentOutputPanel", () => {
       />,
     );
     expect(screen.getByText("10s")).toBeDefined();
+  });
+
+  it("renders an 'error' block type with the error text styling", () => {
+    mockParse.mockReturnValueOnce([{ type: "error", content: "Fatal failure occurred" }]);
+    render(<AgentOutputPanel processes={[]} output="anything" />);
+    expect(screen.getByText("Fatal failure occurred")).toBeDefined();
   });
 
   it("renders a non-error tool_result block without the Error label", () => {

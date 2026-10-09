@@ -111,6 +111,24 @@ describe("ActionBar", () => {
     });
   });
 
+  it("switches back to 'iterate' mode after selecting 'fresh', and submits with iterate mode", async () => {
+    mockApi.rejectPlan.mockResolvedValue({});
+    render(
+      <ActionBar runId={RUN_ID} state="AwaitingPlanApproval" onAction={vi.fn()} />,
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: /^Reject Plan$/ }));
+    await userEvent.click(screen.getByText("Start fresh"));
+    await userEvent.click(screen.getByText("Revise plan"));
+
+    const rejectButtons = screen.getAllByRole("button", { name: "Reject Plan" });
+    await userEvent.click(rejectButtons[rejectButtons.length - 1]);
+
+    await waitFor(() => {
+      expect(mockApi.rejectPlan).toHaveBeenCalledWith(RUN_ID, undefined, "iterate");
+    });
+  });
+
   it("cancels the reject dialog via the Cancel button without calling the API", async () => {
     render(
       <ActionBar runId={RUN_ID} state="AwaitingPlanApproval" onAction={vi.fn()} />,
