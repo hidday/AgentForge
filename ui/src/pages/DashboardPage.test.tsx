@@ -120,6 +120,19 @@ describe("DashboardPage", () => {
     expect(screen.getByText("Awaiting")).toBeTruthy();
   });
 
+  it("counts a run with an unrecognized state under 'idle' rather than throwing", () => {
+    const runs = [makeRun({ id: "r1", state: "SomeUnknownState" })];
+    mockUseRuns.mockReturnValue({ runs, loading: false, error: null, refetch: vi.fn() });
+    render(<DashboardPage />);
+
+    // Total still counts it, but it doesn't bump any of the named stat buckets.
+    expect(screen.getByTestId("runs-count").textContent).toBe("1");
+    const activeLabel = screen.getAllByText("Active").find((el) => el.tagName === "DIV")!;
+    const doneLabel = screen.getAllByText("Done").find((el) => el.tagName === "DIV")!;
+    expect(activeLabel.previousSibling?.textContent).toBe("0");
+    expect(doneLabel.previousSibling?.textContent).toBe("0");
+  });
+
   it("filters the runs table when a filter button is clicked", () => {
     const runs = [
       makeRun({ id: "r1", state: "Planning" }), // active

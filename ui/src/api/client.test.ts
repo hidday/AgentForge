@@ -142,6 +142,12 @@ describe("api client", () => {
       expect(JSON.parse(options.body as string)).toEqual({ note: "re-check" });
     });
 
+    it("reReviewPlan omits the note field when none is given", async () => {
+      await api.reReviewPlan("run-1");
+      const [, options] = (fetch as ReturnType<typeof vi.fn>).mock.calls[0];
+      expect(JSON.parse(options.body as string)).toEqual({});
+    });
+
     it("revisePlan posts to the correct path", async () => {
       await api.revisePlan("run-1");
       const [url] = (fetch as ReturnType<typeof vi.fn>).mock.calls[0];

@@ -128,6 +128,20 @@ describe("useRuns", () => {
     expect(mockApi.getRuns).not.toHaveBeenCalled();
   });
 
+  it("ignores SSE event types other than run:created and run:state-changed", async () => {
+    mockApi.getRuns.mockResolvedValueOnce({ runs: [runA] });
+    const { result } = renderHook(() => useRuns());
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    mockApi.getRuns.mockClear();
+    act(() => {
+      sseCallback!({ type: "process:started", runId: "run-a" });
+    });
+
+    expect(mockApi.getRuns).not.toHaveBeenCalled();
+    expect(result.current.runs).toEqual([runA]);
+  });
+
   it("ignores a run:state-changed event for a run id that isn't in the list", async () => {
     mockApi.getRuns.mockResolvedValueOnce({ runs: [runA] });
     const { result } = renderHook(() => useRuns());

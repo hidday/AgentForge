@@ -104,6 +104,26 @@ describe("useActiveProcesses", () => {
     expect(result.current.processes).toEqual([]);
   });
 
+  it("does not apply process output fetched after unmount", async () => {
+    mockApi.getActiveProcesses.mockResolvedValue({ processes: [proc] });
+    let resolveOutput: (value: { processId: string; output: string }) => void = () => {};
+    mockApi.getProcessOutput.mockReturnValue(
+      new Promise((resolve) => {
+        resolveOutput = resolve;
+      }),
+    );
+
+    const { result, unmount } = renderHook(() => useActiveProcesses("run-1"));
+    await waitFor(() => expect(mockApi.getProcessOutput).toHaveBeenCalled());
+
+    unmount();
+    resolveOutput({ processId: "proc-1", output: "too late" });
+
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(result.current.output).toBe("");
+  });
+
   describe("SSE handling", () => {
     beforeEach(() => {
       mockApi.getActiveProcesses.mockResolvedValue({ processes: [] });

@@ -160,6 +160,34 @@ describe("RunDetailPage", () => {
     expect(screen.getByTestId("event-timeline").textContent).toBe("1");
   });
 
+  it("falls back to the issue identifier when there is no issue title", () => {
+    const run = makeRun({ linearIssueTitle: null, linearIssueIdentifier: "ENG-99" });
+    mockUseRun.mockReturnValue({
+      data: { run, artifacts: [], events: [] },
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+    renderAt(run.id);
+    expect(screen.getByText("ENG-99")).toBeTruthy();
+  });
+
+  it("falls back to a truncated issue id when title and identifier are both absent", () => {
+    const run = makeRun({
+      linearIssueTitle: null,
+      linearIssueIdentifier: null,
+      linearIssueId: "0123456789abcdef",
+    });
+    mockUseRun.mockReturnValue({
+      data: { run, artifacts: [], events: [] },
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+    renderAt(run.id);
+    expect(screen.getByText("01234567")).toBeTruthy();
+  });
+
   it("shows the Linear link when linearIssueUrl is present", () => {
     const run = makeRun({ linearIssueUrl: "https://linear.app/issue/ENG-1" });
     mockUseRun.mockReturnValue({
