@@ -251,5 +251,24 @@ describe("GitHubSyncService", () => {
       const summary = githubClient.commentOnPR.mock.calls[0][2] as string;
       expect(summary).toContain(":grey_question:");
     });
+
+    it("uses the grey question icon in the reply body too when the finding has a comment id", async () => {
+      const resolutions = [
+        {
+          findingId: "f1",
+          status: "unknown_status" as unknown as ResolutionItem["status"],
+          action: "N/A",
+          rationale: "N/A",
+        },
+      ];
+      await service.postRemediationResolutions("org/repo", 5, resolutions, { f1: 500 });
+
+      expect(githubClient.replyToReviewComment).toHaveBeenCalledWith(
+        "org/repo",
+        5,
+        500,
+        expect.stringContaining(":grey_question:"),
+      );
+    });
   });
 });

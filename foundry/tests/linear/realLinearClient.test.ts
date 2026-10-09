@@ -19,6 +19,10 @@ interface FakeIssue {
   project: Promise<{ name: string } | null>;
   cycle: Promise<{ name: string } | null>;
   labels: () => Promise<{ nodes: Array<{ id: string; name: string }> }>;
+  parent: Promise<FakeIssue | null>;
+  inverseRelations: () => Promise<{
+    nodes: Array<{ id: string; type: string; issue: Promise<FakeIssue> }>;
+  }>;
 }
 
 function makeFakeIssue(overrides: Partial<FakeIssue> & { id: string }): FakeIssue {
@@ -35,6 +39,8 @@ function makeFakeIssue(overrides: Partial<FakeIssue> & { id: string }): FakeIssu
     project: Promise.resolve(null),
     cycle: Promise.resolve(null),
     labels: () => Promise.resolve({ nodes: [] }),
+    parent: Promise.resolve(null),
+    inverseRelations: () => Promise.resolve({ nodes: [] }),
     ...overrides,
   };
 }
@@ -75,15 +81,14 @@ describe("RealLinearClient.getRelatedContext blocker hydration failure", () => {
     const okBlocker = makeFakeIssue({ id: "blocker-ok" });
     const focus = makeFakeIssue({
       id: "focus-id",
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      inverseRelations: (() =>
+      inverseRelations: () =>
         Promise.resolve({
           nodes: [
             { id: "rel-bad", type: "blocks", issue: Promise.reject(new Error("blocker gone")) },
             { id: "rel-ok", type: "blocks", issue: Promise.resolve(okBlocker) },
           ],
-        })) as unknown as FakeIssue["labels"] extends never ? never : () => Promise<never>,
-    } as unknown as Partial<FakeIssue> & { id: string });
+        }),
+    });
     sdk.issue.mockImplementation((id: string) =>
       Promise.resolve(id === "focus-id" ? focus : okBlocker),
     );

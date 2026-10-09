@@ -167,6 +167,30 @@ describe("NotificationService.sendHumanRequest", () => {
     expect(result.slack.error).toBe("network down");
   });
 
+  it("stringifies a non-Error slack rejection", async () => {
+    fetchMock.mockRejectedValue("dns failure");
+    const svc = new NotificationService(
+      config({ slackWebhookUrl: "https://hooks.slack.com/x" }),
+      logger as never,
+    );
+
+    const result = await svc.sendHumanRequest(makePayload());
+    expect(result.slack.ok).toBe(false);
+    expect(result.slack.error).toBe("dns failure");
+  });
+
+  it("stringifies a non-Error email rejection", async () => {
+    fetchMock.mockRejectedValue({ reason: "timeout" });
+    const svc = new NotificationService(
+      config({ emailTo: "a@x.com", resendApiKey: "resend-key" }),
+      logger as never,
+    );
+
+    const result = await svc.sendHumanRequest(makePayload());
+    expect(result.email.ok).toBe(false);
+    expect(result.email.error).toBe("[object Object]");
+  });
+
   it("posts to Resend and reports ok on success, splitting/trimming recipients", async () => {
     fetchMock.mockResolvedValue(okResponse());
     const svc = new NotificationService(
@@ -263,6 +287,22 @@ describe("NotificationService.sendHumanRequest", () => {
     expect(serialized).not.toContain("Question number 3");
     // Linear issue button included since url is present
     expect(serialized).toContain("https://linear.app/i/1");
+  });
+
+  it("includes a short context verbatim (no truncation) when under the length limit", async () => {
+    fetchMock.mockResolvedValue(okResponse());
+    const svc = new NotificationService(
+      config({ slackWebhookUrl: "https://hooks.slack.com/x" }),
+      logger as never,
+    );
+
+    await svc.sendHumanRequest(makePayload({ context: "short context" }));
+
+    const call = fetchMock.mock.calls[0][1] as { body: string };
+    const body = JSON.parse(call.body) as { blocks: unknown[] };
+    const serialized = JSON.stringify(body.blocks);
+    expect(serialized).toContain("short context");
+    expect(serialized).not.toContain("…");
   });
 
   it("omits optional slack sections when planConfidence/context/openQuestions/url are absent", async () => {

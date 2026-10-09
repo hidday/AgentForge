@@ -266,32 +266,31 @@ describe("buildChatSystemPrompt (fallback branches for missing optional sub-fiel
     const artifact = makeArtifact({
       type: "ResearchedAnswers",
       version: 1,
-      payloadJson: { answers: [{ answer: "An answer with no question id or confidence" }] },
+      payloadJson: { answers: [{}] },
     });
     const result = buildChatSystemPrompt(makeRun(), [artifact]);
     expect(result).toContain("## Researched Answers");
-    expect(result).toContain("**[] ():**");
-    expect(result).toContain("An answer with no question id or confidence");
+    expect(result).toContain("**[] ():** ");
   });
 
-  it("falls back to empty strings for PlanReview findings missing severity/title", () => {
+  it("falls back to empty strings for PlanReview findings missing every optional field", () => {
     const artifact = makeArtifact({
       type: "PlanReview",
       version: 1,
-      payloadJson: { findings: [{ id: "pr1", details: "some detail" }] },
+      payloadJson: { findings: [{}] },
     });
     const result = buildChatSystemPrompt(makeRun(), [artifact]);
-    expect(result).toContain("**[] ** (pr1): some detail");
+    expect(result).toContain("**[] ** (): ");
   });
 
-  it("falls back to empty strings for Review findings missing severity/title", () => {
+  it("falls back to empty strings for Review findings missing every optional field", () => {
     const artifact = makeArtifact({
       type: "Review",
       version: 1,
-      payloadJson: { findings: [{ id: "f1", details: "some detail" }] },
+      payloadJson: { findings: [{}] },
     });
     const result = buildChatSystemPrompt(makeRun(), [artifact]);
-    expect(result).toContain("**[] ** (f1): some detail");
+    expect(result).toContain("**[] ** (): ");
   });
 
   it("falls back to '?' for a missing check status, JSON-stringifies a non-string file/note, and falls back to the artifact version when executionVersion is absent", () => {

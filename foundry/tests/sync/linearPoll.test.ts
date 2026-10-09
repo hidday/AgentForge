@@ -166,6 +166,21 @@ describe("LinearPollService.startRunsForIssues", () => {
     );
   });
 
+  it("stringifies a non-Error rejection from startRun when logging the error", async () => {
+    const deps = makeDeps();
+    deps.runRepo.findActiveByIssueId.mockResolvedValue(null);
+    deps.orchestrator.startRun.mockRejectedValue("transport closed");
+    const service = build(deps);
+
+    const result = await service.startRunsForIssues(["issue-1"]);
+
+    expect(result).toEqual({ started: [], skipped: ["issue-1"] });
+    expect(deps.logger.error).toHaveBeenCalledWith(
+      expect.objectContaining({ issueId: "issue-1", error: "transport closed" }),
+      "Failed to start run for issue",
+    );
+  });
+
   it("handles a mix of started, skipped-existing, and skipped-error issues", async () => {
     const deps = makeDeps();
     deps.runRepo.findActiveByIssueId.mockImplementation((id: string) =>
