@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor, act } from "@testing-library/react";
+import { render, screen, waitFor, act, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { Artifact } from "@/api/client.ts";
 
@@ -249,6 +249,90 @@ describe("ChatPanel", () => {
       // After resolution, still only artifact-derived messages (2 from props)
       // "New question" should NOT appear
       expect(screen.queryByText("New question")).toBeNull();
+    });
+  });
+
+  it("auto-scrolls the message list into view when the message count changes", async () => {
+    const scrollSpy = vi.fn();
+    // jsdom has no real layout engine and doesn't implement scrollIntoView;
+    // stub it so the effect's `typeof === "function"` guard passes.
+    (HTMLElement.prototype as unknown as { scrollIntoView: () => void }).scrollIntoView = scrollSpy;
+
+    try {
+      const artifacts: Artifact[] = [
+        makeArtifact("user", "Hello there", "a1", "2024-01-01T00:00:01Z"),
+      ];
+      render(<ChatPanel runId={RUN_ID} artifacts={artifacts} />);
+
+      await waitFor(() => {
+        expect(scrollSpy).toHaveBeenCalledWith({ behavior: "smooth" });
+      });
+    } finally {
+      delete (HTMLElement.prototype as unknown as { scrollIntoView?: () => void }).scrollIntoView;
+    }
+  });
+
+  it("clicking the header collapses the panel, hiding its body, and clicking again reopens it", async () => {
+    render(<ChatPanel runId={RUN_ID} artifacts={[]} />);
+
+    // Open by default — input and empty-state body are visible.
+    expect(screen.getByPlaceholderText(/ask the agent/i)).toBeDefined();
+    expect(screen.getByText(/no messages yet/i)).toBeDefined();
+
+    const headerBtn = screen.getByRole("button", { name: /chat with agent/i });
+    await userEvent.click(headerBtn);
+
+    // Collapsed — body content (input, empty state) is no longer rendered.
+    expect(screen.queryByPlaceholderText(/ask the agent/i)).toBeNull();
+    expect(screen.queryByText(/no messages yet/i)).toBeNull();
+
+    await userEvent.click(headerBtn);
+
+    // Reopened — body content is back.
+    expect(screen.getByPlaceholderText(/ask the agent/i)).toBeDefined();
+    expect(screen.getByText(/no messages yet/i)).toBeDefined();
+  });
+
+  it("submitting the form directly with blank/whitespace input does not call the API", async () => {
+    const { container } = render(<ChatPanel runId={RUN_ID} artifacts={[]} />);
+    const form = container.querySelector("form");
+    expect(form).not.toBeNull();
+
+    // Input defaults to "" — fire a native submit event, bypassing the
+    // disabled submit button, to exercise handleSubmit's early-return guard.
+    fireEvent.submit(form!);
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(mockApi.sendChatMessage).not.toHaveBeenCalled();
+  });
+
+  it("renders an empty bubble when a ChatMessage artifact payload has no content field", () => {
+    const artifact: Artifact = {
+      id: "a1",
+      runId: RUN_ID,
+      type: "ChatMessage",
+      version: 1,
+      payloadJson: { role: "user" },
+      rawText: "",
+      createdAt: "2024-01-01T00:00:01Z",
+    };
+    const { container } = render(<ChatPanel runId={RUN_ID} artifacts={[artifact]} />);
+
+    const bubble = container.querySelector("span.whitespace-pre-wrap");
+    expect(bubble).not.toBeNull();
+    expect(bubble!.textContent).toBe("");
+  });
+
+  it("shows a generic error message when the API rejects with a non-Error value", async () => {
+    mockApi.sendChatMessage.mockRejectedValue("network down");
+
+    render(<ChatPanel runId={RUN_ID} artifacts={[]} />);
+    const input = screen.getByPlaceholderText(/ask the agent/i);
+    await userEvent.type(input, "Hi");
+    await userEvent.click(screen.getByRole("button", { name: /send/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/chat request failed/i)).toBeDefined();
     });
   });
 });
