@@ -64,5 +64,15 @@ describe("parseLinearCommand", () => {
       const result = parseLinearCommand("/unknown-command");
       expect(result).toEqual({ type: "unknown", raw: "/unknown-command" });
     });
+
+    it("returns null for an empty string input (first line is empty, not undefined)", () => {
+      const result = parseLinearCommand("");
+      expect(result).toBeNull();
+    });
+
+    it("returns null for whitespace-only input", () => {
+      const result = parseLinearCommand("   \n  ");
+      expect(result).toBeNull();
+    });
   });
 });

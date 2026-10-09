@@ -116,4 +116,137 @@ END_STRUCTURED_OUTPUT`;
     expect(out.parsed.payload.value).toBe("ok");
     expect(logger.error).not.toHaveBeenCalled();
   });
+
+  it("prepends the system prompt to stdin with a separator when input.systemPrompt is set", async () => {
+    const validBlock = `BEGIN_STRUCTURED_OUTPUT
+{"success":true,"stage":"planner","payload":{"value":"ok"}}
+END_STRUCTURED_OUTPUT`;
+    const processRunner = makeMockProcessRunner({
+      stdout: JSON.stringify({ type: "result", result: validBlock }),
+      stderr: "",
+      exitCode: 0,
+      durationMs: 10,
+      timedOut: false,
+    });
+    const logger = makeMockLogger();
+    const runner = new CursorRunner(
+      processRunner as never,
+      "cursor",
+      [],
+      "claude-4.6-sonnet",
+      logger as never,
+    );
+
+    await runner.run(
+      {
+        prompt: "Review this.",
+        systemPrompt: "You are precise.",
+        workingDirectory: "/tmp",
+        timeoutMs: 1000,
+      },
+      "planner",
+      echoSchema,
+    );
+
+    expect(processRunner.execute).toHaveBeenCalledWith(
+      expect.objectContaining({
+        stdinData: "You are precise.\n\n---\n\nReview this.",
+      }),
+    );
+  });
+
+  it("uses the prompt alone as stdin when input.systemPrompt is absent", async () => {
+    const validBlock = `BEGIN_STRUCTURED_OUTPUT
+{"success":true,"stage":"planner","payload":{"value":"ok"}}
+END_STRUCTURED_OUTPUT`;
+    const processRunner = makeMockProcessRunner({
+      stdout: JSON.stringify({ type: "result", result: validBlock }),
+      stderr: "",
+      exitCode: 0,
+      durationMs: 10,
+      timedOut: false,
+    });
+    const logger = makeMockLogger();
+    const runner = new CursorRunner(
+      processRunner as never,
+      "cursor",
+      [],
+      "claude-4.6-sonnet",
+      logger as never,
+    );
+
+    await runner.run(
+      { prompt: "Review this.", workingDirectory: "/tmp", timeoutMs: 1000 },
+      "planner",
+      echoSchema,
+    );
+
+    expect(processRunner.execute).toHaveBeenCalledWith(
+      expect.objectContaining({ stdinData: "Review this." }),
+    );
+  });
+
+  it("passes a process context (runId/stage/runtime) to the process runner when input.runId is set", async () => {
+    const validBlock = `BEGIN_STRUCTURED_OUTPUT
+{"success":true,"stage":"planner","payload":{"value":"ok"}}
+END_STRUCTURED_OUTPUT`;
+    const processRunner = makeMockProcessRunner({
+      stdout: JSON.stringify({ type: "result", result: validBlock }),
+      stderr: "",
+      exitCode: 0,
+      durationMs: 10,
+      timedOut: false,
+    });
+    const logger = makeMockLogger();
+    const runner = new CursorRunner(
+      processRunner as never,
+      "cursor",
+      [],
+      "claude-4.6-sonnet",
+      logger as never,
+    );
+
+    await runner.run(
+      { prompt: "x", workingDirectory: "/tmp", timeoutMs: 1000, runId: "run-cursor-1" },
+      "planner",
+      echoSchema,
+    );
+
+    const call = processRunner.execute.mock.calls[0]![0] as { context?: unknown };
+    expect(call.context).toEqual({ runId: "run-cursor-1", stage: "planner", runtime: "cursor" });
+  });
+
+  it("truncates a long stderr/outputSnippet to a tail with an ellipsis prefix", async () => {
+    const longResult = "Y".repeat(900) + "[CURSOR_TAIL]";
+    const longStderr = "Z".repeat(700) + "[STDERR_TAIL]";
+    const envelope = JSON.stringify({ type: "result", result: longResult });
+
+    const processRunner = makeMockProcessRunner({
+      stdout: envelope,
+      stderr: longStderr,
+      exitCode: 1,
+      durationMs: 50,
+      timedOut: false,
+    });
+    const logger = makeMockLogger();
+    const runner = new CursorRunner(
+      processRunner as never,
+      "cursor",
+      [],
+      "claude-4.6-sonnet",
+      logger as never,
+    );
+
+    await expect(
+      runner.run({ prompt: "x", workingDirectory: "/tmp", timeoutMs: 1000 }, "planner", echoSchema),
+    ).rejects.toThrow();
+
+    const [logFields] = logger.error.mock.calls[0]!;
+    expect(logFields.outputSnippet.startsWith("…")).toBe(true);
+    expect(logFields.outputSnippet).toContain("[CURSOR_TAIL]");
+    expect(logFields.outputSnippet.length).toBeLessThanOrEqual(501);
+    expect(logFields.stderr.startsWith("…")).toBe(true);
+    expect(logFields.stderr).toContain("[STDERR_TAIL]");
+    expect(logFields.stderr.length).toBeLessThanOrEqual(501);
+  });
 });

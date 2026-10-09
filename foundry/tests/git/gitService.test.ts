@@ -164,6 +164,41 @@ describe("GitService", () => {
       await svc.removeWorktree(repoPath, result.worktreePath);
     });
 
+    it("removes and recreates the worktree when the deterministic worktree path already exists", async () => {
+      const runId = "repeat123-3456-7890-abcd-ef1234567890";
+      const branchName = "hidday/pry-55-repeat-setup";
+
+      const first = await svc.setupRunWorktree(repoPath, runId, "main", branchName);
+      expect(existsSync(first.worktreePath)).toBe(true);
+
+      // Calling setupRunWorktree again with the same runId/branchName computes
+      // the exact same deterministic worktree path, which now already exists
+      // on disk from the first call — exercising the "remove first" branch.
+      const second = await svc.setupRunWorktree(repoPath, runId, "main", branchName);
+
+      expect(second.worktreePath).toBe(first.worktreePath);
+      expect(existsSync(second.worktreePath)).toBe(true);
+      expect(await svc.currentBranch(second.worktreePath)).toBe(branchName);
+
+      await svc.removeWorktree(repoPath, second.worktreePath);
+    });
+
+    it("warns and resets the local branch when origin/<branch> already exists", async () => {
+      const branchName = "hidday/pry-66-already-on-origin";
+      // Push the branch to the bare "origin" remote first so remoteBranchExists()
+      // returns true inside setupRunWorktree.
+      git(["push", "origin", `main:refs/heads/${branchName}`], repoPath);
+
+      const runId = "originex1-3456-7890-abcd-ef1234567890";
+      const result = await svc.setupRunWorktree(repoPath, runId, "main", branchName);
+
+      expect(existsSync(result.worktreePath)).toBe(true);
+      expect(await svc.currentBranch(result.worktreePath)).toBe(branchName);
+      expect(await svc.remoteBranchExists(repoPath, branchName)).toBe(true);
+
+      await svc.removeWorktree(repoPath, result.worktreePath);
+    });
+
     it("recovers when the branch is checked out in a stale worktree", async () => {
       // Simulate a prior run that left both a branch and a worktree admin record.
       const branchName = "hidday/pry-100-stale-wt";
