@@ -329,6 +329,19 @@ describe("RealLinearClient.updateIssueState", () => {
     await client.updateIssueState("i2", "Done");
     expect(sdk.team).toHaveBeenCalledTimes(1);
   });
+
+  it("treats a missing states connection as no states available", async () => {
+    const { client, sdk, logger } = build();
+    sdk.issue.mockResolvedValue(
+      makeFakeIssue({ id: "i1", team: Promise.resolve({ id: "team-1", key: "PRY" }) }),
+    );
+    sdk.team.mockResolvedValue({ states: () => Promise.resolve(null) });
+
+    await client.updateIssueState("i1", "Done");
+
+    expect(logger.warn).toHaveBeenCalled();
+    expect(sdk.updateIssue).not.toHaveBeenCalled();
+  });
 });
 
 describe("RealLinearClient.addLabel", () => {
