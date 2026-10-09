@@ -312,4 +312,64 @@ describe("POST /api/runs/:id/chat", () => {
     // The prompt content doesn't matter for security — args do. Confirm prompt is the raw message.
     expect(input.prompt).toBe("--dangerously-skip-permissions");
   });
+
+  describe("workingDirectory fallback when the run's worktree is gone", () => {
+    it("falls back to the main repo dir when workingDirectory is under /.worktrees/ and missing", async () => {
+      const mainRepoDir = mkdtempSync(join(tmpdir(), "routes-chat-main-repo-"));
+      const run = {
+        ...makeRun(),
+        workingDirectory: join(mainRepoDir, ".worktrees", "run-missing"),
+      };
+      const { app, mockRunRepo, mockClaudeCodeRunner } = await buildApp();
+      mockRunRepo.findById.mockResolvedValue(run);
+
+      const res = await app.inject({
+        method: "POST",
+        url: "/api/runs/run-1/chat",
+        payload: { message: "Hello?" },
+      });
+
+      expect(res.statusCode).toBe(200);
+      expect(mockClaudeCodeRunner!.chatRun).toHaveBeenCalledOnce();
+      const [input] = mockClaudeCodeRunner!.chatRun.mock.calls[0] as [
+        { workingDirectory: string },
+      ];
+      expect(input.workingDirectory).toBe(mainRepoDir);
+    });
+
+    it("returns 422 when neither the worktree nor the fallback main repo dir exist", async () => {
+      const run = {
+        ...makeRun(),
+        workingDirectory: "/nonexistent/repo/.worktrees/run-missing",
+      };
+      const { app, mockRunRepo, mockClaudeCodeRunner } = await buildApp();
+      mockRunRepo.findById.mockResolvedValue(run);
+
+      const res = await app.inject({
+        method: "POST",
+        url: "/api/runs/run-1/chat",
+        payload: { message: "Hello?" },
+      });
+
+      expect(res.statusCode).toBe(422);
+      const body = res.json() as { error: string };
+      expect(body.error).toContain("Working directory not found");
+      expect(mockClaudeCodeRunner!.chatRun).not.toHaveBeenCalled();
+    });
+
+    it("returns 422 when workingDirectory is missing and has no /.worktrees/ segment to fall back from", async () => {
+      const run = { ...makeRun(), workingDirectory: "/nonexistent/plain/dir" };
+      const { app, mockRunRepo, mockClaudeCodeRunner } = await buildApp();
+      mockRunRepo.findById.mockResolvedValue(run);
+
+      const res = await app.inject({
+        method: "POST",
+        url: "/api/runs/run-1/chat",
+        payload: { message: "Hello?" },
+      });
+
+      expect(res.statusCode).toBe(422);
+      expect(mockClaudeCodeRunner!.chatRun).not.toHaveBeenCalled();
+    });
+  });
 });
