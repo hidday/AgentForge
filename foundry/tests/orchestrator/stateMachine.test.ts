@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { transition, getValidEvents } from "../../src/orchestrator/stateMachine.js";
 import { RunState } from "../../src/domain/runState.js";
 import { RunEvent } from "../../src/domain/runEvent.js";
+import { StateTransitionError } from "../../src/utils/errors.js";
 
 describe("stateMachine - clarification transitions", () => {
   it("HumanClarificationNeeded + CLARIFICATION_PROVIDED → Planning", () => {
@@ -39,5 +40,43 @@ describe("stateMachine - clarification transitions", () => {
     const validEvents = getValidEvents(RunState.Failed);
     expect(validEvents).toHaveLength(1);
     expect(validEvents).toContain(RunEvent.RESET_TO_TODO);
+  });
+});
+
+describe("stateMachine - error paths", () => {
+  it("throws StateTransitionError when the current state has no entries in the table at all", () => {
+    // RunState.Done has no outgoing transitions registered anywhere.
+    expect(() => transition(RunState.Done, RunEvent.RESET_TO_TODO)).toThrow(StateTransitionError);
+    try {
+      transition(RunState.Done, RunEvent.RESET_TO_TODO);
+      expect.unreachable();
+    } catch (err) {
+      expect(err).toBeInstanceOf(StateTransitionError);
+      const e = err as StateTransitionError;
+      expect(e.fromState).toBe(RunState.Done);
+      expect(e.event).toBe(RunEvent.RESET_TO_TODO);
+      expect(e.message).toContain("Done");
+      expect(e.message).toContain("RESET_TO_TODO");
+    }
+  });
+
+  it("throws StateTransitionError when the state exists but the event is not a valid transition for it", () => {
+    // RunState.Todo has entries, but HUMAN_APPROVED is not one of its valid events.
+    expect(() => transition(RunState.Todo, RunEvent.HUMAN_APPROVED)).toThrow(
+      StateTransitionError,
+    );
+    try {
+      transition(RunState.Todo, RunEvent.HUMAN_APPROVED);
+      expect.unreachable();
+    } catch (err) {
+      expect(err).toBeInstanceOf(StateTransitionError);
+      const e = err as StateTransitionError;
+      expect(e.fromState).toBe(RunState.Todo);
+      expect(e.event).toBe(RunEvent.HUMAN_APPROVED);
+    }
+  });
+
+  it("getValidEvents returns an empty array for a state with no registered transitions", () => {
+    expect(getValidEvents(RunState.Done)).toEqual([]);
   });
 });
