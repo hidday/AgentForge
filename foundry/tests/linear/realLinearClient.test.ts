@@ -104,6 +104,38 @@ describe("RealLinearClient.getRelatedContext blocker hydration failure", () => {
   });
 });
 
+describe("RealLinearClient.getRelatedContext with missing nested connections", () => {
+  it("treats a missing inverseRelations result as no blockers", async () => {
+    const { client, sdk } = build();
+    const focus = makeFakeIssue({
+      id: "focus-id",
+      inverseRelations: () =>
+        Promise.resolve(null as unknown as { nodes: Array<{ id: string; type: string; issue: Promise<never> }> }),
+    });
+    sdk.issue.mockResolvedValue(focus);
+
+    const ctx = await client.getRelatedContext("focus-id");
+    expect(ctx.blockers).toEqual([]);
+  });
+
+  it("defaults the parent's state to Unknown and labels to [] when their connections are missing", async () => {
+    const { client, sdk } = build();
+    const parent = makeFakeIssue({
+      id: "parent-id",
+      state: Promise.resolve(null),
+      labels: () => Promise.resolve(null as unknown as { nodes: Array<{ id: string; name: string }> }),
+    });
+    const focus = makeFakeIssue({ id: "focus-id", parent: Promise.resolve(parent) });
+    sdk.issue.mockImplementation((id: string) =>
+      Promise.resolve(id === "focus-id" ? focus : parent),
+    );
+
+    const ctx = await client.getRelatedContext("focus-id");
+    expect(ctx.parent?.state).toBe("Unknown");
+    expect(ctx.parent?.labels).toEqual([]);
+  });
+});
+
 describe("RealLinearClient.getIssue", () => {
   it("maps all fields, defaulting null description and missing relations", async () => {
     const { client, sdk } = build();
@@ -134,6 +166,18 @@ describe("RealLinearClient.getIssue", () => {
       team: undefined,
       cycle: undefined,
     });
+  });
+
+  it("defaults labels to [] when the labels connection itself is missing", async () => {
+    const { client, sdk } = build();
+    const issue = makeFakeIssue({
+      id: "i3",
+      labels: () => Promise.resolve(null as unknown as { nodes: Array<{ id: string; name: string }> }),
+    });
+    sdk.issue.mockResolvedValue(issue);
+
+    const result = await client.getIssue("i3");
+    expect(result.labels).toEqual([]);
   });
 
   it("maps project/team/cycle names when present", async () => {
@@ -194,6 +238,22 @@ describe("RealLinearClient.searchIssues", () => {
     sdk.issues.mockResolvedValue(null);
     const results = await client.searchIssues({ state: "Todo" });
     expect(results).toEqual([]);
+  });
+
+  it("defaults labels/description/team to their fallbacks when nested connections are missing", async () => {
+    const { client, sdk } = build();
+    const node = makeFakeIssue({
+      id: "i1",
+      description: null,
+      team: Promise.resolve(null),
+      labels: () => Promise.resolve(null as unknown as { nodes: Array<{ id: string; name: string }> }),
+    });
+    sdk.issues.mockResolvedValue({ nodes: [node] });
+
+    const [result] = await client.searchIssues({ state: "Todo" });
+    expect(result.labels).toEqual([]);
+    expect(result.description).toBe("");
+    expect(result.team).toBeUndefined();
   });
 
   it("maps project/cycle/team names per result node", async () => {
@@ -435,6 +495,17 @@ describe("RealLinearClient.listLabels", () => {
     const { client, sdk } = build();
     sdk.issue.mockResolvedValue(
       makeFakeIssue({ id: "i1", labels: () => Promise.resolve({ nodes: [] }) }),
+    );
+    expect(await client.listLabels("i1")).toEqual([]);
+  });
+
+  it("returns [] and skips caching when the labels connection itself is missing", async () => {
+    const { client, sdk } = build();
+    sdk.issue.mockResolvedValue(
+      makeFakeIssue({
+        id: "i1",
+        labels: () => Promise.resolve(null as unknown as { nodes: Array<{ id: string; name: string }> }),
+      }),
     );
     expect(await client.listLabels("i1")).toEqual([]);
   });
