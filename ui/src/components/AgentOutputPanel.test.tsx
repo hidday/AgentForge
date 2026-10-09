@@ -171,6 +171,16 @@ describe("AgentOutputPanel", () => {
     expect(screen.getByText("Fatal failure occurred")).toBeDefined();
   });
 
+  it("shows the raw-view waiting fallback when output is empty but a process is active", async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    render(<AgentOutputPanel processes={[makeProcess()]} output="" />);
+
+    await user.click(screen.getByText("raw"));
+
+    const pre = document.querySelector("pre");
+    expect(pre?.textContent).toBe("Waiting for output...");
+  });
+
   it("renders a non-error tool_result block without the Error label", () => {
     const line = JSON.stringify({
       content: [{ type: "tool_result", content: "all good", is_error: false }],
