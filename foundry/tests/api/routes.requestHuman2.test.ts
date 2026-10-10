@@ -37,7 +37,8 @@ function makeRun(overrides: Record<string, unknown> = {}) {
 async function buildApp(opts: {
   run?: ReturnType<typeof makeRun> | null;
   events?: { eventType: string; createdAt: Date; payloadJson: unknown }[];
-  withOptions?: boolean;
+  /** When false, omit uiBaseUrl/debounceHours from options so their defaults kick in. */
+  withDebounceOptions?: boolean;
 } = {}) {
   const run = opts.run === undefined ? makeRun() : opts.run;
 
@@ -86,7 +87,13 @@ async function buildApp(opts: {
     mockEmitter as never,
     mockProcessRunner as never,
     undefined,
-    opts.withOptions === false ? {} : { notificationService: notificationService as never },
+    opts.withDebounceOptions === false
+      ? { notificationService: notificationService as never }
+      : {
+          notificationService: notificationService as never,
+          uiBaseUrl: "http://localhost:5173",
+          debounceHours: 6,
+        },
   );
   await app.ready();
 
@@ -110,8 +117,8 @@ describe("POST /api/runs/:id/actions/request-human — additional branches", () 
     expect(res.statusCode).toBe(404);
   });
 
-  it("uses default debounceHours (6) and default uiBaseUrl when options are omitted", async () => {
-    const { app, sendHumanRequest } = await buildApp({ withOptions: false });
+  it("uses default debounceHours (6) and default uiBaseUrl when those options are omitted", async () => {
+    const { app, sendHumanRequest } = await buildApp({ withDebounceOptions: false });
 
     const res = await app.inject({
       method: "POST",
@@ -127,7 +134,7 @@ describe("POST /api/runs/:id/actions/request-human — additional branches", () 
   it("does not debounce when a HUMAN_REQUESTED event with the same reason is outside the debounce window", async () => {
     const oldTs = new Date(Date.now() - 7 * 60 * 60 * 1000); // 7h ago, default window is 6h
     const { app, sendHumanRequest } = await buildApp({
-      withOptions: false,
+      withDebounceOptions: false,
       events: [{ eventType: RunEvent.HUMAN_REQUESTED, createdAt: oldTs, payloadJson: { reason: "other" } }],
     });
 
@@ -145,7 +152,7 @@ describe("POST /api/runs/:id/actions/request-human — additional branches", () 
   it("skips over unrelated event types when scanning for a recent debounce match", async () => {
     const recentTs = new Date(Date.now() - 60 * 1000);
     const { app, sendHumanRequest } = await buildApp({
-      withOptions: false,
+      withDebounceOptions: false,
       events: [
         { eventType: "PLAN_CREATED", createdAt: recentTs, payloadJson: {} },
         { eventType: RunEvent.HUMAN_REQUESTED, createdAt: recentTs, payloadJson: { reason: "plan_ambiguous" } },

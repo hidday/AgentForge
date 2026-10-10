@@ -129,6 +129,14 @@ describe("ProcessRunner — getActiveProcesses / getProcessOutput", () => {
     expect(output).toBe("line one\nline two\n");
   });
 
+  it("swallows a read failure and returns null when the log path exists but is unreadable as a file (e.g. a directory)", () => {
+    const processId = "dir-not-file-proc";
+    // existsSync() is true for a directory too, but readFileSync() on it throws EISDIR.
+    mkdirSync(join(spoolDir, `${processId}.log`));
+
+    expect(runner.getProcessOutput(processId)).toBeNull();
+  });
+
   it("returns an empty active-processes list when nothing is running", () => {
     expect(runner.getActiveProcesses()).toEqual([]);
   });
@@ -432,7 +440,7 @@ describe("ProcessRunner — rehydrateOrphans", () => {
     mkdirSync(spoolDir, { recursive: true });
   });
 
-  it("swallows a missing pre-existing log file for an alive orphan (rollingBuffer stays empty) and still logs a warning for the resulting watch failure", () => {
+  it("swallows a missing pre-existing log file for an alive orphan (rollingBuffer stays empty) and still logs a warning for the resulting watch failure", async () => {
     const alivePid = process.pid;
     writeFileSync(
       join(spoolDir, "alive-no-log.json"),
@@ -457,6 +465,12 @@ describe("ProcessRunner — rehydrateOrphans", () => {
       expect.objectContaining({ file: "alive-no-log.json" }),
       "Failed to process manifest",
     );
+
+    // The alive branch still opens a real (async) write stream for log
+    // tailing before the watch() throw unwinds it; give it time to settle
+    // before afterEach deletes the spool dir, to avoid a racy ENOENT on
+    // the stream's deferred fd open landing as an unhandled error.
+    await new Promise((r) => setTimeout(r, 100));
   });
 });
 
@@ -475,105 +489,118 @@ describe("ProcessRunner — orphan finalization when the pid later dies", () => 
 
   afterEach(() => {
     vi.restoreAllMocks();
-    vi.useRealTimers();
     rmSync(spoolDir, { recursive: true, force: true });
   });
 
-  it("finalizes the orphan (updates manifest, emits emitProcessCompleted) once the periodic liveness poll detects the pid is gone", () => {
-    const processId = "finalize-proc";
-    const logPath = join(spoolDir, `${processId}.log`);
-    const manifestPath = join(spoolDir, `${processId}.json`);
-    writeFileSync(logPath, "initial content");
-    writeFileSync(
-      manifestPath,
-      JSON.stringify({
-        id: processId,
-        pid: 55555,
-        command: "node",
-        args: [],
-        runId: "run-finalize",
-        stage: "implementing",
-        runtime: "claude-code",
-        startedAt: new Date().toISOString(),
-        logFile: logPath,
-      }),
-    );
+  // The orphan's liveness poll (setInterval) is created internally the
+  // moment rehydrateOrphans() registers it, so faking timers after the
+  // fact wouldn't affect an already-real interval. Instead we let the
+  // real 5s poll tick fire, with a generous margin above it.
+  it(
+    "finalizes the orphan (updates manifest, emits emitProcessCompleted) once the periodic liveness poll detects the pid is gone",
+    async () => {
+      const processId = "finalize-proc";
+      const logPath = join(spoolDir, `${processId}.log`);
+      const manifestPath = join(spoolDir, `${processId}.json`);
+      writeFileSync(logPath, "initial content");
+      writeFileSync(
+        manifestPath,
+        JSON.stringify({
+          id: processId,
+          pid: 55555,
+          command: "node",
+          args: [],
+          runId: "run-finalize",
+          stage: "implementing",
+          runtime: "claude-code",
+          startedAt: new Date().toISOString(),
+          logFile: logPath,
+        }),
+      );
 
-    let killCalls = 0;
-    vi.spyOn(process, "kill").mockImplementation(() => {
-      killCalls += 1;
-      if (killCalls === 1) return true; // rehydrateOrphans' initial liveness check: alive
-      throw new Error("ESRCH"); // every subsequent poll: dead
-    });
+      let killCalls = 0;
+      vi.spyOn(process, "kill").mockImplementation(() => {
+        killCalls += 1;
+        if (killCalls === 1) return true; // rehydrateOrphans' initial liveness check: alive
+        throw new Error("ESRCH"); // every subsequent poll: dead
+      });
 
-    runner.rehydrateOrphans();
-    expect(runner.getActiveProcesses().map((p) => p.id)).toContain(processId);
+      runner.rehydrateOrphans();
+      expect(runner.getActiveProcesses().map((p) => p.id)).toContain(processId);
 
-    vi.useFakeTimers();
-    vi.advanceTimersByTime(5_000);
+      // Let the real 5s poll interval fire at least once.
+      await new Promise((r) => setTimeout(r, 5_300));
 
-    expect(runner.getActiveProcesses()).toEqual([]);
-    expect(emitter.emitProcessCompleted).toHaveBeenCalledWith(
-      "run-finalize",
-      processId,
-      "implementing",
-      "claude-code",
-      -1,
-      expect.any(Number),
-    );
+      expect(runner.getActiveProcesses()).toEqual([]);
+      expect(emitter.emitProcessCompleted).toHaveBeenCalledWith(
+        "run-finalize",
+        processId,
+        "implementing",
+        "claude-code",
+        -1,
+        expect.any(Number),
+      );
 
-    const manifest = JSON.parse(readFileSync(manifestPath, "utf-8")) as {
-      completedAt?: string;
-      exitCode?: number;
-    };
-    expect(manifest.completedAt).toBeDefined();
-    expect(manifest.exitCode).toBe(-1);
-  });
+      const manifest = JSON.parse(readFileSync(manifestPath, "utf-8")) as {
+        completedAt?: string;
+        exitCode?: number;
+      };
+      expect(manifest.completedAt).toBeDefined();
+      expect(manifest.exitCode).toBe(-1);
+    },
+    10_000,
+  );
 
-  it("still finalizes and emits even when the manifest file disappears before the poll fires", () => {
-    const processId = "finalize-proc-no-manifest";
-    const logPath = join(spoolDir, `${processId}.log`);
-    const manifestPath = join(spoolDir, `${processId}.json`);
-    writeFileSync(logPath, "initial content");
-    writeFileSync(
-      manifestPath,
-      JSON.stringify({
-        id: processId,
-        pid: 55556,
-        command: "node",
-        args: [],
-        runId: "run-finalize-2",
-        stage: "implementing",
-        runtime: "claude-code",
-        startedAt: new Date().toISOString(),
-        logFile: logPath,
-      }),
-    );
+  it(
+    "still finalizes and emits even when the manifest file disappears before the poll fires",
+    async () => {
+      const processId = "finalize-proc-no-manifest";
+      const logPath = join(spoolDir, `${processId}.log`);
+      const manifestPath = join(spoolDir, `${processId}.json`);
+      writeFileSync(logPath, "initial content");
+      writeFileSync(
+        manifestPath,
+        JSON.stringify({
+          id: processId,
+          pid: 55556,
+          command: "node",
+          args: [],
+          runId: "run-finalize-2",
+          stage: "implementing",
+          runtime: "claude-code",
+          startedAt: new Date().toISOString(),
+          logFile: logPath,
+        }),
+      );
 
-    let killCalls = 0;
-    vi.spyOn(process, "kill").mockImplementation(() => {
-      killCalls += 1;
-      if (killCalls === 1) return true;
-      throw new Error("ESRCH");
-    });
+      let killCalls = 0;
+      vi.spyOn(process, "kill").mockImplementation(() => {
+        killCalls += 1;
+        if (killCalls === 1) return true;
+        throw new Error("ESRCH");
+      });
 
-    runner.rehydrateOrphans();
-    // Manifest vanishes before the orphan is finalized.
-    rmSync(manifestPath, { force: true });
+      runner.rehydrateOrphans();
+      // Give the async log-tailing write stream a moment to finish opening
+      // before we delete the manifest out from under it.
+      await new Promise((r) => setTimeout(r, 100));
+      // Manifest vanishes before the orphan is finalized.
+      rmSync(manifestPath, { force: true });
 
-    vi.useFakeTimers();
-    vi.advanceTimersByTime(5_000);
+      await new Promise((r) => setTimeout(r, 5_300));
 
-    expect(runner.getActiveProcesses()).toEqual([]);
-    expect(emitter.emitProcessCompleted).toHaveBeenCalledWith(
-      "run-finalize-2",
-      processId,
-      "implementing",
-      "claude-code",
-      -1,
-      expect.any(Number),
-    );
-  });
+      expect(runner.getActiveProcesses()).toEqual([]);
+      expect(emitter.emitProcessCompleted).toHaveBeenCalledWith(
+        "run-finalize-2",
+        processId,
+        "implementing",
+        "claude-code",
+        -1,
+        expect.any(Number),
+      );
+    },
+    10_000,
+  );
 });
 
 describe("ProcessRunner — appendToBuffer behavior via executeReal", () => {

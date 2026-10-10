@@ -361,7 +361,7 @@ describe("OrchestratorService.answerQuestions additional error branches", () => 
       .mockResolvedValueOnce(makeRun({ state: RunState.Planning }))
       .mockResolvedValueOnce(makeRun({ state: RunState.PlanReview }))
       .mockResolvedValueOnce(makeRun({ state: RunState.HumanClarificationNeeded }));
-    runRepo.update.mockResolvedValue({ ...run, planVersion: 2 });
+    runRepo.update.mockResolvedValue({ ...run, state: RunState.Planning, planVersion: 2 });
     artifactRepo.findLatestByType.mockImplementation((_: string, type: string) => {
       if (type === "Plan") return Promise.resolve(asArtifact("Plan", 1, plan));
       if (type === "TaskBundle") return Promise.resolve(asArtifact("TaskBundle", 1, taskBundle));
@@ -413,6 +413,7 @@ describe("OrchestratorService answer-researcher humanAnswers injection branch", 
     const todoRun = makeRun({ id: "run-1", state: RunState.Todo, branchName: null, prNumber: null });
     runRepo.findActiveByIssueId.mockResolvedValue(null);
     runRepo.create.mockResolvedValue(todoRun);
+    runRepo.findById.mockResolvedValue(makeRun({ state: RunState.PlanReview }));
     (deps.repoRegistry as { resolveForIssue: ReturnType<typeof vi.fn> }).resolveForIssue.mockReturnValue({
       name: "test-repo",
       defaultBranch: "main",
@@ -502,8 +503,8 @@ describe("OrchestratorService comment formatting edge cases", () => {
     const report = makeExecutionReport({ filesChanged: manyFiles, notes: ["Watch out for X"] });
 
     runRepo.findById
-      .mockResolvedValueOnce(makeRun({ state: RunState.Implementing, branchName: null }))
-      .mockResolvedValue(makeRun({ state: RunState.AIReview, prNumber: 5 }));
+      .mockResolvedValueOnce(makeRun({ state: RunState.Implementing, branchName: null, approvedPlanVersion: 1 }))
+      .mockResolvedValue(makeRun({ state: RunState.AIReview, prNumber: 5, approvedPlanVersion: 1 }));
     let execCallCount = 0;
     artifactRepo.findLatestByType.mockImplementation((_: string, type: string) => {
       if (type === "Plan") return Promise.resolve(asArtifact("Plan", 1, makePlan()));
