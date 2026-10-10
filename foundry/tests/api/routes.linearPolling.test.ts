@@ -82,6 +82,17 @@ describe("GET /api/linear/pending", () => {
     expect(res.statusCode).toBe(500);
     expect(res.json()).toEqual({ error: "Linear API down" });
   });
+
+  it("returns 500 (non-Error message) when discoverPendingIssues rejects a non-Error value", async () => {
+    const { app, mockLinearPollService } = await buildApp();
+    // eslint-disable-next-line prefer-promise-reject-errors
+    mockLinearPollService!.discoverPendingIssues.mockRejectedValue("Linear API down (string)");
+
+    const res = await app.inject({ method: "GET", url: "/api/linear/pending" });
+
+    expect(res.statusCode).toBe(500);
+    expect(res.json()).toEqual({ error: "Linear API down (string)" });
+  });
 });
 
 describe("POST /api/linear/ingest", () => {
@@ -141,5 +152,20 @@ describe("POST /api/linear/ingest", () => {
 
     expect(res.statusCode).toBe(500);
     expect(res.json()).toEqual({ error: "ingest failed" });
+  });
+
+  it("returns 500 (non-Error message) when startRunsForIssues rejects a non-Error value", async () => {
+    const { app, mockLinearPollService } = await buildApp();
+    // eslint-disable-next-line prefer-promise-reject-errors
+    mockLinearPollService!.startRunsForIssues.mockRejectedValue("ingest failed (string)");
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/linear/ingest",
+      payload: { issueIds: ["LIN-1"] },
+    });
+
+    expect(res.statusCode).toBe(500);
+    expect(res.json()).toEqual({ error: "ingest failed (string)" });
   });
 });

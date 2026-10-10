@@ -196,6 +196,27 @@ describe("GET /api/runs/:id/summary", () => {
     expect(body.executionReport.score).toBeUndefined();
   });
 
+  it("falls back to String(r) when a risk object cannot be JSON.stringified (circular reference)", async () => {
+    const run = makeRun();
+    const { app, mockRunRepo, mockArtifactRepo } = await buildApp();
+    mockRunRepo.findById.mockResolvedValue(run);
+
+    const circular: Record<string, unknown> = { note: "circular risk" };
+    circular.self = circular;
+    const planArtifact = makeArtifact("Plan", 1, { summary: "x", risks: [circular] });
+    mockArtifactRepo.findLatestByType.mockImplementation((_runId: string, type: string) => {
+      if (type === "Plan") return Promise.resolve(planArtifact);
+      return Promise.resolve(null);
+    });
+
+    const res = await app.inject({ method: "GET", url: "/api/runs/run-1/summary" });
+
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as Record<string, any>;
+    expect(body.plan.risks).toEqual(["[object Object]"]);
+    expect(body.plan.riskCount).toBe(1);
+  });
+
   it("returns empty steps/risks arrays when plan payload lacks them", async () => {
     const run = makeRun();
     const { app, mockRunRepo, mockArtifactRepo } = await buildApp();

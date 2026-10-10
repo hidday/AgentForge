@@ -121,6 +121,54 @@ describe("POST /api/runs/:id/actions/approve-plan", () => {
     // allow the fire-and-forget rejection handler (app.log.error) to run
     await new Promise((r) => setTimeout(r, 10));
   });
+
+  it("does not fail the request when the background runExecution rejects a non-Error value", async () => {
+    const run = makeRun({ state: RunState.Implementing });
+    const { app, mockOrchestrator } = await buildApp();
+    mockOrchestrator.approvePlan.mockResolvedValue(run);
+    // eslint-disable-next-line prefer-promise-reject-errors
+    mockOrchestrator.runExecution.mockRejectedValue("plain string failure");
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/actions/approve-plan",
+      payload: {},
+    });
+
+    expect(res.statusCode).toBe(200);
+    await new Promise((r) => setTimeout(r, 10));
+  });
+
+  it("treats a whitespace-only note as no note provided", async () => {
+    const run = makeRun({ state: RunState.Implementing });
+    const { app, mockOrchestrator } = await buildApp();
+    mockOrchestrator.approvePlan.mockResolvedValue(run);
+    mockOrchestrator.runExecution.mockResolvedValue(run);
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/actions/approve-plan",
+      payload: { note: "   " },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(mockOrchestrator.approvePlan).toHaveBeenCalledWith("run-1", { note: undefined });
+  });
+
+  it("returns 400 (non-Error message) when orchestrator.approvePlan rejects a non-Error value", async () => {
+    const { app, mockOrchestrator } = await buildApp();
+    // eslint-disable-next-line prefer-promise-reject-errors
+    mockOrchestrator.approvePlan.mockRejectedValue("just a string");
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/actions/approve-plan",
+      payload: {},
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toEqual({ error: "just a string" });
+  });
 });
 
 describe("POST /api/runs/:id/actions/reject-plan — mode validation", () => {
@@ -170,6 +218,21 @@ describe("POST /api/runs/:id/actions/reject-plan — mode validation", () => {
     expect(res.statusCode).toBe(200);
     expect(mockOrchestrator.rejectPlan).toHaveBeenCalledWith("run-1", undefined, "api", "iterate");
   });
+
+  it("returns 400 (non-Error message) when orchestrator.rejectPlan rejects a non-Error value", async () => {
+    const { app, mockOrchestrator } = await buildApp();
+    // eslint-disable-next-line prefer-promise-reject-errors
+    mockOrchestrator.rejectPlan.mockRejectedValue("rejected as string");
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/actions/reject-plan",
+      payload: {},
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toEqual({ error: "rejected as string" });
+  });
 });
 
 describe("POST /api/runs/:id/actions/re-review-plan", () => {
@@ -207,6 +270,38 @@ describe("POST /api/runs/:id/actions/re-review-plan", () => {
     expect(res.statusCode).toBe(200);
     await new Promise((r) => setTimeout(r, 10));
   });
+
+  it("logs but does not fail the request when the background call rejects a non-Error value", async () => {
+    const { app, mockOrchestrator } = await buildApp();
+    // eslint-disable-next-line prefer-promise-reject-errors
+    mockOrchestrator.runManualReReview.mockRejectedValue("background string failure");
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/actions/re-review-plan",
+      payload: {},
+    });
+
+    expect(res.statusCode).toBe(200);
+    await new Promise((r) => setTimeout(r, 10));
+  });
+
+  it("returns 400 (non-Error message) when runManualReReview throws synchronously with a non-Error", async () => {
+    const { app, mockOrchestrator } = await buildApp();
+    mockOrchestrator.runManualReReview.mockImplementation(() => {
+      // eslint-disable-next-line @typescript-eslint/no-throw-literal
+      throw "sync string throw";
+    });
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/actions/re-review-plan",
+      payload: {},
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toEqual({ error: "sync string throw" });
+  });
 });
 
 describe("POST /api/runs/:id/actions/revise-plan", () => {
@@ -243,6 +338,38 @@ describe("POST /api/runs/:id/actions/revise-plan", () => {
     expect(res.statusCode).toBe(200);
     await new Promise((r) => setTimeout(r, 10));
   });
+
+  it("logs but does not fail the request when the background call rejects a non-Error value", async () => {
+    const { app, mockOrchestrator } = await buildApp();
+    // eslint-disable-next-line prefer-promise-reject-errors
+    mockOrchestrator.runManualPlanRevision.mockRejectedValue("background string failure");
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/actions/revise-plan",
+      payload: {},
+    });
+
+    expect(res.statusCode).toBe(200);
+    await new Promise((r) => setTimeout(r, 10));
+  });
+
+  it("returns 400 (non-Error message) when runManualPlanRevision throws synchronously with a non-Error", async () => {
+    const { app, mockOrchestrator } = await buildApp();
+    mockOrchestrator.runManualPlanRevision.mockImplementation(() => {
+      // eslint-disable-next-line @typescript-eslint/no-throw-literal
+      throw "sync string throw";
+    });
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/actions/revise-plan",
+      payload: {},
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toEqual({ error: "sync string throw" });
+  });
 });
 
 describe("POST /api/runs/:id/actions/approve-review", () => {
@@ -275,6 +402,20 @@ describe("POST /api/runs/:id/actions/approve-review", () => {
 
     expect(res.statusCode).toBe(400);
     expect(res.json()).toEqual({ error: "not ready" });
+  });
+
+  it("returns 400 (non-Error message) when orchestrator rejects a non-Error value", async () => {
+    const { app, mockOrchestrator } = await buildApp();
+    // eslint-disable-next-line prefer-promise-reject-errors
+    mockOrchestrator.approveHumanReview.mockRejectedValue("not ready (string)");
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/actions/approve-review",
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toEqual({ error: "not ready (string)" });
   });
 });
 
@@ -316,6 +457,19 @@ describe("POST /api/runs/:id/actions/pause", () => {
     expect(res.statusCode).toBe(400);
     expect(res.json()).toEqual({ error: "cannot pause" });
   });
+
+  it("returns 400 (non-Error message) when handleCommand rejects a non-Error value", async () => {
+    const run = makeRun();
+    const { app, mockRunRepo, mockOrchestrator } = await buildApp();
+    mockRunRepo.findById.mockResolvedValue(run);
+    // eslint-disable-next-line prefer-promise-reject-errors
+    mockOrchestrator.handleCommand.mockRejectedValue("cannot pause (string)");
+
+    const res = await app.inject({ method: "POST", url: "/api/runs/run-1/actions/pause" });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toEqual({ error: "cannot pause (string)" });
+  });
 });
 
 describe("POST /api/runs/:id/actions/resume", () => {
@@ -355,5 +509,18 @@ describe("POST /api/runs/:id/actions/resume", () => {
 
     expect(res.statusCode).toBe(400);
     expect(res.json()).toEqual({ error: "cannot resume" });
+  });
+
+  it("returns 400 (non-Error message) when handleCommand rejects a non-Error value", async () => {
+    const run = makeRun();
+    const { app, mockRunRepo, mockOrchestrator } = await buildApp();
+    mockRunRepo.findById.mockResolvedValue(run);
+    // eslint-disable-next-line prefer-promise-reject-errors
+    mockOrchestrator.handleCommand.mockRejectedValue("cannot resume (string)");
+
+    const res = await app.inject({ method: "POST", url: "/api/runs/run-1/actions/resume" });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toEqual({ error: "cannot resume (string)" });
   });
 });

@@ -128,4 +128,16 @@ describe("POST /api/runs/:id/actions/retry", () => {
     expect(res.statusCode).toBe(200);
     await new Promise((r) => setTimeout(r, 10));
   });
+
+  it("does not fail the request when the background trigger rejects a non-Error value", async () => {
+    const { app, mockOrchestrator, mockRunRepo } = await buildApp();
+    mockRunRepo.findById.mockResolvedValue(makeRun(RunState.Todo));
+    // eslint-disable-next-line prefer-promise-reject-errors
+    mockOrchestrator.retryRun.mockRejectedValue("retry failed (string)");
+
+    const res = await app.inject({ method: "POST", url: "/api/runs/run-1/actions/retry" });
+
+    expect(res.statusCode).toBe(200);
+    await new Promise((r) => setTimeout(r, 10));
+  });
 });
