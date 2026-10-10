@@ -223,7 +223,7 @@ describe("ActionBar", () => {
       await userEvent.click(screen.getByRole("button", { name: "Reject Plan" }));
 
       expect(screen.getByText(/This will reject the current plan/i)).toBeDefined();
-      expect(screen.getByRole("button", { name: /Revise plan/i })).toBeDefined();
+      expect(screen.getByRole("button", { name: /Iterate with full context/i })).toBeDefined();
       expect(screen.getByRole("button", { name: /Start fresh/i })).toBeDefined();
     });
 
@@ -271,6 +271,21 @@ describe("ActionBar", () => {
 
       await waitFor(() => {
         expect(mockApi.rejectPlan).toHaveBeenCalledWith("run-1", undefined, "fresh");
+      });
+    });
+
+    it("can switch back to iterate mode after selecting fresh", async () => {
+      render(<ActionBar runId="run-1" state="AwaitingPlanApproval" onAction={vi.fn()} />);
+
+      await userEvent.click(screen.getByRole("button", { name: "Reject Plan" }));
+      await userEvent.click(screen.getByRole("button", { name: /Start fresh/i }));
+      await userEvent.click(screen.getByRole("button", { name: /Iterate with full context/i }));
+
+      const confirmButtons = screen.getAllByRole("button", { name: "Reject Plan" });
+      await userEvent.click(confirmButtons[confirmButtons.length - 1]);
+
+      await waitFor(() => {
+        expect(mockApi.rejectPlan).toHaveBeenCalledWith("run-1", undefined, "iterate");
       });
     });
 

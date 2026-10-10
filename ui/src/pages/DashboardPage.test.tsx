@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, within, act, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import type { Run } from "@/api/client.ts";
@@ -153,21 +153,28 @@ describe("DashboardPage", () => {
   it("renders the stats bar computed from run states", () => {
     const runs = [
       makeRun({ id: "r1", state: "Implementing" }), // active
+      makeRun({ id: "r1b", state: "Planning" }), // also active — exercises the
+      // reduce's "category already seen" accumulation path, not just the
+      // nullish-coalescing default-to-0 path.
       makeRun({ id: "r2", state: "AwaitingPlanApproval" }), // waiting
       makeRun({ id: "r3", state: "AIBlocked" }), // blocked
       makeRun({ id: "r4", state: "Done" }), // done
       makeRun({ id: "r5", state: "Todo" }), // idle (not counted in any stat bucket shown)
+      makeRun({ id: "r6", state: "SomeUnknownFutureState" }), // falls back to "idle"
     ];
     mockUseRuns.mockReturnValue(defaultRunsResult({ runs }));
     renderPage();
 
-    const stats = screen.getByText("Total").parentElement!;
-    expect(stats.textContent).toContain("5");
+    // Scope to the stats grid (identified by the unambiguous "Total" label)
+    // to avoid matching the filter bar's same-named buttons below it.
+    const statsBar = screen.getByText("Total").parentElement!.parentElement!;
+    const stats = within(statsBar);
 
-    expect(screen.getByText("Active").parentElement!.textContent).toContain("1");
-    expect(screen.getByText("Awaiting").parentElement!.textContent).toContain("1");
-    expect(screen.getByText("Blocked").parentElement!.textContent).toContain("1");
-    expect(screen.getByText("Done").parentElement!.textContent).toContain("1");
+    expect(stats.getByText("Total").parentElement!.textContent).toContain("7");
+    expect(stats.getByText("Active").parentElement!.textContent).toContain("2");
+    expect(stats.getByText("Awaiting").parentElement!.textContent).toContain("1");
+    expect(stats.getByText("Blocked").parentElement!.textContent).toContain("1");
+    expect(stats.getByText("Done").parentElement!.textContent).toContain("1");
   });
 
   it("renders RunsTable with all runs when the filter is All", () => {
@@ -289,37 +296,44 @@ describe("DashboardPage", () => {
     expect(capturedBannerProps?.skipped).toBe(1);
   });
 
-  it("auto-dismisses the ingest banner after INGEST_BANNER_AUTO_DISMISS_MS", async () => {
+  it("auto-dismisses the ingest banner after INGEST_BANNER_AUTO_DISMISS_MS", () => {
     vi.useFakeTimers();
-    const user = userEvent.setup({ delay: null });
     renderPage();
 
-    await user.click(screen.getByRole("button", { name: /sync from linear/i }));
-    await user.click(screen.getByTestId("sync-complete"));
+    // Use fireEvent (not userEvent) here: userEvent's internal scheduling
+    // doesn't play well with fully-faked timers, but these are plain
+    // synchronous button clicks with no debounce/async behavior to simulate.
+    fireEvent.click(screen.getByRole("button", { name: /sync from linear/i }));
+    fireEvent.click(screen.getByTestId("sync-complete"));
     expect(screen.getByTestId("ingest-banner")).toBeDefined();
 
-    vi.advanceTimersByTime(4999);
+    act(() => {
+      vi.advanceTimersByTime(4999);
+    });
     expect(screen.getByTestId("ingest-banner")).toBeDefined();
 
-    vi.advanceTimersByTime(1);
+    act(() => {
+      vi.advanceTimersByTime(1);
+    });
     expect(screen.queryByTestId("ingest-banner")).toBeNull();
   });
 
-  it("dismisses the ingest banner manually and cancels the pending auto-dismiss timer", async () => {
+  it("dismisses the ingest banner manually and cancels the pending auto-dismiss timer", () => {
     vi.useFakeTimers();
-    const user = userEvent.setup({ delay: null });
     renderPage();
 
-    await user.click(screen.getByRole("button", { name: /sync from linear/i }));
-    await user.click(screen.getByTestId("sync-complete"));
+    fireEvent.click(screen.getByRole("button", { name: /sync from linear/i }));
+    fireEvent.click(screen.getByTestId("sync-complete"));
     expect(screen.getByTestId("ingest-banner")).toBeDefined();
 
-    await user.click(within(screen.getByTestId("ingest-banner")).getByTestId("banner-dismiss"));
+    fireEvent.click(within(screen.getByTestId("ingest-banner")).getByTestId("banner-dismiss"));
     expect(screen.queryByTestId("ingest-banner")).toBeNull();
 
     // Advancing past the auto-dismiss window should not throw or resurrect it,
     // confirming the timeout was cleared rather than merely racing a re-set.
-    vi.advanceTimersByTime(10_000);
+    act(() => {
+      vi.advanceTimersByTime(10_000);
+    });
     expect(screen.queryByTestId("ingest-banner")).toBeNull();
   });
 
