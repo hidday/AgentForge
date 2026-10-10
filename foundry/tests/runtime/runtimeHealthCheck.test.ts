@@ -391,6 +391,24 @@ describe("RuntimeHealthCheck auth check branches — successPattern (claude-code
     expect(claude.authCheck.ok).toBe(false);
     expect(claude.authCheck.error).toBe("socket hang up");
   });
+
+  it("auth check execute() throwing a non-Error value stringifies it", async () => {
+    const { processRunner, health } = setup();
+    processRunner.execute.mockImplementation((opts: ProcessSpawnOptions) => {
+      if (opts.args[0] === "--version") return Promise.resolve(okResult("1.0.0"));
+      if (opts.command === "claude") return Promise.reject("raw string auth failure");
+      return Promise.resolve(okResult("PONG"));
+    });
+    let thrown: unknown;
+    try {
+      await health.runPreflight();
+    } catch (err) {
+      thrown = err;
+    }
+    const claude = (thrown as PreflightError).result.results.find((r) => r.runtime === "claude-code")!;
+    expect(claude.authCheck.ok).toBe(false);
+    expect(claude.authCheck.error).toBe("raw string auth failure");
+  });
 });
 
 describe("RuntimeHealthCheck auth check branches — exitCodeOnly (cursor style)", () => {

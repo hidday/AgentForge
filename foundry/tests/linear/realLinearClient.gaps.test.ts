@@ -23,6 +23,79 @@ describe("RealLinearClient (gaps beyond getRelatedContext)", () => {
     (client as unknown as { sdk: FakeSdk }).sdk = sdk;
   });
 
+  describe("getRelatedContext blocker hydration failure", () => {
+    it("warns and drops a blocker whose relation.issue rejects", async () => {
+      const okBlocker = {
+        id: "blocker-ok",
+        identifier: "PRY-101",
+        title: "OK blocker",
+        description: "d",
+        labels: () => Promise.resolve({ nodes: [] }),
+        state: Promise.resolve({ name: "Todo" }),
+        priority: 0,
+        url: "https://linear.app/ok",
+      };
+      const focusIssue = {
+        id: "focus-id",
+        parent: Promise.resolve(null),
+        inverseRelations: () =>
+          Promise.resolve({
+            nodes: [
+              {
+                id: "rel-bad",
+                type: "blocks",
+                issue: Promise.reject(new Error("hydration failed")),
+              },
+              { id: "rel-ok", type: "blocks", issue: Promise.resolve(okBlocker) },
+            ],
+          }),
+      };
+      sdk.issue = vi.fn().mockResolvedValue(focusIssue);
+
+      const ctx = await client.getRelatedContext("focus-id");
+
+      expect(ctx.blockers).toHaveLength(1);
+      expect(ctx.blockers[0].id).toBe("blocker-ok");
+    });
+  });
+
+  describe("getRelatedContext edge branches", () => {
+    it("treats an inverseRelations connection with no nodes as empty", async () => {
+      const focusIssue = {
+        id: "focus-id",
+        parent: Promise.resolve(null),
+        inverseRelations: () => Promise.resolve({ nodes: undefined }),
+      };
+      sdk.issue = vi.fn().mockResolvedValue(focusIssue);
+
+      const ctx = await client.getRelatedContext("focus-id");
+
+      expect(ctx.blockers).toEqual([]);
+    });
+
+    it("defaults labels to [] and state to 'Unknown' for a related issue missing both", async () => {
+      const parent = {
+        id: "parent-id",
+        identifier: "PRY-100",
+        title: "Parent",
+        description: "d",
+        labels: () => Promise.resolve(undefined),
+        state: Promise.resolve(undefined),
+      };
+      const focusIssue = {
+        id: "focus-id",
+        parent: Promise.resolve(parent),
+        inverseRelations: () => Promise.resolve({ nodes: [] }),
+      };
+      sdk.issue = vi.fn().mockResolvedValue(focusIssue);
+
+      const ctx = await client.getRelatedContext("focus-id");
+
+      expect(ctx.parent?.labels).toEqual([]);
+      expect(ctx.parent?.state).toBe("Unknown");
+    });
+  });
+
   describe("getIssue", () => {
     it("maps sdk issue fields, defaulting null description and missing optional fields", async () => {
       sdk.issue = vi.fn().mockResolvedValue({
@@ -204,6 +277,34 @@ describe("RealLinearClient (gaps beyond getRelatedContext)", () => {
 
       expect(results).toEqual([]);
     });
+
+    it("defaults labels/description/project/team/cycle when a result node lacks them", async () => {
+      sdk.issues = vi.fn().mockResolvedValue({
+        nodes: [
+          {
+            id: "node-2",
+            identifier: "PRY-11",
+            title: "Bare node",
+            description: null,
+            branchName: "ai/bare",
+            priority: 0,
+            url: "https://linear.app/bare",
+            labels: () => Promise.resolve(undefined),
+            project: Promise.resolve(null),
+            cycle: Promise.resolve(null),
+            team: Promise.resolve(null),
+          },
+        ],
+      });
+
+      const [result] = await client.searchIssues({ state: "Todo" });
+
+      expect(result.labels).toEqual([]);
+      expect(result.description).toBe("");
+      expect(result.project).toBeUndefined();
+      expect(result.team).toBeUndefined();
+      expect(result.cycle).toBeUndefined();
+    });
   });
 
   describe("postComment", () => {
@@ -248,6 +349,18 @@ describe("RealLinearClient (gaps beyond getRelatedContext)", () => {
       await client.updateIssueState("issue-1", "Done");
 
       expect(sdk.updateIssue).toHaveBeenCalledWith("issue-1", { stateId: "s1" });
+    });
+
+    it("treats a states connection with no nodes as empty (state stays unresolved)", async () => {
+      sdk.issue = vi.fn().mockResolvedValue({ team: Promise.resolve({ id: "team-1" }) });
+      sdk.team = vi.fn().mockResolvedValue({
+        states: () => Promise.resolve({ nodes: undefined }),
+      });
+      sdk.updateIssue = vi.fn();
+
+      await client.updateIssueState("issue-1", "Done");
+
+      expect(sdk.updateIssue).not.toHaveBeenCalled();
     });
 
     it("caches the team's state map so a second call does not refetch via sdk.team", async () => {

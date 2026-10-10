@@ -434,7 +434,37 @@ describe("GitHubSyncService.postRemediationResolutions", () => {
     expect(summaryBody).toContain("| :white_check_mark: **f1** | accepted |");
     expect(summaryBody).toContain("| :no_entry_sign: **f2** | rejected |");
     expect(summaryBody).toContain("| :warning: **f3** | partially addressed |");
-    expect(summaryBody).toContain("| :grey_question: **f4** | unknown_status |");
+    expect(summaryBody).toContain("| :grey_question: **f4** | unknown status |");
+  });
+
+  it("replies with the grey_question fallback icon when the finding IS in commentMap but has an unrecognized status", async () => {
+    const githubClient = buildGithubClient();
+    const logger = buildLogger();
+    const svc = new GitHubSyncService(githubClient as never, logger as never);
+
+    const resolutions = [
+      makeResolution({
+        findingId: "f1",
+        status: "unknown_status" as ResolutionItem["status"],
+        action: "Did something",
+        rationale: "For reasons",
+      }),
+    ];
+    const commentMap: Record<string, number> = { f1: 1001 };
+
+    await svc.postRemediationResolutions("acme/repo", 7, resolutions, commentMap);
+
+    expect(githubClient.replyToReviewComment).toHaveBeenCalledWith(
+      "acme/repo",
+      7,
+      1001,
+      [
+        ":grey_question: **unknown status**",
+        "",
+        "**Action:** Did something",
+        "**Rationale:** For reasons",
+      ].join("\n"),
+    );
   });
 
   it("does not reply when commentMap has a falsy (0) value for the finding", async () => {

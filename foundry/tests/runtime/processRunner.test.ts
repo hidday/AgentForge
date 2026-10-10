@@ -357,7 +357,7 @@ describe("ProcessRunner — rehydrateOrphans", () => {
     expect(updated.completedAt).toBeDefined();
   });
 
-  it("registers an alive pid as an active process and emits emitProcessStarted", () => {
+  it("registers an alive pid as an active process and emits emitProcessStarted", async () => {
     const alivePid = process.pid;
     writeFileSync(
       join(spoolDir, "alive-proc.json"),
@@ -391,6 +391,11 @@ describe("ProcessRunner — rehydrateOrphans", () => {
 
     const output = runner.getProcessOutput("alive-proc");
     expect(output).toBe("existing log content");
+
+    // rehydrateOrphans opens a real write stream (for log tailing) asynchronously;
+    // give it time to finish opening before afterEach deletes the spool dir, to
+    // avoid a racy ENOENT on the stream's fd open landing as an unhandled error.
+    await new Promise((r) => setTimeout(r, 100));
   });
 
   it("logs a warning and continues when a manifest file is malformed JSON", () => {

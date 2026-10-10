@@ -25,9 +25,9 @@ describe("MockLinearClient (gaps not covered by mockLinearClient.test.ts)", () =
     expect(result).not.toBe(seeded);
   });
 
-  it("getIssue throws for an unseeded issue id", async () => {
+  it("getIssue throws for an unseeded issue id", () => {
     const client = new MockLinearClient();
-    await expect(client.getIssue("missing")).rejects.toThrow("Mock: Issue missing not found");
+    expect(() => client.getIssue("missing")).toThrow("Mock: Issue missing not found");
   });
 
   it("searchIssues filters by state only", async () => {
