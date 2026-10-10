@@ -111,7 +111,7 @@ function renderPage() {
   );
 }
 
-function defaultRunsResult(overrides: Partial<ReturnType<typeof mockUseRuns>> = {}) {
+function defaultRunsResult(overrides: Partial<ReturnType<typeof useRuns>> = {}) {
   return {
     runs: [] as Run[],
     loading: false,
