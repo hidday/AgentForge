@@ -121,6 +121,67 @@ describe("GET /api/runs/:id/skills — additional branches", () => {
     });
   });
 
+  it("treats a SKILL_INJECTION event with no skillIds field as contributing no ids", async () => {
+    const skill = {
+      id: "skill-present",
+      repoSlug: "test-repo",
+      name: "some-skill",
+      description: "desc",
+      taskCategory: "cat",
+      skillMarkdown: "md",
+      successCount: 0,
+      failureCount: 0,
+      utilityScore: 0,
+      createdAt: new Date(),
+      lastUsedAt: new Date(),
+      archivedAt: null,
+    };
+    const agentSkillRepo = {
+      findById: vi.fn().mockImplementation((id: string) =>
+        Promise.resolve(id === "skill-present" ? skill : null),
+      ),
+      findByRepoCategoryNearTime: vi.fn().mockResolvedValue(null),
+    };
+    const events = [
+      {
+        id: "e1",
+        runId: "run-1",
+        eventType: "SKILL_INJECTION",
+        source: "orchestrator",
+        payloadJson: {}, // no skillIds field at all
+        createdAt: new Date(),
+      },
+    ];
+    const { app } = await buildApp({ events, agentSkillRepo });
+
+    const res = await app.inject({ method: "GET", url: "/api/runs/run-1/skills" });
+
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as { injectedSkills: unknown[] };
+    expect(body.injectedSkills).toEqual([]);
+    expect(agentSkillRepo.findById).not.toHaveBeenCalled();
+  });
+
+  it("falls back shouldPersist to false when the distillation payload omits it", async () => {
+    const events = [
+      {
+        id: "e1",
+        runId: "run-1",
+        eventType: "SKILL_DISTILLATION",
+        source: "distillation-agent",
+        payloadJson: {}, // shouldPersist, reason, etc. all omitted
+        createdAt: new Date(),
+      },
+    ];
+    const { app } = await buildApp({ events, agentSkillRepo: null });
+
+    const res = await app.inject({ method: "GET", url: "/api/runs/run-1/skills" });
+
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as { distillationDecision: { shouldPersist: boolean; reason: string } };
+    expect(body.distillationDecision).toMatchObject({ shouldPersist: false, reason: "" });
+  });
+
   it("returns 400 when the :id route param is empty", async () => {
     const { app } = await buildApp();
 

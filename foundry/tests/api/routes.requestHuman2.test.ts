@@ -149,6 +149,21 @@ describe("POST /api/runs/:id/actions/request-human — additional branches", () 
     expect(sendHumanRequest).toHaveBeenCalledTimes(1);
   });
 
+  it("falls back linearIssue.identifier to undefined when the run has no linearIssueIdentifier", async () => {
+    const run = makeRun({ linearIssueIdentifier: null });
+    const { app, sendHumanRequest } = await buildApp({ run });
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/actions/request-human",
+      payload: { reason: "other", summary: "manual flag" },
+    });
+
+    expect(res.statusCode).toBe(200);
+    const payload = sendHumanRequest.mock.calls[0][0] as { linearIssue: { identifier?: string } };
+    expect(payload.linearIssue.identifier).toBeUndefined();
+  });
+
   it("skips over unrelated event types when scanning for a recent debounce match", async () => {
     const recentTs = new Date(Date.now() - 60 * 1000);
     const { app, sendHumanRequest } = await buildApp({

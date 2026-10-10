@@ -423,6 +423,48 @@ describe("ProcessRunner — rehydrateOrphans", () => {
     await new Promise((r) => setTimeout(r, 100));
   });
 
+  it(
+    "tails new content appended to an alive orphan's log file via the fs.watch listener",
+    async () => {
+      const alivePid = process.pid;
+      const logPath = join(spoolDir, "tailed-proc.log");
+      writeFileSync(
+        join(spoolDir, "tailed-proc.json"),
+        JSON.stringify({
+          id: "tailed-proc",
+          pid: alivePid,
+          command: "node",
+          args: [],
+          runId: "run-tailed",
+          stage: "planning",
+          runtime: "claude-code",
+          startedAt: new Date().toISOString(),
+          logFile: logPath,
+        }),
+      );
+      writeFileSync(logPath, "initial\n");
+
+      runner.rehydrateOrphans();
+      // Let the write stream finish opening before we append more content.
+      await new Promise((r) => setTimeout(r, 100));
+
+      writeFileSync(logPath, "initial\nmore content appended\n");
+
+      // fs.watch's "change" event is delivered asynchronously by the OS;
+      // poll getProcessOutput until the tailed content shows up, with a
+      // generous overall margin.
+      const deadline = Date.now() + 3_000;
+      let output = runner.getProcessOutput("tailed-proc");
+      while ((!output || !output.includes("more content appended")) && Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, 50));
+        output = runner.getProcessOutput("tailed-proc");
+      }
+
+      expect(output).toContain("more content appended");
+    },
+    6_000,
+  );
+
   it("logs a warning and continues when a manifest file is malformed JSON", () => {
     writeFileSync(join(spoolDir, "broken.json"), "{ not valid json");
 

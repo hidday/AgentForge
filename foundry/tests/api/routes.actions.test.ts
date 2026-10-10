@@ -302,6 +302,22 @@ describe("POST /api/runs/:id/actions/re-review-plan", () => {
     expect(res.statusCode).toBe(400);
     expect(res.json()).toEqual({ error: "sync string throw" });
   });
+
+  it("returns 400 with the Error's message when runManualReReview throws synchronously with an Error", async () => {
+    const { app, mockOrchestrator } = await buildApp();
+    mockOrchestrator.runManualReReview.mockImplementation(() => {
+      throw new Error("sync error throw");
+    });
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/actions/re-review-plan",
+      payload: {},
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toEqual({ error: "sync error throw" });
+  });
 });
 
 describe("POST /api/runs/:id/actions/revise-plan", () => {
@@ -369,6 +385,22 @@ describe("POST /api/runs/:id/actions/revise-plan", () => {
 
     expect(res.statusCode).toBe(400);
     expect(res.json()).toEqual({ error: "sync string throw" });
+  });
+
+  it("returns 400 with the Error's message when runManualPlanRevision throws synchronously with an Error", async () => {
+    const { app, mockOrchestrator } = await buildApp();
+    mockOrchestrator.runManualPlanRevision.mockImplementation(() => {
+      throw new Error("sync error throw");
+    });
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/actions/revise-plan",
+      payload: {},
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toEqual({ error: "sync error throw" });
   });
 });
 
