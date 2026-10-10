@@ -312,6 +312,54 @@ describe("DistillationAgent summarization helpers (field-aware summaries)", () =
   });
 });
 
+describe("DistillationAgent summarization helpers (empty-collection branches)", () => {
+  it("renders '_none_' for a plan with an empty steps array", async () => {
+    const deps = buildDeps({ planPayload: { ...makePlanArtifactPayload(), steps: [] } });
+    const agent = buildAgent(deps);
+
+    await agent.run("run-1", makeRun());
+
+    const prompt = getCapturedUserPrompt(deps);
+    expect(prompt).toContain("**Steps**:\n_none_");
+  });
+
+  it("renders '_none_' for an execution report with an empty filesChanged array", async () => {
+    const deps = buildDeps({});
+    deps.artifactRepo.findLatestByType.mockImplementation((_runId: string, type: string) => {
+      if (type === "ExecutionReport") {
+        return Promise.resolve({
+          id: "artifact-exec",
+          runId: "run-1",
+          type: "ExecutionReport" as const,
+          version: 1,
+          payloadJson: { ...makeExecutionArtifactPayload(), filesChanged: [] },
+          rawText: "{}",
+          createdAt: new Date(),
+        });
+      }
+      return Promise.resolve(null);
+    });
+    const agent = buildAgent(deps);
+
+    await agent.run("run-1", makeRun());
+
+    const prompt = getCapturedUserPrompt(deps);
+    expect(prompt).toContain("Files Changed** (0):\n_none_");
+  });
+
+  it("renders '_none_' for a remediation with an empty resolution array", async () => {
+    const deps = buildDeps({
+      remediationPayload: { ...makeRemediationArtifactPayload(), resolution: [] },
+    });
+    const agent = buildAgent(deps);
+
+    await agent.run("run-1", makeRun());
+
+    const prompt = getCapturedUserPrompt(deps);
+    expect(prompt).toContain("**Resolutions**:\n_none_");
+  });
+});
+
 describe("DistillationAgent taskQuery construction from linearIssueDescription", () => {
   it("folds linearIssueDescription into the novelty-check query, tripping the gate when it matches an existing skill", async () => {
     const description = "add jwt auth middleware for the api endpoints immediately";

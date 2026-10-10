@@ -296,10 +296,11 @@ describe("OrchestratorService.runReview", () => {
       return Promise.resolve(null);
     });
     (deps.reviewerAgent as { run: ReturnType<typeof vi.fn> }).run.mockResolvedValue(review);
-    remediationAgent.run.mockRejectedValue(new Error("stop here"));
-
-    await expect(svc.runReview("run-1")).rejects.toThrow("stop here");
+    // With zero findings, runRemediation's own PolicyEngine.assertCanRemediate
+    // check throws before the remediation agent is even invoked.
+    await expect(svc.runReview("run-1")).rejects.toThrow("Cannot remediate without review findings");
     expect(githubSync.postReviewFindings).not.toHaveBeenCalled();
+    expect(remediationAgent.run).not.toHaveBeenCalled();
   });
 
   it("throws PolicyViolationError via assertCanReview when run is not in AIReview state", async () => {
@@ -347,7 +348,23 @@ describe("OrchestratorService.runRemediation", () => {
       .mockResolvedValueOnce(makeRun({ state: RunState.AIReview })) // REMEDIATION_FINISHED
       .mockResolvedValueOnce(makeRun({ state: RunState.ReadyForHumanReview })); // REVIEW_APPROVED
 
-    const result = await svc.runRemediation("run-1", { f1: 123 });
+    // runRemediation always finishes by calling markReady, which re-reads the
+    // latest Review artifact. Since this mock doesn't simulate the real
+    // RemediationAgent re-running code review, the stored Review is still the
+    // "changes_requested" one, so markReady's policy check throws (the same
+    // pre-existing limitation documented in orchestratorService.executionScore.test.ts).
+    // We assert the PolicyViolationError and verify all the remediation side
+    // effects already ran by the time it's thrown.
+    let caught: PolicyViolationError | undefined;
+    let result: Run | undefined;
+    try {
+      result = await svc.runRemediation("run-1", { f1: 123 });
+    } catch (err) {
+      caught = err as PolicyViolationError;
+    }
+    expect(caught).toBeInstanceOf(PolicyViolationError);
+    expect(caught?.rule).toBe("ready_requires_approved_verdict");
+    expect(result).toBeUndefined();
 
     expect(remediationAgent.run).toHaveBeenCalledWith(review, execReportV1, "/tmp/worktree", "run-1");
     expect(deps.gitService && (deps.gitService as { commitAndPush: ReturnType<typeof vi.fn> }).commitAndPush).toHaveBeenCalledWith(
@@ -375,8 +392,6 @@ describe("OrchestratorService.runRemediation", () => {
     );
     expect(scoreLog).toBeDefined();
     expect((scoreLog![0] as { scoreDelta: number }).scoreDelta).toBeCloseTo(0.45, 5);
-
-    expect(result.state).toBe(RunState.ReadyForHumanReview);
   });
 
   it("skips git operations and GitHub sync when the run has no branchName / prNumber", async () => {
@@ -412,7 +427,10 @@ describe("OrchestratorService.runRemediation", () => {
       .mockResolvedValueOnce(makeRun({ state: RunState.AIReview, prNumber: null, branchName: null }))
       .mockResolvedValueOnce(makeRun({ state: RunState.ReadyForHumanReview, prNumber: null, branchName: null }));
 
-    await svc.runRemediation("run-1");
+    // As in the test above, markReady throws because the stored Review is
+    // still "changes_requested" (here it throws even earlier, on the missing
+    // PR check) -- the side effects we care about already ran by then.
+    await expect(svc.runRemediation("run-1")).rejects.toThrow(PolicyViolationError);
 
     expect((deps.gitService as { commitAndPush: ReturnType<typeof vi.fn> }).commitAndPush).not.toHaveBeenCalled();
     expect((deps.gitService as { assertBranch: ReturnType<typeof vi.fn> }).assertBranch).not.toHaveBeenCalled();

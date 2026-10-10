@@ -90,6 +90,26 @@ function buildAgent() {
   return { agent, logger, getUserPrompt: () => capturedUserPrompt };
 }
 
+describe("ExecutorAgent.run() isRetry flag", () => {
+  it("marks isRetry true when only existingPR is set (no existingBranch)", async () => {
+    const { agent, logger } = buildAgent();
+
+    await agent.run(makePlan(), makeTaskBundle(), "run-1", { existingPR: 999 });
+
+    const startLog = logger.info.mock.calls.find((c: unknown[]) => c[1] === "Starting executor agent");
+    expect((startLog?.[0] as Record<string, unknown>)?.isRetry).toBe(true);
+  });
+
+  it("marks isRetry false when retry is undefined", async () => {
+    const { agent, logger } = buildAgent();
+
+    await agent.run(makePlan(), makeTaskBundle(), "run-1");
+
+    const startLog = logger.info.mock.calls.find((c: unknown[]) => c[1] === "Starting executor agent");
+    expect((startLog?.[0] as Record<string, unknown>)?.isRetry).toBe(false);
+  });
+});
+
 describe("ExecutorAgent.run() operator note section", () => {
   it("injects the Operator Note section into the user prompt when options.operatorNote is set", async () => {
     const { agent, getUserPrompt, logger } = buildAgent();
