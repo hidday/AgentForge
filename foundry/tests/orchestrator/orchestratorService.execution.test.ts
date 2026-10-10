@@ -222,6 +222,10 @@ describe("OrchestratorService.runExecution", () => {
         if (executionReportCallCount === 1) return Promise.resolve(null);
         return Promise.resolve(asArtifact("ExecutionReport", 1, report));
       }
+      if (type === "Review")
+        return Promise.resolve(
+          asArtifact("Review", 1, { reviewId: "r", summary: "ok", findings: [], overallVerdict: "approved" }),
+        );
       return Promise.resolve(null);
     });
     executorAgent.run.mockResolvedValue({ report, prNumber: 7 });
@@ -283,6 +287,10 @@ describe("OrchestratorService.runExecution", () => {
         if (executionReportCallCount === 1) return Promise.resolve(null);
         return Promise.resolve(asArtifact("ExecutionReport", 1, makeExecutionReport()));
       }
+      if (type === "Review")
+        return Promise.resolve(
+          asArtifact("Review", 1, { reviewId: "r", summary: "ok", findings: [], overallVerdict: "approved" }),
+        );
       return Promise.resolve(null);
     });
     executorAgent.run.mockResolvedValue({ report: makeExecutionReport(), prNumber: 9 });
@@ -319,6 +327,10 @@ describe("OrchestratorService.runExecution", () => {
         if (executionReportCallCount === 1) return Promise.resolve(null);
         return Promise.resolve(asArtifact("ExecutionReport", 1, makeExecutionReport()));
       }
+      if (type === "Review")
+        return Promise.resolve(
+          asArtifact("Review", 1, { reviewId: "r", summary: "ok", findings: [], overallVerdict: "approved" }),
+        );
       return Promise.resolve(null);
     });
     executorAgent.run.mockResolvedValue({ report: makeExecutionReport(), prNumber: 3 });
@@ -421,6 +433,10 @@ describe("OrchestratorService.runExecution", () => {
       artifactRepo.findLatestByType.mockImplementation((_: string, type: string) => {
         if (type === "Plan") return Promise.resolve(asArtifact("Plan", 1, plan));
         if (type === "ExecutionReport") return Promise.resolve(asArtifact("ExecutionReport", 1, report, reportCreatedAt));
+        if (type === "Review")
+          return Promise.resolve(
+            asArtifact("Review", 1, { reviewId: "r", summary: "ok", findings: [], overallVerdict: "approved" }),
+          );
         return Promise.resolve(null);
       });
       eventRepo.findByRunId.mockResolvedValue([makeEvent(RunEvent.EXECUTION_STARTED, startedAt)]);
@@ -456,6 +472,10 @@ describe("OrchestratorService.runExecution", () => {
       artifactRepo.findLatestByType.mockImplementation((_: string, type: string) => {
         if (type === "Plan") return Promise.resolve(asArtifact("Plan", 1, plan));
         if (type === "ExecutionReport") return Promise.resolve(asArtifact("ExecutionReport", 1, report, reportCreatedAt));
+        if (type === "Review")
+          return Promise.resolve(
+            asArtifact("Review", 1, { reviewId: "r", summary: "ok", findings: [], overallVerdict: "approved" }),
+          );
         return Promise.resolve(null);
       });
       eventRepo.findByRunId.mockResolvedValue([makeEvent(RunEvent.EXECUTION_FINISHED, finishedAt)]);
@@ -484,6 +504,10 @@ describe("OrchestratorService.runExecution", () => {
       artifactRepo.findLatestByType.mockImplementation((_: string, type: string) => {
         if (type === "Plan") return Promise.resolve(asArtifact("Plan", 1, plan));
         if (type === "ExecutionReport") return Promise.resolve(asArtifact("ExecutionReport", 1, report));
+        if (type === "Review")
+          return Promise.resolve(
+            asArtifact("Review", 1, { reviewId: "r", summary: "ok", findings: [], overallVerdict: "approved" }),
+          );
         return Promise.resolve(null);
       });
       executorAgent.run.mockResolvedValue({ report: makeExecutionReport(), prNumber: 101 });

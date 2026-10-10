@@ -46,11 +46,11 @@ function makePlan(): Plan {
 }
 
 function buildAgent() {
-  let capturedSystemPrompt = "";
+  let capturedUserPrompt = "";
 
   const agentRunner = {
-    run: vi.fn().mockImplementation(async (_runtime: unknown, opts: { systemPrompt: string }) => {
-      capturedSystemPrompt = opts.systemPrompt;
+    run: vi.fn().mockImplementation(async (_runtime: unknown, opts: { prompt: string }) => {
+      capturedUserPrompt = opts.prompt;
       return {
         raw: "raw executor transcript",
         parsed: {
@@ -87,33 +87,33 @@ function buildAgent() {
     logger as never,
   );
 
-  return { agent, logger, getSystemPrompt: () => capturedSystemPrompt };
+  return { agent, logger, getUserPrompt: () => capturedUserPrompt };
 }
 
 describe("ExecutorAgent.run() operator note section", () => {
-  it("injects the Operator Note section into the system prompt when options.operatorNote is set", async () => {
-    const { agent, getSystemPrompt, logger } = buildAgent();
+  it("injects the Operator Note section into the user prompt when options.operatorNote is set", async () => {
+    const { agent, getUserPrompt, logger } = buildAgent();
 
     await agent.run(makePlan(), makeTaskBundle(), "run-1", undefined, {
       operatorNote: "Please double-check the auth flow.",
     });
 
-    const systemPrompt = getSystemPrompt();
-    expect(systemPrompt).toContain("## Operator Note");
-    expect(systemPrompt).toContain("Please double-check the auth flow.");
-    expect(systemPrompt).toContain("high-priority clarification");
+    const userPrompt = getUserPrompt();
+    expect(userPrompt).toContain("## Operator Note");
+    expect(userPrompt).toContain("Please double-check the auth flow.");
+    expect(userPrompt).toContain("high-priority clarification");
 
     const startLog = logger.info.mock.calls.find((c: unknown[]) => c[1] === "Starting executor agent");
     expect((startLog?.[0] as Record<string, unknown>)?.hasOperatorNote).toBe(true);
   });
 
   it("omits the Operator Note section when no operatorNote is provided", async () => {
-    const { agent, getSystemPrompt, logger } = buildAgent();
+    const { agent, getUserPrompt, logger } = buildAgent();
 
     await agent.run(makePlan(), makeTaskBundle(), "run-1");
 
-    const systemPrompt = getSystemPrompt();
-    expect(systemPrompt).not.toContain("## Operator Note");
+    const userPrompt = getUserPrompt();
+    expect(userPrompt).not.toContain("## Operator Note");
 
     const startLog = logger.info.mock.calls.find((c: unknown[]) => c[1] === "Starting executor agent");
     expect((startLog?.[0] as Record<string, unknown>)?.hasOperatorNote).toBe(false);

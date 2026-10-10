@@ -153,6 +153,25 @@ describe("NotificationService.sendHumanRequest", () => {
     );
   });
 
+  it("records an error and warns when the slack fetch throws a non-Error value", async () => {
+    const logger = buildLogger();
+    const fetchMock = vi.fn().mockRejectedValue("raw-slack-rejection");
+    vi.stubGlobal("fetch", fetchMock);
+
+    const svc = new NotificationService(
+      makeConfig({ slackWebhookUrl: "https://hooks.slack.com/x" }),
+      logger as never,
+    );
+    const result = await svc.sendHumanRequest(makePayload());
+
+    expect(result.slack.ok).toBe(false);
+    expect(result.slack.error).toBe("raw-slack-rejection");
+    expect(logger.warn).toHaveBeenCalledWith(
+      { runId: "run-1", error: "raw-slack-rejection" },
+      "Slack notification failed",
+    );
+  });
+
   it("succeeds for email via resend", async () => {
     const logger = buildLogger();
     const fetchMock = vi.fn().mockResolvedValue(okResponse());
@@ -313,7 +332,10 @@ describe("NotificationService.sendHumanRequest", () => {
       reason: "impl_rejected",
       planConfidence: 0.8,
       context: "Some context",
-      openQuestions: [{ id: "q1", question: "Why?", requiredForExecution: true }],
+      openQuestions: [
+        { id: "q1", question: "Why?", requiredForExecution: true },
+        { id: "q2", question: "What next?", requiredForExecution: false },
+      ],
     });
 
     await svc.sendHumanRequest(payload);
@@ -332,9 +354,35 @@ describe("NotificationService.sendHumanRequest", () => {
     expect(bodyJson.html).toContain("<strong>Plan confidence:</strong> 0.80");
     expect(bodyJson.html).toContain("Open questions");
     expect(bodyJson.html).toContain("[required]");
+    expect(bodyJson.html).toContain("<li>What next?</li>");
     expect(bodyJson.text).toContain("Plan confidence: 0.80");
     expect(bodyJson.text).toContain("Open questions:");
     expect(bodyJson.text).toContain("- [required] Why?");
+    expect(bodyJson.text).toContain("- What next?");
+  });
+
+  it("falls back to (untitled) in the email subject, html, and text bodies when linearIssue.title is null", async () => {
+    const logger = buildLogger();
+    const fetchMock = vi.fn().mockResolvedValue(okResponse());
+    vi.stubGlobal("fetch", fetchMock);
+
+    const svc = new NotificationService(
+      makeConfig({ emailTo: "me@x.com", resendApiKey: "re_123" }),
+      logger as never,
+    );
+
+    const payload = makePayload({
+      linearIssue: { id: "LIN-9", identifier: "ENG-9", title: null, url: null },
+    });
+
+    await svc.sendHumanRequest(payload);
+
+    const call = fetchMock.mock.calls[0] as [string, { body: string }];
+    const bodyJson = JSON.parse(call[1].body) as { subject: string; html: string; text: string };
+
+    expect(bodyJson.subject).toContain("ENG-9: (untitled)");
+    expect(bodyJson.html).toContain("<strong>ENG-9:</strong> (untitled)");
+    expect(bodyJson.text).toContain("ENG-9: (untitled)");
   });
 
   it("truncates an overly long context in both the slack and email bodies", async () => {
