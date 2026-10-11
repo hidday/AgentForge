@@ -100,7 +100,7 @@ async function buildApp(opts: {
   });
 
   await app.ready();
-  return { app, mockRunRepo, mockArtifactRepo, mockOrchestrator, mockClaudeCodeRunner };
+  return { app, mockRunRepo, mockArtifactRepo, mockEventRepo, mockOrchestrator, mockClaudeCodeRunner };
 }
 
 describe("POST /api/runs/:id/chat: workingDirectory fallback branches", () => {
@@ -322,6 +322,56 @@ describe("POST /api/runs/:id/actions/request-human: additional branches", () => 
     expect(res.statusCode).toBe(200);
     const payload = sendHumanRequest.mock.calls[0][0] as { linearIssue: { identifier?: string } };
     expect(payload.linearIssue.identifier).toBeUndefined();
+  });
+});
+
+describe("GET /api/runs/:id/skills: payload fallback branches", () => {
+  it("defaults shouldPersist to false, reason to '', and ignores a SKILL_INJECTION event with no skillIds field", async () => {
+    const run = makeRun();
+    const mockAgentSkillRepo = { findById: vi.fn().mockResolvedValue(null) };
+    const { app, mockRunRepo, mockEventRepo } = await buildApp({
+      orchestratorOverrides: { getAgentSkillRepo: vi.fn().mockReturnValue(mockAgentSkillRepo) },
+    });
+    mockRunRepo.findById.mockResolvedValue(run);
+    mockEventRepo.findByRunId.mockResolvedValue([
+      {
+        id: "e1",
+        runId: "run-1",
+        eventType: "SKILL_INJECTION",
+        source: "x",
+        payloadJson: {}, // no skillIds field at all
+        createdAt: new Date(),
+      },
+      {
+        id: "e2",
+        runId: "run-1",
+        eventType: "SKILL_DISTILLATION",
+        source: "x",
+        payloadJson: {}, // shouldPersist/reason/displacedSkillId all absent
+        createdAt: new Date(),
+      },
+    ]);
+
+    const res = await app.inject({ method: "GET", url: "/api/runs/run-1/skills" });
+
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as {
+      injectedSkills: unknown[];
+      distillationDecision: {
+        shouldPersist: boolean;
+        reason: string;
+        displacedSkillId: string | null;
+      } | null;
+    };
+    expect(body.injectedSkills).toEqual([]);
+    expect(body.distillationDecision).toEqual({
+      shouldPersist: false,
+      reason: "",
+      taskCategory: null,
+      name: null,
+      description: null,
+      displacedSkillId: null,
+    });
   });
 });
 
