@@ -86,7 +86,6 @@ describe("ActionBar", () => {
       <ActionBar runId="run-1" state="AwaitingPlanApproval" onAction={onAction} />,
     );
     await userEvent.click(screen.getByRole("button", { name: /approve plan/i }));
-    expect(screen.getByText("Approve Plan")).toBeDefined();
     expect(
       screen.getByText(/This will approve the current plan/i),
     ).toBeDefined();
@@ -113,7 +112,7 @@ describe("ActionBar", () => {
       expect(mockApi.approvePlan).toHaveBeenCalled();
     });
     expect(onAction).not.toHaveBeenCalled();
-    expect(screen.queryByText("Approve Plan")).toBeNull();
+    expect(screen.queryByText(/This will approve the current plan/i)).toBeNull();
   });
 
   it("dismisses the Approve Plan dialog without calling the API when Cancel is clicked", async () => {
@@ -137,7 +136,12 @@ describe("ActionBar", () => {
       screen.getByText(/This will reject the current plan/i),
     ).toBeDefined();
 
-    // Default mode is "Revise plan" (iterate); switch to "Start fresh".
+    // Default mode is "Revise plan" (iterate); switch to "Start fresh" and
+    // back to "Revise plan" to exercise both mode-toggle handlers.
+    await userEvent.click(screen.getByRole("button", { name: /start fresh/i }));
+    // Lowercase "p" distinguishes the in-dialog "Revise plan" mode toggle
+    // from the page-level "Revise Plan" trigger button rendered behind it.
+    await userEvent.click(screen.getByRole("button", { name: /^Revise plan/ }));
     await userEvent.click(screen.getByRole("button", { name: /start fresh/i }));
     await userEvent.type(
       screen.getByPlaceholderText(/describe what should change/i),
@@ -171,7 +175,9 @@ describe("ActionBar", () => {
     );
 
     await userEvent.click(screen.getByRole("button", { name: /re-review plan/i }));
-    expect(screen.getByText("Re-review Plan")).toBeDefined();
+    expect(
+      screen.getByText(/Run the plan reviewer again against the current plan/i),
+    ).toBeDefined();
     await userEvent.click(screen.getByRole("button", { name: /^re-review$/i }));
     await waitFor(() => {
       expect(mockApi.reReviewPlan).toHaveBeenCalledWith("run-1", undefined);

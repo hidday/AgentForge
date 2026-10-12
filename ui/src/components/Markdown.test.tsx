@@ -20,6 +20,24 @@ describe("Markdown", () => {
     expect(heading.className).toContain("font-semibold");
   });
 
+  it("renders h2, h3, and h4 headings with their respective tags", () => {
+    render(
+      <Markdown>
+        {"## Heading Two\n\n### Heading Three\n\n#### Heading Four"}
+      </Markdown>,
+    );
+    expect(screen.getByText("Heading Two").tagName).toBe("H2");
+    expect(screen.getByText("Heading Three").tagName).toBe("H3");
+    expect(screen.getByText("Heading Four").tagName).toBe("H4");
+  });
+
+  it("renders a horizontal rule", () => {
+    const { container } = render(<Markdown>{"above\n\n---\n\nbelow"}</Markdown>);
+    const hr = container.querySelector("hr");
+    expect(hr).not.toBeNull();
+    expect(hr?.className).toContain("border-border-subtle");
+  });
+
   it("renders an unordered list with list items", () => {
     render(<Markdown>{"- one\n- two\n- three"}</Markdown>);
     expect(screen.getByText("one")).toBeDefined();

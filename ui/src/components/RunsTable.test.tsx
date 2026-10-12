@@ -104,7 +104,7 @@ describe("RunsTable", () => {
     expect(screen.getByText("#42")).toBeDefined();
   });
 
-  it("renders an external Linear link when linearIssueUrl is present", () => {
+  it("renders an external Linear link when linearIssueUrl is present and stops click propagation", async () => {
     const run = makeRun({
       id: "r1",
       state: "Todo",
@@ -113,6 +113,10 @@ describe("RunsTable", () => {
     renderWithRouter(<RunsTable runs={[run]} />);
     const link = screen.getByTitle("Open in Linear");
     expect(link.getAttribute("href")).toBe("https://linear.app/team/issue/ENG-1");
+
+    // Clicking the external link should not bubble/navigate the row's own Link.
+    await userEvent.click(link);
+    expect(screen.getByText("Fix the thing")).toBeDefined();
   });
 
   it("does not render an external Linear link when linearIssueUrl is absent", () => {

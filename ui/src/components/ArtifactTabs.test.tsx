@@ -83,6 +83,11 @@ describe("ArtifactTabs", () => {
                 status: "partially_incorporated",
                 rationale: "Partly addressed",
               },
+              {
+                findingId: "F4",
+                status: "unknown_status",
+                rationale: "Fallback styling",
+              },
             ],
           }),
         ]}
@@ -94,6 +99,8 @@ describe("ArtifactTabs", () => {
     expect(screen.getByText("dismissed")).toBeDefined();
     // Underscores in status are replaced with spaces for display.
     expect(screen.getByText("partially incorporated")).toBeDefined();
+    const fallbackBadge = screen.getByText("unknown status");
+    expect(fallbackBadge.className).toContain("bg-surface-hover");
   });
 
   it("shows a fallback message when PlanRevision has no dispositions", () => {
