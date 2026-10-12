@@ -151,3 +151,30 @@ describe("PlanReviserAgent.run() relatedContext rendering", () => {
     expect(prompt).not.toContain("{{relatedContextSection}}");
   });
 });
+
+describe("PlanReviserAgent.run() operatorNote rendering", () => {
+  it("includes the operator note alongside the reviewer findings guidance when provided", async () => {
+    const { agent, getPrompt } = buildPlanReviserAgent();
+    const bundle = makeTaskBundle();
+
+    await agent.run(makePlan(), makePlanReview(), bundle, "run-1", {
+      operatorNote: "Keep the migration step but simplify the rollback plan.",
+    });
+
+    const prompt = getPrompt();
+    expect(prompt).toContain("## Operator Note");
+    expect(prompt).toContain("Keep the migration step but simplify the rollback plan.");
+    expect(prompt).toContain("do not drop the findings in favor of the note");
+    expect(prompt).not.toContain("{{operatorNoteSection}}");
+  });
+
+  it("omits the operator note section when no options are passed", async () => {
+    const { agent, getPrompt } = buildPlanReviserAgent();
+    const bundle = makeTaskBundle();
+
+    await agent.run(makePlan(), makePlanReview(), bundle, "run-1");
+
+    const prompt = getPrompt();
+    expect(prompt).not.toContain("## Operator Note");
+  });
+});

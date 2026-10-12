@@ -147,3 +147,30 @@ describe("PlanReviewerAgent.run() relatedContext rendering", () => {
     expect(prompt).not.toContain("{{relatedContextSection}}");
   });
 });
+
+describe("PlanReviewerAgent.run() operatorNote rendering", () => {
+  it("weights the operator note heavily in the prompt when provided", async () => {
+    const { agent, getPrompt } = buildPlanReviewerAgent();
+    const bundle = makeTaskBundle();
+
+    await agent.run(makePlan(), bundle, "run-1", {
+      operatorNote: "Double-check the auth flow before approving.",
+    });
+
+    const prompt = getPrompt();
+    expect(prompt).toContain("## Operator Note");
+    expect(prompt).toContain("Double-check the auth flow before approving.");
+    expect(prompt).toContain("Weight it heavily");
+    expect(prompt).not.toContain("{{operatorNoteSection}}");
+  });
+
+  it("omits the operator note section when no options are passed", async () => {
+    const { agent, getPrompt } = buildPlanReviewerAgent();
+    const bundle = makeTaskBundle();
+
+    await agent.run(makePlan(), bundle, "run-1");
+
+    const prompt = getPrompt();
+    expect(prompt).not.toContain("## Operator Note");
+  });
+});
