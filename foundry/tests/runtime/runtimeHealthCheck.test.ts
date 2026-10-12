@@ -413,6 +413,23 @@ describe("RuntimeHealthCheck.runPreflight: auth check failures", () => {
     expect(codexResult.authCheck.error).toContain("did not return expected response");
   });
 
+  it("reports err.message when the auth probe throws a real Error instance", async () => {
+    const processRunner = makeMockProcessRunner();
+    processRunner.execute.mockImplementation(async (opts: { args: string[] }) => {
+      if (opts.args[0] === "--version") return okResult({ stdout: "1.0.0" });
+      throw new Error("auth socket reset");
+    });
+    const check = new RuntimeHealthCheck(
+      processRunner as never,
+      buildConfigs(),
+      makeMockLogger() as never,
+    );
+
+    await expect(check.runPreflight()).rejects.toBeInstanceOf(PreflightError);
+    const result = check.getLastResult()!;
+    expect(result.results[0]!.authCheck.error).toBe("auth socket reset");
+  });
+
   it("stringifies a non-Error throw from the auth probe", async () => {
     const processRunner = makeMockProcessRunner();
     processRunner.execute.mockImplementation(async (opts: { args: string[] }) => {

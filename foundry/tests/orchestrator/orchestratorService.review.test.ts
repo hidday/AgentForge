@@ -335,6 +335,7 @@ describe("OrchestratorService.runReview", () => {
         summary: "Found a bug",
         findings: [
           { id: "f1", severity: "important", type: "bug", file: "src/foo.ts", lineHint: 10, title: "Bug", details: "Real issue" },
+          { id: "f2", severity: "minor", type: "style", file: "src/bar.ts", title: "Nit", details: "No line hint for this one" },
         ],
         overallVerdict: "changes_requested",
       };

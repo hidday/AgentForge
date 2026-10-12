@@ -151,6 +151,7 @@ describe("OrchestratorService.runPlanReview -- changes_requested branch", () => 
       summary: "Needs a revision",
       findings: [
         { id: "pf1", severity: "important" as const, title: "Missing step", affectedStepId: "s1", details: "Add detail" },
+        { id: "pf2", severity: "minor" as const, title: "General concern", details: "Not tied to a specific step" },
       ],
     };
     // The real PlanReviewerAgent persists the PlanReview artifact itself before

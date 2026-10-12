@@ -48,6 +48,114 @@ describe("buildChatSystemPrompt", () => {
     expect(result.length).toBeGreaterThan(0);
   });
 
+  it("renders '(none)' for branchName and prNumber when they are null", () => {
+    const result = buildChatSystemPrompt(makeRun({ branchName: null, prNumber: null }), []);
+    expect(result).toContain("**Branch:** (none)");
+    expect(result).toContain("**PR Number:** (none)");
+  });
+
+  it("includes the Linear Issue section when only the identifier is set", () => {
+    const run = makeRun({ linearIssueTitle: null, linearIssueDescription: null });
+    const result = buildChatSystemPrompt(run, []);
+    expect(result).toContain("## Linear Issue");
+    expect(result).toContain("**Identifier:** ENG-42");
+  });
+
+  it("includes the Linear Issue section when only the description is set", () => {
+    const run = makeRun({ linearIssueTitle: null, linearIssueIdentifier: null });
+    const result = buildChatSystemPrompt(run, []);
+    expect(result).toContain("## Linear Issue");
+    expect(result).toContain("**Description:**");
+  });
+
+  it("omits the Linear Issue section entirely when title, identifier, and description are all null", () => {
+    const run = makeRun({
+      linearIssueTitle: null,
+      linearIssueIdentifier: null,
+      linearIssueDescription: null,
+    });
+    const result = buildChatSystemPrompt(run, []);
+    expect(result).not.toContain("## Linear Issue");
+  });
+
+  it("keeps the earlier (higher-version) Plan artifact when a later one in the list has a lower version", () => {
+    const planV1 = makeArtifact({ type: "Plan", version: 1, payloadJson: { summary: "v1" } });
+    const planV3 = makeArtifact({ type: "Plan", version: 3, payloadJson: { summary: "v3" } });
+    const planV2 = makeArtifact({ type: "Plan", version: 2, payloadJson: { summary: "v2" } });
+    const result = buildChatSystemPrompt(makeRun(), [planV1, planV3, planV2]);
+    expect(result).toContain("v3");
+    expect(result).not.toContain("**Summary:** v1");
+    expect(result).not.toContain("**Summary:** v2");
+  });
+
+  it("falls back to empty strings/JSON for missing optional fields across all artifact sections", () => {
+    const planArtifact = makeArtifact({
+      type: "Plan",
+      version: 1,
+      payloadJson: {
+        steps: [{}],
+        risks: [{ oddShape: true }],
+        assumptions: [{ oddShape: true }],
+      },
+    });
+    const humanAnswers = makeArtifact({
+      type: "HumanAnswers",
+      version: 1,
+      payloadJson: { answers: [{}] },
+    });
+    const researchedAnswers = makeArtifact({
+      type: "ResearchedAnswers",
+      version: 1,
+      payloadJson: { answers: [{}] },
+    });
+    const planReview = makeArtifact({
+      type: "PlanReview",
+      version: 1,
+      payloadJson: { findings: [{}] },
+    });
+    const review = makeArtifact({
+      type: "Review",
+      version: 1,
+      payloadJson: { findings: [{}] },
+    });
+    const execReport = makeArtifact({
+      type: "ExecutionReport",
+      version: 1,
+      payloadJson: {
+        checks: {},
+        filesChanged: [{ not: "a string" }],
+        notes: [{ not: "a string" }],
+      },
+    });
+    const rejection = makeArtifact({
+      type: "RejectionContext",
+      version: 1,
+      payloadJson: {},
+    });
+
+    const result = buildChatSystemPrompt(makeRun(), [
+      planArtifact,
+      humanAnswers,
+      researchedAnswers,
+      planReview,
+      review,
+      execReport,
+      rejection,
+    ]);
+
+    // Doesn't throw, and renders every section even with missing fields.
+    expect(result).toContain("## Current Plan");
+    expect(result).toContain("## Human Answers");
+    // ResearchedAnswers with no summary and an empty-ish answer still renders.
+    expect(result).toContain("## Researched Answers");
+    expect(result).toContain("## Plan Review Findings");
+    expect(result).toContain("## Code Review Findings");
+    expect(result).toContain("## Execution Report");
+    expect(result).toContain("**Checks:**");
+    expect(result).toContain("## Rejection Context(s)");
+    expect(result).toContain("**Plan v?**");
+  });
+
   it("always includes the advisory footer text", () => {
     const result1 = buildChatSystemPrompt(makeRun(), []);
     expect(result1).toContain("READ-ONLY advisory mode");

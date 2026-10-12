@@ -551,6 +551,68 @@ describe("OrchestratorService.answerQuestions", () => {
       expect((deps as never as { planReviewerAgent: { run: ReturnType<typeof vi.fn> } }).planReviewerAgent.run).not.toHaveBeenCalled();
       expect(result.state).toBe(RunState.Failed);
     });
+
+    it("re-pauses in HumanClarificationNeeded with the updated blocking questions when iterations remain", async () => {
+      const { deps, runRepo, artifactRepo, eventRepo, plannerAgent } = buildDeps();
+      const svc = new OrchestratorService(deps as never);
+
+      const run = makeRun({ state: RunState.HumanClarificationNeeded });
+      const plan = makePlan({
+        openQuestions: [{ id: "q1", question: "Required?", requiredForExecution: true }],
+      });
+      const taskBundle = makeTaskBundle();
+      const newPlan = makePlan({
+        planVersion: 2,
+        openQuestions: [{ id: "q1", question: "Still unclear -- which provider?", requiredForExecution: true }],
+      });
+
+      const planningRun = makeRun({ state: RunState.Planning });
+      const planReviewRun = makeRun({ state: RunState.PlanReview });
+      const rePausedRun = makeRun({ state: RunState.HumanClarificationNeeded, planVersion: 2 });
+
+      runRepo.findById.mockResolvedValue(run);
+      runRepo.updateState
+        .mockResolvedValueOnce(planningRun) // CLARIFICATION_PROVIDED → Planning
+        .mockResolvedValueOnce(planReviewRun) // PLAN_CREATED → PlanReview
+        .mockResolvedValueOnce(rePausedRun); // NEEDS_HUMAN_CLARIFICATION → HumanClarificationNeeded
+
+      runRepo.update.mockResolvedValue({ ...planningRun, planVersion: 2 });
+
+      artifactRepo.findLatestByType.mockImplementation((_: string, type: string) => {
+        if (type === "Plan") return Promise.resolve(makePlanArtifact(plan));
+        if (type === "TaskBundle") return Promise.resolve(makeTaskBundleArtifact(taskBundle));
+        return Promise.resolve(null);
+      });
+      artifactRepo.create.mockResolvedValue({ id: "artifact-new" });
+      plannerAgent.run.mockResolvedValue(newPlan);
+
+      // Only 1 prior NEEDS_HUMAN_CLARIFICATION event -- below MAX_CLARIFICATION_ITERATIONS (3).
+      eventRepo.findByRunId.mockResolvedValue([
+        { id: "e1", runId: "run-1", eventType: RunEvent.NEEDS_HUMAN_CLARIFICATION, source: "planner-agent", payloadJson: {}, createdAt: new Date() },
+      ]);
+
+      (deps as never as { linearSync: { syncState: ReturnType<typeof vi.fn> } }).linearSync.syncState.mockResolvedValue(undefined);
+      (deps as never as { githubSync: { syncState: ReturnType<typeof vi.fn> } }).githubSync.syncState.mockResolvedValue(undefined);
+      (deps as never as { linearClient: { postComment: ReturnType<typeof vi.fn> } }).linearClient.postComment.mockResolvedValue(undefined);
+
+      const result = await svc.answerQuestions("run-1", [{ questionId: "q1", answer: "still confused" }]);
+
+      // Should NOT call runPlanReview, and should NOT fail -- just pause again.
+      expect((deps as never as { planReviewerAgent: { run: ReturnType<typeof vi.fn> } }).planReviewerAgent.run).not.toHaveBeenCalled();
+      expect(result.state).toBe(RunState.HumanClarificationNeeded);
+
+      const clarificationEvent = (eventRepo.create as ReturnType<typeof vi.fn>).mock.calls.find(
+        (c: unknown[]) => (c[0] as { eventType: string }).eventType === RunEvent.NEEDS_HUMAN_CLARIFICATION,
+      );
+      expect(clarificationEvent).toBeDefined();
+      const payload = (clarificationEvent![0] as {
+        payloadJson: { blockingQuestions: { id: string; question: string }[]; iteration: number };
+      }).payloadJson;
+      expect(payload.iteration).toBe(2);
+      expect(payload.blockingQuestions).toEqual([
+        { id: "q1", question: "Still unclear -- which provider?" },
+      ]);
+    });
   });
 
   describe("startRun clarification checkpoint", () => {

@@ -118,6 +118,31 @@ describe("OutputParser.parseJson", () => {
     expect(err.rawOutput).toBe(block.slice(0, 500));
   });
 
+  it("stringifies a non-Error value thrown by the underlying JSON.parse", () => {
+    const originalParse = JSON.parse;
+    // JSON.parse always throws a real SyntaxError in practice; this
+    // simulates the defensive non-Error branch of the catch handler.
+    JSON.parse = () => {
+      // eslint-disable-next-line @typescript-eslint/no-throw-literal
+      throw "not an Error instance";
+    };
+
+    try {
+      let caught: unknown;
+      try {
+        parser.parseJson("irrelevant");
+      } catch (err) {
+        caught = err;
+      }
+
+      expect(caught).toBeInstanceOf(OutputParseError);
+      const err = caught as OutputParseError;
+      expect(err.message).toBe("Failed to parse JSON: not an Error instance");
+    } finally {
+      JSON.parse = originalParse;
+    }
+  });
+
   it("truncates the block snippet to the first 500 characters on malformed JSON", () => {
     const block = "{" + "x".repeat(600);
 

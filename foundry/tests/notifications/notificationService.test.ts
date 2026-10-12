@@ -166,6 +166,22 @@ describe("NotificationService", () => {
       expect(result.slack.error).toBe("ECONNREFUSED");
     });
 
+    it("stringifies a non-Error rejection from fetch for both Slack and email", async () => {
+      fetchMock.mockRejectedValue("raw string failure");
+      const config: NotificationConfig = {
+        emailFrom: "from@example.com",
+        emailTo: "to@example.com",
+        resendApiKey: "re_abc",
+        slackWebhookUrl: "https://hooks.slack.com/services/x",
+      };
+      const svc = new NotificationService(config, makeLogger() as never);
+
+      const result = await svc.sendHumanRequest(makePayload());
+
+      expect(result.slack.error).toBe("raw string failure");
+      expect(result.email.error).toBe("raw string failure");
+    });
+
     it("sends a successful email notification via Resend", async () => {
       fetchMock.mockResolvedValue(okResponse());
       const config: NotificationConfig = {
@@ -309,6 +325,34 @@ describe("NotificationService", () => {
       expect(body.text).toContain("LIN-999");
       expect(body.text).toContain("(untitled)");
       expect(body.text).toContain("Human intervention requested");
+    });
+
+    it("uses '(untitled)' in the email subject/HTML/text and renders non-required open questions without the [required] marker", async () => {
+      fetchMock.mockResolvedValue(okResponse());
+      const config: NotificationConfig = {
+        emailFrom: "from@example.com",
+        emailTo: "to@example.com",
+        resendApiKey: "re_abc",
+      };
+      const svc = new NotificationService(config, makeLogger() as never);
+
+      const payload = makePayload({
+        linearIssue: { id: "LIN-999", title: null, url: null },
+        openQuestions: [
+          { id: "q1", question: "Non-blocking question?", requiredForExecution: false },
+        ],
+      });
+
+      await svc.sendHumanRequest(payload);
+
+      const body = JSON.parse(fetchMock.mock.calls[0][1].body as string);
+      expect(body.subject).toContain("(untitled)");
+      expect(body.html).toContain("(untitled)");
+      expect(body.html).toContain("Non-blocking question?");
+      expect(body.html).not.toContain("<strong>[required]</strong>");
+      expect(body.text).toContain("(untitled)");
+      expect(body.text).toContain("Non-blocking question?");
+      expect(body.text).not.toContain("[required]");
     });
 
     it("omits the Linear issue link in the email HTML when linearIssue.url is absent", async () => {

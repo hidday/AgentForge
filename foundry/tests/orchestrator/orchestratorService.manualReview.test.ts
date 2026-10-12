@@ -234,6 +234,28 @@ describe("OrchestratorService.runManualPlanRevision", () => {
     expect(revisionComment).toContain("pf1");
     expect(result.state).toBe(RunState.AwaitingPlanApproval);
   });
+
+  it("changes_requested verdict without an operator note: still chains into runPlanRevision with no note option", async () => {
+    const run = makeRun({ state: RunState.AwaitingPlanApproval });
+    const { deps, planReviserAgent, planReviewerAgent } = buildDeps(run);
+    planReviewerAgent.run.mockResolvedValue({
+      overallVerdict: "changes_requested",
+      summary: "Needs work",
+      findings: [{ id: "pf1", severity: "important", title: "X", details: "Y" }],
+    });
+    const svc = new OrchestratorService(deps as never);
+
+    const result = await svc.runManualPlanRevision("run-1");
+
+    expect(planReviserAgent.run).toHaveBeenCalledWith(
+      expect.anything(),
+      undefined,
+      expect.anything(),
+      "run-1",
+      undefined,
+    );
+    expect(result.state).toBe(RunState.AwaitingPlanApproval);
+  });
 });
 
 describe("OrchestratorService.approveHumanReview", () => {

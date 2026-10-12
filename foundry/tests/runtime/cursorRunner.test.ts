@@ -116,4 +116,99 @@ END_STRUCTURED_OUTPUT`;
     expect(out.parsed.payload.value).toBe("ok");
     expect(logger.error).not.toHaveBeenCalled();
   });
+
+  it("truncates a stderr longer than 500 chars to its tail with an ellipsis prefix", async () => {
+    const longStderr = "x".repeat(600);
+    const processRunner = makeMockProcessRunner({
+      stdout: "panic",
+      stderr: longStderr,
+      exitCode: 1,
+      durationMs: 50,
+      timedOut: false,
+    });
+    const logger = makeMockLogger();
+    const runner = new CursorRunner(
+      processRunner as never,
+      "cursor",
+      [],
+      "claude-4.6-sonnet",
+      logger as never,
+    );
+
+    await expect(
+      runner.run({ prompt: "x", workingDirectory: "/tmp", timeoutMs: 1000 }, "planner", echoSchema),
+    ).rejects.toThrow();
+
+    const [logFields] = logger.error.mock.calls[0]!;
+    expect(logFields.stderr.startsWith("…")).toBe(true);
+    expect(logFields.stderr.length).toBe(501);
+  });
+});
+
+describe("CursorRunner — system prompt stdin prefixing", () => {
+  it("prepends the system prompt to stdin when input.systemPrompt is set", async () => {
+    const processRunner = makeMockProcessRunner({
+      stdout: JSON.stringify({ type: "result", result: "ok" }),
+      stderr: "",
+      exitCode: 0,
+      durationMs: 50,
+      timedOut: false,
+    });
+    const logger = makeMockLogger();
+    const runner = new CursorRunner(
+      processRunner as never,
+      "cursor",
+      [],
+      "claude-4.6-sonnet",
+      logger as never,
+    );
+
+    // The schema/structured-output parsing isn't the point of this test —
+    // only that the stdin payload passed to the process is correctly built —
+    // so swallow any parse rejection and inspect the captured call args.
+    await runner
+      .run(
+        {
+          prompt: "Do the task",
+          systemPrompt: "You are a careful planner.",
+          workingDirectory: "/tmp",
+          timeoutMs: 1000,
+        },
+        "planner",
+        z.object({ success: z.boolean(), stage: z.literal("planner"), payload: z.unknown() }),
+      )
+      .catch(() => undefined);
+
+    const call = processRunner.execute.mock.calls[0]![0] as { stdinData: string };
+    expect(call.stdinData).toBe("You are a careful planner.\n\n---\n\nDo the task");
+  });
+
+  it("uses the prompt as-is when no system prompt is set", async () => {
+    const processRunner = makeMockProcessRunner({
+      stdout: JSON.stringify({ type: "result", result: "ok" }),
+      stderr: "",
+      exitCode: 0,
+      durationMs: 50,
+      timedOut: false,
+    });
+    const logger = makeMockLogger();
+    const runner = new CursorRunner(
+      processRunner as never,
+      "cursor",
+      [],
+      "claude-4.6-sonnet",
+      logger as never,
+    );
+
+    await runner
+      .run(
+        { prompt: "Do the task", workingDirectory: "/tmp", timeoutMs: 1000 },
+        "planner",
+        z.object({ success: z.boolean(), stage: z.literal("planner"), payload: z.unknown() }),
+      )
+      .catch(() => undefined);
+
+    const call = processRunner.execute.mock.calls[0]![0] as { stdinData: string };
+    expect(call.stdinData).toBe("Do the task");
+  });
 });

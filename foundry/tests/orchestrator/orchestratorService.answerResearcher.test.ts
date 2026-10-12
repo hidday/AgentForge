@@ -388,6 +388,85 @@ describe("OrchestratorService -- answer researcher integration", () => {
 
       expect(result).toBeDefined();
     });
+
+    it("forwards a prior HumanAnswers artifact to both the researcher and the post-research re-plan call", async () => {
+      const { deps, runRepo, artifactRepo, plannerAgent, answerResearcherAgent, planReviewerAgent } =
+        buildDeps();
+      const svc = new OrchestratorService(deps as never);
+
+      const todoRun = makeRun({ state: RunState.Todo });
+      const planningRun = makeRun({ state: RunState.Planning, planVersion: 1 });
+      const planningRunV2 = makeRun({ state: RunState.Planning, planVersion: 2 });
+      const planReviewRun = makeRun({ state: RunState.PlanReview, planVersion: 2 });
+      const awaitingApprovalRun = makeRun({ state: RunState.AwaitingPlanApproval, planVersion: 2 });
+
+      const initialPlanWithQuestions = makePlan({
+        planVersion: 1,
+        openQuestions: [{ id: "q1", question: "Optional thing?", requiredForExecution: false }],
+      });
+      const revisedPlanCleared = makePlan({ planVersion: 2, openQuestions: [] });
+      const priorHumanAnswers = { answers: [{ questionId: "q0", answer: "from a prior clarification round" }] };
+
+      setupStartRunHappyPath(deps, todoRun);
+
+      runRepo.findById.mockResolvedValue(planReviewRun);
+      runRepo.updateState
+        .mockResolvedValueOnce(planningRun)
+        .mockResolvedValueOnce(planReviewRun)
+        .mockResolvedValueOnce(awaitingApprovalRun);
+      runRepo.update
+        .mockResolvedValueOnce({ ...todoRun, workingDirectory: "/tmp/worktree", branchName: "ai/run-test1234" })
+        .mockResolvedValueOnce(planningRun)
+        .mockResolvedValueOnce(planningRunV2);
+
+      artifactRepo.findLatestByType.mockImplementation((_runId: string, type: string) => {
+        if (type === "ResearchedAnswers") return Promise.resolve(null);
+        if (type === "HumanAnswers")
+          return Promise.resolve({
+            id: "artifact-human-answers",
+            runId: "run-1",
+            type: "HumanAnswers",
+            version: 1,
+            payloadJson: priorHumanAnswers,
+            rawText: "{}",
+            createdAt: new Date(),
+          });
+        if (type === "Plan") return Promise.resolve(makePlanArtifact(revisedPlanCleared));
+        if (type === "TaskBundle") return Promise.resolve(makeTaskBundleArtifact(makeTaskBundle()));
+        return Promise.resolve(null);
+      });
+
+      plannerAgent.run
+        .mockResolvedValueOnce(initialPlanWithQuestions)
+        .mockResolvedValueOnce(revisedPlanCleared);
+
+      answerResearcherAgent.run.mockResolvedValue({
+        summary: "Resolved 1 question.",
+        answers: [
+          { questionId: "q1", question: "Optional thing?", answer: "Yes do it.", confidence: "high", sources: [] },
+        ],
+        completedAt: "2026-05-17T12:00:00Z",
+      });
+
+      planReviewerAgent.run.mockResolvedValue({ overallVerdict: "approved", summary: "OK", findings: [] });
+
+      await svc.startRun("LIN-1");
+
+      // The researcher call must have received the prior human answers.
+      expect(answerResearcherAgent.run).toHaveBeenCalledWith(
+        initialPlanWithQuestions,
+        expect.anything(),
+        "run-1",
+        { humanAnswers: priorHumanAnswers.answers },
+      );
+
+      // The post-research re-plan call must ALSO carry the prior human answers
+      // alongside the researched answers.
+      expect(plannerAgent.run.mock.calls[1][2]).toMatchObject({
+        humanAnswers: priorHumanAnswers.answers,
+        researchedAnswers: expect.arrayContaining([expect.objectContaining({ questionId: "q1" })]),
+      });
+    });
   });
 
   describe("blocking questions remain after research", () => {

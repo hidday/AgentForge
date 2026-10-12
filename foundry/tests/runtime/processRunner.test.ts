@@ -1,6 +1,14 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { EventEmitter } from "node:events";
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdtempSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+  watch,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
@@ -11,7 +19,19 @@ vi.mock("node:child_process", () => ({
   spawn: vi.fn(),
 }));
 
+// `watch` defaults to delegating to the real implementation (so the
+// "happy path" orphan-rehydration tests still exercise real OS file
+// watching), but individual tests can override it with
+// `watchMock.mockImplementationOnce(...)` to drive the watcher's callback
+// deterministically instead of depending on real, timing-sensitive
+// filesystem-change notifications.
+vi.mock("node:fs", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs")>();
+  return { ...actual, watch: vi.fn(actual.watch) };
+});
+
 const spawnMock = spawn as unknown as ReturnType<typeof vi.fn>;
+const watchMock = watch as unknown as ReturnType<typeof vi.fn>;
 
 class FakeChildProcess extends EventEmitter {
   stdin = { write: vi.fn(), end: vi.fn() };
@@ -42,6 +62,7 @@ let spoolDir: string;
 
 beforeEach(() => {
   spawnMock.mockReset();
+  watchMock.mockClear();
   spoolDir = mkdtempSync(join(tmpdir(), "process-runner-test-"));
 });
 
@@ -450,6 +471,81 @@ describe("ProcessRunner real mode: active-process tracking and manifests", () =>
     expect(emitter.emitProcessCompleted).not.toHaveBeenCalled();
   });
 
+  it("does not track or clean up a process when context is provided but the child has no pid", async () => {
+    // context is truthy and a processId is generated, but the
+    // `context && processId && child.pid` guard fails because pid is
+    // falsy, so no active entry/manifest is ever created. The close
+    // handler still calls cleanupProcess(processId, ...) because
+    // processId itself is truthy -- exercising cleanupProcess's own
+    // "no matching entry" guard.
+    const emitter = { emitProcessStarted: vi.fn(), emitProcessOutput: vi.fn(), emitProcessCompleted: vi.fn() };
+    const logger = makeMockLogger();
+    const runner = new ProcessRunner("real", logger as never, emitter as never, spoolDir);
+    const child = spawnFakeChild();
+    // @ts-expect-error -- simulate a child that failed to acquire a pid
+    child.pid = undefined;
+
+    const resultPromise = runner.execute({
+      command: "claude",
+      args: [],
+      cwd: "/tmp",
+      timeoutMs: 5000,
+      context: { runId: "run-no-pid", stage: "executor", runtime: "claude-code" },
+    });
+
+    expect(runner.getActiveProcesses()).toHaveLength(0);
+    expect(emitter.emitProcessStarted).not.toHaveBeenCalled();
+
+    child.emit("close", 0);
+    const result = await resultPromise;
+
+    expect(result.exitCode).toBe(0);
+    expect(emitter.emitProcessCompleted).not.toHaveBeenCalled();
+    expect(logger.info).not.toHaveBeenCalledWith(
+      expect.anything(),
+      "Agent process completed",
+    );
+  });
+
+  it("completes cleanup via the public API even when the process's manifest file is missing at close time", async () => {
+    const emitter = { emitProcessStarted: vi.fn(), emitProcessOutput: vi.fn(), emitProcessCompleted: vi.fn() };
+    const logger = makeMockLogger();
+    const runner = new ProcessRunner("real", logger as never, emitter as never, spoolDir);
+    const child = spawnFakeChild();
+
+    const resultPromise = runner.execute({
+      command: "claude",
+      args: [],
+      cwd: "/tmp",
+      timeoutMs: 5000,
+      context: { runId: "run-no-manifest", stage: "executor", runtime: "claude-code" },
+    });
+
+    const processId = runner.getActiveProcesses()[0]!.id;
+    rmSync(join(spoolDir, `${processId}.json`));
+
+    child.emit("close", 0);
+    const result = await resultPromise;
+
+    expect(result.exitCode).toBe(0);
+    // cleanupProcess's manifest read/write is best-effort: it swallows the
+    // failed read and still runs the rest of cleanup (removal from the
+    // active map, emitter notification, and logging).
+    expect(runner.getActiveProcesses()).toHaveLength(0);
+    expect(emitter.emitProcessCompleted).toHaveBeenCalledWith(
+      "run-no-manifest",
+      processId,
+      "executor",
+      "claude-code",
+      0,
+      expect.any(Number),
+    );
+    expect(logger.info).toHaveBeenCalledWith(
+      expect.objectContaining({ processId }),
+      "Agent process completed",
+    );
+  });
+
   it("computes elapsedMs for an active process based on current time", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
@@ -744,6 +840,299 @@ describe("ProcessRunner.rehydrateOrphans", () => {
       const manifestAfter = JSON.parse(readFileSync(manifestPath, "utf-8"));
       expect(manifestAfter.exitCode).toBe(-1);
       expect(manifestAfter.completedAt).toBeDefined();
+    } finally {
+      killSpy.mockRestore();
+    }
+  });
+
+  it("falls back to an empty rolling buffer when the orphan's log file cannot be read yet, and records the resulting tailLogForOrphan failure", () => {
+    // No .log file is created up front, so the `readFileSync(logPath)`
+    // inside rehydrateOrphans's "alive" branch throws and is swallowed
+    // (rollingBuffer stays ""). The process is still registered as
+    // active *before* tailLogForOrphan runs -- and because the log file
+    // genuinely does not exist yet, the real `fs.watch()` call inside
+    // tailLogForOrphan throws synchronously (Node's fs.watch requires the
+    // watched path to already exist), which is caught by rehydrateOrphans's
+    // outer per-manifest try/catch and reported as a failed manifest.
+    const manifestPath = join(spoolDir, "no-log-proc.json");
+    writeFileSync(
+      manifestPath,
+      JSON.stringify({
+        id: "no-log-proc",
+        pid: process.pid,
+        command: "claude",
+        args: [],
+        runId: "run-no-log",
+        stage: "executor",
+        runtime: "claude-code",
+        startedAt: new Date().toISOString(),
+        logFile: join(spoolDir, "no-log-proc.log"),
+      }),
+    );
+
+    const logger = makeMockLogger();
+    const runner = new ProcessRunner("real", logger as never, undefined, spoolDir);
+
+    expect(() => runner.rehydrateOrphans()).not.toThrow();
+
+    expect(logger.info).toHaveBeenCalledWith(
+      expect.objectContaining({ processId: "no-log-proc" }),
+      "Rehydrating orphaned agent process",
+    );
+    // The entry was added to the active map before tailLogForOrphan's
+    // fs.watch() call threw, so it is left behind with an empty buffer.
+    expect(runner.getProcessOutput("no-log-proc")).toBe("");
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.objectContaining({ file: "no-log-proc.json" }),
+      "Failed to process manifest",
+    );
+  });
+});
+
+describe("ProcessRunner: constructor default spool directory", () => {
+  it("defaults to .foundry/processes under the current working directory when no spoolDir is given", () => {
+    const defaultDir = join(process.cwd(), ".foundry", "processes");
+    const preexisting = existsSync(defaultDir);
+    new ProcessRunner("real", makeMockLogger() as never, undefined);
+    try {
+      expect(existsSync(defaultDir)).toBe(true);
+    } finally {
+      if (!preexisting) {
+        rmSync(join(process.cwd(), ".foundry"), { recursive: true, force: true });
+      }
+    }
+  });
+});
+
+describe("ProcessRunner: tailLogForOrphan's fs.watch callback (driven directly via a mocked watch())", () => {
+  function setupAliveOrphan(logger: ReturnType<typeof makeMockLogger>) {
+    const logPath = join(spoolDir, "watched.log");
+    writeFileSync(logPath, "initial");
+
+    const manifestPath = join(spoolDir, "watched.json");
+    writeFileSync(
+      manifestPath,
+      JSON.stringify({
+        id: "watched",
+        pid: process.pid,
+        command: "claude",
+        args: [],
+        runId: "run-watched",
+        stage: "executor",
+        runtime: "claude-code",
+        startedAt: new Date().toISOString(),
+        logFile: logPath,
+      }),
+    );
+
+    const runner = new ProcessRunner("real", logger as never, undefined, spoolDir);
+    return { runner, logPath };
+  }
+
+  it("appends newly written log content to the rolling buffer when the watch callback fires", () => {
+    const fakeWatcher = { close: vi.fn() };
+    let capturedListener: (() => void) | undefined;
+    watchMock.mockImplementationOnce((_path: unknown, listener: () => void) => {
+      capturedListener = listener;
+      return fakeWatcher as never;
+    });
+
+    const { runner, logPath } = setupAliveOrphan(makeMockLogger());
+    runner.rehydrateOrphans();
+    expect(capturedListener).toBeDefined();
+
+    writeFileSync(logPath, "initial + more output");
+    capturedListener!();
+
+    expect(runner.getProcessOutput("watched")).toBe("initial + more output");
+  });
+
+  it("does not re-append when the watch callback fires but the file content has not grown", () => {
+    const fakeWatcher = { close: vi.fn() };
+    let capturedListener: (() => void) | undefined;
+    watchMock.mockImplementationOnce((_path: unknown, listener: () => void) => {
+      capturedListener = listener;
+      return fakeWatcher as never;
+    });
+
+    const { runner } = setupAliveOrphan(makeMockLogger());
+    runner.rehydrateOrphans();
+
+    // Fire the listener with no underlying file change.
+    capturedListener!();
+    expect(runner.getProcessOutput("watched")).toBe("initial");
+  });
+
+  it("closes the watcher and no-ops when the watch callback fires after the entry has already been removed", () => {
+    const fakeWatcher = { close: vi.fn() };
+    let capturedListener: (() => void) | undefined;
+    watchMock.mockImplementationOnce((_path: unknown, listener: () => void) => {
+      capturedListener = listener;
+      return fakeWatcher as never;
+    });
+
+    const { runner } = setupAliveOrphan(makeMockLogger());
+    runner.rehydrateOrphans();
+    expect(runner.getActiveProcesses()).toHaveLength(1);
+
+    // Simulate the process having already been finalized/removed by some
+    // other path before this (now-stale) watch event is delivered.
+    (runner as unknown as { activeProcesses: Map<string, unknown> }).activeProcesses.delete(
+      "watched",
+    );
+
+    expect(() => capturedListener!()).not.toThrow();
+    expect(fakeWatcher.close).toHaveBeenCalledTimes(1);
+  });
+
+  it("silently ignores a read failure inside the watch callback", async () => {
+    const fakeWatcher = { close: vi.fn() };
+    let capturedListener: (() => void) | undefined;
+    watchMock.mockImplementationOnce((_path: unknown, listener: () => void) => {
+      capturedListener = listener;
+      return fakeWatcher as never;
+    });
+
+    const { runner } = setupAliveOrphan(makeMockLogger());
+    runner.rehydrateOrphans();
+
+    // Inject a single readFileSync failure for the watch callback's own
+    // read, without disturbing the real log file (which the entry's
+    // WriteStream still holds an async-pending open() against -- replacing
+    // it on disk here would otherwise race that open and surface as an
+    // unhandled stream error later).
+    const fs = await import("node:fs");
+    const readSpy = vi
+      .spyOn(fs, "readFileSync")
+      .mockImplementationOnce(() => {
+        throw new Error("simulated read failure");
+      });
+
+    try {
+      expect(() => capturedListener!()).not.toThrow();
+    } finally {
+      readSpy.mockRestore();
+    }
+    // The rolling buffer is left exactly as it was before the failed read.
+    expect(runner.getProcessOutput("watched")).toBe("initial");
+  });
+});
+
+describe("ProcessRunner: orphan poll-interval edge cases", () => {
+  it("clears the interval and no-ops in finalizeOrphan when the entry was already removed before the death check fires", async () => {
+    vi.useFakeTimers();
+
+    const logPath = join(spoolDir, "vanished.log");
+    writeFileSync(logPath, "output");
+    const manifestPath = join(spoolDir, "vanished.json");
+    writeFileSync(
+      manifestPath,
+      JSON.stringify({
+        id: "vanished",
+        pid: process.pid,
+        command: "claude",
+        args: [],
+        runId: "run-vanished",
+        stage: "executor",
+        runtime: "claude-code",
+        startedAt: new Date().toISOString(),
+        logFile: logPath,
+      }),
+    );
+
+    const emitter = { emitProcessStarted: vi.fn(), emitProcessOutput: vi.fn(), emitProcessCompleted: vi.fn() };
+    const logger = makeMockLogger();
+    const runner = new ProcessRunner("real", logger as never, emitter as never, spoolDir);
+
+    let killCallCount = 0;
+    const killSpy = vi.spyOn(process, "kill").mockImplementation(((..._args: unknown[]) => {
+      killCallCount += 1;
+      if (killCallCount > 1) {
+        throw Object.assign(new Error("ESRCH"), { code: "ESRCH" });
+      }
+      return true;
+    }) as typeof process.kill);
+
+    try {
+      runner.rehydrateOrphans();
+      expect(runner.getActiveProcesses()).toHaveLength(1);
+
+      // Remove the entry out-of-band (e.g. as if some other code path had
+      // already finalized it) right before the poll interval's next tick,
+      // so `activeProcesses.get(processId)?.pid` falls back to `?? 0` and
+      // finalizeOrphan's own `if (!entry) return;` guard fires.
+      (runner as unknown as { activeProcesses: Map<string, unknown> }).activeProcesses.delete(
+        "vanished",
+      );
+
+      await vi.advanceTimersByTimeAsync(5_000);
+
+      expect(emitter.emitProcessCompleted).not.toHaveBeenCalled();
+      expect(logger.info).not.toHaveBeenCalledWith(
+        expect.objectContaining({ processId: "vanished" }),
+        "Orphaned process has exited",
+      );
+    } finally {
+      killSpy.mockRestore();
+    }
+  });
+
+  it("still finalizes an orphan (removal, emitter notification, logging) even when its manifest file is missing when the death check fires", async () => {
+    vi.useFakeTimers();
+
+    const logPath = join(spoolDir, "no-manifest-at-death.log");
+    writeFileSync(logPath, "output");
+    const manifestPath = join(spoolDir, "no-manifest-at-death.json");
+    writeFileSync(
+      manifestPath,
+      JSON.stringify({
+        id: "no-manifest-at-death",
+        pid: process.pid,
+        command: "claude",
+        args: [],
+        runId: "run-no-manifest-at-death",
+        stage: "executor",
+        runtime: "claude-code",
+        startedAt: new Date().toISOString(),
+        logFile: logPath,
+      }),
+    );
+
+    const emitter = { emitProcessStarted: vi.fn(), emitProcessOutput: vi.fn(), emitProcessCompleted: vi.fn() };
+    const logger = makeMockLogger();
+    const runner = new ProcessRunner("real", logger as never, emitter as never, spoolDir);
+
+    let killCallCount = 0;
+    const killSpy = vi.spyOn(process, "kill").mockImplementation(((..._args: unknown[]) => {
+      killCallCount += 1;
+      if (killCallCount > 1) {
+        throw Object.assign(new Error("ESRCH"), { code: "ESRCH" });
+      }
+      return true;
+    }) as typeof process.kill);
+
+    try {
+      runner.rehydrateOrphans();
+      expect(runner.getActiveProcesses()).toHaveLength(1);
+
+      // The manifest disappears before the orphan is detected as dead.
+      rmSync(manifestPath);
+
+      await vi.advanceTimersByTimeAsync(5_000);
+
+      expect(runner.getActiveProcesses()).toHaveLength(0);
+      expect(emitter.emitProcessCompleted).toHaveBeenCalledWith(
+        "run-no-manifest-at-death",
+        "no-manifest-at-death",
+        "executor",
+        "claude-code",
+        -1,
+        expect.any(Number),
+      );
+      expect(logger.info).toHaveBeenCalledWith(
+        expect.objectContaining({ processId: "no-manifest-at-death" }),
+        "Orphaned process has exited",
+      );
     } finally {
       killSpy.mockRestore();
     }

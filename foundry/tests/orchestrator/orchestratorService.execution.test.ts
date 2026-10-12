@@ -538,6 +538,34 @@ describe("OrchestratorService.runExecution", () => {
     await expect(svc.runExecution("run-1")).rejects.toThrow("boom");
   });
 
+  it("forwards an operator note to the executor agent as an operatorNote option", async () => {
+    const store: TestStore = {
+      runState: RunState.Implementing,
+      artifacts: [asArtifact({ type: "Plan", version: 1, payloadJson: makePlan() })],
+      events: [],
+      prNumber: null,
+    };
+    const initialRun = makeRun({ state: RunState.Implementing, branchName: "ai/run-1" });
+    const built = buildDeps(store, initialRun);
+    const svc = new OrchestratorService(built.deps as never);
+
+    built.executorAgent.run.mockImplementation(async () => {
+      const report = makeExecutionReport();
+      await built.artifactRepo.create({ runId: "run-1", type: "ExecutionReport", version: 1, payloadJson: report, rawText: "{}" });
+      return { report, prNumber: 7 };
+    });
+
+    await svc.runExecution("run-1", { note: "Use the new auth library" });
+
+    expect(built.executorAgent.run).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      "run-1",
+      expect.anything(),
+      { operatorNote: "Use the new auth library" },
+    );
+  });
+
   it("throws a PolicyViolationError and never invokes the executor when the run is not Implementing", async () => {
     const store: TestStore = {
       runState: RunState.Todo,
