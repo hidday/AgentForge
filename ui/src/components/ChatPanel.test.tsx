@@ -251,4 +251,91 @@ describe("ChatPanel", () => {
       expect(screen.queryByText("New question")).toBeNull();
     });
   });
+
+  it("collapses and re-expands the message list when the header is clicked", async () => {
+    const existingArtifacts: Artifact[] = [
+      makeArtifact("user", "Hello there", "a1", "2024-01-01T00:00:01Z"),
+    ];
+
+    render(<ChatPanel runId={RUN_ID} artifacts={existingArtifacts} />);
+
+    // Open by default
+    expect(screen.getByText("Hello there")).toBeDefined();
+
+    const header = screen.getByRole("button", { name: /chat with agent/i });
+    await userEvent.click(header);
+    expect(screen.queryByText("Hello there")).toBeNull();
+
+    await userEvent.click(header);
+    expect(screen.getByText("Hello there")).toBeDefined();
+  });
+
+  it("falls back to an empty string when a ChatMessage artifact's payload content is missing", async () => {
+    const artifacts: Artifact[] = [
+      {
+        id: "a1",
+        runId: RUN_ID,
+        type: "ChatMessage",
+        version: 1,
+        payloadJson: { role: "user" },
+        rawText: "",
+        createdAt: "2024-01-01T00:00:01Z",
+      },
+    ];
+
+    render(<ChatPanel runId={RUN_ID} artifacts={artifacts} />);
+
+    // The message list no longer shows the "no messages" placeholder, and
+    // renders the (empty) user bubble without crashing on a missing content field.
+    expect(screen.queryByText(/no messages yet/i)).toBeNull();
+  });
+
+  it("ignores a form submit while a request is already in flight, even if dispatched directly", async () => {
+    let resolveRequest!: (v: { reply: string; durationMs: number }) => void;
+    mockApi.sendChatMessage.mockReturnValue(
+      new Promise((resolve) => {
+        resolveRequest = resolve;
+      }),
+    );
+
+    const { container } = render(<ChatPanel runId={RUN_ID} artifacts={[]} />);
+
+    const input = screen.getByPlaceholderText(/ask the agent/i);
+    await userEvent.type(input, "First message");
+    await userEvent.click(screen.getByRole("button", { name: /send/i }));
+
+    expect(screen.getByText(/agent is thinking/i)).toBeDefined();
+    expect(mockApi.sendChatMessage).toHaveBeenCalledTimes(1);
+
+    // Dispatch a raw submit event on the form directly (bypassing the
+    // disabled button/input) to exercise the `isLoading` half of the
+    // `if (!trimmed || isLoading) return;` guard inside handleSubmit.
+    const form = container.querySelector("form");
+    expect(form).not.toBeNull();
+    act(() => {
+      form!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    });
+    expect(mockApi.sendChatMessage).toHaveBeenCalledTimes(1);
+
+    act(() => {
+      resolveRequest({ reply: "ok", durationMs: 10 });
+    });
+  });
+
+  it("scrolls the message list to the bottom anchor when scrollIntoView is available", () => {
+    const scrollIntoView = vi.fn();
+    const originalScrollIntoView = window.HTMLElement.prototype.scrollIntoView;
+    window.HTMLElement.prototype.scrollIntoView = scrollIntoView;
+
+    try {
+      const existingArtifacts: Artifact[] = [
+        makeArtifact("user", "Hello there", "a1", "2024-01-01T00:00:01Z"),
+      ];
+      render(<ChatPanel runId={RUN_ID} artifacts={existingArtifacts} />);
+
+      expect(scrollIntoView).toHaveBeenCalledWith({ behavior: "smooth" });
+    } finally {
+      window.HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+    }
+  });
 });

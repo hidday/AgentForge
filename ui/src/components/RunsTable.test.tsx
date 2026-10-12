@@ -28,7 +28,6 @@ const mockApi = api as unknown as {
 
 function makeRun(overrides: Partial<Run> & { id: string; state: string }): Run {
   return {
-    id: overrides.id,
     linearIssueId: "issue-1",
     linearIssueIdentifier: "ENG-1",
     linearIssueDescription: null,
@@ -37,7 +36,6 @@ function makeRun(overrides: Partial<Run> & { id: string; state: string }): Run {
     repo: "org/repo",
     branchName: null,
     prNumber: null,
-    state: overrides.state,
     planVersion: 1,
     approvedPlanVersion: null,
     plannerRuntime: null,
