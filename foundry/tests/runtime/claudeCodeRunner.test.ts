@@ -372,3 +372,132 @@ describe("ClaudeCodeRunner.chatRun() — arg filtering and error surfacing", () 
     expect(logFields).toMatchObject({ upstreamApiError: true });
   });
 });
+
+describe("ClaudeCodeRunner — NDJSON stream envelope parsing", () => {
+  it("extracts the result text from the last NDJSON line with type 'result', ignoring earlier non-result lines", async () => {
+    const ndjson = [
+      JSON.stringify({ type: "message_start" }),
+      JSON.stringify({ type: "content_block_delta", delta: { text: "partial" } }),
+      "", // blank line, should be skipped
+      JSON.stringify({ type: "result", result: validStructuredOutput, is_error: false }),
+    ].join("\n");
+
+    const processRunner = makeMockProcessRunner({
+      stdout: ndjson,
+      stderr: "",
+      exitCode: 0,
+      durationMs: 150,
+      timedOut: false,
+    });
+    const logger = makeMockLogger();
+    const runner = new ClaudeCodeRunner(
+      processRunner as never,
+      "claude",
+      [],
+      "claude-fable-5",
+      logger as never,
+    );
+
+    const output = await runner.run(
+      { prompt: "hi", workingDirectory: "/tmp", timeoutMs: 1000 },
+      "planner",
+      echoSchema,
+    );
+
+    expect(output.success).toBe(true);
+    expect(output.parsed.payload).toEqual({ value: "ok" });
+  });
+
+  it("skips unparseable NDJSON lines and falls back to the raw text when no 'result' line exists", async () => {
+    const ndjson = [
+      "not json at all",
+      JSON.stringify({ type: "message_start" }),
+      "{also not valid json",
+    ].join("\n");
+
+    const processRunner = makeMockProcessRunner({
+      stdout: ndjson,
+      stderr: "",
+      exitCode: 0,
+      durationMs: 150,
+      timedOut: false,
+    });
+    const logger = makeMockLogger();
+    const runner = new ClaudeCodeRunner(
+      processRunner as never,
+      "claude",
+      [],
+      "claude-fable-5",
+      logger as never,
+    );
+
+    // No `{"type":"result",...}` line exists, so unwrapClaudeEnvelope falls
+    // back to the raw NDJSON text; that text has no structured-output
+    // delimiters, so parsing rejects — this test only cares that the
+    // fallback-to-raw branch itself was exercised without throwing there.
+    await expect(
+      runner.run({ prompt: "hi", workingDirectory: "/tmp", timeoutMs: 1000 }, "planner", echoSchema),
+    ).rejects.toThrow(/BEGIN_STRUCTURED_OUTPUT/);
+
+    expect(processRunner.execute).toHaveBeenCalledOnce();
+  });
+});
+
+describe("ClaudeCodeRunner.run() — system prompt argument", () => {
+  it("passes --system-prompt through to the spawned process when input.systemPrompt is set", async () => {
+    const processRunner = makeMockProcessRunner({
+      stdout: validStructuredOutput,
+      stderr: "",
+      exitCode: 0,
+      durationMs: 100,
+      timedOut: false,
+    });
+    const logger = makeMockLogger();
+    const runner = new ClaudeCodeRunner(
+      processRunner as never,
+      "claude",
+      ["--print"],
+      "claude-fable-5",
+      logger as never,
+    );
+
+    await runner.run(
+      {
+        prompt: "hi",
+        systemPrompt: "You are a helpful planner.",
+        workingDirectory: "/tmp",
+        timeoutMs: 1000,
+      },
+      "planner",
+      echoSchema,
+    );
+
+    const call = processRunner.execute.mock.calls[0]![0] as { args: string[] };
+    expect(call.args).toEqual(
+      expect.arrayContaining(["--system-prompt", "You are a helpful planner."]),
+    );
+  });
+
+  it("omits --system-prompt when input.systemPrompt is not set", async () => {
+    const processRunner = makeMockProcessRunner({
+      stdout: validStructuredOutput,
+      stderr: "",
+      exitCode: 0,
+      durationMs: 100,
+      timedOut: false,
+    });
+    const logger = makeMockLogger();
+    const runner = new ClaudeCodeRunner(
+      processRunner as never,
+      "claude",
+      ["--print"],
+      "claude-fable-5",
+      logger as never,
+    );
+
+    await runner.run({ prompt: "hi", workingDirectory: "/tmp", timeoutMs: 1000 }, "planner", echoSchema);
+
+    const call = processRunner.execute.mock.calls[0]![0] as { args: string[] };
+    expect(call.args).not.toContain("--system-prompt");
+  });
+});

@@ -48,6 +48,114 @@ describe("buildChatSystemPrompt", () => {
     expect(result.length).toBeGreaterThan(0);
   });
 
+  it("renders '(none)' for branchName and prNumber when they are null", () => {
+    const result = buildChatSystemPrompt(makeRun({ branchName: null, prNumber: null }), []);
+    expect(result).toContain("**Branch:** (none)");
+    expect(result).toContain("**PR Number:** (none)");
+  });
+
+  it("includes the Linear Issue section when only the identifier is set", () => {
+    const run = makeRun({ linearIssueTitle: null, linearIssueDescription: null });
+    const result = buildChatSystemPrompt(run, []);
+    expect(result).toContain("## Linear Issue");
+    expect(result).toContain("**Identifier:** ENG-42");
+  });
+
+  it("includes the Linear Issue section when only the description is set", () => {
+    const run = makeRun({ linearIssueTitle: null, linearIssueIdentifier: null });
+    const result = buildChatSystemPrompt(run, []);
+    expect(result).toContain("## Linear Issue");
+    expect(result).toContain("**Description:**");
+  });
+
+  it("omits the Linear Issue section entirely when title, identifier, and description are all null", () => {
+    const run = makeRun({
+      linearIssueTitle: null,
+      linearIssueIdentifier: null,
+      linearIssueDescription: null,
+    });
+    const result = buildChatSystemPrompt(run, []);
+    expect(result).not.toContain("## Linear Issue");
+  });
+
+  it("keeps the earlier (higher-version) Plan artifact when a later one in the list has a lower version", () => {
+    const planV1 = makeArtifact({ type: "Plan", version: 1, payloadJson: { summary: "v1" } });
+    const planV3 = makeArtifact({ type: "Plan", version: 3, payloadJson: { summary: "v3" } });
+    const planV2 = makeArtifact({ type: "Plan", version: 2, payloadJson: { summary: "v2" } });
+    const result = buildChatSystemPrompt(makeRun(), [planV1, planV3, planV2]);
+    expect(result).toContain("v3");
+    expect(result).not.toContain("**Summary:** v1");
+    expect(result).not.toContain("**Summary:** v2");
+  });
+
+  it("falls back to empty strings/JSON for missing optional fields across all artifact sections", () => {
+    const planArtifact = makeArtifact({
+      type: "Plan",
+      version: 1,
+      payloadJson: {
+        steps: [{}],
+        risks: [{ oddShape: true }],
+        assumptions: [{ oddShape: true }],
+      },
+    });
+    const humanAnswers = makeArtifact({
+      type: "HumanAnswers",
+      version: 1,
+      payloadJson: { answers: [{}] },
+    });
+    const researchedAnswers = makeArtifact({
+      type: "ResearchedAnswers",
+      version: 1,
+      payloadJson: { answers: [{}] },
+    });
+    const planReview = makeArtifact({
+      type: "PlanReview",
+      version: 1,
+      payloadJson: { findings: [{}] },
+    });
+    const review = makeArtifact({
+      type: "Review",
+      version: 1,
+      payloadJson: { findings: [{}] },
+    });
+    const execReport = makeArtifact({
+      type: "ExecutionReport",
+      version: 1,
+      payloadJson: {
+        checks: {},
+        filesChanged: [{ not: "a string" }],
+        notes: [{ not: "a string" }],
+      },
+    });
+    const rejection = makeArtifact({
+      type: "RejectionContext",
+      version: 1,
+      payloadJson: {},
+    });
+
+    const result = buildChatSystemPrompt(makeRun(), [
+      planArtifact,
+      humanAnswers,
+      researchedAnswers,
+      planReview,
+      review,
+      execReport,
+      rejection,
+    ]);
+
+    // Doesn't throw, and renders every section even with missing fields.
+    expect(result).toContain("## Current Plan");
+    expect(result).toContain("## Human Answers");
+    // ResearchedAnswers with no summary and an empty-ish answer still renders.
+    expect(result).toContain("## Researched Answers");
+    expect(result).toContain("## Plan Review Findings");
+    expect(result).toContain("## Code Review Findings");
+    expect(result).toContain("## Execution Report");
+    expect(result).toContain("**Checks:**");
+    expect(result).toContain("## Rejection Context(s)");
+    expect(result).toContain("**Plan v?**");
+  });
+
   it("always includes the advisory footer text", () => {
     const result1 = buildChatSystemPrompt(makeRun(), []);
     expect(result1).toContain("READ-ONLY advisory mode");
@@ -76,6 +184,7 @@ describe("buildChatSystemPrompt", () => {
         steps: [{ id: "s1", title: "Step One", description: "Do step one" }],
         risks: ["Risk A"],
         assumptions: ["Assumption B"],
+        openQuestions: ["Plain string question", { id: "q2", question: "Object question" }],
       },
     });
     const result = buildChatSystemPrompt(makeRun(), [planArtifact]);
@@ -84,6 +193,9 @@ describe("buildChatSystemPrompt", () => {
     expect(result).toContain("Risk A");
     expect(result).toContain("Assumption B");
     expect(result).toContain("Plan summary");
+    expect(result).toContain("**Open Questions:**");
+    expect(result).toContain("Plain string question");
+    expect(result).toContain(JSON.stringify({ id: "q2", question: "Object question" }));
   });
 
   it("includes human answers section when HumanAnswers artifact present", () => {
@@ -230,6 +342,82 @@ describe("buildChatSystemPrompt", () => {
     expect(result).toContain("(truncated)");
     expect(result).toContain("x".repeat(4000));
     expect(result).not.toContain("x".repeat(4001));
+  });
+
+  it("includes plan review findings when a PlanReview artifact is present", () => {
+    const artifact = makeArtifact({
+      type: "PlanReview",
+      version: 1,
+      payloadJson: {
+        summary: "Plan looks mostly solid.",
+        findings: [
+          {
+            id: "pf1",
+            severity: "important",
+            title: "Missing error handling",
+            details: "No malformed JSON handling.",
+          },
+        ],
+      },
+    });
+    const result = buildChatSystemPrompt(makeRun(), [artifact]);
+    expect(result).toContain("## Plan Review Findings");
+    expect(result).toContain("Plan looks mostly solid.");
+    expect(result).toContain("[important] Missing error handling");
+    expect(result).toContain("(pf1)");
+  });
+
+  it("omits the Plan Review Findings section when no PlanReview artifact is present", () => {
+    const result = buildChatSystemPrompt(makeRun(), []);
+    expect(result).not.toContain("## Plan Review Findings");
+  });
+
+  it("omits the Plan Review Findings section when the PlanReview artifact has no summary and no findings", () => {
+    const artifact = makeArtifact({
+      type: "PlanReview",
+      version: 1,
+      payloadJson: { findings: [] },
+    });
+    const result = buildChatSystemPrompt(makeRun(), [artifact]);
+    expect(result).not.toContain("## Plan Review Findings");
+  });
+
+  it("includes code review findings when a Review artifact is present", () => {
+    const artifact = makeArtifact({
+      type: "Review",
+      version: 1,
+      payloadJson: {
+        summary: "Found a bug and a nit.",
+        findings: [
+          {
+            id: "f1",
+            severity: "blocker",
+            title: "Null deref",
+            details: "Crashes on null input.",
+          },
+        ],
+      },
+    });
+    const result = buildChatSystemPrompt(makeRun(), [artifact]);
+    expect(result).toContain("## Code Review Findings");
+    expect(result).toContain("Found a bug and a nit.");
+    expect(result).toContain("[blocker] Null deref");
+    expect(result).toContain("(f1)");
+  });
+
+  it("omits the Code Review Findings section when no Review artifact is present", () => {
+    const result = buildChatSystemPrompt(makeRun(), []);
+    expect(result).not.toContain("## Code Review Findings");
+  });
+
+  it("omits the Code Review Findings section when the Review artifact has no summary and no findings", () => {
+    const artifact = makeArtifact({
+      type: "Review",
+      version: 1,
+      payloadJson: { findings: [] },
+    });
+    const result = buildChatSystemPrompt(makeRun(), [artifact]);
+    expect(result).not.toContain("## Code Review Findings");
   });
 
   it("uses the Plan artifact with the highest version when multiple exist", () => {
