@@ -222,7 +222,7 @@ describe("OrchestratorService.runManualPlanRevision", () => {
 
     expect(planReviserAgent.run).toHaveBeenCalledWith(
       expect.anything(),
-      expect.anything(),
+      undefined,
       expect.anything(),
       "run-1",
       { operatorNote: "Simplify step 2" },

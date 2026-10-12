@@ -181,6 +181,47 @@ describe("GitService", () => {
 
       await svc.removeWorktree(repoPath, result.worktreePath);
     });
+
+    it("removes a pre-existing directory at the exact deterministic worktree path before recreating it", async () => {
+      const runId = "fadedcab-3456-7890-abcd-ef1234567890";
+      const branchName = "hidday/pry-55-pre-existing-path";
+      const shortId = runId.slice(0, 8);
+      const dirName = buildWorktreeDirName(shortId, branchName);
+      const worktreePath = join(repoPath, ".worktrees", dirName);
+
+      // Pre-create a worktree at the exact path setupRunWorktree will compute,
+      // simulating a crashed run that left a stale directory behind.
+      await svc.createWorktree(repoPath, worktreePath, "some-other-branch", "main");
+      expect(existsSync(worktreePath)).toBe(true);
+
+      const result = await svc.setupRunWorktree(repoPath, runId, "main", branchName);
+
+      expect(result.worktreePath).toBe(worktreePath);
+      expect(existsSync(result.worktreePath)).toBe(true);
+      expect(await svc.currentBranch(result.worktreePath)).toBe(branchName);
+
+      await svc.removeWorktree(repoPath, result.worktreePath);
+    });
+
+    it("warns and proceeds when origin/<branch> already exists from a previous push", async () => {
+      const runId = "0ddba11a-3456-7890-abcd-ef1234567890";
+      const branchName = "hidday/pry-77-already-pushed";
+
+      // Push the branch to origin ahead of time so refs/remotes/origin/<branch> exists
+      // once setupRunWorktree fetches.
+      git(["checkout", "-b", branchName], repoPath);
+      git(["push", "origin", branchName], repoPath);
+      git(["checkout", "main"], repoPath);
+      git(["branch", "-D", branchName], repoPath);
+
+      const result = await svc.setupRunWorktree(repoPath, runId, "main", branchName);
+
+      expect(existsSync(result.worktreePath)).toBe(true);
+      expect(await svc.currentBranch(result.worktreePath)).toBe(branchName);
+      expect(await svc.remoteBranchExists(repoPath, branchName)).toBe(true);
+
+      await svc.removeWorktree(repoPath, result.worktreePath);
+    });
   });
 
   describe("findWorktreeForBranch", () => {
