@@ -33,7 +33,7 @@ const RUN_ID = "run-1";
 
 // This file exercises many dialogs with multiple user interactions each; give
 // each test extra headroom under load rather than racing the default timeout.
-vi.setConfig({ testTimeout: 15000 });
+vi.setConfig({ testTimeout: 30000 });
 
 function resolveAll() {
   mockApi.approvePlan.mockResolvedValue({ ok: true, state: "Implementing" });

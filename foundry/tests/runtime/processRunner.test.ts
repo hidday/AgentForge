@@ -124,6 +124,18 @@ describe("ProcessRunner construction", () => {
 
     expect(existsSync(spoolDir)).toBe(true);
   });
+
+  it("defaults the spool directory to .foundry/processes under the cwd when none is given", () => {
+    const defaultDir = join(process.cwd(), ".foundry", "processes");
+    expect(existsSync(defaultDir)).toBe(false);
+
+    try {
+      new ProcessRunner("mock", makeMockLogger() as never);
+      expect(existsSync(defaultDir)).toBe(true);
+    } finally {
+      rmSync(join(process.cwd(), ".foundry"), { recursive: true, force: true });
+    }
+  });
 });
 
 describe("ProcessRunner.execute() in mock mode", () => {
@@ -741,6 +753,24 @@ describe("ProcessRunner.rehydrateOrphans()", () => {
     );
   });
 
+  it("stringifies a non-Error thrown while processing a manifest", () => {
+    writeFileSync(join(scratchDir, "weird.json"), JSON.stringify({ id: "weird" }));
+    const parseSpy = vi.spyOn(JSON, "parse").mockImplementationOnce(() => {
+      // eslint-disable-next-line @typescript-eslint/no-throw-literal
+      throw "a raw string failure";
+    });
+    const logger = makeMockLogger();
+    const runner = new ProcessRunner("mock", logger as never, undefined, scratchDir);
+
+    expect(() => runner.rehydrateOrphans()).not.toThrow();
+    expect(logger.warn).toHaveBeenCalledWith(
+      { file: "weird.json", error: "a raw string failure" },
+      "Failed to process manifest",
+    );
+
+    parseSpy.mockRestore();
+  });
+
   it("marks a dead orphan (process.kill throws) as crashed and persists exitCode -1", () => {
     const pid = 99999;
     const manifestPath = join(scratchDir, "dead.json");
@@ -986,5 +1016,156 @@ describe("ProcessRunner.rehydrateOrphans()", () => {
     expect(finalManifest.completedAt).toBeDefined();
 
     killSpy.mockRestore();
+  });
+
+  it("tolerates a missing log file for a live orphan (rollingBuffer stays empty, tail starts from size 0)", () => {
+    const pid = 44444;
+    const logPath = join(scratchDir, "nolog.log"); // never written
+    writeFileSync(
+      join(scratchDir, "nolog.json"),
+      JSON.stringify({
+        id: "nolog",
+        pid,
+        command: "claude",
+        args: [],
+        runId: "run-nolog",
+        stage: "planner",
+        runtime: "claude-code",
+        startedAt: new Date().toISOString(),
+        logFile: logPath,
+      }),
+    );
+
+    vi.spyOn(process, "kill").mockImplementation(() => true as never);
+    let watchCallback: (() => void) | undefined;
+    watchMock.mockImplementation((_path: string, cb: () => void) => {
+      watchCallback = cb;
+      return { close: vi.fn() };
+    });
+
+    const emitter = makeMockEmitter();
+    const runner = new ProcessRunner("mock", makeMockLogger() as never, emitter as never, scratchDir);
+
+    expect(() => runner.rehydrateOrphans()).not.toThrow();
+    expect(runner.getProcessOutput("nolog")).toBe("");
+    expect(emitter.emitProcessStarted).toHaveBeenCalledWith(
+      "run-nolog",
+      "nolog",
+      "planner",
+      "claude-code",
+      "claude",
+    );
+
+    // The watch callback computes its growth delta against a lastSize that
+    // also had to fall back to 0 (readFileSync failed at setup time too).
+    writeFileSync(logPath, "now it exists");
+    expect(() => watchCallback!()).not.toThrow();
+    expect(runner.getProcessOutput("nolog")).toBe("now it exists");
+  });
+
+  it("best-effort tolerates a manifest that disappears before an orphan is finalized", async () => {
+    vi.useFakeTimers();
+    const pid = 33333;
+    const logPath = join(scratchDir, "gone.log");
+    writeFileSync(logPath, "hi\n");
+    const manifestPath = join(scratchDir, "gone.json");
+    writeFileSync(
+      manifestPath,
+      JSON.stringify({
+        id: "gone",
+        pid,
+        command: "claude",
+        args: [],
+        runId: "run-gone",
+        stage: "planner",
+        runtime: "claude-code",
+        startedAt: new Date().toISOString(),
+        logFile: logPath,
+      }),
+    );
+
+    let alive = true;
+    vi.spyOn(process, "kill").mockImplementation((targetPid) => {
+      if (targetPid === pid && alive) return true as never;
+      throw new Error("ESRCH");
+    });
+    watchMock.mockImplementation(() => ({ close: vi.fn() }));
+
+    const emitter = makeMockEmitter();
+    const logger = makeMockLogger();
+    const runner = new ProcessRunner("mock", logger as never, emitter as never, scratchDir);
+    runner.rehydrateOrphans();
+    expect(runner.getActiveProcesses()).toHaveLength(1);
+
+    // Manifest vanishes before the orphan is ever finalized.
+    rmSync(manifestPath);
+
+    alive = false;
+    await vi.advanceTimersByTimeAsync(5000);
+
+    expect(runner.getActiveProcesses()).toHaveLength(0);
+    expect(emitter.emitProcessCompleted).toHaveBeenCalledWith(
+      "run-gone",
+      "gone",
+      "planner",
+      "claude-code",
+      -1,
+      expect.any(Number),
+    );
+    expect(logger.info).toHaveBeenCalledWith(
+      expect.objectContaining({ processId: "gone", pid }),
+      "Orphaned process has exited",
+    );
+    expect(existsSync(manifestPath)).toBe(false);
+  });
+
+  it("finalizes only once when two poll intervals race for the same orphan id (defensive guard + pid fallback)", async () => {
+    vi.useFakeTimers();
+    const pid = 22222;
+    const logPath = join(scratchDir, "dup.log");
+    writeFileSync(logPath, "hi\n");
+    const sharedManifest = {
+      id: "dup",
+      pid,
+      command: "claude",
+      args: [],
+      runId: "run-dup",
+      stage: "planner",
+      runtime: "claude-code",
+      startedAt: new Date().toISOString(),
+      logFile: logPath,
+    };
+    // Two manifest files resolving to the SAME orphan id: rehydrateOrphans
+    // sets up two independent watcher+pollInterval closures that both
+    // reference activeProcesses under the single key "dup".
+    writeFileSync(join(scratchDir, "dup1.json"), JSON.stringify(sharedManifest));
+    writeFileSync(join(scratchDir, "dup2.json"), JSON.stringify(sharedManifest));
+
+    let alive = true;
+    vi.spyOn(process, "kill").mockImplementation(() => {
+      if (!alive) throw new Error("ESRCH");
+      return true as never;
+    });
+    watchMock.mockImplementation(() => ({ close: vi.fn() }));
+
+    const emitter = makeMockEmitter();
+    const logger = makeMockLogger();
+    const runner = new ProcessRunner("mock", logger as never, emitter as never, scratchDir);
+    runner.rehydrateOrphans();
+    expect(runner.getActiveProcesses()).toHaveLength(1);
+
+    alive = false;
+    await vi.advanceTimersByTimeAsync(5000);
+
+    // Only the first poll interval to fire actually finalizes the orphan;
+    // the second finds activeProcesses.get("dup") already gone (pid falls
+    // back to 0 in the kill probe) and its finalizeOrphan call is a no-op.
+    expect(runner.getActiveProcesses()).toHaveLength(0);
+    expect(emitter.emitProcessCompleted).toHaveBeenCalledTimes(1);
+    expect(logger.info).toHaveBeenCalledWith(
+      expect.objectContaining({ processId: "dup", pid }),
+      "Orphaned process has exited",
+    );
+    expect(logger.info.mock.calls.filter(([, msg]) => msg === "Orphaned process has exited")).toHaveLength(1);
   });
 });

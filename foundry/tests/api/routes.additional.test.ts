@@ -1,5 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { EventEmitter } from "node:events";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import Fastify from "fastify";
 import { registerApiRoutes } from "../../src/api/routes.js";
 import { RunEventEmitter, type DashboardEvent } from "../../src/api/runEventEmitter.js";
@@ -34,6 +37,7 @@ function makeRun(overrides: Record<string, unknown> = {}) {
 interface BuildAppOptions {
   orchestratorOverrides?: Record<string, unknown>;
   linearPollService?: Record<string, unknown>;
+  claudeCodeRunner?: Record<string, unknown>;
 }
 
 async function buildApp(opts: BuildAppOptions = {}) {
@@ -91,6 +95,7 @@ async function buildApp(opts: BuildAppOptions = {}) {
     mockEmitter as never,
     mockProcessRunner as never,
     opts.linearPollService as never,
+    { claudeCodeRunner: opts.claudeCodeRunner as never },
   );
 
   await app.ready();
@@ -150,6 +155,66 @@ describe("routes.additional", () => {
       expect(body.run.id).toBe("run-1");
       expect(body.artifacts).toEqual([{ id: "art-1" }]);
       expect(body.events).toEqual([{ id: "evt-1" }]);
+    });
+  });
+
+  describe("POST /api/runs/:id/chat (working directory fallback)", () => {
+    it("returns 422 when workingDirectory does not exist and has no /.worktrees/ segment", async () => {
+      const run = makeRun({ workingDirectory: "/definitely/does/not/exist/anywhere" });
+      const claudeCodeRunner = { chatRun: vi.fn() };
+      const { app, mockRunRepo } = await buildApp({ claudeCodeRunner });
+      mockRunRepo.findById.mockResolvedValue(run);
+
+      const res = await app.inject({
+        method: "POST",
+        url: "/api/runs/run-1/chat",
+        payload: { message: "hello" },
+      });
+
+      expect(res.statusCode).toBe(422);
+      expect(res.json().error).toContain("Working directory not found");
+      expect(claudeCodeRunner.chatRun).not.toHaveBeenCalled();
+    });
+
+    it("falls back to the main repo dir when workingDirectory is a missing .worktrees path", async () => {
+      const repoDir = mkdtempSync(join(tmpdir(), "routes-additional-chat-"));
+      const run = makeRun({
+        workingDirectory: join(repoDir, ".worktrees", "missing-worktree"),
+      });
+      const claudeCodeRunner = {
+        chatRun: vi.fn().mockResolvedValue({ text: "fallback reply", durationMs: 12 }),
+      };
+      const { app, mockRunRepo } = await buildApp({ claudeCodeRunner });
+      mockRunRepo.findById.mockResolvedValue(run);
+
+      const res = await app.inject({
+        method: "POST",
+        url: "/api/runs/run-1/chat",
+        payload: { message: "hello" },
+      });
+
+      expect(res.statusCode).toBe(200);
+      expect(claudeCodeRunner.chatRun).toHaveBeenCalledOnce();
+      const [input] = claudeCodeRunner.chatRun.mock.calls[0] as [{ workingDirectory: string }];
+      expect(input.workingDirectory).toBe(repoDir);
+    });
+
+    it("returns 422 when the .worktrees fallback base directory also does not exist", async () => {
+      const run = makeRun({
+        workingDirectory: "/definitely/does/not/exist/.worktrees/missing-worktree",
+      });
+      const claudeCodeRunner = { chatRun: vi.fn() };
+      const { app, mockRunRepo } = await buildApp({ claudeCodeRunner });
+      mockRunRepo.findById.mockResolvedValue(run);
+
+      const res = await app.inject({
+        method: "POST",
+        url: "/api/runs/run-1/chat",
+        payload: { message: "hello" },
+      });
+
+      expect(res.statusCode).toBe(422);
+      expect(claudeCodeRunner.chatRun).not.toHaveBeenCalled();
     });
   });
 
@@ -260,6 +325,37 @@ describe("routes.additional", () => {
       expect(res.statusCode).toBe(200);
       // allow the fire-and-forget rejection handler (the .catch callback) to run
       await new Promise((resolve) => setImmediate(resolve));
+    });
+  });
+
+  describe("POST /api/runs/:id/actions/reject-plan (mode validation)", () => {
+    it("returns 400 when mode is not 'iterate' or 'fresh'", async () => {
+      const { app, mockOrchestrator } = await buildApp();
+
+      const res = await app.inject({
+        method: "POST",
+        url: "/api/runs/run-1/actions/reject-plan",
+        payload: { mode: "bogus-mode" },
+      });
+
+      expect(res.statusCode).toBe(400);
+      expect(res.json().error).toBe("mode must be one of: iterate, fresh");
+      expect(mockOrchestrator.rejectPlan).not.toHaveBeenCalled();
+    });
+
+    it("accepts mode='fresh' and forwards it to rejectPlan", async () => {
+      const run = makeRun();
+      const { app, mockOrchestrator } = await buildApp();
+      mockOrchestrator.rejectPlan.mockResolvedValue(run);
+
+      const res = await app.inject({
+        method: "POST",
+        url: "/api/runs/run-1/actions/reject-plan",
+        payload: { mode: "fresh" },
+      });
+
+      expect(res.statusCode).toBe(200);
+      expect(mockOrchestrator.rejectPlan).toHaveBeenCalledWith("run-1", undefined, "api", "fresh");
     });
   });
 
@@ -623,6 +719,33 @@ describe("routes.additional", () => {
       const body = res.json();
       expect(body.executionReport.executionVersion).toBe(7);
       expect(body.executionReport.score).toBeUndefined();
+    });
+
+    it("falls back to String(risk) when a risk object cannot be JSON-stringified", async () => {
+      const run = makeRun();
+      const { app, mockRunRepo, mockArtifactRepo } = await buildApp();
+      mockRunRepo.findById.mockResolvedValue(run);
+
+      const circular: Record<string, unknown> = { foo: "bar" };
+      circular.self = circular; // makes JSON.stringify throw
+
+      mockArtifactRepo.findLatestByType.mockImplementation(async (_runId: string, type: string) => {
+        if (type === "Plan") {
+          return {
+            id: "art-plan",
+            version: 1,
+            payloadJson: { summary: "circular risk", risks: [circular] },
+          };
+        }
+        return null;
+      });
+
+      const res = await app.inject({ method: "GET", url: "/api/runs/run-1/summary" });
+
+      expect(res.statusCode).toBe(200);
+      const body = res.json();
+      expect(body.plan.risks).toHaveLength(1);
+      expect(body.plan.risks[0]).toBe(String(circular));
     });
 
     it("defaults openQuestions/steps/risks to empty arrays when the plan omits them", async () => {
