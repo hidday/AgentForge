@@ -691,7 +691,15 @@ describe("OrchestratorService -- additional coverage", () => {
       await deps2.artifactRepo.create({ runId: run.id, type: "Plan", version: 2, payloadJson: plan, rawText: "{}" });
       await deps2.artifactRepo.create({ runId: run.id, type: "PlanReview", version: 1, payloadJson: review, rawText: "{}" });
 
-      const revisedPlan = makePlan({ planVersion: 3, risks: [], openQuestions: [] });
+      const revisedPlan = makePlan({
+        planVersion: 3,
+        risks: [],
+        // requiredForExecution: true here exercises the "*blocks execution*"
+        // comment-formatting branch; runPlanRevision itself does not re-check
+        // blocking questions (that only happens after a planner run, not a
+        // revision), so this is a safe, representative fixture.
+        openQuestions: [{ id: "q2", question: "Still unclear?", requiredForExecution: true }],
+      });
       planReviserAgent.run.mockResolvedValue({
         revision: { dispositions: [{ findingId: "f1", status: "addressed", rationale: "fixed it" }] },
         revisedPlan,
@@ -910,6 +918,14 @@ describe("OrchestratorService -- additional coverage", () => {
           filesChanged: manyFiles,
           notes: ["Had to refactor the config loader"],
           score: 0.95,
+          // A failing check exercises the ":x:" icon branch of the comment
+          // formatter; runExecution itself does not gate on check status, so
+          // this does not change the control flow under test.
+          checks: {
+            lint: { status: "pass", details: "ok" },
+            typecheck: { status: "fail", details: "one type error" },
+            tests: { status: "pass", details: "ok" },
+          },
         }),
         prNumber: 101,
       });
@@ -1000,7 +1016,14 @@ describe("OrchestratorService -- additional coverage", () => {
     });
 
     it("uses the remote default branch when it differs from config, and injects relevant prior skills", async () => {
-      const run = makeRun({ id: "run-1", state: RunState.AwaitingPlanApproval, planVersion: 1 });
+      const run = makeRun({
+        id: "run-1",
+        state: RunState.AwaitingPlanApproval,
+        planVersion: 1,
+        // A non-null description exercises the truthy branch of the optional
+        // chaining used to build the skill-relevance query string.
+        linearIssueDescription: "Needs OAuth2 support end to end",
+      });
       const agentSkillRepo = {
         findTopKByRelevance: vi.fn().mockResolvedValue([
           {
@@ -1088,6 +1111,7 @@ describe("OrchestratorService -- additional coverage", () => {
         severity: "important",
         type: "bug",
         file: "src/x.ts",
+        lineHint: 42,
         title: "Bug",
         details: "details",
       };
