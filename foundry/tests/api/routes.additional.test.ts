@@ -692,6 +692,18 @@ describe("routes.additional", () => {
       expect(res.statusCode).toBe(400);
       expect(res.json().error).toBe("cannot pause");
     });
+
+    it("returns String(err) when handleCommand rejects with a non-Error value", async () => {
+      const run = makeRun();
+      const { app, mockRunRepo, mockOrchestrator } = await buildApp();
+      mockRunRepo.findById.mockResolvedValue(run);
+      mockOrchestrator.handleCommand.mockRejectedValue("plain string failure");
+
+      const res = await app.inject({ method: "POST", url: "/api/runs/run-1/actions/pause" });
+
+      expect(res.statusCode).toBe(400);
+      expect(res.json().error).toBe("plain string failure");
+    });
   });
 
   describe("POST /api/runs/:id/actions/resume", () => {
@@ -729,9 +741,21 @@ describe("routes.additional", () => {
       expect(res.statusCode).toBe(400);
       expect(res.json().error).toBe("cannot resume");
     });
+
+    it("returns String(err) when handleCommand rejects with a non-Error value", async () => {
+      const run = makeRun();
+      const { app, mockRunRepo, mockOrchestrator } = await buildApp();
+      mockRunRepo.findById.mockResolvedValue(run);
+      mockOrchestrator.handleCommand.mockRejectedValue("plain string failure");
+
+      const res = await app.inject({ method: "POST", url: "/api/runs/run-1/actions/resume" });
+
+      expect(res.statusCode).toBe(400);
+      expect(res.json().error).toBe("plain string failure");
+    });
   });
 
-  describe("POST /api/runs/:id/actions/answer-questions (non-Error rejection)", () => {
+  describe("POST /api/runs/:id/actions/answer-questions (generic error fallback)", () => {
     it("falls back to String(err) when the orchestrator rejects with a non-Error value", async () => {
       const { app, mockOrchestrator } = await buildApp();
       mockOrchestrator.answerQuestions.mockRejectedValue("plain string failure");
@@ -744,6 +768,20 @@ describe("routes.additional", () => {
 
       expect(res.statusCode).toBe(400);
       expect(res.json().error).toBe("plain string failure");
+    });
+
+    it("falls back to err.message for a generic Error that is not Policy/ValidationError", async () => {
+      const { app, mockOrchestrator } = await buildApp();
+      mockOrchestrator.answerQuestions.mockRejectedValue(new Error("unexpected failure"));
+
+      const res = await app.inject({
+        method: "POST",
+        url: "/api/runs/run-1/actions/answer-questions",
+        payload: { answers: [{ questionId: "q1", answer: "yes" }] },
+      });
+
+      expect(res.statusCode).toBe(400);
+      expect(res.json().error).toBe("unexpected failure");
     });
   });
 
