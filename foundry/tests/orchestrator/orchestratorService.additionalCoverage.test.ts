@@ -61,6 +61,34 @@ function makePlan(overrides: Partial<Plan> = {}): Plan {
   };
 }
 
+function makeTaskBundle(): TaskBundle {
+  return {
+    issue: {
+      id: "LIN-1",
+      title: "Test issue",
+      description: "Test description",
+      labels: [],
+      priority: 0,
+    },
+    repo: {
+      name: "test-repo",
+      defaultBranch: "main",
+      workingBranch: "ai/lin-1",
+      repoPath: "/tmp",
+      allowedPaths: ["src/"],
+      protectedPaths: [],
+    },
+    constraints: {
+      requiredChecks: [],
+      maxFilesChanged: 10,
+      maxDiffLines: 500,
+      forbiddenPatterns: [],
+      mustNotTouch: [],
+    },
+    definitionOfDone: [],
+  };
+}
+
 function makeExecutionReport(overrides: Partial<ExecutionReport> = {}): ExecutionReport {
   return {
     executionVersion: 1,
@@ -1470,6 +1498,274 @@ describe("OrchestratorService -- additional coverage", () => {
         expect.objectContaining({ runId: run.id, skillId: "skill-bad", error: "db unavailable" }),
         "Failed to update skill metric",
       );
+    });
+
+    it("skips skill-metric updates when no SKILL_INJECTION events were recorded for the run", async () => {
+      const run = makeRun({ id: "run-1", state: RunState.ReadyForHumanReview, workingDirectory: "/tmp" });
+      const agentSkillRepo = {
+        incrementSuccess: vi.fn(),
+        incrementFailure: vi.fn(),
+        archiveIfLowUtility: vi.fn(),
+      };
+      const { deps } = buildDeps(run, { agentSkillRepo });
+      const svc = new OrchestratorService(deps as never);
+
+      const result = await svc.approveHumanReview(run.id);
+
+      expect(result.state).toBe(RunState.Done);
+      expect(agentSkillRepo.incrementSuccess).not.toHaveBeenCalled();
+      expect(agentSkillRepo.incrementFailure).not.toHaveBeenCalled();
+    });
+
+    it("logs a string error (not an Error instance) from a rejecting distillation agent", async () => {
+      const run = makeRun({ id: "run-1", state: RunState.ReadyForHumanReview });
+      const distillationAgent = { run: vi.fn().mockRejectedValue("not-an-error-object") };
+      const { deps, logger } = buildDeps(run, { distillationAgent });
+      const svc = new OrchestratorService(deps as never);
+
+      const result = await svc.approveHumanReview(run.id);
+
+      expect(result.state).toBe(RunState.Done);
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.objectContaining({ runId: run.id, error: "not-an-error-object" }),
+        "Distillation agent failed (best-effort, ignoring)",
+      );
+    });
+  });
+
+  describe("updateSkillMetrics -- failure path", () => {
+    it("increments failure counts (not success) when a run is CLARIFICATION_EXHAUSTED into Failed", async () => {
+      // A fresh scenario distinct from orchestratorService.clarification.test.ts's
+      // "max iterations reached" case: this one additionally wires an
+      // agentSkillRepo with prior SKILL_INJECTION events, to exercise
+      // updateSkillMetrics' success=false (incrementFailure) branch, which is
+      // only reachable when a run transitions to Failed.
+      const run = makeRun({ id: "run-1", state: RunState.HumanClarificationNeeded, planVersion: 1 });
+      const agentSkillRepo = {
+        incrementSuccess: vi.fn(),
+        incrementFailure: vi.fn().mockResolvedValue({
+          id: "skill-1",
+          successCount: 0,
+          failureCount: 1,
+          utilityScore: 0.1,
+        }),
+        archiveIfLowUtility: vi.fn().mockResolvedValue(undefined),
+      };
+      const { deps, store, plannerAgent } = buildDeps(run, { agentSkillRepo });
+
+      store.artifacts.push(
+        makeArtifact("Plan", 1, makePlan({
+          planVersion: 1,
+          openQuestions: [{ id: "q1", question: "Required?", requiredForExecution: true }],
+        })),
+      );
+      store.artifacts.push(makeArtifact("TaskBundle", 1, makeTaskBundle()));
+      store.events.push(
+        { id: "e1", runId: run.id, eventType: "SKILL_INJECTION", source: "orchestrator", payloadJson: { skillIds: ["skill-1"] }, createdAt: new Date() },
+        { id: "e2", runId: run.id, eventType: RunEvent.NEEDS_HUMAN_CLARIFICATION, source: "planner-agent", payloadJson: {}, createdAt: new Date() },
+        { id: "e3", runId: run.id, eventType: RunEvent.NEEDS_HUMAN_CLARIFICATION, source: "planner-agent", payloadJson: {}, createdAt: new Date() },
+        { id: "e4", runId: run.id, eventType: RunEvent.NEEDS_HUMAN_CLARIFICATION, source: "planner-agent", payloadJson: {}, createdAt: new Date() },
+      );
+
+      plannerAgent.run.mockResolvedValue(
+        makePlan({
+          planVersion: 2,
+          openQuestions: [{ id: "q1", question: "Still required?", requiredForExecution: true }],
+        }),
+      );
+
+      const svc = new OrchestratorService(deps as never);
+      const result = await svc.answerQuestions(run.id, [{ questionId: "q1", answer: "still unsure" }]);
+
+      expect(result.state).toBe(RunState.Failed);
+      expect(agentSkillRepo.incrementFailure).toHaveBeenCalledWith("skill-1");
+      expect(agentSkillRepo.incrementSuccess).not.toHaveBeenCalled();
+      expect(agentSkillRepo.archiveIfLowUtility).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe("runPlanReview -- changes_requested branch", () => {
+    it("posts the plan-review comment and chains into runPlanRevision", async () => {
+      const run = makeRun({ id: "run-1", state: RunState.PlanReview, planVersion: 1 });
+      const { deps, store, planReviewerAgent, linearClient } = buildDeps(run);
+      store.artifacts.push(makeArtifact("Plan", 1, makePlan({ planVersion: 1 })));
+
+      const planReview = {
+        reviewId: "pr-1",
+        summary: "A few concerns",
+        findings: [
+          { id: "f1", severity: "blocker", type: "x", affectedStepId: "s1", title: "Missing step", details: "d" },
+        ],
+        overallVerdict: "changes_requested",
+      };
+      planReviewerAgent.run.mockResolvedValue(planReview);
+
+      const svc = new OrchestratorService(deps as never);
+      const runPlanRevisionSpy = vi
+        .spyOn(svc, "runPlanRevision")
+        .mockImplementation(async () => ({ ...store.run, state: RunState.AwaitingPlanApproval }));
+
+      const result = await svc.runPlanReview(run.id);
+
+      expect(runPlanRevisionSpy).toHaveBeenCalledWith(run.id);
+      expect(result.state).toBe(RunState.AwaitingPlanApproval);
+      const comment = (linearClient.postComment.mock.calls as unknown[][]).find(
+        (c) => typeof c[1] === "string" && (c[1] as string).includes("AI Plan Review"),
+      );
+      expect(comment).toBeDefined();
+      expect(comment![1]).toContain("Missing step");
+      expect(comment![1]).toContain("Changes Requested");
+    });
+  });
+
+  describe("rejectPlan -- iterate mode with full prior context", () => {
+    it("injects the previous plan, human answers, researched answers, and plan-review findings into the re-plan", async () => {
+      const run = makeRun({ id: "run-1", state: RunState.AwaitingPlanApproval, planVersion: 2 });
+      const { deps, store, plannerAgent } = buildDeps(run);
+
+      store.artifacts.push(makeArtifact("Plan", 2, makePlan({ planVersion: 2 })));
+      store.artifacts.push(
+        makeArtifact("HumanAnswers", 1, { answers: [{ questionId: "q1", answer: "Postgres" }] }),
+      );
+      store.artifacts.push(
+        makeArtifact("ResearchedAnswers", 1, {
+          summary: "researched",
+          answers: [
+            { questionId: "q2", question: "Which cache?", answer: "Redis", confidence: "medium" },
+          ],
+          completedAt: "2026-01-01T00:00:00Z",
+        }),
+      );
+      store.artifacts.push(
+        makeArtifact("PlanReview", 1, {
+          reviewId: "pr-1",
+          summary: "iterate-mode prior review",
+          findings: [{ id: "f1", severity: "important", type: "x", title: "t", details: "d" }],
+          overallVerdict: "changes_requested",
+        }),
+      );
+
+      plannerAgent.run.mockImplementation(async () => {
+        const plan = makePlan({ planVersion: 3, openQuestions: [] });
+        store.artifacts.push(makeArtifact("Plan", 3, plan));
+        return plan;
+      });
+
+      const svc = new OrchestratorService(deps as never);
+      vi.spyOn(svc, "runPlanReview").mockImplementation(async () => ({ ...store.run, state: RunState.PlanReview }));
+
+      await svc.rejectPlan(run.id, "please iterate");
+
+      const opts = plannerAgent.run.mock.calls[0][2] as Record<string, unknown>;
+      expect(opts.previousPlan).toMatchObject({ planVersion: 2 });
+      expect(opts.humanAnswers).toEqual([{ questionId: "q1", answer: "Postgres" }]);
+      expect(opts.researchedAnswers).toEqual(
+        expect.arrayContaining([expect.objectContaining({ questionId: "q2" })]),
+      );
+      expect(opts.planReviewFindings).toMatchObject({ summary: "iterate-mode prior review" });
+    });
+  });
+
+  describe("manual plan endpoints -- missing Plan artifact guards", () => {
+    it("runManualReReview throws when no Plan artifact exists", async () => {
+      const run = makeRun({ id: "run-1", state: RunState.AwaitingPlanApproval });
+      const { deps } = buildDeps(run);
+      const svc = new OrchestratorService(deps as never);
+
+      await expect(svc.runManualReReview(run.id)).rejects.toThrow(
+        `No plan artifact found for run ${run.id}`,
+      );
+    });
+
+    it("runManualPlanRevision throws when no Plan artifact exists", async () => {
+      const run = makeRun({ id: "run-1", state: RunState.AwaitingPlanApproval });
+      const { deps } = buildDeps(run);
+      const svc = new OrchestratorService(deps as never);
+
+      await expect(svc.runManualPlanRevision(run.id)).rejects.toThrow(
+        `No plan artifact found for run ${run.id}`,
+      );
+    });
+  });
+
+  describe("answerQuestions -- missing TaskBundle artifact guard", () => {
+    it("throws when no TaskBundle artifact exists after clarification is provided", async () => {
+      const run = makeRun({ id: "run-1", state: RunState.HumanClarificationNeeded, planVersion: 1 });
+      const { deps, store } = buildDeps(run);
+      store.artifacts.push(
+        makeArtifact("Plan", 1, makePlan({
+          planVersion: 1,
+          openQuestions: [{ id: "q1", question: "Required?", requiredForExecution: true }],
+        })),
+      );
+      // Deliberately no TaskBundle artifact pushed.
+
+      const svc = new OrchestratorService(deps as never);
+
+      await expect(
+        svc.answerQuestions(run.id, [{ questionId: "q1", answer: "yes" }]),
+      ).rejects.toThrow(`No TaskBundle artifact found for run ${run.id}`);
+    });
+  });
+
+  describe("maybeResearchAndReplan -- honors prior human answers", () => {
+    it("forwards existing HumanAnswers into both the researcher and the post-research re-plan call", async () => {
+      const run = makeRun({
+        id: "run-1",
+        state: RunState.Todo,
+        branchName: "ai/run-1-existing",
+        planVersion: 1,
+      });
+      const answerResearcherAgent = { run: vi.fn() };
+      const { deps, store, plannerAgent, planReviewerAgent } = buildDeps(run, { answerResearcherAgent });
+      store.artifacts.push(
+        makeArtifact("HumanAnswers", 1, { answers: [{ questionId: "q1", answer: "Use Postgres" }] }),
+      );
+
+      plannerAgent.run.mockImplementationOnce(async () => {
+        const plan = makePlan({
+          planVersion: 1,
+          openQuestions: [{ id: "q1", question: "Which DB?", requiredForExecution: false }],
+        });
+        store.artifacts.push(makeArtifact("Plan", 1, plan));
+        return plan;
+      });
+      answerResearcherAgent.run.mockResolvedValue({
+        summary: "resolved",
+        answers: [
+          { questionId: "q1", question: "Which DB?", answer: "Postgres confirmed", confidence: "high" },
+        ],
+        completedAt: "2026-01-01T00:00:00Z",
+      });
+      plannerAgent.run.mockImplementationOnce(async () => {
+        const plan = makePlan({ planVersion: 2, openQuestions: [] });
+        store.artifacts.push(makeArtifact("Plan", 2, plan));
+        return plan;
+      });
+      planReviewerAgent.run.mockResolvedValue({
+        reviewId: "pr-1",
+        summary: "ok",
+        findings: [],
+        overallVerdict: "approved",
+      });
+
+      const svc = new OrchestratorService(deps as never);
+      const result = await svc.retryRun(run.id);
+
+      expect(answerResearcherAgent.run).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.anything(),
+        run.id,
+        { humanAnswers: [{ questionId: "q1", answer: "Use Postgres" }] },
+      );
+      const replanCall = plannerAgent.run.mock.calls[1];
+      expect(replanCall[2]).toMatchObject({
+        humanAnswers: [{ questionId: "q1", answer: "Use Postgres" }],
+        researchedAnswers: expect.arrayContaining([
+          expect.objectContaining({ questionId: "q1", confidence: "high" }),
+        ]),
+      });
+      expect(result.state).toBe(RunState.AwaitingPlanApproval);
     });
   });
 });
