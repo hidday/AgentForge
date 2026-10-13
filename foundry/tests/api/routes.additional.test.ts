@@ -1,8 +1,8 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import Fastify, { type FastifyInstance } from "fastify";
-import http from "node:http";
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { EventEmitter } from "node:events";
+import Fastify from "fastify";
 import { registerApiRoutes } from "../../src/api/routes.js";
-import { RunEventEmitter } from "../../src/api/runEventEmitter.js";
+import { RunEventEmitter, type DashboardEvent } from "../../src/api/runEventEmitter.js";
 import { RunState } from "../../src/domain/runState.js";
 
 function makeRun(overrides: Record<string, unknown> = {}) {
@@ -800,16 +800,12 @@ describe("routes.additional", () => {
   });
 
   describe("GET /api/events/stream (SSE)", () => {
-    let app: FastifyInstance;
-    let emitter: RunEventEmitter;
-
-    afterEach(async () => {
-      if (app) {
-        await app.close();
-      }
-    });
-
-    it("streams dashboard events to the client and cleans up the listener on disconnect", async () => {
+    // Rather than opening a real HTTP connection (which proved flaky under
+    // the test runner's worker-thread teardown and corrupted coverage
+    // collection for the whole file), capture the route handler Fastify
+    // registers and drive it directly with lightweight request/reply
+    // doubles. This exercises the exact same handler code deterministically.
+    async function captureStreamHandler() {
       const mockRunRepo = { findById: vi.fn(), findAll: vi.fn() };
       const mockArtifactRepo = { findByRunId: vi.fn() };
       const mockEventRepo = { findByRunId: vi.fn() };
@@ -823,49 +819,130 @@ describe("routes.additional", () => {
         getProcessOutput: vi.fn().mockReturnValue(null),
       };
 
-      emitter = new RunEventEmitter();
-      app = Fastify({ logger: false });
-      registerApiRoutes(app, mockOrchestrator as never, emitter, mockProcessRunner as never);
-      await app.listen({ port: 0, host: "127.0.0.1" });
+      const emitter = new RunEventEmitter();
+      const app = Fastify({ logger: false });
 
-      const address = app.server.address();
-      if (!address || typeof address === "string") {
-        throw new Error("Expected a network address for the test server");
-      }
-      const { port } = address;
-
-      const received: string[] = [];
-      const streamClosed = new Promise<void>((resolve) => {
-        const req = http.get(`http://127.0.0.1:${port}/api/events/stream`, (res) => {
-          expect(res.headers["content-type"]).toBe("text/event-stream");
-          expect(res.headers["cache-control"]).toBe("no-cache");
-
-          res.on("data", (chunk: Buffer) => {
-            received.push(chunk.toString("utf8"));
-            // Once we've seen the initial heartbeat, emit a real event and
-            // then close the connection from the client side.
-            if (received.join("").includes(":\n\n") && emitter.listenerCount("dashboard") === 1) {
-              emitter.emitRunCreated("run-xyz", "issue-9", "org/repo");
-            }
-            if (received.join("").includes("run:created")) {
-              req.destroy();
-            }
-          });
-
-          res.on("close", () => resolve());
-        });
-        req.on("error", () => resolve());
+      let capturedHandler: ((request: unknown, reply: unknown) => void) | undefined;
+      const originalGet = app.get.bind(app);
+      vi.spyOn(app, "get").mockImplementation((...args: unknown[]) => {
+        const [url, handler] = args as [string, (request: unknown, reply: unknown) => void];
+        if (url === "/api/events/stream") {
+          capturedHandler = handler;
+        }
+        return (originalGet as (...a: unknown[]) => unknown)(...args) as ReturnType<typeof app.get>;
       });
 
-      await streamClosed;
+      registerApiRoutes(app, mockOrchestrator as never, emitter, mockProcessRunner as never);
+      await app.ready();
 
-      const combined = received.join("");
-      expect(combined).toContain("run:created");
-      expect(combined).toContain("run-xyz");
+      if (!capturedHandler) {
+        throw new Error("Failed to capture the /api/events/stream handler");
+      }
 
-      // Give the server's 'close' handler a tick to run emitter.off().
-      await new Promise((resolve) => setTimeout(resolve, 50));
+      return { emitter, handler: capturedHandler };
+    }
+
+    function makeFakeReply() {
+      const writeHead = vi.fn();
+      const write = vi.fn();
+      return { raw: { writeHead, write } };
+    }
+
+    function makeFakeRequest() {
+      const raw = new EventEmitter();
+      return { raw };
+    }
+
+    it("writes SSE headers and an initial heartbeat comment", async () => {
+      const { handler } = await captureStreamHandler();
+      const reply = makeFakeReply();
+      const request = makeFakeRequest();
+
+      handler(request, reply);
+
+      expect(reply.raw.writeHead).toHaveBeenCalledWith(200, {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache",
+        Connection: "keep-alive",
+      });
+      expect(reply.raw.write).toHaveBeenCalledWith(":\n\n");
+    });
+
+    it("forwards emitted dashboard events to the client as SSE data frames", async () => {
+      const { emitter, handler } = await captureStreamHandler();
+      const reply = makeFakeReply();
+      const request = makeFakeRequest();
+
+      handler(request, reply);
+      reply.raw.write.mockClear();
+
+      emitter.emitRunCreated("run-xyz", "issue-9", "org/repo");
+
+      expect(reply.raw.write).toHaveBeenCalledTimes(1);
+      const [frame] = reply.raw.write.mock.calls[0] as [string];
+      expect(frame.startsWith("data: ")).toBe(true);
+      expect(frame.endsWith("\n\n")).toBe(true);
+      const payload = JSON.parse(frame.slice("data: ".length, -2)) as DashboardEvent;
+      expect(payload).toMatchObject({
+        type: "run:created",
+        runId: "run-xyz",
+        issueId: "issue-9",
+        repo: "org/repo",
+      });
+    });
+
+    it("removes the dashboard listener when the client disconnects", async () => {
+      const { emitter, handler } = await captureStreamHandler();
+      const reply = makeFakeReply();
+      const request = makeFakeRequest();
+
+      handler(request, reply);
+      expect(emitter.listenerCount("dashboard")).toBe(1);
+
+      (request.raw as EventEmitter).emit("close");
+
       expect(emitter.listenerCount("dashboard")).toBe(0);
+
+      // Events emitted after disconnect must not reach the (removed) handler.
+      reply.raw.write.mockClear();
+      emitter.emitRunCreated("run-after-close", "issue-1", "org/repo");
+      expect(reply.raw.write).not.toHaveBeenCalled();
+    });
+
+    it("sends periodic heartbeat comments and stops them after disconnect", async () => {
+      vi.useFakeTimers();
+      try {
+        const { handler } = await captureStreamHandler();
+        const reply = makeFakeReply();
+        const request = makeFakeRequest();
+
+        handler(request, reply);
+        reply.raw.write.mockClear();
+
+        vi.advanceTimersByTime(15_000);
+        expect(reply.raw.write).toHaveBeenCalledWith(":\n\n");
+
+        (request.raw as EventEmitter).emit("close");
+        reply.raw.write.mockClear();
+
+        vi.advanceTimersByTime(60_000);
+        expect(reply.raw.write).not.toHaveBeenCalled();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("does not throw when the client disconnects more than once", async () => {
+      const { handler } = await captureStreamHandler();
+      const reply = makeFakeReply();
+      const request = makeFakeRequest();
+
+      handler(request, reply);
+
+      expect(() => {
+        (request.raw as EventEmitter).emit("close");
+        (request.raw as EventEmitter).emit("close");
+      }).not.toThrow();
     });
   });
 });
