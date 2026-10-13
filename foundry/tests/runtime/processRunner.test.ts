@@ -18,12 +18,25 @@ import { AgentTimeoutError } from "../../src/utils/errors.js";
 // test (rehydrateOrphans / tailLogForOrphan tests), while every other fs
 // call (mkdirSync, writeFileSync, readFileSync, existsSync, createWriteStream)
 // goes through the real filesystem against a scratch temp directory.
+// A minimal WriteStream stand-in: real file writes aren't needed by any
+// assertion (log content is verified via writeFileSync-created fixtures or
+// in-memory rollingBuffer), and avoiding a real fd here sidesteps dangling
+// async I/O against directories that afterEach() has already removed.
+class FakeWriteStream extends EventEmitter {
+  write = vi.fn(() => true);
+  end = vi.fn(() => {
+    this.emit("finish");
+    return this;
+  });
+}
+
 vi.mock("node:fs", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:fs")>();
   return {
     ...actual,
     readdirSync: vi.fn(actual.readdirSync),
     watch: vi.fn(),
+    createWriteStream: vi.fn(() => new FakeWriteStream()),
   };
 });
 
@@ -490,7 +503,8 @@ describe("ProcessRunner — process tracking (getActiveProcesses / manifest)", (
   it("does not track the process when context is given but the child has no pid", async () => {
     const emitter = makeMockEmitter();
     const runner = new ProcessRunner("real", makeMockLogger() as never, emitter as never, scratchDir);
-    const child = createFakeChild(undefined);
+    const child = createFakeChild();
+    child.pid = undefined;
     spawnMock.mockReturnValue(child);
 
     const promise = runner.execute({
@@ -823,7 +837,8 @@ describe("ProcessRunner.rehydrateOrphans()", () => {
     killSpy.mockRestore();
   });
 
-  it("closes the watcher without touching buffers when its entry has already been removed", () => {
+  it("closes the watcher and bails out when the watch callback fires after the entry was removed", async () => {
+    vi.useFakeTimers();
     const pid = 77777;
     const logPath = join(scratchDir, "vanished.log");
     writeFileSync(logPath, "hello\n");
@@ -842,7 +857,11 @@ describe("ProcessRunner.rehydrateOrphans()", () => {
       }),
     );
 
-    vi.spyOn(process, "kill").mockImplementation(() => true as never);
+    let alive = true;
+    vi.spyOn(process, "kill").mockImplementation((targetPid) => {
+      if (targetPid === pid && alive) return true as never;
+      throw new Error("ESRCH");
+    });
     const fakeWatcher = { close: vi.fn() };
     let watchCallback: (() => void) | undefined;
     watchMock.mockImplementation((_path: string, cb: () => void) => {
@@ -852,17 +871,24 @@ describe("ProcessRunner.rehydrateOrphans()", () => {
 
     const runner = new ProcessRunner("mock", makeMockLogger() as never, undefined, scratchDir);
     runner.rehydrateOrphans();
-
-    // Remove the active entry out-of-band by finalizing via a dead poll —
-    // simplest is to directly simulate "entry gone" by calling the callback
-    // after the process has been purged through a second rehydrate pass with
-    // the same id missing is not possible, so instead we assert the callback
-    // guards correctly when the process truly is not tracked (never started).
     expect(runner.getActiveProcesses()).toHaveLength(1);
 
-    // Sanity: calling watchCallback while tracked does not close the watcher.
+    // Sanity: calling the callback while still tracked does not close the watcher.
     watchCallback!();
     expect(fakeWatcher.close).not.toHaveBeenCalled();
+
+    // Let the poll interval discover the process has died, which removes
+    // the entry and closes the watcher once (via finalizeOrphan's own path).
+    alive = false;
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(runner.getActiveProcesses()).toHaveLength(0);
+    expect(fakeWatcher.close).toHaveBeenCalledTimes(1);
+
+    // Now a late fs-watch event arrives for a process that is no longer
+    // tracked — it should close the watcher again and return, without
+    // throwing or touching any buffers.
+    expect(() => watchCallback!()).not.toThrow();
+    expect(fakeWatcher.close).toHaveBeenCalledTimes(2);
   });
 
   it("ignores read errors inside the tail callback (e.g. log replaced by a directory)", () => {
