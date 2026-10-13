@@ -403,6 +403,29 @@ describe("ActionBar", () => {
       });
     });
 
+    it("can switch back to iterate mode after selecting fresh mode", async () => {
+      const onAction = vi.fn();
+      render(
+        <ActionBar runId={RUN_ID} state="AwaitingPlanApproval" onAction={onAction} />,
+      );
+
+      await userEvent.click(screen.getAllByRole("button", { name: /^Reject Plan$/i })[0]);
+      await userEvent.click(screen.getByText("Start fresh"));
+      await userEvent.click(screen.getByText("Revise plan"));
+
+      const dialogHeading = screen.getByText(
+        /This will reject the current plan and send it back/i,
+      );
+      const dialog = dialogHeading.closest("div")!.parentElement!;
+      const confirmBtn = within(dialog).getByRole("button", { name: "Reject Plan" });
+      await userEvent.click(confirmBtn);
+
+      await waitFor(() => {
+        expect(mockApi.rejectPlan).toHaveBeenCalledWith(RUN_ID, undefined, "iterate");
+        expect(onAction).toHaveBeenCalledOnce();
+      });
+    });
+
     it("shows a loading state in the reject dialog while rejecting is pending", async () => {
       let resolveReject!: (v: unknown) => void;
       mockApi.rejectPlan.mockReturnValue(

@@ -30,6 +30,43 @@ describe("RealLinearClient", () => {
     client = new RealLinearClient("test-key", logger as never);
   });
 
+  describe("getRelatedContext — blocker hydration failure", () => {
+    it("drops a blocker and logs a warning when hydrating rel.issue rejects", async () => {
+      const focusIssue = {
+        id: "focus-id",
+        parent: Promise.resolve(null),
+        inverseRelations: () =>
+          Promise.resolve({
+            nodes: [
+              {
+                id: "rel-broken",
+                type: "blocks",
+                issue: Promise.reject(new Error("blocker fetch failed")),
+              },
+            ],
+          }),
+      };
+      injectSdk(client, {
+        issue: (id: string) => {
+          if (id === "focus-id") return Promise.resolve(focusIssue);
+          throw new Error(`unexpected issue id: ${id}`);
+        },
+      });
+
+      const ctx = await client.getRelatedContext("focus-id");
+
+      expect(ctx.blockers).toEqual([]);
+      expect(logger.warn).toHaveBeenCalledWith(
+        {
+          err: expect.any(Error),
+          relationId: "rel-broken",
+          focusIssueId: "focus-id",
+        },
+        "Failed to hydrate blocker issue from relation",
+      );
+    });
+  });
+
   describe("getIssue", () => {
     it("maps a fully populated SDK issue to a LinearIssue", async () => {
       injectSdk(client, {
