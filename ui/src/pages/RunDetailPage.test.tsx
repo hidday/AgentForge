@@ -170,6 +170,37 @@ describe("RunDetailPage", () => {
     expect(screen.getByText("acme/widgets")).toBeDefined();
   });
 
+  it("falls back to the issue identifier when no title is set", () => {
+    setHookDefaults({ run: makeRun({ linearIssueTitle: null, linearIssueIdentifier: "ENG-7" }) });
+    renderPage();
+    expect(screen.getByText("ENG-7")).toBeDefined();
+  });
+
+  it("falls back to a truncated issue id when neither title nor identifier is set", () => {
+    setHookDefaults({
+      run: makeRun({
+        linearIssueTitle: null,
+        linearIssueIdentifier: null,
+        linearIssueId: "abcdefgh12345",
+      }),
+    });
+    renderPage();
+    expect(screen.getAllByText("abcdefgh").length).toBeGreaterThan(0);
+  });
+
+  it("renders the external Linear header link only when linearIssueUrl is present", () => {
+    setHookDefaults({ run: makeRun({ linearIssueUrl: "https://linear.app/issue/ENG-1" }) });
+    renderPage();
+    const link = screen.getByTitle("Open in Linear");
+    expect(link.getAttribute("href")).toBe("https://linear.app/issue/ENG-1");
+  });
+
+  it("does not render the Linear header link when linearIssueUrl is absent", () => {
+    setHookDefaults({ run: makeRun({ linearIssueUrl: null }) });
+    renderPage();
+    expect(screen.queryByTitle("Open in Linear")).toBeNull();
+  });
+
   it("renders the branch name only when present", () => {
     setHookDefaults({ run: makeRun({ branchName: "feature/x" }) });
     renderPage();

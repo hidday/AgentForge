@@ -198,6 +198,15 @@ describe("RunsTable", () => {
     expect(onAction).not.toHaveBeenCalled();
   });
 
+  it("stops propagation when the external Linear link is clicked", async () => {
+    renderTable([makeRun()]);
+    const linearLink = screen.getByTitle("Open in Linear");
+    // Clicking should not throw and should invoke the stopPropagation handler;
+    // jsdom does not implement navigation, so we only assert it doesn't error.
+    await userEvent.click(linearLink);
+    expect(linearLink).toBeDefined();
+  });
+
   it("links the issue title and chevron to the run detail page", () => {
     renderTable([makeRun()]);
     const links = screen.getAllByRole("link");

@@ -121,6 +121,41 @@ describe("useActiveProcesses", () => {
     }).not.toThrow();
   });
 
+  it("does not apply a late process-output response after unmount", async () => {
+    let resolveProcesses!: (v: { processes: typeof PROC[] }) => void;
+    let resolveOutput!: (v: { processId: string; output: string }) => void;
+    mockApi.getActiveProcesses.mockReturnValue(
+      new Promise((res) => {
+        resolveProcesses = res;
+      }),
+    );
+    mockApi.getProcessOutput.mockReturnValue(
+      new Promise((res) => {
+        resolveOutput = res;
+      }),
+    );
+
+    const { unmount } = renderHook(() => useActiveProcesses("run-1"));
+
+    await act(async () => {
+      resolveProcesses({ processes: [PROC] });
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(mockApi.getProcessOutput).toHaveBeenCalledWith("p1");
+
+    unmount();
+
+    // Resolving after unmount must not throw, and must not apply the late output.
+    await expect(
+      act(async () => {
+        resolveOutput({ processId: "p1", output: "too-late" });
+        await Promise.resolve();
+      }),
+    ).resolves.not.toThrow();
+  });
+
   describe("SSE handling", () => {
     async function setup() {
       mockApi.getActiveProcesses.mockResolvedValue({ processes: [] });

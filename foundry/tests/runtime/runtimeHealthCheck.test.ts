@@ -170,7 +170,9 @@ describe("RuntimeHealthCheck.runPreflight() — failure path", () => {
     );
 
     const error: PreflightError = await check.runPreflight().catch((e) => e);
-    const claudeResult = error.result.results.find((r: { runtime: string }) => r.runtime === "claude-code");
+    const claudeResult = error.result.results.find(
+      (r: { runtime: string }) => r.runtime === "claude-code",
+    )!;
 
     expect(claudeResult.binaryCheck.ok).toBe(false);
     expect(claudeResult.authCheck).toEqual({

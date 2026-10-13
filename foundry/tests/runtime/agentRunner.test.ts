@@ -3,7 +3,7 @@ import { z } from "zod";
 import { AgentRunner } from "../../src/runtime/agentRunner.js";
 import type { AgentInput, AgentOutput } from "../../src/runtime/runnerTypes.js";
 
-const resolveAgentModelMock = vi.fn(() => "resolved-model");
+const resolveAgentModelMock = vi.fn((..._args: unknown[]) => "resolved-model");
 
 vi.mock("../../src/config/agentModels.js", () => ({
   resolveAgentModel: (...args: unknown[]) => resolveAgentModelMock(...args),

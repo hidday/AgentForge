@@ -201,6 +201,13 @@ describe("api client", () => {
       expect(url).toBe("/api/runs/r1/actions/re-review-plan");
       expect(JSON.parse(options.body)).toEqual({ note: "n" });
     });
+
+    it("omits the note when none is provided", async () => {
+      fetchMock.mockResolvedValue(makeResponse(true, 200, { ok: true, runId: "r1" }));
+      await api.reReviewPlan("r1");
+      const [, options] = fetchMock.mock.calls[0]!;
+      expect(JSON.parse(options.body)).toEqual({});
+    });
   });
 
   describe("revisePlan", () => {
@@ -210,6 +217,13 @@ describe("api client", () => {
       const [url, options] = fetchMock.mock.calls[0]!;
       expect(url).toBe("/api/runs/r1/actions/revise-plan");
       expect(JSON.parse(options.body)).toEqual({ note: "n" });
+    });
+
+    it("omits the note when none is provided", async () => {
+      fetchMock.mockResolvedValue(makeResponse(true, 200, { ok: true, runId: "r1" }));
+      await api.revisePlan("r1");
+      const [, options] = fetchMock.mock.calls[0]!;
+      expect(JSON.parse(options.body)).toEqual({});
     });
   });
 

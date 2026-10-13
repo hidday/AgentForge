@@ -67,6 +67,82 @@ describe("RealLinearClient", () => {
     });
   });
 
+  describe("getRelatedContext — toRelatedLinearIssue fallbacks", () => {
+    it("falls back to an empty label list when the parent's labels connection has no nodes", async () => {
+      const parentIssue = {
+        id: "parent-id",
+        identifier: "PRY-100",
+        title: "Parent",
+        description: "",
+        priority: 0,
+        url: "https://linear.app/team/issue/PRY-100",
+        labels: () => Promise.resolve({}),
+        state: Promise.resolve({ name: "Todo" }),
+      };
+      const focusIssue = {
+        id: "focus-id",
+        parent: Promise.resolve(parentIssue),
+        inverseRelations: () => Promise.resolve({ nodes: [] }),
+      };
+      injectSdk(client, {
+        issue: (id: string) => {
+          if (id === "focus-id") return Promise.resolve(focusIssue);
+          throw new Error(`unexpected issue id: ${id}`);
+        },
+      });
+
+      const ctx = await client.getRelatedContext("focus-id");
+
+      expect(ctx.parent?.labels).toEqual([]);
+    });
+
+    it("falls back to 'Unknown' when the parent issue's state is nullish", async () => {
+      const parentIssue = {
+        id: "parent-id",
+        identifier: "PRY-100",
+        title: "Parent",
+        description: "",
+        priority: 0,
+        url: "https://linear.app/team/issue/PRY-100",
+        labels: () => Promise.resolve({ nodes: [] }),
+        state: Promise.resolve(null),
+      };
+      const focusIssue = {
+        id: "focus-id",
+        parent: Promise.resolve(parentIssue),
+        inverseRelations: () => Promise.resolve({ nodes: [] }),
+      };
+      injectSdk(client, {
+        issue: (id: string) => {
+          if (id === "focus-id") return Promise.resolve(focusIssue);
+          throw new Error(`unexpected issue id: ${id}`);
+        },
+      });
+
+      const ctx = await client.getRelatedContext("focus-id");
+
+      expect(ctx.parent?.state).toBe("Unknown");
+    });
+
+    it("falls back to an empty blockers list when inverseRelations has no nodes field", async () => {
+      const focusIssue = {
+        id: "focus-id",
+        parent: Promise.resolve(null),
+        inverseRelations: () => Promise.resolve({}),
+      };
+      injectSdk(client, {
+        issue: (id: string) => {
+          if (id === "focus-id") return Promise.resolve(focusIssue);
+          throw new Error(`unexpected issue id: ${id}`);
+        },
+      });
+
+      const ctx = await client.getRelatedContext("focus-id");
+
+      expect(ctx.blockers).toEqual([]);
+    });
+  });
+
   describe("getIssue", () => {
     it("maps a fully populated SDK issue to a LinearIssue", async () => {
       injectSdk(client, {
@@ -272,6 +348,24 @@ describe("RealLinearClient", () => {
       const results = await client.searchIssues({ state: "Todo" });
 
       expect(results).toEqual([]);
+    });
+
+    it("falls back to an empty label list when an issue's labels connection is nullish", async () => {
+      const issue = makeSdkIssue({ labels: () => Promise.resolve(null) });
+      injectSdk(client, { issues: vi.fn().mockResolvedValue({ nodes: [issue] }) });
+
+      const [result] = await client.searchIssues({ state: "Todo" });
+
+      expect(result.labels).toEqual([]);
+    });
+
+    it("falls back to an empty string when an issue's description is null", async () => {
+      const issue = makeSdkIssue({ description: null });
+      injectSdk(client, { issues: vi.fn().mockResolvedValue({ nodes: [issue] }) });
+
+      const [result] = await client.searchIssues({ state: "Todo" });
+
+      expect(result.description).toBe("");
     });
   });
 

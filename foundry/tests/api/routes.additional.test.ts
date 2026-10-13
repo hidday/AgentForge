@@ -38,6 +38,9 @@ interface BuildAppOptions {
   orchestratorOverrides?: Record<string, unknown>;
   linearPollService?: Record<string, unknown>;
   claudeCodeRunner?: Record<string, unknown>;
+  notificationService?: Record<string, unknown>;
+  uiBaseUrl?: string;
+  debounceHours?: number;
 }
 
 async function buildApp(opts: BuildAppOptions = {}) {
@@ -95,7 +98,12 @@ async function buildApp(opts: BuildAppOptions = {}) {
     mockEmitter as never,
     mockProcessRunner as never,
     opts.linearPollService as never,
-    { claudeCodeRunner: opts.claudeCodeRunner as never },
+    {
+      claudeCodeRunner: opts.claudeCodeRunner as never,
+      notificationService: opts.notificationService as never,
+      uiBaseUrl: opts.uiBaseUrl,
+      debounceHours: opts.debounceHours,
+    },
   );
 
   await app.ready();
@@ -261,6 +269,52 @@ describe("routes.additional", () => {
 
       expect(res.statusCode).toBe(200);
       expect(res.json().events).toEqual([{ id: "evt-1" }]);
+    });
+  });
+
+  describe("GET /api/runs/:id/skills (default-value branches)", () => {
+    it("defaults a SKILL_INJECTION event's missing skillIds to an empty array", async () => {
+      const mockAgentSkillRepo = {
+        findById: vi.fn().mockResolvedValue(null),
+        findByRepoCategoryNearTime: vi.fn().mockResolvedValue(null),
+      };
+      const { app, mockRunRepo, mockEventRepo } = await buildApp({
+        orchestratorOverrides: { getAgentSkillRepo: vi.fn().mockReturnValue(mockAgentSkillRepo) },
+      });
+      mockRunRepo.findById.mockResolvedValue(makeRun());
+      mockEventRepo.findByRunId.mockResolvedValue([
+        {
+          id: "evt-1",
+          eventType: "SKILL_INJECTION",
+          payloadJson: {},
+          createdAt: new Date(),
+        },
+      ]);
+
+      const res = await app.inject({ method: "GET", url: "/api/runs/run-1/skills" });
+
+      expect(res.statusCode).toBe(200);
+      expect(res.json().injectedSkills).toEqual([]);
+      expect(mockAgentSkillRepo.findById).not.toHaveBeenCalled();
+    });
+
+    it("defaults a SKILL_DISTILLATION event's missing shouldPersist/reason", async () => {
+      const { app, mockRunRepo, mockEventRepo } = await buildApp();
+      mockRunRepo.findById.mockResolvedValue(makeRun());
+      mockEventRepo.findByRunId.mockResolvedValue([
+        {
+          id: "evt-1",
+          eventType: "SKILL_DISTILLATION",
+          payloadJson: {},
+          createdAt: new Date(),
+        },
+      ]);
+
+      const res = await app.inject({ method: "GET", url: "/api/runs/run-1/skills" });
+
+      expect(res.statusCode).toBe(200);
+      const body = res.json();
+      expect(body.distillationDecision).toMatchObject({ shouldPersist: false, reason: "" });
     });
   });
 
@@ -558,6 +612,22 @@ describe("routes.additional", () => {
     });
   });
 
+  describe("POST /api/runs/:id/actions/answer-questions (non-Error rejection)", () => {
+    it("falls back to String(err) when the orchestrator rejects with a non-Error value", async () => {
+      const { app, mockOrchestrator } = await buildApp();
+      mockOrchestrator.answerQuestions.mockRejectedValue("plain string failure");
+
+      const res = await app.inject({
+        method: "POST",
+        url: "/api/runs/run-1/actions/answer-questions",
+        payload: { answers: [{ questionId: "q1", answer: "yes" }] },
+      });
+
+      expect(res.statusCode).toBe(400);
+      expect(res.json().error).toBe("plain string failure");
+    });
+  });
+
   describe("POST /api/runs/:id/actions/retry", () => {
     it("returns 404 when the run is not found", async () => {
       const { app, mockRunRepo } = await buildApp();
@@ -611,6 +681,18 @@ describe("routes.additional", () => {
       const { app, mockRunRepo, mockOrchestrator } = await buildApp();
       mockRunRepo.findById.mockResolvedValue(run);
       mockOrchestrator.retryRun.mockRejectedValue(new Error("retry failed"));
+
+      const res = await app.inject({ method: "POST", url: "/api/runs/run-1/actions/retry" });
+
+      expect(res.statusCode).toBe(200);
+      await new Promise((resolve) => setImmediate(resolve));
+    });
+
+    it("logs String(err) when the retry trigger rejects with a non-Error value", async () => {
+      const run = makeRun({ state: RunState.Todo });
+      const { app, mockRunRepo, mockOrchestrator } = await buildApp();
+      mockRunRepo.findById.mockResolvedValue(run);
+      mockOrchestrator.retryRun.mockRejectedValue("plain string failure");
 
       const res = await app.inject({ method: "POST", url: "/api/runs/run-1/actions/retry" });
 
@@ -770,6 +852,89 @@ describe("routes.additional", () => {
     });
   });
 
+  describe("POST /api/runs/:id/actions/request-human (default option branches)", () => {
+    it("returns 404 when the run is not found", async () => {
+      const { app, mockRunRepo } = await buildApp();
+      mockRunRepo.findById.mockResolvedValue(null);
+
+      const res = await app.inject({
+        method: "POST",
+        url: "/api/runs/missing/actions/request-human",
+        payload: { reason: "other", summary: "needs a human" },
+      });
+
+      expect(res.statusCode).toBe(404);
+    });
+
+    it("uses the default debounceHours/uiBaseUrl, and defaults a null linearIssueIdentifier", async () => {
+      const run = makeRun({ linearIssueIdentifier: null });
+      const { app, mockRunRepo, mockEventRepo } = await buildApp();
+      mockRunRepo.findById.mockResolvedValue(run);
+
+      const res = await app.inject({
+        method: "POST",
+        url: "/api/runs/run-1/actions/request-human",
+        payload: { reason: "other", summary: "needs a human" },
+      });
+
+      expect(res.statusCode).toBe(200);
+      const body = res.json();
+      expect(body.ok).toBe(true);
+      expect(body.debounced).toBe(false);
+
+      expect(mockEventRepo.create).toHaveBeenCalledTimes(1);
+      const eventArgs = mockEventRepo.create.mock.calls[0][0] as {
+        payloadJson: { runUrl: string };
+      };
+      // Default uiBaseUrl (http://localhost:5173) is used when not configured.
+      expect(eventArgs.payloadJson.runUrl).toBe("http://localhost:5173/runs/run-1");
+    });
+
+    it("does not debounce when the only prior event has a different eventType", async () => {
+      const run = makeRun();
+      const { app, mockRunRepo, mockEventRepo } = await buildApp();
+      mockRunRepo.findById.mockResolvedValue(run);
+      mockEventRepo.findByRunId.mockResolvedValue([
+        {
+          eventType: "SOME_OTHER_EVENT",
+          createdAt: new Date(),
+          payloadJson: { reason: "other" },
+        },
+      ]);
+
+      const res = await app.inject({
+        method: "POST",
+        url: "/api/runs/run-1/actions/request-human",
+        payload: { reason: "other", summary: "needs a human" },
+      });
+
+      expect(res.statusCode).toBe(200);
+      expect(res.json().debounced).toBe(false);
+    });
+
+    it("does not debounce when the matching prior event is outside the debounce window", async () => {
+      const run = makeRun();
+      const { app, mockRunRepo, mockEventRepo } = await buildApp({ debounceHours: 1 });
+      mockRunRepo.findById.mockResolvedValue(run);
+      mockEventRepo.findByRunId.mockResolvedValue([
+        {
+          eventType: "HUMAN_REQUESTED",
+          createdAt: new Date(Date.now() - 2 * 60 * 60 * 1000), // 2h ago, window is 1h
+          payloadJson: { reason: "other" },
+        },
+      ]);
+
+      const res = await app.inject({
+        method: "POST",
+        url: "/api/runs/run-1/actions/request-human",
+        payload: { reason: "other", summary: "needs a human" },
+      });
+
+      expect(res.statusCode).toBe(200);
+      expect(res.json().debounced).toBe(false);
+    });
+  });
+
   describe("GET /api/processes", () => {
     it("returns all active processes when no runId filter is given", async () => {
       const { app, mockProcessRunner } = await buildApp();
@@ -855,6 +1020,19 @@ describe("routes.additional", () => {
       expect(res.statusCode).toBe(500);
       expect(res.json().error).toBe("linear API down");
     });
+
+    it("returns 500 with String(err) when discoverPendingIssues rejects with a non-Error", async () => {
+      const linearPollService = {
+        discoverPendingIssues: vi.fn().mockRejectedValue("plain string failure"),
+        startRunsForIssues: vi.fn(),
+      };
+      const { app } = await buildApp({ linearPollService });
+
+      const res = await app.inject({ method: "GET", url: "/api/linear/pending" });
+
+      expect(res.statusCode).toBe(500);
+      expect(res.json().error).toBe("plain string failure");
+    });
   });
 
   describe("POST /api/linear/ingest", () => {
@@ -919,6 +1097,23 @@ describe("routes.additional", () => {
 
       expect(res.statusCode).toBe(500);
       expect(res.json().error).toBe("db unavailable");
+    });
+
+    it("returns 500 with String(err) when startRunsForIssues rejects with a non-Error", async () => {
+      const linearPollService = {
+        discoverPendingIssues: vi.fn(),
+        startRunsForIssues: vi.fn().mockRejectedValue("plain string failure"),
+      };
+      const { app } = await buildApp({ linearPollService });
+
+      const res = await app.inject({
+        method: "POST",
+        url: "/api/linear/ingest",
+        payload: { issueIds: ["issue-1"] },
+      });
+
+      expect(res.statusCode).toBe(500);
+      expect(res.json().error).toBe("plain string failure");
     });
   });
 

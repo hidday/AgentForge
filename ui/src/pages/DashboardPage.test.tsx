@@ -135,6 +135,20 @@ describe("DashboardPage", () => {
     expect(stats.map((n) => n.textContent)).toEqual(["5", "1", "1", "1", "1"]);
   });
 
+  it("counts a run whose state is not in the category map as idle (not reflected in any stat but the total)", () => {
+    mockUseRuns.mockReturnValue({
+      runs: [makeRun({ id: "r1", state: "SomeUnknownState" })],
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+    render(<DashboardPage />);
+
+    const stats = screen.getAllByText(/^[0-9]+$/);
+    // Total is 1, but none of Active/Awaiting/Blocked/Done count it.
+    expect(stats.map((n) => n.textContent)).toEqual(["1", "0", "0", "0", "0"]);
+  });
+
   it("passes all runs to RunsTable when the 'All' filter is active by default", () => {
     mockUseRuns.mockReturnValue({
       runs: [makeRun({ id: "r1" }), makeRun({ id: "r2", state: "Done" })],
