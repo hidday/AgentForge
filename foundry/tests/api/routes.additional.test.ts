@@ -224,6 +224,24 @@ describe("routes.additional", () => {
       expect(res.statusCode).toBe(422);
       expect(claudeCodeRunner.chatRun).not.toHaveBeenCalled();
     });
+
+    it("returns 500 (chatRun failure) regardless of whether the rejection is an Error", async () => {
+      const repoDir = mkdtempSync(join(tmpdir(), "routes-additional-chat-nonerror-"));
+      const run = makeRun({ workingDirectory: repoDir });
+      const claudeCodeRunner = { chatRun: vi.fn().mockRejectedValue("plain string failure") };
+      const { app, mockRunRepo, mockArtifactRepo } = await buildApp({ claudeCodeRunner });
+      mockRunRepo.findById.mockResolvedValue(run);
+
+      const res = await app.inject({
+        method: "POST",
+        url: "/api/runs/run-1/chat",
+        payload: { message: "hello" },
+      });
+
+      expect(res.statusCode).toBe(500);
+      expect(res.json().error).toBe("Chat request failed");
+      expect(mockArtifactRepo.create).not.toHaveBeenCalled();
+    });
   });
 
   describe("GET /api/runs/:id/artifacts", () => {
