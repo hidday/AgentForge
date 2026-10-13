@@ -309,6 +309,27 @@ describe("NotificationService.sendHumanRequest", () => {
         "Slack notification failed",
       );
     });
+
+    it("stringifies a non-Error value thrown by fetch", async () => {
+      fetchMock.mockRejectedValue("connection reset");
+      const config: NotificationConfig = {
+        emailFrom: "bot@example.com",
+        slackWebhookUrl: "https://hooks.slack.com/services/x",
+      };
+      const svc = new NotificationService(config, logger as never);
+
+      const result = await svc.sendHumanRequest(makePayload());
+
+      expect(result.slack).toEqual({
+        attempted: true,
+        ok: false,
+        error: "connection reset",
+      });
+      expect(logger.warn).toHaveBeenCalledWith(
+        { runId: "run-1", error: "connection reset" },
+        "Slack notification failed",
+      );
+    });
   });
 
   describe("email channel", () => {
@@ -329,7 +350,10 @@ describe("NotificationService.sendHumanRequest", () => {
         reason: "impl_rejected",
         planConfidence: 0.6,
         context: "Context body",
-        openQuestions: [{ id: "q1", question: "Why?", requiredForExecution: true }],
+        openQuestions: [
+          { id: "q1", question: "Why?", requiredForExecution: true },
+          { id: "q2", question: "What about rollback?", requiredForExecution: false },
+        ],
       });
 
       const result = await svc.sendHumanRequest(payload);
@@ -371,6 +395,7 @@ describe("NotificationService.sendHumanRequest", () => {
           "",
           "Open questions:",
           "- [required] Why?",
+          "- What about rollback?",
           "",
           "Run: https://dashboard.example.com/runs/run-1",
           "Linear: https://linear.app/team/issue/ENG-7",
@@ -382,6 +407,7 @@ describe("NotificationService.sendHumanRequest", () => {
       expect(body.html).toContain("<strong>Plan confidence:</strong> 0.60");
       expect(body.html).toContain("Context body");
       expect(body.html).toContain("<strong>[required]</strong> Why?");
+      expect(body.html).toContain("<li>What about rollback?</li>");
       expect(body.html).toContain('href="https://dashboard.example.com/runs/run-1"');
       expect(body.html).toContain('href="https://linear.app/team/issue/ENG-7"');
 
@@ -420,6 +446,20 @@ describe("NotificationService.sendHumanRequest", () => {
       expect(body.html).toContain("Needs &lt;review&gt; &amp; &quot;approval&quot;");
       expect(body.html).toContain("A &lt;script&gt;alert(1)&lt;/script&gt; title");
       expect(body.html).not.toContain("<script>alert(1)</script>");
+    });
+
+    it("falls back to (untitled) in both html and text when the issue has no title", async () => {
+      fetchMock.mockResolvedValue(okResponse());
+      const svc = new NotificationService(emailConfig(), logger as never);
+
+      await svc.sendHumanRequest(
+        makePayload({ linearIssue: { id: "lin-5", identifier: "ENG-5", title: null, url: null } }),
+      );
+
+      const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+      const body = JSON.parse(init.body as string) as { html: string; text: string };
+      expect(body.html).toContain("<strong>ENG-5:</strong> (untitled)");
+      expect(body.text).toContain("ENG-5: (untitled)");
     });
 
     it("omits the Linear link and open-questions block from the html when absent", async () => {

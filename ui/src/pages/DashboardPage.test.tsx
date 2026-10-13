@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, fireEvent, act } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { Run } from "@/api/client.ts";
 
@@ -201,18 +201,19 @@ describe("DashboardPage", () => {
     expect(refetch).toHaveBeenCalledOnce();
   });
 
-  it("shows the ingest summary banner after a completed ingest and auto-dismisses it", async () => {
+  it("shows the ingest summary banner after a completed ingest and auto-dismisses it", () => {
     vi.useFakeTimers();
-    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     mockUseRuns.mockReturnValue({ runs: [], loading: false, error: null, refetch: vi.fn() });
     render(<DashboardPage />);
 
-    await user.click(screen.getByRole("button", { name: /Sync from Linear/i }));
-    await user.click(screen.getByText("trigger-ingest-complete"));
+    fireEvent.click(screen.getByRole("button", { name: /Sync from Linear/i }));
+    fireEvent.click(screen.getByText("trigger-ingest-complete"));
 
     expect(screen.getByTestId("ingest-banner").textContent).toContain("Started 2, skipped 1");
 
-    vi.advanceTimersByTime(5000);
+    act(() => {
+      vi.advanceTimersByTime(5000);
+    });
     expect(screen.queryByTestId("ingest-banner")).toBeNull();
   });
 
