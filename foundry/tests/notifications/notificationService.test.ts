@@ -517,6 +517,19 @@ describe("NotificationService.sendHumanRequest", () => {
       expect(result.email).toEqual({ attempted: true, ok: false, error: "DNS failure" });
     });
 
+    it("stringifies a non-Error value thrown by fetch", async () => {
+      fetchMock.mockRejectedValue("connection reset");
+      const svc = new NotificationService(emailConfig(), logger as never);
+
+      const result = await svc.sendHumanRequest(makePayload());
+
+      expect(result.email).toEqual({ attempted: true, ok: false, error: "connection reset" });
+      expect(logger.warn).toHaveBeenCalledWith(
+        { runId: "run-1", error: "connection reset" },
+        "Email notification failed",
+      );
+    });
+
     it("falls back to a generic error message when a non-Error value is thrown or returned by response.text()", async () => {
       fetchMock.mockResolvedValue({
         ok: false,
