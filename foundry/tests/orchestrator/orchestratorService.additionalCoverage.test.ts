@@ -721,11 +721,12 @@ describe("OrchestratorService -- additional coverage", () => {
 
       const revisedPlan = makePlan({
         planVersion: 3,
-        risks: [],
-        // requiredForExecution: true here exercises the "*blocks execution*"
-        // comment-formatting branch; runPlanRevision itself does not re-check
-        // blocking questions (that only happens after a planner run, not a
-        // revision), so this is a safe, representative fixture.
+        // A non-empty risks list, together with a requiredForExecution:true
+        // open question below, exercises both of formatPlanComment's
+        // non-empty-section branches. runPlanRevision itself does not
+        // re-check blocking questions (that only happens after a planner
+        // run, not a revision), so this is a safe, representative fixture.
+        risks: ["Scope creep risk"],
         openQuestions: [{ id: "q2", question: "Still unclear?", requiredForExecution: true }],
       });
       planReviserAgent.run.mockResolvedValue({
@@ -750,6 +751,37 @@ describe("OrchestratorService -- additional coverage", () => {
       );
       expect(comment).toBeDefined();
       expect(comment![1]).toContain("fixed it");
+    });
+
+    it("passes undefined (not an operatorNote) to the plan reviser when called without a note", async () => {
+      const run = makeRun({ id: "run-1", state: RunState.PlanRevision, planVersion: 1 });
+      const { deps, planReviserAgent } = buildDeps(run);
+      const plan = makePlan({ planVersion: 1 });
+      const review: Review = {
+        reviewId: "pr-1",
+        summary: "needs fixes",
+        findings: [{ id: "f1", severity: "important", type: "bug", file: "x.ts", title: "t", details: "d" }],
+        overallVerdict: "changes_requested",
+      };
+      const deps2 = deps as { artifactRepo: { create: ReturnType<typeof vi.fn> } };
+      await deps2.artifactRepo.create({ runId: run.id, type: "Plan", version: 1, payloadJson: plan, rawText: "{}" });
+      await deps2.artifactRepo.create({ runId: run.id, type: "PlanReview", version: 1, payloadJson: review, rawText: "{}" });
+
+      planReviserAgent.run.mockResolvedValue({
+        revision: { dispositions: [] },
+        revisedPlan: makePlan({ planVersion: 2 }),
+      });
+
+      const svc = new OrchestratorService(deps as never);
+      await svc.runPlanRevision(run.id);
+
+      expect(planReviserAgent.run).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.anything(),
+        expect.anything(),
+        run.id,
+        undefined,
+      );
     });
   });
 
@@ -1685,6 +1717,58 @@ describe("OrchestratorService -- additional coverage", () => {
       await expect(svc.runManualPlanRevision(run.id)).rejects.toThrow(
         `No plan artifact found for run ${run.id}`,
       );
+    });
+  });
+
+  describe("answerQuestions -- missing Plan artifact guard", () => {
+    it("throws when no Plan artifact exists for the run", async () => {
+      const run = makeRun({ id: "run-1", state: RunState.HumanClarificationNeeded });
+      const { deps } = buildDeps(run);
+      const svc = new OrchestratorService(deps as never);
+
+      await expect(
+        svc.answerQuestions(run.id, [{ questionId: "q1", answer: "yes" }]),
+      ).rejects.toThrow(`No plan artifact found for run ${run.id}`);
+    });
+  });
+
+  describe("answerQuestions -- re-plan still blocking, under the clarification iteration limit", () => {
+    it("loops back to HumanClarificationNeeded with an incremented iteration count", async () => {
+      const run = makeRun({ id: "run-1", state: RunState.HumanClarificationNeeded, planVersion: 1 });
+      const { deps, store, plannerAgent } = buildDeps(run);
+
+      store.artifacts.push(
+        makeArtifact("Plan", 1, makePlan({
+          planVersion: 1,
+          openQuestions: [{ id: "q1", question: "Required?", requiredForExecution: true }],
+        })),
+      );
+      store.artifacts.push(makeArtifact("TaskBundle", 1, makeTaskBundle()));
+      // Only one prior clarification round so far -- below MAX_CLARIFICATION_ITERATIONS (3).
+      store.events.push({
+        id: "e1",
+        runId: run.id,
+        eventType: RunEvent.NEEDS_HUMAN_CLARIFICATION,
+        source: "planner-agent",
+        payloadJson: {},
+        createdAt: new Date(),
+      });
+
+      plannerAgent.run.mockResolvedValue(
+        makePlan({
+          planVersion: 2,
+          openQuestions: [{ id: "q1", question: "Still required?", requiredForExecution: true }],
+        }),
+      );
+
+      const svc = new OrchestratorService(deps as never);
+      const result = await svc.answerQuestions(run.id, [{ questionId: "q1", answer: "partial answer" }]);
+
+      expect(result.state).toBe(RunState.HumanClarificationNeeded);
+      const secondClarification = store.events.find(
+        (e) => e.eventType === RunEvent.NEEDS_HUMAN_CLARIFICATION && (e.payloadJson as { iteration?: number }).iteration === 2,
+      );
+      expect(secondClarification).toBeDefined();
     });
   });
 

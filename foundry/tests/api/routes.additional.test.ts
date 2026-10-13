@@ -380,6 +380,36 @@ describe("routes.additional", () => {
       // allow the fire-and-forget rejection handler (the .catch callback) to run
       await new Promise((resolve) => setImmediate(resolve));
     });
+
+    it("logs String(err) when the background runExecution rejects with a non-Error value", async () => {
+      const run = makeRun();
+      const { app, mockOrchestrator } = await buildApp();
+      mockOrchestrator.approvePlan.mockResolvedValue(run);
+      mockOrchestrator.runExecution.mockRejectedValue("plain string failure");
+
+      const res = await app.inject({
+        method: "POST",
+        url: "/api/runs/run-1/actions/approve-plan",
+        payload: {},
+      });
+
+      expect(res.statusCode).toBe(200);
+      await new Promise((resolve) => setImmediate(resolve));
+    });
+
+    it("returns String(err) when approvePlan rejects with a non-Error value", async () => {
+      const { app, mockOrchestrator } = await buildApp();
+      mockOrchestrator.approvePlan.mockRejectedValue("plain string failure");
+
+      const res = await app.inject({
+        method: "POST",
+        url: "/api/runs/run-1/actions/approve-plan",
+        payload: {},
+      });
+
+      expect(res.statusCode).toBe(400);
+      expect(res.json().error).toBe("plain string failure");
+    });
   });
 
   describe("POST /api/runs/:id/actions/reject-plan (mode validation)", () => {
@@ -410,6 +440,20 @@ describe("routes.additional", () => {
 
       expect(res.statusCode).toBe(200);
       expect(mockOrchestrator.rejectPlan).toHaveBeenCalledWith("run-1", undefined, "api", "fresh");
+    });
+
+    it("returns String(err) when rejectPlan rejects with a non-Error value", async () => {
+      const { app, mockOrchestrator } = await buildApp();
+      mockOrchestrator.rejectPlan.mockRejectedValue("plain string failure");
+
+      const res = await app.inject({
+        method: "POST",
+        url: "/api/runs/run-1/actions/reject-plan",
+        payload: {},
+      });
+
+      expect(res.statusCode).toBe(400);
+      expect(res.json().error).toBe("plain string failure");
     });
   });
 
@@ -444,6 +488,20 @@ describe("routes.additional", () => {
       await new Promise((resolve) => setImmediate(resolve));
     });
 
+    it("logs String(err) when the background call rejects with a non-Error value", async () => {
+      const { app, mockOrchestrator } = await buildApp();
+      mockOrchestrator.runManualReReview.mockRejectedValue("plain string failure");
+
+      const res = await app.inject({
+        method: "POST",
+        url: "/api/runs/run-1/actions/re-review-plan",
+        payload: {},
+      });
+
+      expect(res.statusCode).toBe(200);
+      await new Promise((resolve) => setImmediate(resolve));
+    });
+
     it("returns 400 when constructing the call throws synchronously", async () => {
       const { app, mockOrchestrator } = await buildApp();
       mockOrchestrator.runManualReReview.mockImplementation(() => {
@@ -458,6 +516,23 @@ describe("routes.additional", () => {
 
       expect(res.statusCode).toBe(400);
       expect(res.json().error).toBe("sync failure");
+    });
+
+    it("returns String(err) when constructing the call throws a non-Error value synchronously", async () => {
+      const { app, mockOrchestrator } = await buildApp();
+      mockOrchestrator.runManualReReview.mockImplementation(() => {
+        // eslint-disable-next-line @typescript-eslint/no-throw-literal
+        throw "plain string failure";
+      });
+
+      const res = await app.inject({
+        method: "POST",
+        url: "/api/runs/run-1/actions/re-review-plan",
+        payload: {},
+      });
+
+      expect(res.statusCode).toBe(400);
+      expect(res.json().error).toBe("plain string failure");
     });
   });
 
@@ -492,6 +567,20 @@ describe("routes.additional", () => {
       await new Promise((resolve) => setImmediate(resolve));
     });
 
+    it("logs String(err) when the background call rejects with a non-Error value", async () => {
+      const { app, mockOrchestrator } = await buildApp();
+      mockOrchestrator.runManualPlanRevision.mockRejectedValue("plain string failure");
+
+      const res = await app.inject({
+        method: "POST",
+        url: "/api/runs/run-1/actions/revise-plan",
+        payload: {},
+      });
+
+      expect(res.statusCode).toBe(200);
+      await new Promise((resolve) => setImmediate(resolve));
+    });
+
     it("returns 400 when constructing the call throws synchronously", async () => {
       const { app, mockOrchestrator } = await buildApp();
       mockOrchestrator.runManualPlanRevision.mockImplementation(() => {
@@ -506,6 +595,23 @@ describe("routes.additional", () => {
 
       expect(res.statusCode).toBe(400);
       expect(res.json().error).toBe("sync failure");
+    });
+
+    it("returns String(err) when constructing the call throws a non-Error value synchronously", async () => {
+      const { app, mockOrchestrator } = await buildApp();
+      mockOrchestrator.runManualPlanRevision.mockImplementation(() => {
+        // eslint-disable-next-line @typescript-eslint/no-throw-literal
+        throw "plain string failure";
+      });
+
+      const res = await app.inject({
+        method: "POST",
+        url: "/api/runs/run-1/actions/revise-plan",
+        payload: {},
+      });
+
+      expect(res.statusCode).toBe(400);
+      expect(res.json().error).toBe("plain string failure");
     });
   });
 
@@ -535,6 +641,19 @@ describe("routes.additional", () => {
 
       expect(res.statusCode).toBe(400);
       expect(res.json().error).toBe("wrong state");
+    });
+
+    it("returns String(err) when approveHumanReview rejects with a non-Error value", async () => {
+      const { app, mockOrchestrator } = await buildApp();
+      mockOrchestrator.approveHumanReview.mockRejectedValue("plain string failure");
+
+      const res = await app.inject({
+        method: "POST",
+        url: "/api/runs/run-1/actions/approve-review",
+      });
+
+      expect(res.statusCode).toBe(400);
+      expect(res.json().error).toBe("plain string failure");
     });
   });
 
