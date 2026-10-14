@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { transition, getValidEvents } from "../../src/orchestrator/stateMachine.js";
 import { RunState } from "../../src/domain/runState.js";
 import { RunEvent } from "../../src/domain/runEvent.js";
+import { StateTransitionError } from "../../src/utils/errors.js";
 
 describe("stateMachine - clarification transitions", () => {
   it("HumanClarificationNeeded + CLARIFICATION_PROVIDED → Planning", () => {
@@ -39,5 +40,27 @@ describe("stateMachine - clarification transitions", () => {
     const validEvents = getValidEvents(RunState.Failed);
     expect(validEvents).toHaveLength(1);
     expect(validEvents).toContain(RunEvent.RESET_TO_TODO);
+  });
+
+  it("transition throws StateTransitionError for a state with no outgoing transitions at all (Done is terminal)", () => {
+    expect(() => transition(RunState.Done, RunEvent.RUN_REQUESTED)).toThrow(
+      StateTransitionError,
+    );
+    expect(() => transition(RunState.Done, RunEvent.RUN_REQUESTED)).toThrow(
+      'No transition from state "Done" for event "RUN_REQUESTED"',
+    );
+  });
+
+  it("transition throws StateTransitionError for a known state with an unsupported event", () => {
+    expect(() => transition(RunState.Todo, RunEvent.PLAN_CREATED)).toThrow(
+      StateTransitionError,
+    );
+    expect(() => transition(RunState.Todo, RunEvent.PLAN_CREATED)).toThrow(
+      'No transition from state "Todo" for event "PLAN_CREATED"',
+    );
+  });
+
+  it("getValidEvents returns an empty array for a terminal state with no outgoing transitions", () => {
+    expect(getValidEvents(RunState.Done)).toEqual([]);
   });
 });

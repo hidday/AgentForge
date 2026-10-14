@@ -65,6 +65,63 @@ describe("DistilledSkillPanel", () => {
     expect(screen.getByText(/name: dev-env-pause-resume-footguns/)).toBeDefined();
   });
 
+  it("shows a loading indicator when loading is true", () => {
+    render(
+      <DistilledSkillPanel
+        distilledSkill={null}
+        distillationDecision={null}
+        loading
+      />,
+    );
+
+    expect(screen.getByText(/Loading distilled skill/i)).toBeDefined();
+  });
+
+  it("shows the error message when error is set, even if a skill is present", () => {
+    render(
+      <DistilledSkillPanel
+        distilledSkill={skill}
+        distillationDecision={decision}
+        error="Failed to load distilled skill"
+      />,
+    );
+
+    expect(screen.getByText("Failed to load distilled skill")).toBeDefined();
+    expect(screen.queryByText("Distilled Skill")).toBeNull();
+  });
+
+  it("falls all the way back to 'distilled-skill' and omits the description when neither source has a name/taskCategory/description", () => {
+    render(
+      <DistilledSkillPanel
+        distilledSkill={null}
+        distillationDecision={{
+          shouldPersist: true,
+          reason: "",
+          taskCategory: null,
+          name: null,
+          description: null,
+          displacedSkillId: null,
+        }}
+      />,
+    );
+
+    expect(screen.getByText("distilled-skill")).toBeDefined();
+    // No description paragraph should render when it resolves to null.
+    expect(screen.queryByText(/Use when changing/i)).toBeNull();
+  });
+
+  it("shows which skill was displaced when displacedSkillId is set", () => {
+    render(
+      <DistilledSkillPanel
+        distilledSkill={skill}
+        distillationDecision={{ ...decision, displacedSkillId: "old-skill-id-1234" }}
+      />,
+    );
+
+    expect(screen.getByText(/Displaced skill:/)).toBeDefined();
+    expect(screen.getByText(/old-skil/)).toBeDefined();
+  });
+
   it("shows a fallback message when persistence succeeded but content is missing", () => {
     render(
       <DistilledSkillPanel

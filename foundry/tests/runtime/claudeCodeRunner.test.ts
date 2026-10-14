@@ -194,6 +194,35 @@ describe("ClaudeCodeRunner.run() error reporting", () => {
     expect(logger.error).not.toHaveBeenCalled();
   });
 
+  it("passes a ProcessContext to the subprocess when input.runId is set", async () => {
+    const processRunner = makeMockProcessRunner({
+      stdout: JSON.stringify({ type: "result", result: validStructuredOutput }),
+      stderr: "",
+      exitCode: 0,
+      durationMs: 50,
+      timedOut: false,
+    });
+    const logger = makeMockLogger();
+    const runner = new ClaudeCodeRunner(
+      processRunner as never,
+      "claude",
+      [],
+      "claude-opus-4-8",
+      logger as never,
+    );
+
+    await runner.run(
+      { prompt: "x", workingDirectory: "/tmp", timeoutMs: 1000, runId: "run-7" },
+      "planner",
+      echoSchema,
+    );
+
+    const { context } = processRunner.execute.mock.calls[0]![0] as {
+      context: { runId: string; stage: string; runtime: string };
+    };
+    expect(context).toEqual({ runId: "run-7", stage: "planner", runtime: "claude-code" });
+  });
+
   it("does not log an error when exitCode is non-zero but a structured output block is recoverable", async () => {
     // A common pattern: model produced a valid structured block but the CLI
     // exited non-zero for unrelated reasons (post-write hook, etc.).
@@ -370,5 +399,210 @@ describe("ClaudeCodeRunner.chatRun() — arg filtering and error surfacing", () 
     expect(logger.error).toHaveBeenCalledOnce();
     const [logFields] = logger.error.mock.calls[0]!;
     expect(logFields).toMatchObject({ upstreamApiError: true });
+  });
+});
+
+describe("ClaudeCodeRunner — buildArgs() systemPrompt handling", () => {
+  it("passes --system-prompt through to the subprocess when input.systemPrompt is set", async () => {
+    const processRunner = makeMockProcessRunner({
+      stdout: JSON.stringify({ type: "result", result: validStructuredOutput }),
+      stderr: "",
+      exitCode: 0,
+      durationMs: 50,
+      timedOut: false,
+    });
+    const logger = makeMockLogger();
+    const runner = new ClaudeCodeRunner(
+      processRunner as never,
+      "claude",
+      [],
+      "claude-opus-4-8",
+      logger as never,
+    );
+
+    await runner.run(
+      {
+        prompt: "x",
+        systemPrompt: "You are a helpful planner.",
+        workingDirectory: "/tmp",
+        timeoutMs: 1000,
+      },
+      "planner",
+      echoSchema,
+    );
+
+    const { args } = processRunner.execute.mock.calls[0]![0] as { args: string[] };
+    const idx = args.indexOf("--system-prompt");
+    expect(idx).toBeGreaterThanOrEqual(0);
+    expect(args[idx + 1]).toBe("You are a helpful planner.");
+  });
+
+  it("omits --system-prompt when input.systemPrompt is not set", async () => {
+    const processRunner = makeMockProcessRunner({
+      stdout: JSON.stringify({ type: "result", result: validStructuredOutput }),
+      stderr: "",
+      exitCode: 0,
+      durationMs: 50,
+      timedOut: false,
+    });
+    const logger = makeMockLogger();
+    const runner = new ClaudeCodeRunner(
+      processRunner as never,
+      "claude",
+      [],
+      "claude-opus-4-8",
+      logger as never,
+    );
+
+    await runner.run({ prompt: "x", workingDirectory: "/tmp", timeoutMs: 1000 }, "planner", echoSchema);
+
+    const { args } = processRunner.execute.mock.calls[0]![0] as { args: string[] };
+    expect(args).not.toContain("--system-prompt");
+  });
+});
+
+describe("ClaudeCodeRunner — unwrapClaudeEnvelope() NDJSON fallback", () => {
+  it("extracts text from the last NDJSON line with type \"result\" when stdout is not a single JSON envelope", async () => {
+    const ndjson = [
+      JSON.stringify({ type: "system", subtype: "init" }),
+      JSON.stringify({ type: "assistant", message: "thinking..." }),
+      JSON.stringify({ type: "result", result: "Final NDJSON answer", is_error: false }),
+    ].join("\n");
+
+    const processRunner = makeMockProcessRunner({
+      stdout: ndjson,
+      stderr: "",
+      exitCode: 0,
+      durationMs: 50,
+      timedOut: false,
+    });
+    const logger = makeMockLogger();
+    const runner = new ClaudeCodeRunner(
+      processRunner as never,
+      "claude",
+      [],
+      "claude-opus-4-8",
+      logger as never,
+    );
+
+    const result = await runner.chatRun(
+      { prompt: "x", workingDirectory: "/tmp", timeoutMs: 1000 },
+      "chat",
+    );
+
+    expect(result.text).toBe("Final NDJSON answer");
+  });
+
+  it("surfaces is_error: true from an NDJSON result line as an upstream API error", async () => {
+    const ndjson = [
+      JSON.stringify({ type: "system", subtype: "init" }),
+      JSON.stringify({ type: "result", result: "API Error: timeout", is_error: true }),
+    ].join("\n");
+
+    const processRunner = makeMockProcessRunner({
+      stdout: ndjson,
+      stderr: "",
+      exitCode: 0,
+      durationMs: 50,
+      timedOut: false,
+    });
+    const logger = makeMockLogger();
+    const runner = new ClaudeCodeRunner(
+      processRunner as never,
+      "claude",
+      [],
+      "claude-opus-4-8",
+      logger as never,
+    );
+
+    await expect(
+      runner.chatRun({ prompt: "x", workingDirectory: "/tmp", timeoutMs: 1000 }, "chat"),
+    ).rejects.toThrow(/Claude CLI API error/);
+  });
+
+  it("skips blank lines and lines that aren't valid JSON while scanning for the result line", async () => {
+    const ndjson = [
+      "",
+      "not json at all {{{",
+      JSON.stringify({ type: "result", result: "Recovered answer" }),
+      "",
+    ].join("\n");
+
+    const processRunner = makeMockProcessRunner({
+      stdout: ndjson,
+      stderr: "",
+      exitCode: 0,
+      durationMs: 50,
+      timedOut: false,
+    });
+    const logger = makeMockLogger();
+    const runner = new ClaudeCodeRunner(
+      processRunner as never,
+      "claude",
+      [],
+      "claude-opus-4-8",
+      logger as never,
+    );
+
+    const result = await runner.chatRun(
+      { prompt: "x", workingDirectory: "/tmp", timeoutMs: 1000 },
+      "chat",
+    );
+
+    expect(result.text).toBe("Recovered answer");
+  });
+
+  it("falls back to the raw output when neither a single JSON envelope nor an NDJSON result line is found", async () => {
+    const raw = "completely unstructured plain text output";
+    const processRunner = makeMockProcessRunner({
+      stdout: raw,
+      stderr: "",
+      exitCode: 0,
+      durationMs: 50,
+      timedOut: false,
+    });
+    const logger = makeMockLogger();
+    const runner = new ClaudeCodeRunner(
+      processRunner as never,
+      "claude",
+      [],
+      "claude-opus-4-8",
+      logger as never,
+    );
+
+    const result = await runner.chatRun(
+      { prompt: "x", workingDirectory: "/tmp", timeoutMs: 1000 },
+      "chat",
+    );
+
+    expect(result.text).toBe(raw);
+  });
+
+  it("passes a ProcessContext to the subprocess when input.runId is set", async () => {
+    const processRunner = makeMockProcessRunner({
+      stdout: JSON.stringify({ type: "result", result: "The current plan looks good." }),
+      stderr: "",
+      exitCode: 0,
+      durationMs: 50,
+      timedOut: false,
+    });
+    const logger = makeMockLogger();
+    const runner = new ClaudeCodeRunner(
+      processRunner as never,
+      "claude",
+      [],
+      "claude-opus-4-8",
+      logger as never,
+    );
+
+    await runner.chatRun(
+      { prompt: "x", workingDirectory: "/tmp", timeoutMs: 1000, runId: "run-42" },
+      "chat",
+    );
+
+    const { context } = processRunner.execute.mock.calls[0]![0] as {
+      context: { runId: string; stage: string; runtime: string };
+    };
+    expect(context).toEqual({ runId: "run-42", stage: "chat", runtime: "claude-code" });
   });
 });

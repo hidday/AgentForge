@@ -1,8 +1,24 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { AgentOutputPanel } from "./AgentOutputPanel.tsx";
 import type { ActiveProcess } from "@/api/client.ts";
+
+// Wrap the real parser with a spy so every existing test below still
+// exercises genuine parsing logic; only the dedicated "error block" test
+// overrides its return value, since the real parser never actually
+// produces a "error"-typed block today (it's a defensive renderer branch).
+vi.mock("@/lib/parseClaudeOutput.ts", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/parseClaudeOutput.ts")>();
+  return {
+    ...actual,
+    parseClaudeOutput: vi.fn(actual.parseClaudeOutput),
+  };
+});
+
+import { AgentOutputPanel } from "./AgentOutputPanel.tsx";
+import { parseClaudeOutput } from "@/lib/parseClaudeOutput.ts";
+
+const mockParse = parseClaudeOutput as unknown as ReturnType<typeof vi.fn>;
 
 function makeProcess(overrides: Partial<ActiveProcess> = {}): ActiveProcess {
   return {
@@ -183,5 +199,11 @@ describe("AgentOutputPanel", () => {
 
     expect(screen.getByText("runtime-a")).toBeDefined();
     expect(screen.queryByText("runtime-b")).toBeNull();
+  });
+
+  it("renders an 'error'-typed block with the warning icon (defensive branch the real parser never emits)", () => {
+    mockParse.mockReturnValueOnce([{ type: "error", content: "fatal failure" }]);
+    render(<AgentOutputPanel processes={[]} output="irrelevant" />);
+    expect(screen.getByText("fatal failure")).toBeDefined();
   });
 });
