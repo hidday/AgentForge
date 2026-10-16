@@ -107,10 +107,10 @@ describe("DistilledSkillPanel", () => {
     expect(screen.getAllByText("fallback-category").length).toBeGreaterThan(0);
   });
 
-  it("falls back through distillationDecision.taskCategory when distilledSkill.name and taskCategory are absent", () => {
+  it("falls back through distillationDecision.taskCategory when distilledSkill is absent entirely", () => {
     render(
       <DistilledSkillPanel
-        distilledSkill={{ ...skill, name: null, taskCategory: null }}
+        distilledSkill={null}
         distillationDecision={{ ...decision, name: null, taskCategory: "decision-category" }}
       />,
     );
@@ -121,7 +121,7 @@ describe("DistilledSkillPanel", () => {
   it("falls back to 'distilled-skill' when no name or taskCategory is available anywhere", () => {
     render(
       <DistilledSkillPanel
-        distilledSkill={{ ...skill, name: null, taskCategory: null }}
+        distilledSkill={null}
         distillationDecision={{ ...decision, name: null, taskCategory: null }}
       />,
     );

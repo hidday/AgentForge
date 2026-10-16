@@ -116,8 +116,6 @@ function ArtifactContent({
       return <ExecutionReportView report={payload} />;
     case "remediation":
       return <RemediationView remediation={payload} />;
-    case "rejectionFeedback":
-      return null;
     default:
       return (
         <pre className="text-xs font-mono text-text-secondary overflow-auto">

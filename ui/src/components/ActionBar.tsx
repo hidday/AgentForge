@@ -59,10 +59,11 @@ export function ActionBar({
   const category = getStateCategory(state);
 
   async function handleConfirm(note?: string) {
-    if (!dialog) return;
+    // Only ever invoked via ConfirmDialog's onConfirm, which is rendered
+    // only while `dialog` is set (ConfirmDialog returns null when closed).
     setLoading(true);
     try {
-      await dialog.action(note);
+      await dialog!.action(note);
       onAction();
     } catch {
       // handled by client
