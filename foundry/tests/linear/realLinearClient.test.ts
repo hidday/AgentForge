@@ -151,6 +151,47 @@ describe("RealLinearClient.getRelatedContext", () => {
       "Failed to hydrate blocker issue from relation",
     );
   });
+
+  it("treats a missing inverseRelations connection as having no blockers", async () => {
+    const logger = makeLogger();
+    const client = new RealLinearClient("key", logger as never);
+    const sdk = makeFakeSdk();
+    const focus = makeFakeIssue({
+      id: "focus-id",
+      parent: Promise.resolve(undefined),
+      inverseRelations: () =>
+        Promise.resolve(undefined as unknown as { nodes: never[] }),
+    });
+    sdk.issue.mockResolvedValue(focus);
+    injectSdk(client, sdk);
+
+    const ctx = await client.getRelatedContext("focus-id");
+
+    expect(ctx.blockers).toEqual([]);
+  });
+
+  it("falls back to empty labels and Unknown state for a parent with no labels connection or state", async () => {
+    const logger = makeLogger();
+    const client = new RealLinearClient("key", logger as never);
+    const sdk = makeFakeSdk();
+    const parent = makeFakeIssue({
+      id: "parent-id",
+      labels: () => Promise.resolve(undefined),
+      state: Promise.resolve(undefined),
+    });
+    const focus = makeFakeIssue({
+      id: "focus-id",
+      parent: Promise.resolve(parent),
+      inverseRelations: () => Promise.resolve({ nodes: [] }),
+    });
+    sdk.issue.mockResolvedValue(focus);
+    injectSdk(client, sdk);
+
+    const ctx = await client.getRelatedContext("focus-id");
+
+    expect(ctx.parent?.labels).toEqual([]);
+    expect(ctx.parent?.state).toBe("Unknown");
+  });
 });
 
 describe("RealLinearClient.searchIssues", () => {
@@ -259,6 +300,20 @@ describe("RealLinearClient.searchIssues", () => {
     expect(result[0].team).toBeUndefined();
     expect(result[0].cycle).toBeUndefined();
   });
+
+  it("falls back to empty labels and empty description when the issue has no labels connection or description", async () => {
+    const issue = makeFakeIssue({
+      id: "issue-1",
+      description: null,
+      labels: () => Promise.resolve(undefined),
+    });
+    sdk.issues.mockResolvedValue({ nodes: [issue] });
+
+    const result = await client.searchIssues({ state: "Todo" });
+
+    expect(result[0].labels).toEqual([]);
+    expect(result[0].description).toBe("");
+  });
 });
 
 describe("RealLinearClient.postComment", () => {
@@ -322,6 +377,19 @@ describe("RealLinearClient.updateIssueState", () => {
       { issueId: "issue-1", stateName: "Done", stateId: "state-done" },
       "Updated Linear issue state",
     );
+  });
+
+  it("treats a missing states connection as having no workflow states", async () => {
+    sdk.issue.mockResolvedValue(makeFakeIssue({ id: "issue-1" }));
+    sdk.team.mockResolvedValue({ states: () => Promise.resolve(undefined) });
+
+    await client.updateIssueState("issue-1", "Done");
+
+    expect(logger.warn).toHaveBeenCalledWith(
+      { issueId: "issue-1", stateName: "Done", teamId: "team-1" },
+      "Could not find workflow state by name",
+    );
+    expect(sdk.updateIssue).not.toHaveBeenCalled();
   });
 
   it("caches the team's workflow states across calls (fetches team.states() only once)", async () => {
