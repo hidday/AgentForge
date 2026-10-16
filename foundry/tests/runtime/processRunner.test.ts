@@ -383,6 +383,33 @@ describe("ProcessRunner.executeReal() — context tracking, manifests, and dashb
     expect(emitter.emitProcessCompleted).toHaveBeenCalled();
   });
 
+  it("is a no-op if cleanup runs twice for the same process (e.g. both 'error' and 'close' fire)", async () => {
+    const child = makeFakeChild();
+    vi.mocked(spawn).mockReturnValue(child as never);
+    const emitter = makeEmitter();
+    const runner = new ProcessRunner("real", makeLogger() as never, emitter as never, SPOOL_DIR);
+
+    const promise = runner.execute({
+      command: "claude",
+      args: [],
+      cwd: "/",
+      timeoutMs: 5000,
+      context,
+    });
+    const id = runner.getActiveProcesses()[0]!.id;
+
+    child.emit("error", new Error("boom"));
+    expect(runner.getActiveProcesses()).toEqual([]);
+    expect(emitter.emitProcessCompleted).toHaveBeenCalledTimes(1);
+
+    // A spurious 'close' after 'error' must not crash or double-report completion.
+    child.emit("close", null);
+    expect(emitter.emitProcessCompleted).toHaveBeenCalledTimes(1);
+
+    await expect(promise).rejects.toThrow("boom");
+    void id;
+  });
+
   it("on child error with a context, cleans up the active process with exitCode -1", async () => {
     const child = makeFakeChild();
     vi.mocked(spawn).mockReturnValue(child as never);
@@ -723,7 +750,10 @@ describe("ProcessRunner.rehydrateOrphans()", () => {
       logFile: "dead-1.log",
     };
     vi.mocked(readFileSync).mockImplementation((path: unknown) => {
-      if (String(path).includes("bad.json")) return "{ not valid json" as never;
+      if (String(path).includes("bad.json")) {
+        // Throw a non-Error value to exercise the `err instanceof Error` false branch.
+        throw "corrupt manifest";
+      }
       return JSON.stringify(deadManifest) as never;
     });
     const killSpy = vi.spyOn(process, "kill").mockImplementation(() => {
@@ -735,7 +765,7 @@ describe("ProcessRunner.rehydrateOrphans()", () => {
     expect(() => runner.rehydrateOrphans()).not.toThrow();
 
     expect(logger.warn).toHaveBeenCalledWith(
-      expect.objectContaining({ file: "bad.json" }),
+      expect.objectContaining({ file: "bad.json", error: "corrupt manifest" }),
       "Failed to process manifest",
     );
     // the second, valid manifest is still processed
