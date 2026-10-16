@@ -242,6 +242,168 @@ describe("PlannerAgent.run()", () => {
     });
   });
 
+  describe("planReviewFindings injection", () => {
+    it("renders '## AI Plan Review Findings' section with summary and findings when provided", async () => {
+      const { agent, getPrompt } = buildPlannerAgent();
+      const bundle = makeTaskBundle();
+
+      await agent.run(bundle, "run-1", {
+        planReviewFindings: {
+          summary: "Plan had a scoping gap.",
+          findings: [
+            { id: "f1", severity: "high", title: "Missing migration", details: "No DB plan." },
+          ],
+        },
+      });
+
+      const prompt = getPrompt();
+      expect(prompt).toContain("## AI Plan Review Findings (from previous plan)");
+      expect(prompt).toContain("**Review Summary:** Plan had a scoping gap.");
+      expect(prompt).toContain("- **[high] Missing migration** (f1): No DB plan.");
+      expect(prompt).toContain("Incorporate these findings into the revised plan");
+    });
+
+    it("omits the AI Plan Review Findings section when planReviewFindings is absent", async () => {
+      const { agent, getPrompt } = buildPlannerAgent();
+      const bundle = makeTaskBundle();
+
+      await agent.run(bundle, "run-1");
+
+      const prompt = getPrompt();
+      expect(prompt).not.toContain("## AI Plan Review Findings");
+    });
+  });
+
+  describe("previousPlan injection", () => {
+    it("renders '## Previously Rejected Plan' section with steps, risks, assumptions, open questions", async () => {
+      const { agent, getPrompt } = buildPlannerAgent();
+      const bundle = makeTaskBundle();
+
+      await agent.run(bundle, "run-1", {
+        previousPlan: {
+          planVersion: 1,
+          summary: "Old summary",
+          requirementsTraceability: "",
+          assumptions: ["Assumption A"],
+          openQuestions: [
+            { id: "q1", question: "Blocking question?", requiredForExecution: true },
+            { id: "q2", question: "Non-blocking question?", requiredForExecution: false },
+          ],
+          risks: ["Risk A"],
+          steps: [{ id: "s1", title: "Step One", description: "Do step one" }],
+          testPlan: "Run the suite",
+          confidence: 0.75,
+        },
+      });
+
+      const prompt = getPrompt();
+      expect(prompt).toContain("## Previously Rejected Plan (v1)");
+      expect(prompt).toContain("**Summary:** Old summary");
+      expect(prompt).toContain("**Confidence:** 75%");
+      expect(prompt).toContain("1. **Step One** (s1): Do step one");
+      expect(prompt).toContain("**Risks:**\n- Risk A");
+      expect(prompt).toContain("**Assumptions:**\n- Assumption A");
+      expect(prompt).toContain("**Open Questions:**");
+      expect(prompt).toContain("- [q1] Blocking question? *(blocks execution)*");
+      expect(prompt).toContain("- [q2] Non-blocking question?");
+      expect(prompt).not.toContain("Non-blocking question? *(blocks execution)*");
+      expect(prompt).toContain("**Test Plan:** Run the suite");
+      expect(prompt).toContain("Use this as the starting point for the new plan.");
+    });
+
+    it("omits risks/assumptions/open-questions sub-sections when their arrays are empty", async () => {
+      const { agent, getPrompt } = buildPlannerAgent();
+      const bundle = makeTaskBundle();
+
+      await agent.run(bundle, "run-1", {
+        previousPlan: {
+          planVersion: 1,
+          summary: "Old summary",
+          requirementsTraceability: "",
+          assumptions: [],
+          openQuestions: [],
+          risks: [],
+          steps: [{ id: "s1", title: "Step One", description: "Do step one" }],
+          testPlan: "Run the suite",
+          confidence: 0.5,
+        },
+      });
+
+      const prompt = getPrompt();
+      expect(prompt).toContain("## Previously Rejected Plan (v1)");
+      expect(prompt).not.toContain("**Risks:**");
+      expect(prompt).not.toContain("**Assumptions:**");
+      expect(prompt).not.toContain("**Open Questions:**");
+    });
+
+    it("omits the Previously Rejected Plan section when previousPlan is absent", async () => {
+      const { agent, getPrompt } = buildPlannerAgent();
+      const bundle = makeTaskBundle();
+
+      await agent.run(bundle, "run-1");
+
+      const prompt = getPrompt();
+      expect(prompt).not.toContain("## Previously Rejected Plan");
+    });
+  });
+
+  describe("priorSkills injection", () => {
+    it("renders '## Prior Skills from Similar Tasks' with name, category, and description", async () => {
+      const { agent, getPrompt } = buildPlannerAgent();
+      const bundle = makeTaskBundle();
+
+      await agent.run(bundle, "run-1", {
+        priorSkills: [
+          {
+            id: "skill-1",
+            name: "db-migration-safety",
+            taskCategory: "database",
+            description: "How to run safe migrations.",
+            skillMarkdown: "# DB Migration Safety\n\nAlways use transactions.",
+          } as never,
+        ],
+      });
+
+      const prompt = getPrompt();
+      expect(prompt).toContain("## Prior Skills from Similar Tasks");
+      expect(prompt).toContain("### db-migration-safety (database)");
+      expect(prompt).toContain("How to run safe migrations.");
+      expect(prompt).toContain("Always use transactions.");
+    });
+
+    it("falls back to taskCategory as heading and omits intro when name/description absent", async () => {
+      const { agent, getPrompt } = buildPlannerAgent();
+      const bundle = makeTaskBundle();
+
+      await agent.run(bundle, "run-1", {
+        priorSkills: [
+          {
+            id: "skill-2",
+            name: null,
+            taskCategory: "infra",
+            description: null,
+            skillMarkdown: "# Infra Skill\n\nDetails here.",
+          } as never,
+        ],
+      });
+
+      const prompt = getPrompt();
+      expect(prompt).toContain("### infra");
+      expect(prompt).not.toContain("### infra (infra)");
+      expect(prompt).toContain("# Infra Skill");
+    });
+
+    it("omits the Prior Skills section when priorSkills is absent or empty", async () => {
+      const { agent, getPrompt } = buildPlannerAgent();
+      const bundle = makeTaskBundle();
+
+      await agent.run(bundle, "run-1", { priorSkills: [] });
+
+      const prompt = getPrompt();
+      expect(prompt).not.toContain("## Prior Skills from Similar Tasks");
+    });
+  });
+
   describe("relatedContext rendering", () => {
     it("renders the Related Linear Context section when bundle has parent and blockers", async () => {
       const { agent, getPrompt } = buildPlannerAgent();

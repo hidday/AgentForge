@@ -106,6 +106,84 @@ function buildPlanReviserAgent() {
   return { agent, getPrompt: () => capturedPrompt };
 }
 
+describe("PlanReviserAgent.run() operatorNote injection", () => {
+  it("renders the Operator Note section when options.operatorNote is provided", async () => {
+    const { agent, getPrompt } = buildPlanReviserAgent();
+
+    await agent.run(makePlan(), makePlanReview(), makeTaskBundle(), "run-1", {
+      operatorNote: "Keep backward compatibility in mind.",
+    });
+
+    const prompt = getPrompt();
+    expect(prompt).toContain("## Operator Note");
+    expect(prompt).toContain("Keep backward compatibility in mind.");
+    expect(prompt).toContain("do not drop the findings in favor of the note");
+  });
+
+  it("omits the Operator Note section when options is absent", async () => {
+    const { agent, getPrompt } = buildPlanReviserAgent();
+
+    await agent.run(makePlan(), makePlanReview(), makeTaskBundle(), "run-1");
+
+    const prompt = getPrompt();
+    expect(prompt).not.toContain("## Operator Note");
+  });
+});
+
+describe("PlanReviserAgent.run() disposition tallying", () => {
+  it("counts accepted, dismissed, and partially_incorporated dispositions separately", async () => {
+    let capturedLogger: Record<string, unknown> | undefined;
+    const agentRunner = {
+      run: vi.fn().mockResolvedValue({
+        raw: "raw text",
+        parsed: {
+          payload: {
+            revision: {
+              originalPlanVersion: 1,
+              revisedPlanVersion: 2,
+              reviewId: "plan-rev-001",
+              dispositions: [
+                { findingId: "f1", status: "accepted", rationale: "r1" },
+                { findingId: "f2", status: "accepted", rationale: "r2" },
+                { findingId: "f3", status: "dismissed", rationale: "r3" },
+                { findingId: "f4", status: "partially_incorporated", rationale: "r4" },
+              ],
+            },
+            revisedPlan: { ...makePlan(), planVersion: 2 },
+          },
+        },
+      }),
+    };
+    const artifactRepo = { create: vi.fn().mockResolvedValue({ id: "artifact-new" }) };
+    const logger = {
+      info: vi.fn((payload: Record<string, unknown>) => {
+        if (payload && "accepted" in payload) capturedLogger = payload;
+      }),
+      warn: vi.fn(),
+      error: vi.fn(),
+      debug: vi.fn(),
+    };
+
+    const { PlanReviserAgent } = await import("../../src/agents/planReviserAgent.js");
+    const agent = new PlanReviserAgent(
+      agentRunner as never,
+      artifactRepo as never,
+      logger as never,
+    );
+
+    await agent.run(makePlan(), makePlanReview(), makeTaskBundle(), "run-1");
+
+    expect(capturedLogger).toEqual({
+      runId: "run-1",
+      originalVersion: 1,
+      revisedVersion: 2,
+      accepted: 2,
+      dismissed: 1,
+      partial: 1,
+    });
+  });
+});
+
 describe("PlanReviserAgent.run() relatedContext rendering", () => {
   it("renders the Related Linear Context section when bundle has relatedContext", async () => {
     const { agent, getPrompt } = buildPlanReviserAgent();

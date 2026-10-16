@@ -189,7 +189,8 @@ export function LinearSyncDialog({
   useSSE(handleSSE);
 
   async function handleIngest() {
-    if (selected.size === 0) return;
+    // Only reachable via the Start button, which is disabled while
+    // selected.size === 0.
     const pendingIds = [...selected];
     pendingIdsRef.current = pendingIds;
     seenIdsRef.current = new Set();

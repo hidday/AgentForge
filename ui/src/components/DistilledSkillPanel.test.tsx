@@ -75,4 +75,79 @@ describe("DistilledSkillPanel", () => {
 
     expect(screen.getByText(/content could not be loaded/i)).toBeDefined();
   });
+
+  it("shows a loading spinner when loading is true", () => {
+    render(
+      <DistilledSkillPanel distilledSkill={null} distillationDecision={null} loading />,
+    );
+
+    expect(screen.getByText(/Loading distilled skill/i)).toBeDefined();
+  });
+
+  it("shows an error message when error is set", () => {
+    render(
+      <DistilledSkillPanel
+        distilledSkill={null}
+        distillationDecision={null}
+        error="Failed to load skill"
+      />,
+    );
+
+    expect(screen.getByText("Failed to load skill")).toBeDefined();
+  });
+
+  it("falls back through distilledSkill.taskCategory when name fields are absent", () => {
+    render(
+      <DistilledSkillPanel
+        distilledSkill={{ ...skill, name: null, taskCategory: "fallback-category" }}
+        distillationDecision={{ ...decision, name: null, taskCategory: "fallback-category" }}
+      />,
+    );
+
+    expect(screen.getAllByText("fallback-category").length).toBeGreaterThan(0);
+  });
+
+  it("falls back through distillationDecision.taskCategory when distilledSkill is absent entirely", () => {
+    render(
+      <DistilledSkillPanel
+        distilledSkill={null}
+        distillationDecision={{ ...decision, name: null, taskCategory: "decision-category" }}
+      />,
+    );
+
+    expect(screen.getAllByText("decision-category").length).toBeGreaterThan(0);
+  });
+
+  it("falls back to 'distilled-skill' when no name or taskCategory is available anywhere", () => {
+    render(
+      <DistilledSkillPanel
+        distilledSkill={null}
+        distillationDecision={{ ...decision, name: null, taskCategory: null }}
+      />,
+    );
+
+    expect(screen.getByText("distilled-skill")).toBeDefined();
+  });
+
+  it("omits the description section when neither distilledSkill nor distillationDecision has a description", () => {
+    render(
+      <DistilledSkillPanel
+        distilledSkill={{ ...skill, description: null }}
+        distillationDecision={{ ...decision, description: null }}
+      />,
+    );
+
+    expect(screen.queryByText(/Use when changing prysmic/i)).toBeNull();
+  });
+
+  it("shows the displaced skill id when a skill was displaced", () => {
+    render(
+      <DistilledSkillPanel
+        distilledSkill={skill}
+        distillationDecision={{ ...decision, displacedSkillId: "displaced-skill-id-123" }}
+      />,
+    );
+
+    expect(screen.getByText(/Displaced skill:/i).textContent).toContain("displace");
+  });
 });
