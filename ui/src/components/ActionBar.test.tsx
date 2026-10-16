@@ -321,6 +321,29 @@ describe("ActionBar", () => {
       expect(onAction).toHaveBeenCalledOnce();
     });
 
+    it("can switch from 'fresh' back to 'iterate' mode before confirming", async () => {
+      const onAction = vi.fn();
+      render(
+        <ActionBar runId={RUN_ID} state="AwaitingPlanApproval" onAction={onAction} />,
+      );
+      await userEvent.click(screen.getByRole("button", { name: "Reject Plan" }));
+
+      await userEvent.click(screen.getByRole("button", { name: /start fresh/i }));
+      // "Revise plan" (lowercase p) is the mode-toggle button inside the reject
+      // dialog; it is distinct from the "Revise Plan" action-bar button.
+      await userEvent.click(screen.getByText("Revise plan"));
+
+      const dialog = screen.getByText(/this will reject the current plan/i).closest("div")!
+        .parentElement as HTMLElement;
+      const confirmBtn = within(dialog).getByRole("button", { name: "Reject Plan" });
+      await userEvent.click(confirmBtn);
+
+      await waitFor(() => {
+        expect(mockApi.rejectPlan).toHaveBeenCalledWith(RUN_ID, undefined, "iterate");
+      });
+      expect(onAction).toHaveBeenCalledOnce();
+    });
+
     it("cancelling the reject dialog does not call the api and resets state", async () => {
       const onAction = vi.fn();
       render(
