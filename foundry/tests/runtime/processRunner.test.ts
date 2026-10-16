@@ -736,8 +736,12 @@ describe("ProcessRunner.rehydrateOrphans()", () => {
     killSpy.mockRestore();
   });
 
-  it("logs a warning and continues when a manifest file is corrupt", () => {
-    vi.mocked(readdirSync).mockReturnValue(["bad.json", "dead-1.json"] as never);
+  it("logs a warning and continues when a manifest file is corrupt (both Error and non-Error failures)", () => {
+    vi.mocked(readdirSync).mockReturnValue([
+      "malformed.json",
+      "throws-non-error.json",
+      "dead-1.json",
+    ] as never);
     const deadManifest = {
       id: "dead-1",
       pid: 9999,
@@ -750,7 +754,13 @@ describe("ProcessRunner.rehydrateOrphans()", () => {
       logFile: "dead-1.log",
     };
     vi.mocked(readFileSync).mockImplementation((path: unknown) => {
-      if (String(path).includes("bad.json")) {
+      const p = String(path);
+      if (p.includes("malformed.json")) {
+        // Invalid JSON makes JSON.parse throw a real SyntaxError (an Error
+        // instance), exercising the `err instanceof Error` true branch.
+        return "{ not valid json" as never;
+      }
+      if (p.includes("throws-non-error.json")) {
         // Throw a non-Error value to exercise the `err instanceof Error` false branch.
         throw "corrupt manifest";
       }
@@ -765,10 +775,14 @@ describe("ProcessRunner.rehydrateOrphans()", () => {
     expect(() => runner.rehydrateOrphans()).not.toThrow();
 
     expect(logger.warn).toHaveBeenCalledWith(
-      expect.objectContaining({ file: "bad.json", error: "corrupt manifest" }),
+      expect.objectContaining({ file: "malformed.json", error: expect.stringContaining("JSON") }),
       "Failed to process manifest",
     );
-    // the second, valid manifest is still processed
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.objectContaining({ file: "throws-non-error.json", error: "corrupt manifest" }),
+      "Failed to process manifest",
+    );
+    // the third, valid manifest is still processed
     expect(logger.warn).toHaveBeenCalledWith(
       expect.objectContaining({ processId: "dead-1" }),
       "Orphaned agent process is dead, marking crashed",
@@ -949,6 +963,73 @@ describe("ProcessRunner.rehydrateOrphans()", () => {
     );
     // The manifest rewrite inside finalizeOrphan was attempted but failed silently.
     expect(writeFileSync).not.toHaveBeenCalled();
+
+    killSpy.mockRestore();
+  });
+
+  it("falls back to pid 0 and no-ops a second finalize when a stale poll interval outlives its process entry", async () => {
+    // Regression coverage for the defensive `?? 0` fallback in the poll loop and
+    // the early-return guard in finalizeOrphan, which only trigger when a second,
+    // now-dangling interval fires after its process entry has already been
+    // removed by another finalize. We force that by rehydrating the same
+    // manifest id twice, leaving two independent poll intervals racing for one
+    // map entry.
+    vi.useFakeTimers();
+    const ALIVE_PID = 7777;
+    const manifest = {
+      id: "dup-1",
+      pid: ALIVE_PID,
+      command: "claude",
+      args: [],
+      runId: "run-dup",
+      stage: "executor",
+      runtime: "claude-code",
+      startedAt: new Date().toISOString(),
+      logFile: join(SPOOL_DIR, "dup-1.log"),
+    };
+    const manifestPath = join(SPOOL_DIR, "dup-1.json");
+    const logPath = join(SPOOL_DIR, "dup-1.log");
+
+    vi.mocked(readdirSync).mockReturnValue(["dup-1.json"] as never);
+    vi.mocked(readFileSync).mockImplementation((path: unknown) => {
+      if (path === manifestPath) return JSON.stringify(manifest) as never;
+      throw new Error("ENOENT: no log file");
+    });
+
+    let aliveFlag = true;
+    const killSpy = vi.spyOn(process, "kill").mockImplementation((pid) => {
+      if (pid === ALIVE_PID && aliveFlag) return true as never;
+      throw new Error("ESRCH");
+    });
+
+    const watchers: { close: ReturnType<typeof vi.fn> }[] = [];
+    vi.mocked(watch).mockImplementation(() => {
+      const w = { close: vi.fn() };
+      watchers.push(w);
+      return w as never;
+    });
+
+    const emitter = makeEmitter();
+    const logger = makeLogger();
+    const runner = new ProcessRunner("real", logger as never, emitter as never, SPOOL_DIR);
+
+    // Two rehydrations at the same fake-clock tick create two independent
+    // poll intervals (and watchers) for the same processId.
+    runner.rehydrateOrphans();
+    runner.rehydrateOrphans();
+    expect(watchers).toHaveLength(2);
+    expect(runner.getActiveProcesses()).toHaveLength(1);
+
+    aliveFlag = false;
+    await vi.advanceTimersByTimeAsync(5_000);
+
+    // The second (dangling) interval's poll must have fallen back to pid 0.
+    expect(killSpy).toHaveBeenCalledWith(0, 0);
+    // Both intervals' watchers were closed, but only one real finalize happened.
+    expect(watchers[0]!.close).toHaveBeenCalledTimes(1);
+    expect(watchers[1]!.close).toHaveBeenCalledTimes(1);
+    expect(emitter.emitProcessCompleted).toHaveBeenCalledTimes(1);
+    expect(runner.getActiveProcesses()).toEqual([]);
 
     killSpy.mockRestore();
   });
