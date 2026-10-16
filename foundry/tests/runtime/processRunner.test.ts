@@ -843,4 +843,83 @@ describe("ProcessRunner.rehydrateOrphans()", () => {
 
     killSpy.mockRestore();
   });
+
+  it("tolerates missing/unreadable log and manifest files throughout the orphan lifecycle", async () => {
+    vi.useFakeTimers();
+    const ERR_PID = 3333;
+    const manifest = {
+      id: "err-1",
+      pid: ERR_PID,
+      command: "claude",
+      args: [],
+      runId: "run-err",
+      stage: "executor",
+      runtime: "claude-code",
+      startedAt: new Date().toISOString(),
+      logFile: join(SPOOL_DIR, "err-1.log"),
+    };
+    const manifestPath = join(SPOOL_DIR, "err-1.json");
+    const logPath = join(SPOOL_DIR, "err-1.log");
+
+    vi.mocked(readdirSync).mockReturnValue(["err-1.json"] as never);
+
+    let aliveFlag = true;
+    const killSpy = vi.spyOn(process, "kill").mockImplementation((pid) => {
+      if (pid === ERR_PID && aliveFlag) return true as never;
+      throw new Error("ESRCH");
+    });
+
+    let watchCallback: (() => void) | undefined;
+    const watcher = { close: vi.fn() };
+    vi.mocked(watch).mockImplementation((_path, cb) => {
+      watchCallback = cb as () => void;
+      return watcher as never;
+    });
+
+    // The log file never exists (every read for it throws). The manifest file
+    // is readable the first time (the initial directory scan) but fails on the
+    // later re-read inside finalizeOrphan, exercising all of the module's
+    // best-effort catch branches.
+    let manifestReadCount = 0;
+    vi.mocked(readFileSync).mockImplementation((path: unknown) => {
+      if (path === manifestPath) {
+        manifestReadCount += 1;
+        if (manifestReadCount === 1) return JSON.stringify(manifest) as never;
+        throw new Error("manifest vanished");
+      }
+      if (path === logPath) {
+        throw new Error("ENOENT: no log file");
+      }
+      throw new Error(`unexpected read: ${String(path)}`);
+    });
+
+    const emitter = makeEmitter();
+    const logger = makeLogger();
+    const runner = new ProcessRunner("real", logger as never, emitter as never, SPOOL_DIR);
+
+    expect(() => runner.rehydrateOrphans()).not.toThrow();
+    expect(runner.getActiveProcesses()).toHaveLength(1);
+    expect(runner.getProcessOutput("err-1")).toBe(""); // rollingBuffer seed failed silently
+
+    // Watcher fires but the log read fails — handled by the ignore-and-continue catch.
+    expect(() => watchCallback?.()).not.toThrow();
+    expect(emitter.emitProcessOutput).not.toHaveBeenCalled();
+
+    aliveFlag = false;
+    await vi.advanceTimersByTimeAsync(5_000);
+
+    expect(runner.getActiveProcesses()).toEqual([]);
+    expect(emitter.emitProcessCompleted).toHaveBeenCalledWith(
+      "run-err",
+      "err-1",
+      "executor",
+      "claude-code",
+      -1,
+      expect.any(Number),
+    );
+    // The manifest rewrite inside finalizeOrphan was attempted but failed silently.
+    expect(writeFileSync).not.toHaveBeenCalled();
+
+    killSpy.mockRestore();
+  });
 });

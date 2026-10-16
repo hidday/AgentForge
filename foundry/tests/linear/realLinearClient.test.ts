@@ -24,6 +24,10 @@ interface FakeIssue {
   cycle: Promise<{ name: string } | undefined>;
   team: Promise<{ id: string; key: string } | undefined>;
   labels: () => Promise<{ nodes: Array<{ id: string; name: string }> } | undefined>;
+  parent?: Promise<FakeIssue | undefined>;
+  inverseRelations?: () => Promise<{
+    nodes: Array<{ id: string; type: string; issue: Promise<FakeIssue> }>;
+  }>;
 }
 
 function makeFakeIssue(overrides: Partial<FakeIssue> & { id: string }): FakeIssue {
@@ -114,6 +118,38 @@ describe("RealLinearClient.getIssue", () => {
     expect(result.team).toBeUndefined();
     expect(result.cycle).toBeUndefined();
     expect(result.labels).toEqual([]);
+  });
+});
+
+describe("RealLinearClient.getRelatedContext", () => {
+  it("logs a warning and drops a blocker when hydrating its issue rejects", async () => {
+    const logger = makeLogger();
+    const client = new RealLinearClient("key", logger as never);
+    const sdk = makeFakeSdk();
+    const failingRelationIssue = Promise.reject(new Error("hydrate failed"));
+    const okBlocker = makeFakeIssue({ id: "blocker-ok" });
+    const focus = makeFakeIssue({
+      id: "focus-id",
+      parent: Promise.resolve(undefined),
+      inverseRelations: () =>
+        Promise.resolve({
+          nodes: [
+            { id: "rel-bad", type: "blocks", issue: failingRelationIssue },
+            { id: "rel-good", type: "blocks", issue: Promise.resolve(okBlocker) },
+          ],
+        }),
+    });
+    sdk.issue.mockResolvedValue(focus);
+    injectSdk(client, sdk);
+
+    const ctx = await client.getRelatedContext("focus-id");
+
+    expect(ctx.blockers).toHaveLength(1);
+    expect(ctx.blockers[0].id).toBe("blocker-ok");
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.objectContaining({ relationId: "rel-bad", focusIssueId: "focus-id" }),
+      "Failed to hydrate blocker issue from relation",
+    );
   });
 });
 
