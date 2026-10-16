@@ -110,6 +110,14 @@ describe("parseClaudeOutput – tool_use extraction", () => {
     ]);
   });
 
+  it("produces no block for a content_block_start event whose content_block isn't a tool_use", () => {
+    const line = JSON.stringify({
+      type: "content_block_start",
+      content_block: { type: "text", text: "" },
+    });
+    expect(parseClaudeOutput(line)).toEqual([]);
+  });
+
   it("truncates long tool input with an ellipsis", () => {
     const longContent = "x".repeat(300);
     const line = JSON.stringify({
@@ -190,6 +198,11 @@ describe("parseClaudeOutput – tool_result extraction", () => {
 
   it("skips object tool_use_result with no stdout/stderr content", () => {
     const line = JSON.stringify({ tool_use_result: { stdout: "  ", stderr: " " } });
+    expect(parseClaudeOutput(line)).toEqual([]);
+  });
+
+  it("produces no block for a tool_use_result that is neither a string nor an object", () => {
+    const line = JSON.stringify({ tool_use_result: 42 });
     expect(parseClaudeOutput(line)).toEqual([]);
   });
 
@@ -414,6 +427,22 @@ describe("parseClaudeOutput – edge cases", () => {
   it("handles a JSON object with no recognised fields gracefully (produces no block)", () => {
     const line = JSON.stringify({ unknown_field: 42 });
     expect(parseClaudeOutput(line)).toEqual([]);
+  });
+
+  it("produces no block for a line that parses as a bare JSON primitive (not an object or array)", () => {
+    expect(parseClaudeOutput("42")).toEqual([]);
+    expect(parseClaudeOutput("true")).toEqual([]);
+  });
+
+  it("skips content-array entries with an unrecognised type", () => {
+    const line = JSON.stringify({
+      content: [
+        { type: "thinking", text: "internal reasoning" },
+        { type: "text", text: "visible output" },
+      ],
+    });
+    const result = parseClaudeOutput(line);
+    expect(result).toEqual<ParsedBlock[]>([{ type: "text", content: "visible output" }]);
   });
 
   it("filters a non-JSON fragment ending in stop_reason:null + stop_sequence:null with no other noise markers", () => {

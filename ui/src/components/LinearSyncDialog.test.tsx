@@ -119,6 +119,29 @@ describe("LinearSyncDialog", () => {
     });
   });
 
+  it("does not call onIngested when ingestIssues resolves with zero started runs", async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    const onIngested = vi.fn();
+    mockApi.ingestIssues.mockResolvedValue({
+      ok: true,
+      started: [],
+      skipped: [issueA.id, issueB.id],
+    });
+
+    render(
+      <LinearSyncDialog open={true} onClose={vi.fn()} onIngested={onIngested} />,
+    );
+    await waitFor(() => expect(screen.getByText(issueA.title)).toBeDefined());
+    await user.click(screen.getByRole("button", { name: /start 2 runs/i }));
+
+    await act(async () => {
+      vi.advanceTimersByTime(700);
+    });
+
+    await waitFor(() => expect(mockApi.ingestIssues).toHaveBeenCalled());
+    expect(onIngested).not.toHaveBeenCalled();
+  });
+
   it("auto-closes when ingestIssues resolves first (SSE never fires)", async () => {
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     const onClose = vi.fn();
