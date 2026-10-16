@@ -183,6 +183,39 @@ describe("ExecutorAgent.run()", () => {
     expect(githubClient.createDraftPR).toHaveBeenCalledTimes(1);
   });
 
+  it("marks isRetry true in the start log when only existingBranch is set (no existingPR)", async () => {
+    const { agent, logger, githubClient } = buildAgent();
+
+    await agent.run(makePlan(), makeTaskBundle(), "run-1", { existingBranch: "ai/lin-1" });
+
+    const startLog = logger.info.mock.calls.find(
+      (c: unknown[]) => c[1] === "Starting executor agent",
+    );
+    expect((startLog?.[0] as Record<string, unknown>)?.isRetry).toBe(true);
+    // No existingPR means a new draft PR is still created.
+    expect(githubClient.createDraftPR).toHaveBeenCalledTimes(1);
+  });
+
+  it("treats a retry context with explicit null fields as a non-retry (falls back to defaults)", async () => {
+    const { agent, logger, githubClient, gitService } = buildAgent();
+
+    await agent.run(makePlan(), makeTaskBundle(), "run-1", {
+      existingBranch: null,
+      existingPR: null,
+    });
+
+    const startLog = logger.info.mock.calls.find(
+      (c: unknown[]) => c[1] === "Starting executor agent",
+    );
+    expect((startLog?.[0] as Record<string, unknown>)?.isRetry).toBe(false);
+    expect(gitService.commitAndPush).toHaveBeenCalledWith(
+      "/tmp",
+      "ai/lin-1",
+      expect.stringContaining("Test issue"),
+    );
+    expect(githubClient.createDraftPR).toHaveBeenCalledTimes(1);
+  });
+
   it("reuses an existing PR number on retry instead of creating a new draft", async () => {
     const { agent, githubClient } = buildAgent();
 
@@ -193,6 +226,28 @@ describe("ExecutorAgent.run()", () => {
 
     expect(result.prNumber).toBe(555);
     expect(githubClient.createDraftPR).not.toHaveBeenCalled();
+  });
+
+  it("injects the operator note section into the user prompt when provided", async () => {
+    const { agent, getUserPrompt } = buildAgent();
+
+    await agent.run(makePlan(), makeTaskBundle(), "run-1", undefined, {
+      operatorNote: "Please prioritize backward compatibility.",
+    });
+
+    const userPrompt = getUserPrompt();
+    expect(userPrompt).toContain("## Operator Note");
+    expect(userPrompt).toContain("Please prioritize backward compatibility.");
+    expect(userPrompt).toContain("high-priority clarification");
+  });
+
+  it("omits the operator note section when no operator note is provided", async () => {
+    const { agent, getUserPrompt } = buildAgent();
+
+    await agent.run(makePlan(), makeTaskBundle(), "run-1");
+
+    const userPrompt = getUserPrompt();
+    expect(userPrompt).not.toContain("## Operator Note");
   });
 
   it("logs the score and executionVersion in the completion event", async () => {

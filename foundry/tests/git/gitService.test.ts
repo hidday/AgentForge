@@ -337,6 +337,19 @@ describe("GitService", () => {
       );
     });
 
+    it("breaks on max length within the first 4 parts when a word would push the slug over 30 chars", () => {
+      // "anotherlongwordthatpushesover30chars" (37 chars) makes the cumulative
+      // slug exceed maxLen=30 on the second part, before the maxParts=4 cutoff
+      // is reached — exercising the length-based break distinctly from the
+      // part-count-based cutoff covered by the test above.
+      expect(
+        buildWorktreeDirName(
+          "abcdefgh",
+          "hidday/pry-42-shortword-anotherlongwordthatpushesover30chars-tail-more",
+        ),
+      ).toBe("run-abcdefgh-pry-42-shortword");
+    });
+
     it("falls back to run-<shortId> when no issue id is present", () => {
       expect(buildWorktreeDirName("abcdefgh", "hidday/some-branch-name")).toBe(
         "run-abcdefgh",
@@ -358,6 +371,16 @@ describe("GitService", () => {
   describe("error handling", () => {
     it("throws GitError for invalid repo path", async () => {
       await expect(svc.currentBranch("/nonexistent")).rejects.toThrow(GitError);
+    });
+
+    it("GitError stringifies a non-Error cause directly (not via .message)", () => {
+      const err = new GitError("push", "/some/path", "a plain string cause");
+      expect(err.message).toBe('git push failed in /some/path: a plain string cause');
+    });
+
+    it("GitError uses .message when the cause is an Error instance", () => {
+      const err = new GitError("push", "/some/path", new Error("boom"));
+      expect(err.message).toBe("git push failed in /some/path: boom");
     });
 
     it("fetch throws GitError for invalid repo path", async () => {
