@@ -171,6 +171,21 @@ describe("DashboardPage", () => {
     expect(getStatValue("Done")).toBe("1");
   });
 
+  it("counts a run whose state is not in the known category map as idle, not toward any stat", () => {
+    const runs = [
+      makeRun({ id: "r1", state: "SomeUnknownFutureState" }),
+      makeRun({ id: "r2", state: "Implementing" }), // active
+    ];
+    mockUseRuns.mockReturnValue({ ...defaultHookResult, runs });
+    render(<DashboardPage />);
+
+    expect(getStatValue("Total")).toBe("2");
+    expect(getStatValue("Active")).toBe("1");
+    expect(getStatValue("Awaiting")).toBe("0");
+    expect(getStatValue("Blocked")).toBe("0");
+    expect(getStatValue("Done")).toBe("0");
+  });
+
   it("renders RunsTable with an empty list and zeroed stats when there are no runs", () => {
     mockUseRuns.mockReturnValue({ ...defaultHookResult, runs: [] });
     render(<DashboardPage />);

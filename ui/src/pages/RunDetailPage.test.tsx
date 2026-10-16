@@ -351,6 +351,30 @@ describe("RunDetailPage", () => {
     expect(actionBarProps.hasOptionalQuestions).toBe(false);
   });
 
+  it("falls back from linearIssueTitle to linearIssueIdentifier when title is missing", () => {
+    const run = makeRun({ linearIssueTitle: null, linearIssueIdentifier: "ENG-99" });
+    mockUseRun.mockReturnValue({
+      ...defaultUseRunResult,
+      data: { run, artifacts: [], events: [] },
+    });
+    renderPage();
+    expect(screen.getByText("ENG-99")).toBeDefined();
+  });
+
+  it("falls back to a truncated linearIssueId when title and identifier are both missing", () => {
+    const run = makeRun({
+      linearIssueTitle: null,
+      linearIssueIdentifier: null,
+      linearIssueId: "abcdefghijklmnop",
+    });
+    mockUseRun.mockReturnValue({
+      ...defaultUseRunResult,
+      data: { run, artifacts: [], events: [] },
+    });
+    renderPage();
+    expect(screen.getByText("abcdefgh")).toBeDefined();
+  });
+
   it("does not render Cursor/Claude links when workingDirectory or branchName is missing", () => {
     const run = makeRun({ branchName: null, workingDirectory: "" });
     mockUseRun.mockReturnValue({

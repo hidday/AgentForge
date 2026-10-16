@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import type { Run } from "@/api/client.ts";
@@ -117,6 +117,15 @@ describe("RunsTable", () => {
     renderTable([makeRun({ linearIssueUrl: "https://linear.app/team/issue/ENG-1" })]);
     const link = screen.getByTitle("Open in Linear");
     expect(link.getAttribute("href")).toBe("https://linear.app/team/issue/ENG-1");
+  });
+
+  it("stops click propagation on the external Linear link so it doesn't also trigger row navigation", () => {
+    renderTable([makeRun({ linearIssueUrl: "https://linear.app/team/issue/ENG-1" })]);
+    const link = screen.getByTitle("Open in Linear");
+    const stopPropagationSpy = vi.spyOn(MouseEvent.prototype, "stopPropagation");
+    fireEvent.click(link);
+    expect(stopPropagationSpy).toHaveBeenCalled();
+    stopPropagationSpy.mockRestore();
   });
 
   it("does not render an external Linear link when linearIssueUrl is null", () => {

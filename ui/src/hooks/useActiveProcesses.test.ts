@@ -136,6 +136,30 @@ describe("useActiveProcesses", () => {
     expect(result.current.processes).toEqual([]);
   });
 
+  it("does not update output after unmount while getProcessOutput is still pending", async () => {
+    const proc = makeProcess();
+    mockApi.getActiveProcesses.mockResolvedValue({ processes: [proc] });
+    let resolveOutput!: (v: { processId: string; output: string }) => void;
+    mockApi.getProcessOutput.mockReturnValue(
+      new Promise((res) => {
+        resolveOutput = res;
+      }),
+    );
+
+    const { result, unmount } = renderHook(() => useActiveProcesses("run-1"));
+
+    await waitFor(() => expect(mockApi.getProcessOutput).toHaveBeenCalled());
+    unmount();
+
+    await act(async () => {
+      resolveOutput({ processId: proc.id, output: "late output" });
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(result.current.output).toBe("");
+  });
+
   it("process:started SSE event adds a new process entry and resets output", async () => {
     mockApi.getActiveProcesses.mockResolvedValue({ processes: [] });
 
