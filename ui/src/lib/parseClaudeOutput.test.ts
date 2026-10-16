@@ -373,6 +373,42 @@ describe("parseClaudeOutput – edge cases", () => {
     expect(parseClaudeOutput(line)).toEqual([]);
   });
 
+  it("filters a non-JSON fragment ending in stop_reason:null + stop_sequence:null with no other noise markers", () => {
+    // Deliberately avoids any METADATA_NOISE_RE keyword (input_tokens, usage, etc.)
+    // and parent_tool_use_id, so this exercises the stop_reason/stop_sequence
+    // branch in isNoiseLine() on its own rather than an earlier return.
+    const fragment = '"foo":"bar"}],"stop_reason":null,"stop_sequence":null}';
+    expect(parseClaudeOutput(fragment)).toEqual([]);
+  });
+
+  it("skips non-object entries inside a content array", () => {
+    const line = JSON.stringify({
+      content: ["a plain string", null, { type: "text", text: "real text" }],
+    });
+    const result = parseClaudeOutput(line);
+    expect(result).toEqual<ParsedBlock[]>([{ type: "text", content: "real text" }]);
+  });
+
+  it("formats a tool_use input via the path field when command/file_path are absent", () => {
+    const line = JSON.stringify({
+      content: [{ type: "tool_use", name: "Glob", input: { path: "/tmp/dir" } }],
+    });
+    const result = parseClaudeOutput(line);
+    expect(result).toEqual<ParsedBlock[]>([
+      { type: "tool_use", content: "/tmp/dir", toolName: "Glob" },
+    ]);
+  });
+
+  it("formats a tool_use input as an empty string when input is not an object", () => {
+    const line = JSON.stringify({
+      content: [{ type: "tool_use", name: "Noop", input: "not-an-object" }],
+    });
+    const result = parseClaudeOutput(line);
+    expect(result).toEqual<ParsedBlock[]>([
+      { type: "tool_use", content: "", toolName: "Noop" },
+    ]);
+  });
+
   it("filters metadata from a mixed stream of content and noise", () => {
     const raw = ndjoin(
       JSON.stringify({ type: "message_start", message: { id: "msg_1", model: "claude-sonnet-4-20250514" } }),
