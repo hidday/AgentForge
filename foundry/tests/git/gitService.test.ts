@@ -158,6 +158,16 @@ describe("GitService", () => {
       expect(stat).toContain("gitdir:");
     });
 
+    it("createWorktree throws GitError when the start point does not exist", async () => {
+      const wtPath = join(repoPath, ".worktrees", "bad-wt");
+      await expect(
+        svc.createWorktree(repoPath, wtPath, "bad-branch", "no-such-start-point"),
+      ).rejects.toThrow(GitError);
+      await expect(
+        svc.createWorktree(repoPath, wtPath, "bad-branch", "no-such-start-point"),
+      ).rejects.toThrow(/git worktree add failed/);
+    });
+
     it("removeWorktree removes the worktree", async () => {
       const wtPath = join(repoPath, ".worktrees", "test-wt2");
       await svc.createWorktree(repoPath, wtPath, "branch2", "main");
@@ -348,6 +358,15 @@ describe("GitService", () => {
   describe("error handling", () => {
     it("throws GitError for invalid repo path", async () => {
       await expect(svc.currentBranch("/nonexistent")).rejects.toThrow(GitError);
+    });
+
+    it("fetch throws GitError for invalid repo path", async () => {
+      await expect(svc.fetch("/nonexistent")).rejects.toThrow(GitError);
+      await expect(svc.fetch("/nonexistent")).rejects.toThrow(/git fetch failed in \/nonexistent/);
+    });
+
+    it("pruneWorktrees swallows errors for invalid repo path (best-effort)", async () => {
+      await expect(svc.pruneWorktrees("/nonexistent")).resolves.toBeUndefined();
     });
 
     it("hasChanges throws GitError for invalid repo path", async () => {
