@@ -96,6 +96,16 @@ describe("GET /api/events/stream", () => {
     expect(setIntervalSpy).toHaveBeenCalledWith(expect.any(Function), 15_000);
   });
 
+  it("writes a keep-alive comment each time the heartbeat fires", async () => {
+    const { getData } = await openSseConnection(app);
+    const initialData = getData();
+
+    const heartbeatCallback = setIntervalSpy.mock.calls[0][0] as () => void;
+    heartbeatCallback();
+
+    expect(getData()).toBe(`${initialData}:\n\n`);
+  });
+
   it("writes emitted dashboard events to the stream as SSE 'data:' lines", async () => {
     const { getData } = await openSseConnection(app);
 

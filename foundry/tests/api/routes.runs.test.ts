@@ -258,6 +258,39 @@ describe("POST /api/runs/:id/actions/approve-plan", () => {
   });
 });
 
+describe("POST /api/runs/:id/actions/reject-plan (mode validation)", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it("returns 400 when mode is not 'iterate' or 'fresh'", async () => {
+    const { app, mockOrchestrator } = await buildApp();
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/actions/reject-plan",
+      payload: { mode: "not-a-real-mode" },
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toEqual({ error: "mode must be one of: iterate, fresh" });
+    expect(mockOrchestrator.rejectPlan).not.toHaveBeenCalled();
+  });
+
+  it("passes mode 'fresh' through to rejectPlan when provided", async () => {
+    const run = makeRun();
+    const { app, mockOrchestrator } = await buildApp();
+    mockOrchestrator.rejectPlan.mockResolvedValue(run);
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/actions/reject-plan",
+      payload: { mode: "fresh" },
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(mockOrchestrator.rejectPlan).toHaveBeenCalledWith("run-1", undefined, "api", "fresh");
+  });
+});
+
 describe("POST /api/runs/:id/actions/re-review-plan", () => {
   beforeEach(() => vi.clearAllMocks());
 
@@ -290,6 +323,22 @@ describe("POST /api/runs/:id/actions/re-review-plan", () => {
 
     expect(res.statusCode).toBe(200);
     await new Promise((resolve) => setImmediate(resolve));
+  });
+
+  it("returns 400 when orchestrator.runManualReReview throws synchronously", async () => {
+    const { app, mockOrchestrator } = await buildApp();
+    mockOrchestrator.runManualReReview.mockImplementation(() => {
+      throw new Error("synchronous failure");
+    });
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/actions/re-review-plan",
+      payload: {},
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toEqual({ error: "synchronous failure" });
   });
 });
 
@@ -325,6 +374,22 @@ describe("POST /api/runs/:id/actions/revise-plan", () => {
 
     expect(res.statusCode).toBe(200);
     await new Promise((resolve) => setImmediate(resolve));
+  });
+
+  it("returns 400 when orchestrator.runManualPlanRevision throws synchronously", async () => {
+    const { app, mockOrchestrator } = await buildApp();
+    mockOrchestrator.runManualPlanRevision.mockImplementation(() => {
+      throw new Error("synchronous failure");
+    });
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/actions/revise-plan",
+      payload: {},
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toEqual({ error: "synchronous failure" });
   });
 });
 
@@ -593,5 +658,44 @@ describe("GET /api/runs/:id/summary", () => {
     expect(body.review).toEqual({ version: 1, payload: { verdict: "pass" } });
     expect(body.executionReport.score).toBe(0.8);
     expect(body.executionReport.scoreRationale).toBe("solid");
+  });
+
+  it("defaults steps to an empty array when the plan's steps field is not an array", async () => {
+    const run = makeRun();
+    const { app, mockRunRepo, mockArtifactRepo } = await buildApp();
+    mockRunRepo.findById.mockResolvedValue(run);
+    mockArtifactRepo.findLatestByType.mockImplementation(async (_runId: string, type: string) => {
+      if (type === "Plan") {
+        return { version: 1, payloadJson: { summary: "No steps here", steps: undefined } };
+      }
+      return undefined;
+    });
+
+    const res = await app.inject({ method: "GET", url: "/api/runs/run-1/summary" });
+
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as { plan: { steps: unknown[]; stepCount: number } };
+    expect(body.plan.steps).toEqual([]);
+    expect(body.plan.stepCount).toBe(0);
+  });
+
+  it("falls back to String(risk) when a risk value cannot be JSON-serialized", async () => {
+    const run = makeRun();
+    const circular: Record<string, unknown> = { description: undefined };
+    circular.self = circular; // JSON.stringify throws on circular structures
+    const { app, mockRunRepo, mockArtifactRepo } = await buildApp();
+    mockRunRepo.findById.mockResolvedValue(run);
+    mockArtifactRepo.findLatestByType.mockImplementation(async (_runId: string, type: string) => {
+      if (type === "Plan") {
+        return { version: 1, payloadJson: { summary: "Risky", risks: [circular] } };
+      }
+      return undefined;
+    });
+
+    const res = await app.inject({ method: "GET", url: "/api/runs/run-1/summary" });
+
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as { plan: { risks: string[] } };
+    expect(body.plan.risks).toEqual([String(circular)]);
   });
 });
