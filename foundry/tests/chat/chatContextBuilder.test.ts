@@ -86,6 +86,20 @@ describe("buildChatSystemPrompt", () => {
     expect(result).toContain("Plan summary");
   });
 
+  it("includes plan open questions when present", () => {
+    const planArtifact = makeArtifact({
+      type: "Plan",
+      version: 1,
+      payloadJson: {
+        summary: "Plan summary",
+        openQuestions: ["Should we support multi-tenant mode?"],
+      },
+    });
+    const result = buildChatSystemPrompt(makeRun(), [planArtifact]);
+    expect(result).toContain("**Open Questions:**");
+    expect(result).toContain("Should we support multi-tenant mode?");
+  });
+
   it("includes human answers section when HumanAnswers artifact present", () => {
     const artifact = makeArtifact({
       type: "HumanAnswers",
@@ -230,6 +244,60 @@ describe("buildChatSystemPrompt", () => {
     expect(result).toContain("(truncated)");
     expect(result).toContain("x".repeat(4000));
     expect(result).not.toContain("x".repeat(4001));
+  });
+
+  it("includes plan review findings when PlanReview artifact present", () => {
+    const artifact = makeArtifact({
+      type: "PlanReview",
+      version: 1,
+      payloadJson: {
+        summary: "Plan has a scoping gap.",
+        findings: [
+          {
+            id: "pr1",
+            severity: "high",
+            title: "Missing migration step",
+            details: "The plan does not account for the DB migration.",
+          },
+        ],
+      },
+    });
+    const result = buildChatSystemPrompt(makeRun(), [artifact]);
+    expect(result).toContain("## Plan Review Findings");
+    expect(result).toContain("**Summary:** Plan has a scoping gap.");
+    expect(result).toContain("**[high] Missing migration step** (pr1): The plan does not account for the DB migration.");
+  });
+
+  it("omits Plan Review Findings section when no PlanReview artifact present", () => {
+    const result = buildChatSystemPrompt(makeRun(), []);
+    expect(result).not.toContain("## Plan Review Findings");
+  });
+
+  it("includes code review findings when Review artifact present", () => {
+    const artifact = makeArtifact({
+      type: "Review",
+      version: 1,
+      payloadJson: {
+        summary: "One blocking issue found.",
+        findings: [
+          {
+            id: "r1",
+            severity: "critical",
+            title: "SQL injection risk",
+            details: "User input is concatenated directly into the query.",
+          },
+        ],
+      },
+    });
+    const result = buildChatSystemPrompt(makeRun(), [artifact]);
+    expect(result).toContain("## Code Review Findings");
+    expect(result).toContain("**Summary:** One blocking issue found.");
+    expect(result).toContain("**[critical] SQL injection risk** (r1): User input is concatenated directly into the query.");
+  });
+
+  it("omits Code Review Findings section when no Review artifact present", () => {
+    const result = buildChatSystemPrompt(makeRun(), []);
+    expect(result).not.toContain("## Code Review Findings");
   });
 
   it("uses the Plan artifact with the highest version when multiple exist", () => {
