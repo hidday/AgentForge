@@ -422,4 +422,103 @@ describe("LinearSyncDialog", () => {
     expect(onIngestComplete).toHaveBeenLastCalledWith({ started: 1, skipped: 1 });
     expect(onIngested).toHaveBeenCalledOnce();
   });
+
+  it("clears a pending min-delay timer on unmount", async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    mockApi.ingestIssues.mockReturnValue(new Promise(() => {}));
+    const clearTimeoutSpy = vi.spyOn(globalThis, "clearTimeout");
+
+    const { unmount } = render(
+      <LinearSyncDialog open={true} onClose={vi.fn()} onIngested={vi.fn()} />,
+    );
+    await waitFor(() => expect(screen.getByText(issueA.title)).toBeDefined());
+    await user.click(screen.getByRole("button", { name: /start 2 runs/i }));
+
+    fireSSE({ type: "run:created", runId: "run-a", issueId: issueA.id });
+    fireSSE({ type: "run:created", runId: "run-b", issueId: issueB.id });
+    // Both seen -> a MIN_LOADER_MS timer is now scheduled.
+
+    clearTimeoutSpy.mockClear();
+    unmount();
+    expect(clearTimeoutSpy).toHaveBeenCalled();
+    clearTimeoutSpy.mockRestore();
+  });
+
+  it("falls back to a generic error message when fetchPendingIssues rejects with a non-Error value", async () => {
+    mockApi.fetchPendingIssues.mockReset();
+    mockApi.fetchPendingIssues.mockRejectedValue("network down");
+
+    render(<LinearSyncDialog open={true} onClose={vi.fn()} onIngested={vi.fn()} />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Failed to fetch issues")).toBeDefined();
+    });
+  });
+
+  it("falls back to a generic error message when ingestIssues rejects with a non-Error value", async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    mockApi.ingestIssues.mockRejectedValue("network down");
+
+    render(<LinearSyncDialog open={true} onClose={vi.fn()} onIngested={vi.fn()} />);
+    await waitFor(() => expect(screen.getByText(issueA.title)).toBeDefined());
+    await user.click(screen.getByRole("button", { name: /start 2 runs/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText("Failed to ingest issues")).toBeDefined();
+    });
+  });
+
+  it("does not auto-close or report stale counts if ingestIssues resolves after the dialog was closed and reopened mid-flight", async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    let resolveIngest!: (v: { ok: boolean; started: string[]; skipped: string[] }) => void;
+    mockApi.ingestIssues.mockReturnValue(
+      new Promise((res) => {
+        resolveIngest = res;
+      }),
+    );
+    const onClose = vi.fn();
+    const onIngestComplete = vi.fn();
+
+    const { rerender } = render(
+      <LinearSyncDialog
+        open={true}
+        onClose={onClose}
+        onIngested={vi.fn()}
+        onIngestComplete={onIngestComplete}
+      />,
+    );
+    await waitFor(() => expect(screen.getByText(issueA.title)).toBeDefined());
+    await user.click(screen.getByRole("button", { name: /start 2 runs/i }));
+
+    // Close and reopen while the ingestIssues request is still in flight —
+    // this resets pendingIdsRef to [] via the `open` effect without
+    // cancelling the pending promise.
+    rerender(
+      <LinearSyncDialog
+        open={false}
+        onClose={onClose}
+        onIngested={vi.fn()}
+        onIngestComplete={onIngestComplete}
+      />,
+    );
+    mockApi.fetchPendingIssues.mockResolvedValue({ issues: [issueA, issueB] });
+    rerender(
+      <LinearSyncDialog
+        open={true}
+        onClose={onClose}
+        onIngested={vi.fn()}
+        onIngestComplete={onIngestComplete}
+      />,
+    );
+    await waitFor(() => expect(screen.getByText(issueA.title)).toBeDefined());
+
+    // The stale request now resolves — maybeAutoClose() must see pendingIds
+    // is now empty and bail out rather than closing the reopened dialog.
+    await act(async () => {
+      resolveIngest({ ok: true, started: [issueA.id], skipped: [] });
+      await Promise.resolve();
+    });
+
+    expect(onClose).not.toHaveBeenCalled();
+  });
 });

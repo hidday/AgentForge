@@ -129,6 +129,17 @@ describe("DistilledSkillPanel", () => {
     expect(screen.getByText("distilled-skill")).toBeDefined();
   });
 
+  it("omits the description section when neither distilledSkill nor distillationDecision has a description", () => {
+    render(
+      <DistilledSkillPanel
+        distilledSkill={{ ...skill, description: null }}
+        distillationDecision={{ ...decision, description: null }}
+      />,
+    );
+
+    expect(screen.queryByText(/Use when changing prysmic/i)).toBeNull();
+  });
+
   it("shows the displaced skill id when a skill was displaced", () => {
     render(
       <DistilledSkillPanel
