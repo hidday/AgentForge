@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor, act } from "@testing-library/react";
+import { render, screen, waitFor, act, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { Artifact } from "@/api/client.ts";
 
@@ -250,5 +250,74 @@ describe("ChatPanel", () => {
       // "New question" should NOT appear
       expect(screen.queryByText("New question")).toBeNull();
     });
+  });
+
+  it("collapses and re-expands the panel when the header is clicked", async () => {
+    render(<ChatPanel runId={RUN_ID} artifacts={[]} />);
+
+    expect(screen.getByPlaceholderText(/ask the agent/i)).toBeDefined();
+    const header = screen.getByRole("button", { name: /chat with agent/i });
+
+    await userEvent.click(header);
+    expect(screen.queryByPlaceholderText(/ask the agent/i)).toBeNull();
+
+    await userEvent.click(header);
+    expect(screen.getByPlaceholderText(/ask the agent/i)).toBeDefined();
+  });
+
+  it("falls back to a generic error message when sendChatMessage rejects with a non-Error value", async () => {
+    mockApi.sendChatMessage.mockRejectedValue("network down");
+
+    render(<ChatPanel runId={RUN_ID} artifacts={[]} />);
+    const input = screen.getByPlaceholderText(/ask the agent/i);
+    await userEvent.type(input, "Test question");
+    await userEvent.click(screen.getByRole("button", { name: /send/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText("Chat request failed")).toBeDefined();
+    });
+  });
+
+  it("does not submit when the input is only whitespace", () => {
+    render(<ChatPanel runId={RUN_ID} artifacts={[]} />);
+    const input = screen.getByPlaceholderText(/ask the agent/i) as HTMLInputElement;
+    fireEvent.change(input, { target: { value: "   " } });
+
+    const form = input.closest("form")!;
+    fireEvent.submit(form);
+
+    expect(mockApi.sendChatMessage).not.toHaveBeenCalled();
+  });
+
+  it("renders an empty string for a ChatMessage artifact whose payload has no content field", () => {
+    const artifact: Artifact = {
+      id: "a1",
+      runId: RUN_ID,
+      type: "ChatMessage",
+      version: 1,
+      payloadJson: { role: "user" },
+      rawText: "",
+      createdAt: "2024-01-01T00:00:01Z",
+    };
+
+    render(<ChatPanel runId={RUN_ID} artifacts={[artifact]} />);
+    expect(screen.queryByText(/No messages yet/i)).toBeNull();
+  });
+
+  it("scrolls the message list into view when a new message arrives", () => {
+    const scrollSpy = vi.fn();
+    Element.prototype.scrollIntoView = scrollSpy;
+
+    const { rerender } = render(<ChatPanel runId={RUN_ID} artifacts={[]} />);
+    expect(scrollSpy).toHaveBeenCalled();
+
+    scrollSpy.mockClear();
+    rerender(
+      <ChatPanel
+        runId={RUN_ID}
+        artifacts={[makeArtifact("user", "Hi", "a1", "2024-01-01T00:00:01Z")]}
+      />,
+    );
+    expect(scrollSpy).toHaveBeenCalledWith({ behavior: "smooth" });
   });
 });
