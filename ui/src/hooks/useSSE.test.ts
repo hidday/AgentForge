@@ -23,7 +23,7 @@ describe("useSSE", () => {
   beforeEach(() => {
     FakeEventSource.instances = [];
     // @ts-expect-error -- jsdom has no EventSource; install our fake
-    global.EventSource = FakeEventSource;
+    globalThis.EventSource = FakeEventSource;
   });
 
   afterEach(() => {
