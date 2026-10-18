@@ -321,7 +321,7 @@ describe("NotificationService.sendHumanRequest", () => {
 
   it("sends both Slack and email concurrently and reports independent results when one fails", async () => {
     (global.fetch as ReturnType<typeof vi.fn>).mockImplementation((url: string) => {
-      if (url.includes("hooks.slack.com")) {
+      if (url === "https://hooks.slack.com/services/abc") {
         return Promise.resolve({ ok: true, status: 200, text: vi.fn().mockResolvedValue("") });
       }
       return Promise.resolve({
