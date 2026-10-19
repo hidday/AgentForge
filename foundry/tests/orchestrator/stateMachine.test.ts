@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { transition, getValidEvents } from "../../src/orchestrator/stateMachine.js";
 import { RunState } from "../../src/domain/runState.js";
 import { RunEvent } from "../../src/domain/runEvent.js";
+import { StateTransitionError } from "../../src/utils/errors.js";
 
 describe("stateMachine - clarification transitions", () => {
   it("HumanClarificationNeeded + CLARIFICATION_PROVIDED → Planning", () => {
@@ -39,5 +40,45 @@ describe("stateMachine - clarification transitions", () => {
     const validEvents = getValidEvents(RunState.Failed);
     expect(validEvents).toHaveLength(1);
     expect(validEvents).toContain(RunEvent.RESET_TO_TODO);
+  });
+});
+
+describe("stateMachine - invalid transitions", () => {
+  it("throws StateTransitionError when the current state has no entries in the transition table", () => {
+    // Done is a terminal state with no outgoing transitions at all.
+    expect(() => transition(RunState.Done, RunEvent.RUN_REQUESTED)).toThrow(
+      StateTransitionError,
+    );
+    try {
+      transition(RunState.Done, RunEvent.RUN_REQUESTED);
+      expect.fail("expected throw");
+    } catch (err) {
+      expect(err).toBeInstanceOf(StateTransitionError);
+      const transitionError = err as StateTransitionError;
+      expect(transitionError.fromState).toBe(RunState.Done);
+      expect(transitionError.event).toBe(RunEvent.RUN_REQUESTED);
+      expect(transitionError.message).toContain(RunState.Done);
+      expect(transitionError.message).toContain(RunEvent.RUN_REQUESTED);
+    }
+  });
+
+  it("throws StateTransitionError when the state is known but the event has no transition defined", () => {
+    // Todo has outgoing transitions, but not for PLAN_CREATED.
+    expect(() => transition(RunState.Todo, RunEvent.PLAN_CREATED)).toThrow(
+      StateTransitionError,
+    );
+    try {
+      transition(RunState.Todo, RunEvent.PLAN_CREATED);
+      expect.fail("expected throw");
+    } catch (err) {
+      expect(err).toBeInstanceOf(StateTransitionError);
+      const transitionError = err as StateTransitionError;
+      expect(transitionError.fromState).toBe(RunState.Todo);
+      expect(transitionError.event).toBe(RunEvent.PLAN_CREATED);
+    }
+  });
+
+  it("getValidEvents returns an empty array for a state with no outgoing transitions", () => {
+    expect(getValidEvents(RunState.Done)).toEqual([]);
   });
 });
