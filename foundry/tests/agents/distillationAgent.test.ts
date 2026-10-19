@@ -430,6 +430,140 @@ describe("DistillationAgent", () => {
     });
   });
 
+  describe("(j) Existing skills summary rendering when the pool is non-empty and passes novelty", () => {
+    it("renders each active skill's name/taskCategory/snippet into the prompt instead of 'No existing skills.'", async () => {
+      const deps = buildDeps();
+      // Dissimilar to the task query so the novelty pre-check passes and the LLM call happens.
+      deps.agentSkillRepo.findActiveByRepo.mockResolvedValue([
+        makeSkill({ name: "db-migrations", taskCategory: "database migration", skillMarkdown: "Run alembic upgrade head before any schema change." }),
+      ]);
+      let capturedPrompt = "";
+      deps.agentRunner.run.mockImplementation(async (_runtime: unknown, opts: { prompt: string }) => {
+        capturedPrompt = opts.prompt;
+        return makeDistillationOutput({ shouldPersist: false, reason: "not novel enough" });
+      });
+
+      const agent = buildAgent(deps);
+      await agent.run("run-1", makeRun());
+
+      expect(deps.agentRunner.run).toHaveBeenCalledTimes(1);
+      expect(capturedPrompt).toContain("db-migrations");
+      expect(capturedPrompt).toContain("database migration");
+      expect(capturedPrompt).toContain("Run alembic upgrade head");
+      expect(capturedPrompt).not.toContain("No existing skills.");
+    });
+  });
+
+  describe("(k) shouldPersist=true but required fields missing", () => {
+    it("skips persistence and emits missing_required_skill_fields when taskCategory is blank", async () => {
+      const deps = buildDeps();
+      deps.agentSkillRepo.findActiveByRepo.mockResolvedValue([]);
+      deps.agentRunner.run.mockResolvedValue(
+        makeDistillationOutput({
+          shouldPersist: true,
+          reason: "insight",
+          taskCategory: "   ",
+          skillMarkdown: "Some markdown",
+        }),
+      );
+
+      const agent = buildAgent(deps);
+      await agent.run("run-1", makeRun());
+
+      expect(deps.agentSkillRepo.create).not.toHaveBeenCalled();
+      expect(deps.agentSkillRepo.displaceAndCreate).not.toHaveBeenCalled();
+      expect(deps.logger.warn).toHaveBeenCalledWith(
+        { runId: "run-1" },
+        "Distillation missing taskCategory or skillMarkdown, skipping persist",
+      );
+      expect(deps.eventRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          payloadJson: expect.objectContaining({
+            shouldPersist: false,
+            reason: "missing_required_skill_fields",
+            displacedSkillId: null,
+          }),
+        }),
+      );
+    });
+
+    it("skips persistence and emits missing_required_skill_fields when skillMarkdown is absent", async () => {
+      const deps = buildDeps();
+      deps.agentSkillRepo.findActiveByRepo.mockResolvedValue([]);
+      deps.agentRunner.run.mockResolvedValue(
+        makeDistillationOutput({
+          shouldPersist: true,
+          reason: "insight",
+          taskCategory: "auth middleware",
+        }),
+      );
+
+      const agent = buildAgent(deps);
+      await agent.run("run-1", makeRun());
+
+      expect(deps.agentSkillRepo.create).not.toHaveBeenCalled();
+      expect(deps.eventRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          payloadJson: expect.objectContaining({
+            shouldPersist: false,
+            reason: "missing_required_skill_fields",
+          }),
+        }),
+      );
+    });
+  });
+
+  describe("(l) Description fallback when the LLM omits or blanks the description", () => {
+    it("falls back to a generated description when decision.description is undefined", async () => {
+      const deps = buildDeps();
+      deps.agentSkillRepo.findActiveByRepo.mockResolvedValue([]);
+      deps.agentSkillRepo.countActiveByRepo.mockResolvedValue(0);
+      deps.agentRunner.run.mockResolvedValue(
+        makeDistillationOutput({
+          shouldPersist: true,
+          reason: "insight",
+          taskCategory: "auth middleware",
+          skillMarkdown: "Use JWT.",
+          name: "auth-middleware",
+        }),
+      );
+
+      const agent = buildAgent(deps);
+      await agent.run("run-1", makeRun());
+
+      expect(deps.agentSkillRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          description: "Use when working on auth middleware in test-repo.",
+        }),
+      );
+    });
+
+    it("falls back to a generated description when decision.description is whitespace-only", async () => {
+      const deps = buildDeps();
+      deps.agentSkillRepo.findActiveByRepo.mockResolvedValue([]);
+      deps.agentSkillRepo.countActiveByRepo.mockResolvedValue(0);
+      deps.agentRunner.run.mockResolvedValue(
+        makeDistillationOutput({
+          shouldPersist: true,
+          reason: "insight",
+          taskCategory: "auth middleware",
+          skillMarkdown: "Use JWT.",
+          name: "auth-middleware",
+          description: "   ",
+        }),
+      );
+
+      const agent = buildAgent(deps);
+      await agent.run("run-1", makeRun());
+
+      expect(deps.agentSkillRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          description: "Use when working on auth middleware in test-repo.",
+        }),
+      );
+    });
+  });
+
   describe("(i) No-skill backward-compat: empty priorSkills produces same output structure", () => {
     it("plannerAgent.run called with empty priorSkills works without error", async () => {
       const { PlannerAgent } = await import("../../src/agents/plannerAgent.js");

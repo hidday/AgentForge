@@ -77,6 +77,30 @@ describe("api client", () => {
       expect(options.headers).toEqual({});
     });
 
+    it("pauseRun, resumeRun, and retryStage POST to their respective action endpoints", async () => {
+      mockFetchOnce({ ok: true, json: async () => ({ ok: true }) });
+      await api.pauseRun("r1");
+      expect((global.fetch as ReturnType<typeof vi.fn>).mock.calls.at(-1)).toEqual([
+        "/api/runs/r1/actions/pause",
+        { headers: {}, method: "POST" },
+      ]);
+
+      mockFetchOnce({ ok: true, json: async () => ({ ok: true }) });
+      await api.resumeRun("r1");
+      expect((global.fetch as ReturnType<typeof vi.fn>).mock.calls.at(-1)).toEqual([
+        "/api/runs/r1/actions/resume",
+        { headers: {}, method: "POST" },
+      ]);
+
+      mockFetchOnce({ ok: true, json: async () => ({ ok: true, state: "Implementing", retrying: true }) });
+      const retryResult = await api.retryStage("r1");
+      expect(retryResult).toEqual({ ok: true, state: "Implementing", retrying: true });
+      expect((global.fetch as ReturnType<typeof vi.fn>).mock.calls.at(-1)).toEqual([
+        "/api/runs/r1/actions/retry",
+        { headers: {}, method: "POST" },
+      ]);
+    });
+
     it("getActiveProcesses omits runId query param when not provided", async () => {
       mockFetchOnce({ ok: true, json: async () => ({ processes: [] }) });
       await api.getActiveProcesses();
