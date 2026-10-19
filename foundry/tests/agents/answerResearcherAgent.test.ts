@@ -247,6 +247,18 @@ describe("AnswerResearcherAgent.run()", () => {
     expect(result.summary).toContain("Resolved");
   });
 
+  it("omits the Open Questions section entirely when the plan has no open questions", async () => {
+    const { agent, getUserPrompt } = buildAgent();
+    const plan = makePlan();
+    plan.openQuestions = [];
+
+    await agent.run(plan, makeTaskBundle(), "run-1");
+
+    const prompt = getUserPrompt();
+    expect(prompt).not.toContain("## Open Questions to Research");
+    expect(prompt).not.toContain("{{openQuestionsSection}}");
+  });
+
   it("handles an unresolved-confidence answer without throwing", async () => {
     const unresolvedOutput = makeResearcherOutput();
     unresolvedOutput.parsed.payload.answers[0].confidence = "unresolved";

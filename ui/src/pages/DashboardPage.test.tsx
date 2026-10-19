@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, act } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { Run } from "@/api/client.ts";
 
@@ -110,13 +110,15 @@ describe("DashboardPage", () => {
       makeRun("r2", "AwaitingPlanApproval"), // waiting
       makeRun("r3", "AIBlocked"), // blocked
       makeRun("r4", "Done"), // done
+      makeRun("r5", "SomeUnmappedState"), // falls back to "idle"
+      makeRun("r6", "AIReview"), // active, second active run exercises the running-tally branch
     ];
     useRunsMock.mockReturnValue({ runs, loading: false, error: null, refetch: vi.fn() });
     render(<DashboardPage />);
 
     expect(screen.getByText("Agent Runs")).toBeDefined();
     const total = screen.getByText("Total").previousSibling as HTMLElement;
-    expect(total.textContent).toBe("4");
+    expect(total.textContent).toBe("6");
   });
 
   it("filters the runs passed to RunsTable when a filter button is clicked", async () => {
@@ -176,7 +178,9 @@ describe("DashboardPage", () => {
 
     expect(screen.getByTestId("ingest-banner")).toBeDefined();
 
-    vi.advanceTimersByTime(5000);
+    act(() => {
+      vi.advanceTimersByTime(5000);
+    });
     expect(screen.queryByTestId("ingest-banner")).toBeNull();
   });
 });

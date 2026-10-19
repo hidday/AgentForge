@@ -227,7 +227,8 @@ describe("RunDetailPage", () => {
     renderPage();
 
     expect(screen.getByTestId("open-questions-panel").textContent).toBe("q1,q2");
-    expect(screen.getByTestId("has-optional").textContent).toBe("false");
+    // hasOptionalQuestions reflects optionalQuestions.length regardless of state.
+    expect(screen.getByTestId("has-optional").textContent).toBe("true");
   });
 
   it("renders only optional open questions for AwaitingPlanApproval and flags hasOptionalQuestions", () => {

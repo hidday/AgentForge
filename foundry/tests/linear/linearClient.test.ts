@@ -32,8 +32,8 @@ describe("MockLinearClient", () => {
       expect((await client.getIssue("issue-1")).title).toBe("Issue title");
     });
 
-    it("throws for an unseeded issue id", async () => {
-      await expect(client.getIssue("missing")).rejects.toThrow(/Mock: Issue missing not found/);
+    it("throws for an unseeded issue id", () => {
+      expect(() => client.getIssue("missing")).toThrow(/Mock: Issue missing not found/);
     });
   });
 
