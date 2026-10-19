@@ -43,7 +43,7 @@ function makeSkill(overrides: {
   return {
     id: overrides.id ?? "skill-1",
     repoSlug: overrides.repoSlug ?? "test-repo",
-    name: overrides.name ?? "auth-middleware",
+    name: "name" in overrides ? overrides.name : "auth-middleware",
     description: overrides.description ?? "Use when adding or changing auth middleware.",
     taskCategory: overrides.taskCategory ?? "auth middleware",
     skillMarkdown: overrides.skillMarkdown ?? "Use JWT tokens for auth.",
@@ -561,6 +561,296 @@ describe("DistillationAgent", () => {
           description: "Use when working on auth middleware in test-repo.",
         }),
       );
+    });
+  });
+
+  describe("(m) summarizePlan/summarizeExecution/summarizeRemediation prompt rendering", () => {
+    function buildDepsWithArtifacts(overrides: {
+      planPayload?: unknown;
+      executionPayload?: unknown;
+      remediationPayload?: unknown;
+    }) {
+      const deps = buildDeps();
+      const executionArtifact = {
+        id: "artifact-1",
+        runId: "run-1",
+        type: "ExecutionReport" as const,
+        version: 1,
+        payloadJson: overrides.executionPayload ?? {
+          executionVersion: 1,
+          summary: "Implemented JWT auth middleware.",
+          filesChanged: ["src/middleware/auth.ts"],
+          checks: {
+            lint: { status: "pass", details: "ok" },
+            typecheck: { status: "pass", details: "ok" },
+            tests: { status: "pass", details: "ok" },
+          },
+          notes: [],
+          prDraftCreated: true,
+          score: 0.82,
+          scoreRationale: "Implementation matches plan and all checks pass.",
+        },
+        rawText: "{}",
+        createdAt: new Date(),
+      };
+      const planArtifact = overrides.planPayload
+        ? {
+            id: "artifact-plan",
+            runId: "run-1",
+            type: "Plan" as const,
+            version: 1,
+            payloadJson: overrides.planPayload,
+            rawText: "{}",
+            createdAt: new Date(),
+          }
+        : null;
+      const remediationArtifact = overrides.remediationPayload
+        ? {
+            id: "artifact-rem",
+            runId: "run-1",
+            type: "Remediation" as const,
+            version: 1,
+            payloadJson: overrides.remediationPayload,
+            rawText: "{}",
+            createdAt: new Date(),
+          }
+        : null;
+
+      deps.artifactRepo.findLatestByType.mockImplementation((_runId: string, type: string) => {
+        if (type === "ExecutionReport") return Promise.resolve(executionArtifact);
+        if (type === "Plan") return Promise.resolve(planArtifact);
+        if (type === "Remediation") return Promise.resolve(remediationArtifact);
+        return Promise.resolve(null);
+      });
+      return deps;
+    }
+
+    function captureUserPrompt(deps: ReturnType<typeof buildDeps>, decision: Parameters<typeof makeDistillationOutput>[0] = { shouldPersist: false, reason: "stop here" }) {
+      let capturedPrompt = "";
+      deps.agentRunner.run.mockImplementation(async (_runtime: unknown, opts: { prompt: string }) => {
+        capturedPrompt = opts.prompt;
+        return makeDistillationOutput(decision);
+      });
+      return () => capturedPrompt;
+    }
+
+    it("renders a valid plan with truncation markers when steps/assumptions/risks exceed their caps", async () => {
+      const manySteps = Array.from({ length: 14 }, (_, i) => ({
+        id: `s${i}`,
+        title: `Step ${i}`,
+        description: `Description ${i}`,
+      }));
+      const manyAssumptions = Array.from({ length: 10 }, (_, i) => `Assumption ${i}`);
+      const manyRisks = Array.from({ length: 9 }, (_, i) => `Risk ${i}`);
+      const deps = buildDepsWithArtifacts({
+        planPayload: {
+          planVersion: 1,
+          summary: "A plan with many steps",
+          assumptions: manyAssumptions,
+          openQuestions: [],
+          risks: manyRisks,
+          steps: manySteps,
+          testPlan: "Run the full suite",
+          confidence: 0.7,
+        },
+      });
+      const getPrompt = captureUserPrompt(deps);
+
+      const agent = buildAgent(deps);
+      await agent.run("run-1", makeRun());
+
+      const prompt = getPrompt();
+      expect(prompt).toContain("**Summary**: A plan with many steps");
+      expect(prompt).toContain("**Confidence**: 0.70");
+      expect(prompt).toContain("…and 2 more steps");
+      expect(prompt).toContain("…and 2 more"); // assumptions cap=8, 10 items
+      expect(prompt).toContain("…and 1 more"); // risks cap=8, 9 items
+      expect(prompt).toContain("**Test Plan**: Run the full suite");
+    });
+
+    it("falls back to truncated JSON when the Plan artifact payload fails schema validation", async () => {
+      const deps = buildDepsWithArtifacts({ planPayload: { not: "a valid plan" } });
+      const getPrompt = captureUserPrompt(deps);
+
+      const agent = buildAgent(deps);
+      await agent.run("run-1", makeRun());
+
+      const prompt = getPrompt();
+      expect(prompt).toContain(JSON.stringify({ not: "a valid plan" }));
+      expect(prompt).not.toContain("**Summary**: A plan");
+    });
+
+    it("renders execution report file list with overflow marker and surfaces details for a failing check", async () => {
+      const manyFiles = Array.from({ length: 42 }, (_, i) => `src/file${i}.ts`);
+      const deps = buildDepsWithArtifacts({
+        executionPayload: {
+          executionVersion: 1,
+          summary: "Touched many files",
+          filesChanged: manyFiles,
+          checks: {
+            lint: { status: "fail", details: "2 lint errors in file0.ts" },
+            typecheck: { status: "pass", details: "ok" },
+            tests: { status: "pass", details: "ok" },
+          },
+          notes: [],
+          prDraftCreated: false,
+          score: 0.3,
+          scoreRationale: "Lint failures block merge.",
+        },
+      });
+      const getPrompt = captureUserPrompt(deps);
+
+      const agent = buildAgent(deps);
+      await agent.run("run-1", makeRun());
+
+      const prompt = getPrompt();
+      expect(prompt).toContain("**Files Changed** (42)");
+      expect(prompt).toContain("…and 2 more");
+      expect(prompt).toContain("- lint: fail — 2 lint errors in file0.ts");
+      expect(prompt).toContain("- typecheck: pass");
+      expect(prompt).not.toContain("- typecheck: pass — ok");
+    });
+
+    it("renders execution report with '_none_' files placeholder when filesChanged is empty", async () => {
+      const deps = buildDepsWithArtifacts({
+        executionPayload: {
+          executionVersion: 1,
+          summary: "No files touched",
+          filesChanged: [],
+          checks: {
+            lint: { status: "pass", details: "ok" },
+            typecheck: { status: "pass", details: "ok" },
+            tests: { status: "pass", details: "ok" },
+          },
+          notes: [],
+          prDraftCreated: false,
+          score: 0.5,
+          scoreRationale: "N/A",
+        },
+      });
+      const getPrompt = captureUserPrompt(deps);
+
+      const agent = buildAgent(deps);
+      await agent.run("run-1", makeRun());
+
+      const prompt = getPrompt();
+      expect(prompt).toContain("**Files Changed** (0):\n_none_");
+    });
+
+    it("falls back to truncated JSON when the ExecutionReport artifact payload fails schema validation", async () => {
+      const deps = buildDepsWithArtifacts({ executionPayload: { garbage: true } });
+      const getPrompt = captureUserPrompt(deps);
+
+      const agent = buildAgent(deps);
+      await agent.run("run-1", makeRun());
+
+      const prompt = getPrompt();
+      expect(prompt).toContain(JSON.stringify({ garbage: true }));
+    });
+
+    it("renders a valid remediation summary with an overflow marker when resolutions exceed the cap", async () => {
+      const manyResolutions = Array.from({ length: 17 }, (_, i) => ({
+        findingId: `f${i}`,
+        status: "accepted" as const,
+        action: `Fixed finding ${i}`,
+        rationale: `Because of reason ${i}`,
+      }));
+      const deps = buildDepsWithArtifacts({
+        remediationPayload: {
+          reviewId: "rev-1",
+          resolution: manyResolutions,
+          readyForHumanReview: true,
+          executionReport: {
+            executionVersion: 1,
+            summary: "Fixed everything",
+            filesChanged: [],
+            checks: {
+              lint: { status: "pass", details: "ok" },
+              typecheck: { status: "pass", details: "ok" },
+              tests: { status: "pass", details: "ok" },
+            },
+            notes: [],
+            prDraftCreated: true,
+            score: 0.95,
+            scoreRationale: "All findings addressed.",
+          },
+        },
+      });
+      const getPrompt = captureUserPrompt(deps);
+
+      const agent = buildAgent(deps);
+      await agent.run("run-1", makeRun());
+
+      const prompt = getPrompt();
+      expect(prompt).toContain("## Remediation Summary");
+      expect(prompt).toContain("**Ready for human review**: true");
+      expect(prompt).toContain("**Final score**: 0.95");
+      expect(prompt).toContain("…and 2 more");
+    });
+
+    it("falls back to a truncated-JSON remediation summary when the Remediation artifact payload fails schema validation", async () => {
+      const deps = buildDepsWithArtifacts({ remediationPayload: { nope: true } });
+      const getPrompt = captureUserPrompt(deps);
+
+      const agent = buildAgent(deps);
+      await agent.run("run-1", makeRun());
+
+      const prompt = getPrompt();
+      expect(prompt).toContain("## Remediation Summary");
+      expect(prompt).toContain(JSON.stringify({ nope: true }));
+    });
+  });
+
+  describe("(n) taskQuery construction from the Run when fields are missing", () => {
+    it("builds the novelty-check query without throwing when linearIssueTitle and linearIssueDescription are both absent", async () => {
+      const deps = buildDeps();
+      deps.agentSkillRepo.findActiveByRepo.mockResolvedValue([]);
+      deps.agentRunner.run.mockResolvedValue(
+        makeDistillationOutput({ shouldPersist: false, reason: "n/a" }),
+      );
+
+      const agent = buildAgent(deps);
+      const run = makeRun({ linearIssueTitle: null });
+      delete (run as unknown as Record<string, unknown>).linearIssueDescription;
+
+      await expect(agent.run("run-1", run)).resolves.toBeUndefined();
+      expect(deps.agentRunner.run).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe("(o) Catch block error formatting for non-Error rejections", () => {
+    it("stringifies a non-Error rejection reason instead of reading .message", async () => {
+      const deps = buildDeps();
+      deps.agentSkillRepo.findActiveByRepo.mockResolvedValue([]);
+      // eslint-disable-next-line @typescript-eslint/prefer-promise-reject-errors
+      deps.agentRunner.run.mockRejectedValue("a plain string failure");
+
+      const agent = buildAgent(deps);
+      await agent.run("run-1", makeRun());
+
+      expect(deps.logger.warn).toHaveBeenCalledWith(
+        { runId: "run-1", error: "a plain string failure" },
+        "Distillation LLM call failed or parse error",
+      );
+    });
+  });
+
+  describe("(p) existingSkillsSummary falls back to taskCategory when a skill has no name", () => {
+    it("uses taskCategory as the display label for an unnamed skill in the prompt", async () => {
+      const deps = buildDeps();
+      deps.agentSkillRepo.findActiveByRepo.mockResolvedValue([
+        makeSkill({ name: null, taskCategory: "rate limiting", skillMarkdown: "Use a token bucket algorithm for throttling requests." }),
+      ]);
+      let capturedPrompt = "";
+      deps.agentRunner.run.mockImplementation(async (_runtime: unknown, opts: { prompt: string }) => {
+        capturedPrompt = opts.prompt;
+        return makeDistillationOutput({ shouldPersist: false, reason: "n/a" });
+      });
+
+      const agent = buildAgent(deps);
+      await agent.run("run-1", makeRun());
+
+      expect(capturedPrompt).toContain("[rate limiting] rate limiting:");
     });
   });
 

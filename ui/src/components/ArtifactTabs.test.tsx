@@ -49,7 +49,8 @@ describe("ArtifactTabs", () => {
     expect(screen.getByTestId("plan-view")).toBeDefined();
   });
 
-  it("switches tabs on click and renders the corresponding artifact", () => {
+  it("switches tabs on click and renders the corresponding artifact", async () => {
+    const user = userEvent.setup();
     render(
       <ArtifactTabs
         artifacts={[
@@ -59,12 +60,9 @@ describe("ArtifactTabs", () => {
       />,
     );
     expect(screen.getByTestId("plan-view")).toBeDefined();
-    const reviewTab = screen.getByRole("button", { name: "Code Review" });
-    userEvent.setup();
-    return userEvent.click(reviewTab).then(() => {
-      expect(screen.getByTestId("review-view")).toBeDefined();
-      expect(screen.queryByTestId("plan-view")).toBeNull();
-    });
+    await user.click(screen.getByRole("button", { name: "Code Review" }));
+    expect(screen.getByTestId("review-view")).toBeDefined();
+    expect(screen.queryByTestId("plan-view")).toBeNull();
   });
 
   it("renders 'No data available' when the active tab has no matching artifact after filtering", async () => {
@@ -164,15 +162,8 @@ describe("ArtifactTabs", () => {
   });
 
   describe("Rejection feedback view", () => {
-    it("shows 'No rejection feedback recorded' when there are no RejectionContext artifacts", () => {
-      render(
-        <ArtifactTabs
-          artifacts={[
-            artifact("RejectionContext", { planVersion: 1, feedback: "f", source: "api" }),
-          ].slice(0, 0).concat([artifact("Plan", { summary: "s" })])}
-        />,
-      );
-      // No rejectionFeedback tab is available at all when there are no RejectionContext artifacts.
+    it("does not show the Rejection Feedback tab when there are no RejectionContext artifacts", () => {
+      render(<ArtifactTabs artifacts={[artifact("Plan", { summary: "s" })]} />);
       expect(screen.queryByRole("button", { name: "Rejection Feedback" })).toBeNull();
     });
 
@@ -181,8 +172,8 @@ describe("ArtifactTabs", () => {
       render(
         <ArtifactTabs
           artifacts={[
-            artifact("RejectionContext", { planVersion: 1, feedback: "First rejection", source: "api" }, "r1"),
-            artifact("RejectionContext", { planVersion: 2, feedback: "Second rejection", source: "linear" }, "r2"),
+            artifact("RejectionContext", { planVersion: 1, feedback: "First rejection", source: "api" }, "r1", 1),
+            artifact("RejectionContext", { planVersion: 2, feedback: "Second rejection", source: "linear" }, "r2", 2),
           ]}
         />,
       );
