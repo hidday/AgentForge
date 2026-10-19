@@ -304,4 +304,172 @@ describe("PlannerAgent.run()", () => {
       expect(prompt).not.toContain("{{relatedContextSection}}");
     });
   });
+
+  describe("previousPlan rendering", () => {
+    it("renders the rejected plan with steps, risks, assumptions and open questions when all are present", async () => {
+      const { agent, getPrompt } = buildPlannerAgent();
+      const bundle = makeTaskBundle();
+
+      await agent.run(bundle, "run-1", {
+        previousPlan: {
+          planVersion: 3,
+          summary: "Old plan summary",
+          requirementsTraceability: "trace",
+          assumptions: ["Users are already authenticated"],
+          risks: ["Migration could lock the table"],
+          openQuestions: [
+            { id: "q1", question: "Which DB?", requiredForExecution: true },
+            { id: "q2", question: "Which cache?", requiredForExecution: false },
+          ],
+          steps: [{ id: "s1", title: "Old step", description: "Old description" }],
+          testPlan: "Old test plan",
+          confidence: 0.75,
+        },
+      });
+
+      const prompt = getPrompt();
+      expect(prompt).toContain("## Previously Rejected Plan (v3)");
+      expect(prompt).toContain("**Summary:** Old plan summary");
+      expect(prompt).toContain("**Confidence:** 75%");
+      expect(prompt).toContain("1. **Old step** (s1): Old description");
+      expect(prompt).toContain("**Risks:**\n- Migration could lock the table");
+      expect(prompt).toContain("**Assumptions:**\n- Users are already authenticated");
+      expect(prompt).toContain("- [q1] Which DB? *(blocks execution)*");
+      expect(prompt).toContain("- [q2] Which cache?");
+      expect(prompt).not.toContain("[q2] Which cache? *(blocks execution)*");
+      expect(prompt).toContain("**Test Plan:** Old test plan");
+      expect(prompt).toContain("Use this as the starting point for the new plan");
+    });
+
+    it("omits risks, assumptions and open-questions blocks when those arrays are empty", async () => {
+      const { agent, getPrompt } = buildPlannerAgent();
+      const bundle = makeTaskBundle();
+
+      await agent.run(bundle, "run-1", {
+        previousPlan: {
+          planVersion: 1,
+          summary: "Minimal old plan",
+          requirementsTraceability: "trace",
+          assumptions: [],
+          risks: [],
+          openQuestions: [],
+          steps: [{ id: "s1", title: "Step", description: "Desc" }],
+          testPlan: "Test plan",
+          confidence: 0.5,
+        },
+      });
+
+      const prompt = getPrompt();
+      expect(prompt).toContain("## Previously Rejected Plan (v1)");
+      expect(prompt).not.toContain("**Risks:**");
+      expect(prompt).not.toContain("**Assumptions:**");
+      expect(prompt).not.toContain("**Open Questions:**");
+    });
+
+    it("omits the previousPlan section entirely when not provided", async () => {
+      const { agent, getPrompt } = buildPlannerAgent();
+      const bundle = makeTaskBundle();
+
+      await agent.run(bundle, "run-1");
+
+      const prompt = getPrompt();
+      expect(prompt).not.toContain("Previously Rejected Plan");
+      expect(prompt).not.toContain("{{previousPlanSection}}");
+    });
+  });
+
+  describe("priorSkills rendering", () => {
+    it("renders a skill block with heading 'name (taskCategory)' and description when both are present", async () => {
+      const { agent, getPrompt } = buildPlannerAgent();
+      const bundle = makeTaskBundle();
+
+      await agent.run(bundle, "run-1", {
+        priorSkills: [
+          {
+            id: "skill-1",
+            repoSlug: "test-repo",
+            name: "jwt-auth",
+            taskCategory: "auth middleware",
+            description: "Use when adding JWT auth.",
+            skillMarkdown: "Always set an expiry on tokens.",
+            utilityScore: 0.9,
+            lastUsedAt: new Date(),
+          },
+        ],
+      });
+
+      const prompt = getPrompt();
+      expect(prompt).toContain("## Prior Skills from Similar Tasks");
+      expect(prompt).toContain("### jwt-auth (auth middleware)");
+      expect(prompt).toContain("Use when adding JWT auth.");
+      expect(prompt).toContain("Always set an expiry on tokens.");
+    });
+
+    it("falls back to the taskCategory as the heading when the skill has no name, and omits the intro line when there's no description", async () => {
+      const { agent, getPrompt } = buildPlannerAgent();
+      const bundle = makeTaskBundle();
+
+      await agent.run(bundle, "run-1", {
+        priorSkills: [
+          {
+            id: "skill-2",
+            repoSlug: "test-repo",
+            name: null,
+            taskCategory: "rate limiting",
+            description: null,
+            skillMarkdown: "Use a token bucket.",
+            utilityScore: 0.5,
+            lastUsedAt: new Date(),
+          },
+        ],
+      });
+
+      const prompt = getPrompt();
+      expect(prompt).toContain("### rate limiting\n\nUse a token bucket.");
+    });
+
+    it("joins multiple skill blocks with a blank line between them", async () => {
+      const { agent, getPrompt } = buildPlannerAgent();
+      const bundle = makeTaskBundle();
+
+      await agent.run(bundle, "run-1", {
+        priorSkills: [
+          {
+            id: "skill-1",
+            repoSlug: "test-repo",
+            name: "skill-one",
+            taskCategory: "cat-one",
+            description: null,
+            skillMarkdown: "Markdown one.",
+            utilityScore: 0.5,
+            lastUsedAt: new Date(),
+          },
+          {
+            id: "skill-2",
+            repoSlug: "test-repo",
+            name: "skill-two",
+            taskCategory: "cat-two",
+            description: null,
+            skillMarkdown: "Markdown two.",
+            utilityScore: 0.5,
+            lastUsedAt: new Date(),
+          },
+        ],
+      });
+
+      const prompt = getPrompt();
+      expect(prompt).toContain("### skill-one (cat-one)\n\nMarkdown one.\n\n### skill-two (cat-two)");
+    });
+
+    it("omits the priorSkillsSection entirely when priorSkills is undefined or empty", async () => {
+      const { agent, getPrompt } = buildPlannerAgent();
+      const bundle = makeTaskBundle();
+
+      await agent.run(bundle, "run-1", { priorSkills: [] });
+
+      const prompt = getPrompt();
+      expect(prompt).not.toContain("## Prior Skills from Similar Tasks");
+      expect(prompt).not.toContain("{{priorSkillsSection}}");
+    });
+  });
 });
