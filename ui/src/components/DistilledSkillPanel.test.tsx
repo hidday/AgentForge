@@ -75,4 +75,84 @@ describe("DistilledSkillPanel", () => {
 
     expect(screen.getByText(/content could not be loaded/i)).toBeDefined();
   });
+
+  it("shows the loading state and nothing else while loading is true", () => {
+    render(
+      <DistilledSkillPanel
+        distilledSkill={null}
+        distillationDecision={null}
+        loading={true}
+      />,
+    );
+
+    expect(screen.getByText(/loading distilled skill/i)).toBeDefined();
+    expect(screen.queryByText("Distilled Skill")).toBeNull();
+  });
+
+  it("shows an error message and suppresses the panel content when error is set", () => {
+    render(
+      <DistilledSkillPanel
+        distilledSkill={skill}
+        distillationDecision={decision}
+        error="Failed to load skill data"
+      />,
+    );
+
+    expect(screen.getByText("Failed to load skill data")).toBeDefined();
+    expect(screen.queryByText("Distilled Skill")).toBeNull();
+  });
+
+  it("falls back through name/description sources when the skill document lacks its own name and description", () => {
+    const bareSkill: SkillDocument = {
+      ...skill,
+      name: null,
+      description: null,
+    };
+
+    render(
+      <DistilledSkillPanel
+        distilledSkill={bareSkill}
+        distillationDecision={decision}
+      />,
+    );
+
+    // Falls back to distillationDecision.name.
+    expect(screen.getByText("dev-env-pause-resume-footguns")).toBeDefined();
+    // Falls back to distillationDecision.description; the export preview
+    // (which requires both distilledSkill and a resolved skillDescription)
+    // still renders using that fallback description.
+    expect(screen.getByText(/SKILL.md export preview/i)).toBeDefined();
+  });
+
+  it("falls all the way back to 'distilled-skill' and omits description/export preview when no name or description is available anywhere", () => {
+    const bareDecision: DistillationDecision = {
+      ...decision,
+      name: null,
+      description: null,
+      taskCategory: null,
+    };
+
+    render(
+      <DistilledSkillPanel
+        distilledSkill={null}
+        distillationDecision={bareDecision}
+      />,
+    );
+
+    expect(screen.getByText("distilled-skill")).toBeDefined();
+    expect(screen.queryByText(/SKILL.md export preview/i)).toBeNull();
+    expect(screen.queryByText(/dev-env pause\/resume tooling/)).toBeNull();
+  });
+
+  it("renders the displaced skill id when the distillation decision reports one", () => {
+    render(
+      <DistilledSkillPanel
+        distilledSkill={skill}
+        distillationDecision={{ ...decision, displacedSkillId: "old-skill-id-123" }}
+      />,
+    );
+
+    const displacedText = screen.getByText(/Displaced skill:/);
+    expect(displacedText.textContent).toBe("Displaced skill: old-skil");
+  });
 });

@@ -51,6 +51,23 @@ describe("ChatPanel", () => {
     expect(screen.getByText(/No messages yet/i)).toBeDefined();
   });
 
+  it("falls back to an empty string and the 'user' role when payload fields are missing", () => {
+    const artifact: Artifact = {
+      id: "a1",
+      runId: RUN_ID,
+      type: "ChatMessage",
+      version: 1,
+      payloadJson: {},
+      rawText: "",
+      createdAt: "2026-01-01T00:00:00.000Z",
+    };
+    const { container } = render(<ChatPanel runId={RUN_ID} artifacts={[artifact]} />);
+    // Renders without crashing and shows an (empty) user-aligned bubble
+    // rather than the empty-state message.
+    expect(screen.queryByText(/No messages yet/i)).toBeNull();
+    expect(container.querySelector(".justify-end")).not.toBeNull();
+  });
+
   it("renders user and assistant messages from ChatMessage artifacts in chronological order", () => {
     const artifacts: Artifact[] = [
       makeArtifact("assistant", "Second message", "a2", "2024-01-01T00:00:02Z"),
@@ -214,6 +231,19 @@ describe("ChatPanel", () => {
     expect(screen.queryByText("Failing question")).toBeNull();
   });
 
+  it("falls back to a generic error message when the rejection is not an Error instance", async () => {
+    mockApi.sendChatMessage.mockRejectedValue("some string failure");
+
+    render(<ChatPanel runId={RUN_ID} artifacts={[]} />);
+    const input = screen.getByPlaceholderText(/ask the agent/i);
+    await userEvent.type(input, "Failing question");
+    await userEvent.click(screen.getByRole("button", { name: /send/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/chat request failed/i)).toBeDefined();
+    });
+  });
+
   it("message list does not change from artifact-derived count when only local state changes", async () => {
     let resolveRequest!: (v: { reply: string; durationMs: number }) => void;
     mockApi.sendChatMessage.mockReturnValue(
@@ -250,5 +280,33 @@ describe("ChatPanel", () => {
       // "New question" should NOT appear
       expect(screen.queryByText("New question")).toBeNull();
     });
+  });
+
+  it("calls scrollIntoView on the bottom anchor when the browser supports it", () => {
+    const scrollMock = vi.fn();
+    (HTMLDivElement.prototype as unknown as { scrollIntoView: () => void }).scrollIntoView =
+      scrollMock;
+
+    render(<ChatPanel runId={RUN_ID} artifacts={[]} />);
+
+    expect(scrollMock).toHaveBeenCalledWith({ behavior: "smooth" });
+
+    delete (HTMLDivElement.prototype as unknown as Record<string, unknown>).scrollIntoView;
+  });
+
+  it("collapses the panel when the header is clicked, hiding messages and the input form", async () => {
+    render(<ChatPanel runId={RUN_ID} artifacts={[]} />);
+
+    // Initially open: input is present
+    expect(screen.getByPlaceholderText(/ask the agent/i)).toBeDefined();
+
+    const header = screen.getByText("Chat with Agent").closest("button")!;
+    await userEvent.click(header);
+
+    expect(screen.queryByPlaceholderText(/ask the agent/i)).toBeNull();
+
+    // Clicking again re-opens it
+    await userEvent.click(header);
+    expect(screen.getByPlaceholderText(/ask the agent/i)).toBeDefined();
   });
 });
