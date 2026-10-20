@@ -80,7 +80,7 @@ describe("ActionBar", () => {
       render(<ActionBar runId={RUN_ID} state="AwaitingPlanApproval" onAction={onAction} />);
 
       await userEvent.click(screen.getByRole("button", { name: /approve plan/i }));
-      expect(screen.getByText("Approve Plan")).toBeDefined();
+      expect(screen.getByText(/start implementation/i)).toBeDefined();
 
       const textarea = screen.getByRole("textbox") as HTMLTextAreaElement;
       await userEvent.type(textarea, "  watch the gotchas  ");
