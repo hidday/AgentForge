@@ -181,4 +181,97 @@ describe("LinearSyncDialog", () => {
     // can retry.
     expect(screen.getByRole("button", { name: /start 2 runs/i })).toBeDefined();
   });
+
+  it("fires a second onIngestComplete with authoritative counts after SSE auto-closes before the HTTP response lands", async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    const onClose = vi.fn();
+    const onIngested = vi.fn();
+    const onIngestComplete = vi.fn();
+
+    let resolveIngest!: (v: { ok: boolean; started: string[]; skipped: string[] }) => void;
+    mockApi.ingestIssues.mockReturnValue(
+      new Promise((res) => {
+        resolveIngest = res;
+      }),
+    );
+
+    render(
+      <LinearSyncDialog
+        open={true}
+        onClose={onClose}
+        onIngested={onIngested}
+        onIngestComplete={onIngestComplete}
+      />,
+    );
+
+    await waitFor(() => expect(screen.getByText(issueA.title)).toBeDefined());
+
+    const startBtn = screen.getByRole("button", { name: /start 2 runs/i });
+    await user.click(startBtn);
+
+    // SSE observes both issues before the HTTP response arrives.
+    fireSSE({ type: "run:created", runId: "run-a", issueId: issueA.id });
+    fireSSE({ type: "run:created", runId: "run-b", issueId: issueB.id });
+
+    await act(async () => {
+      vi.advanceTimersByTime(700);
+    });
+
+    await waitFor(() => {
+      expect(onClose).toHaveBeenCalledOnce();
+      expect(onIngestComplete).toHaveBeenNthCalledWith(1, { started: 2, skipped: 0 });
+    });
+
+    // Now the HTTP response lands with the authoritative counts.
+    await act(async () => {
+      resolveIngest({ ok: true, started: [issueA.id], skipped: [issueB.id] });
+    });
+
+    await waitFor(() => {
+      expect(onIngestComplete).toHaveBeenNthCalledWith(2, { started: 1, skipped: 1 });
+      expect(onIngested).toHaveBeenCalledOnce();
+    });
+  });
+
+  it("renders project and label badges and toggles an individual issue via its own checkbox", async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    const issueC = {
+      id: "issue-c",
+      title: "Third issue",
+      description: "",
+      state: "Todo",
+      labels: ["bug", "urgent"],
+      priority: 1,
+      project: "Core Platform",
+    };
+    mockApi.fetchPendingIssues.mockResolvedValue({ issues: [issueA, issueC] });
+
+    render(
+      <LinearSyncDialog
+        open={true}
+        onClose={vi.fn()}
+        onIngested={vi.fn()}
+        onIngestComplete={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => expect(screen.getByText(issueC.title)).toBeDefined());
+
+    // Project and label badges render for the issue that has them.
+    expect(screen.getByText("Core Platform")).toBeDefined();
+    expect(screen.getByText("bug")).toBeDefined();
+    expect(screen.getByText("urgent")).toBeDefined();
+
+    // Both issues start selected -> "Start 2 Runs"
+    expect(screen.getByRole("button", { name: /start 2 runs/i })).toBeDefined();
+
+    // Deselect issueC individually via its own checkbox (not "select all").
+    const checkboxes = screen.getAllByRole("checkbox") as HTMLInputElement[];
+    // checkboxes[0] is "select all"; the rest are per-issue in render order.
+    const issueCCheckbox = checkboxes[2]!;
+    await user.click(issueCCheckbox);
+
+    expect(screen.getByRole("button", { name: /start 1 run\b/i })).toBeDefined();
+    expect(checkboxes[0]!.checked).toBe(false);
+  });
 });

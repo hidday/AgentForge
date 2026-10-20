@@ -113,7 +113,7 @@ describe("RunsTable", () => {
     expect(screen.getByText("abcdefgh")).toBeDefined();
   });
 
-  it("renders an external link to Linear only when linearIssueUrl is present", () => {
+  it("renders an external link to Linear only when linearIssueUrl is present", async () => {
     const withUrl = makeRun({ id: "r1", linearIssueUrl: "https://linear.app/issue/1" });
     const { rerender } = render(
       <MemoryRouter>
@@ -122,6 +122,8 @@ describe("RunsTable", () => {
     );
     const externalLink = screen.getByTitle("Open in Linear");
     expect(externalLink.getAttribute("href")).toBe("https://linear.app/issue/1");
+    // Clicking it should stop propagation rather than bubble to the row/Link.
+    await userEvent.click(externalLink);
 
     const withoutUrl = makeRun({ id: "r2", linearIssueUrl: null });
     rerender(
