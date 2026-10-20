@@ -125,6 +125,29 @@ describe("useActiveProcesses", () => {
     }).not.toThrow();
   });
 
+  it("does not update output after unmount between getActiveProcesses and getProcessOutput resolving", async () => {
+    mockApi.getActiveProcesses.mockResolvedValue({ processes: [proc1] });
+    let resolveOutput!: (v: { processId: string; output: string }) => void;
+    mockApi.getProcessOutput.mockReturnValue(
+      new Promise((res) => {
+        resolveOutput = res;
+      }),
+    );
+
+    const { result, unmount } = renderHook(() => useActiveProcesses("r1"));
+
+    await waitFor(() => expect(mockApi.getProcessOutput).toHaveBeenCalled());
+    unmount();
+
+    expect(() => {
+      act(() => {
+        resolveOutput({ processId: proc1.id, output: "late output" });
+      });
+    }).not.toThrow();
+
+    expect(result.current.output).toBe("");
+  });
+
   it("ignores SSE events for a different runId", async () => {
     mockApi.getActiveProcesses.mockResolvedValue({ processes: [] });
     const { result } = renderHook(() => useActiveProcesses("r1"));

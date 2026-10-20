@@ -191,6 +191,24 @@ describe("ActionBar", () => {
       });
     });
 
+    it("switches back to 'Revise plan' (iterate) mode after toggling to 'Start Fresh'", async () => {
+      mockApi.rejectPlan.mockResolvedValue({});
+      render(<ActionBar runId={RUN_ID} state="AwaitingPlanApproval" onAction={vi.fn()} />);
+
+      await userEvent.click(screen.getByRole("button", { name: /^reject plan$/i }));
+      await userEvent.click(screen.getByRole("button", { name: /start fresh/i }));
+      await userEvent.click(
+        screen.getByRole("button", { name: /revise plan.*iterate with full context/i }),
+      );
+
+      const confirmButtons = screen.getAllByRole("button", { name: /^reject plan$/i });
+      await userEvent.click(confirmButtons[confirmButtons.length - 1]);
+
+      await waitFor(() => {
+        expect(mockApi.rejectPlan).toHaveBeenCalledWith(RUN_ID, undefined, "iterate");
+      });
+    });
+
     it("cancels the Reject Plan dialog via the Cancel button and resets its fields", async () => {
       render(<ActionBar runId={RUN_ID} state="AwaitingPlanApproval" onAction={vi.fn()} />);
 

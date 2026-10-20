@@ -161,12 +161,26 @@ describe("api client", () => {
       expect(options.body).toBe(JSON.stringify({ note: "please re-review" }));
     });
 
+    it("reReviewPlan drops the note field when no note is given", async () => {
+      fetchMock.mockResolvedValue(okResponse({ ok: true, runId: "r1" }));
+      await api.reReviewPlan("r1");
+      const [, options] = lastCall();
+      expect(options.body).toBe(JSON.stringify({ note: undefined }));
+    });
+
     it("revisePlan posts a note to /actions/revise-plan", async () => {
       fetchMock.mockResolvedValue(okResponse({ ok: true, runId: "r1" }));
       await api.revisePlan("r1", "revise this");
       const [url, options] = lastCall();
       expect(url).toBe("/api/runs/r1/actions/revise-plan");
       expect(options.body).toBe(JSON.stringify({ note: "revise this" }));
+    });
+
+    it("revisePlan drops the note field when no note is given", async () => {
+      fetchMock.mockResolvedValue(okResponse({ ok: true, runId: "r1" }));
+      await api.revisePlan("r1");
+      const [, options] = lastCall();
+      expect(options.body).toBe(JSON.stringify({ note: undefined }));
     });
 
     it("ingestIssues posts the issueIds array", async () => {

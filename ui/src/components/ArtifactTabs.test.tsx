@@ -112,6 +112,12 @@ describe("ArtifactTabs", () => {
       expect(screen.getByText(/no dispositions recorded/i)).toBeDefined();
     });
 
+    it("shows 'No dispositions recorded' when the dispositions field is entirely absent", () => {
+      const artifacts = [makeArtifact({ type: "PlanRevision", payloadJson: {} })];
+      render(<ArtifactTabs artifacts={artifacts} />);
+      expect(screen.getByText(/no dispositions recorded/i)).toBeDefined();
+    });
+
     it("renders dispositions with status styling for each known status and a default style for unknown ones", () => {
       const artifacts = [
         makeArtifact({
@@ -157,6 +163,12 @@ describe("ArtifactTabs", () => {
       expect(screen.getByText("accepted")).toBeDefined();
       expect(screen.getByText("rejected")).toBeDefined();
       expect(screen.getByText("deferred")).toBeDefined();
+    });
+
+    it("renders no resolution rows, without crashing, when the resolution field is entirely absent", () => {
+      const artifacts = [makeArtifact({ type: "Remediation", payloadJson: {} })];
+      render(<ArtifactTabs artifacts={artifacts} />);
+      expect(screen.getByText("Resolutions")).toBeDefined();
     });
 
     it("falls back to v2 in the execution-report pointer note when executionVersion is absent", () => {

@@ -345,7 +345,7 @@ describe("RunDetailPage", () => {
     await userEvent.click(screen.getByText("mock-scroll"));
     expect(scrollMock).toHaveBeenCalledWith({ behavior: "smooth", block: "start" });
 
-    delete (HTMLDivElement.prototype as Record<string, unknown>).scrollIntoView;
+    delete (HTMLDivElement.prototype as unknown as Record<string, unknown>).scrollIntoView;
   });
 
   it("does not throw when onScrollToQuestions fires but no questions ref is mounted", async () => {

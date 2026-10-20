@@ -158,6 +158,21 @@ describe("DashboardPage", () => {
     ]);
   });
 
+  it("falls back to the 'idle' category for a state not in STATE_CATEGORY_MAP, without crashing", () => {
+    const runs = [
+      makeRun("r1", "Implementing"), // active
+      makeRun("r2", "SomeFutureUnmappedState"), // falls back to idle
+    ];
+    mockUseRuns.mockReturnValue({ runs, loading: false, error: null, refetch: vi.fn() });
+
+    render(<DashboardPage />);
+
+    expect(screen.getByText("2").parentElement?.textContent).toContain("Total");
+    // The unmapped-state run is excluded from every named (non-"all") filter,
+    // same as an explicit "idle" state would be.
+    expect(lastRunsTableProps?.runs.map((r) => r.id)).toEqual(["r1", "r2"]);
+  });
+
   it("filters the runs passed to RunsTable when a category filter is clicked", async () => {
     const runs = [
       makeRun("r1", "Implementing"), // active
