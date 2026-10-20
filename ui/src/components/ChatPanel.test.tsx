@@ -251,4 +251,32 @@ describe("ChatPanel", () => {
       expect(screen.queryByText("New question")).toBeNull();
     });
   });
+
+  it("calls scrollIntoView on the bottom anchor when the browser supports it", () => {
+    const scrollMock = vi.fn();
+    (HTMLDivElement.prototype as unknown as { scrollIntoView: () => void }).scrollIntoView =
+      scrollMock;
+
+    render(<ChatPanel runId={RUN_ID} artifacts={[]} />);
+
+    expect(scrollMock).toHaveBeenCalledWith({ behavior: "smooth" });
+
+    delete (HTMLDivElement.prototype as Record<string, unknown>).scrollIntoView;
+  });
+
+  it("collapses the panel when the header is clicked, hiding messages and the input form", async () => {
+    render(<ChatPanel runId={RUN_ID} artifacts={[]} />);
+
+    // Initially open: input is present
+    expect(screen.getByPlaceholderText(/ask the agent/i)).toBeDefined();
+
+    const header = screen.getByText("Chat with Agent").closest("button")!;
+    await userEvent.click(header);
+
+    expect(screen.queryByPlaceholderText(/ask the agent/i)).toBeNull();
+
+    // Clicking again re-opens it
+    await userEvent.click(header);
+    expect(screen.getByPlaceholderText(/ask the agent/i)).toBeDefined();
+  });
 });

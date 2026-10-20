@@ -328,6 +328,20 @@ describe("parseClaudeOutput – partial line noise filtering", () => {
     expect(parseClaudeOutput(fragment)).toEqual([]);
   });
 
+  it("filters a partial line with stop_reason:null + stop_sequence:null that matches no other noise pattern", () => {
+    // Deliberately avoids any METADATA_NOISE_RE token (input_tokens, service_tier, etc.)
+    // and the parent_tool_use_id+session_id combo, so this exercises the dedicated
+    // stop_reason/stop_sequence branch in isNoiseLine on its own.
+    const fragment = ',"stop_reason":null,"stop_sequence":null,"extra":"field"}';
+    expect(parseClaudeOutput(fragment)).toEqual([]);
+  });
+
+  it("does NOT filter a partial line with only stop_reason:null (missing stop_sequence)", () => {
+    const fragment = ',"stop_reason":null,"extra":"field"}';
+    const result = parseClaudeOutput(fragment);
+    expect(result).toEqual<ParsedBlock[]>([{ type: "raw", content: fragment }]);
+  });
+
   it("keeps genuine non-JSON raw lines", () => {
     const result = parseClaudeOutput("Error: command not found");
     expect(result).toEqual<ParsedBlock[]>([{ type: "raw", content: "Error: command not found" }]);
