@@ -725,6 +725,7 @@ describe("DistillationAgent", () => {
       await agent.run("run-1", makeRun());
 
       const prompt = getPrompt();
+      console.log("DEBUG eventRepo calls:", JSON.stringify(deps.eventRepo.create.mock.calls));
       expect(prompt).toContain("[rate limiting] rate limiting");
     });
 

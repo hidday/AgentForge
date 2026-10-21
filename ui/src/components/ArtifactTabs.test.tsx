@@ -112,40 +112,48 @@ describe("ArtifactTabs", () => {
     expect(screen.getByText("Plan V1 Rejection")).toBeDefined();
   });
 
-  it("shows the rejection empty state only when no RejectionContext artifacts exist, despite the tab being active by default", () => {
-    // RejectionContext tab only appears when at least one such artifact exists, so to reach
-    // the "no rejection feedback recorded" branch we need the tab visible but then all of its
-    // artifacts filtered out — this can't happen via the public filter, so instead verify the
-    // tab shows real content when present and is entirely absent otherwise (already covered
-    // above) — here we assert clicking back and forth doesn't leave stale content.
-    render(
+  it("shows the 'No rejection feedback recorded' empty state once the active rejection tab's artifacts disappear", () => {
+    // Make RejectionContext the ONLY available tab so it becomes the default active tab,
+    // then remove it on rerender — activeTab state stays "rejectionFeedback" but
+    // activeArtifacts filters to an empty array, hitting the empty-state branch.
+    const { rerender } = render(
       <ArtifactTabs
         artifacts={[
           makeArtifact({
             type: "RejectionContext",
             payloadJson: { planVersion: 1, feedback: "only rejection", source: "api" },
           }),
-          makeArtifact({ type: "Plan", payloadJson: { summary: "plan text" } }),
         ]}
       />,
     );
     expect(screen.getByText("only rejection")).toBeDefined();
+
+    rerender(
+      <ArtifactTabs artifacts={[makeArtifact({ type: "Plan", payloadJson: {} })]} />,
+    );
+    expect(screen.getByText("No rejection feedback recorded")).toBeDefined();
   });
 
-  it("shows the 'No data available' fallback when the active tab's artifact type is missing its artifact", async () => {
-    // Plan and Review both present so both tabs show; switch to Review (artifact exists) is
-    // covered elsewhere — to hit the "no data" branch we need a tab whose artifactType has no
-    // matching artifact despite the tab key being iterable; PlanRevision & Remediation never
-    // appear unless their own artifact exists, so instead we drive this via planReview, whose
-    // tab shows once any such artifact exists.
-    render(
+  it("shows the 'No data available' fallback when the artifacts prop changes and the previously-active tab's artifact disappears", () => {
+    // The active tab is tracked in local state, initialized once from the first render's
+    // availableTabs. If the artifacts prop later changes such that the tab that was active no
+    // longer has a backing artifact, activeArtifact becomes undefined even though a stale
+    // activeTabDef is still resolved, hitting the "No data available" branch.
+    const { rerender } = render(
+      <ArtifactTabs
+        artifacts={[makeArtifact({ type: "Plan", payloadJson: { summary: "the plan" } })]}
+      />,
+    );
+    expect(screen.getByTestId("plan-view")).toBeDefined();
+
+    rerender(
       <ArtifactTabs
         artifacts={[
-          makeArtifact({ type: "PlanReview", payloadJson: { verdict: "changes_requested" } }),
+          makeArtifact({ type: "Review", payloadJson: { verdict: "approved" } }),
         ]}
       />,
     );
-    expect(screen.getByTestId("review-view")).toBeDefined();
+    expect(screen.getByText("No data available")).toBeDefined();
   });
 
   it("renders plan revision dispositions grouped by finding, with status styling text", () => {
