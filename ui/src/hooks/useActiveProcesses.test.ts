@@ -107,6 +107,49 @@ describe("useActiveProcesses", () => {
     expect(result.current.processes).toEqual([]);
   });
 
+  it("does not set output after unmount even if getProcessOutput resolves late (cancelled guard)", async () => {
+    mockApi.getActiveProcesses.mockResolvedValueOnce({ processes: [proc] });
+    let resolveOutput: (v: { processId: string; output: string }) => void = () => {};
+    mockApi.getProcessOutput.mockImplementationOnce(
+      () => new Promise((resolve) => { resolveOutput = resolve; }),
+    );
+
+    const { result, unmount } = renderHook(() => useActiveProcesses("run-1"));
+    await waitFor(() => expect(result.current.processes).toEqual([proc]));
+
+    unmount();
+
+    await act(async () => {
+      resolveOutput({ processId: proc.id, output: "late output" });
+      await Promise.resolve();
+    });
+
+    expect(result.current.output).toBe("");
+  });
+
+  it("falls back to defaults when process:started fields are missing", async () => {
+    mockApi.getActiveProcesses.mockResolvedValueOnce({ processes: [] });
+    const { result } = renderHook(() => useActiveProcesses("run-1"));
+    await waitFor(() => expect(mockApi.getActiveProcesses).toHaveBeenCalled());
+
+    act(() => {
+      sseCallback?.({ type: "process:started", runId: "run-1" });
+    });
+
+    expect(result.current.processes).toEqual([
+      {
+        id: "",
+        pid: 0,
+        command: "",
+        runId: "run-1",
+        stage: "",
+        runtime: "",
+        startedAt: expect.any(String),
+        elapsedMs: 0,
+      },
+    ]);
+  });
+
   it("ignores SSE events for a different runId", async () => {
     mockApi.getActiveProcesses.mockResolvedValueOnce({ processes: [] });
     const { result } = renderHook(() => useActiveProcesses("run-1"));

@@ -711,13 +711,24 @@ describe("DistillationAgent", () => {
 
     it("includes existing skills in the prompt, falling back to taskCategory when a skill has no name", async () => {
       const deps = buildDeps();
+      // makeSkill()'s `??` fallbacks can't express an explicit null name, so build
+      // this fixture by hand, with wording unrelated to the run's title/description
+      // to avoid tripping the novelty pre-check gate.
       deps.agentSkillRepo.findActiveByRepo.mockResolvedValue([
-        makeSkill({
+        {
+          id: "skill-unnamed",
+          repoSlug: "test-repo",
           name: null,
+          description: "Use when throttling outbound API calls.",
           taskCategory: "rate limiting",
-          skillMarkdown: "Use Redis buckets.",
-          description: "Use when throttling API traffic.",
-        }),
+          skillMarkdown: "Use a Redis token bucket for throttling.",
+          successCount: 0,
+          failureCount: 0,
+          utilityScore: 0.5,
+          lastUsedAt: new Date(),
+          createdAt: new Date(),
+          archivedAt: null,
+        },
       ]);
       const getPrompt = capturePrompt(deps);
 
@@ -725,7 +736,6 @@ describe("DistillationAgent", () => {
       await agent.run("run-1", makeRun());
 
       const prompt = getPrompt();
-      console.log("DEBUG eventRepo calls:", JSON.stringify(deps.eventRepo.create.mock.calls));
       expect(prompt).toContain("[rate limiting] rate limiting");
     });
 

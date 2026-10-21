@@ -41,6 +41,26 @@ function collectDashboardEvents(emitter: RunEventEmitter): DashboardEvent[] {
   return events;
 }
 
+// The runner's log WriteStream is flushed via end(), which is async: the
+// outer execute() promise resolves before the "finish" event necessarily
+// fires. Poll briefly with real timers rather than racing the write.
+async function waitForFileContent(path: string, timeoutMs = 2000): Promise<string> {
+  const start = Date.now();
+  for (;;) {
+    if (existsSync(path)) {
+      try {
+        return readFileSync(path, "utf-8");
+      } catch {
+        // fall through and retry
+      }
+    }
+    if (Date.now() - start > timeoutMs) {
+      throw new Error(`Timed out waiting for file: ${path}`);
+    }
+    await new Promise((r) => setTimeout(r, 10));
+  }
+}
+
 let spoolDir: string;
 
 beforeEach(() => {
@@ -209,7 +229,7 @@ describe("ProcessRunner real mode: happy path", () => {
       exitCode: 0,
     });
 
-    const logContent = readFileSync(join(spoolDir, `${processId}.log`), "utf-8");
+    const logContent = await waitForFileContent(join(spoolDir, `${processId}.log`));
     expect(logContent).toBe("partial output");
 
     // Process finished, so it's no longer "active".
@@ -231,7 +251,7 @@ describe("ProcessRunner real mode: happy path", () => {
 
     const processId = readdirSync(spoolDir).find((f) => f.endsWith(".json"))!.replace(/\.json$/, "");
 
-    const big = "a".repeat(8000) + "TAIL_MARKER_END";
+    const big = "a".repeat(8200) + "TAIL_MARKER_END";
     child.stdout.emit("data", Buffer.from(big));
 
     const buffered = runner.getProcessOutput(processId)!;
@@ -298,6 +318,8 @@ describe("ProcessRunner real mode: getProcessOutput", () => {
     child.emit("close", 0);
     await promise;
 
+    // Wait for the log file to actually be flushed to disk before reading it back.
+    await waitForFileContent(join(spoolDir, `${processId}.log`));
     expect(runner.getProcessOutput(processId)).toBe("from disk after completion");
   });
 

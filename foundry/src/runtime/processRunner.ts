@@ -146,6 +146,12 @@ export class ProcessRunner {
 
           const logPath = join(this.spoolDir, `${manifest.id}.log`);
           const logStream = createWriteStream(logPath, { flags: "a" });
+          logStream.on("error", (err) => {
+            this.logger.warn(
+              { processId: manifest.id, error: err.message },
+              "Log stream error while rehydrating orphaned process",
+            );
+          });
 
           const entry: ActiveProcessEntry = {
             id: manifest.id,
@@ -299,6 +305,9 @@ export class ProcessRunner {
       if (context && processId && child.pid) {
         const logPath = join(this.spoolDir, `${processId}.log`);
         const logStream = createWriteStream(logPath, { flags: "a" });
+        logStream.on("error", (err) => {
+          this.logger.warn({ processId, error: err.message }, "Log stream error for process");
+        });
 
         entry = {
           id: processId,

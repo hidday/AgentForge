@@ -104,6 +104,19 @@ describe("useRuns", () => {
     expect(mockApi.getRuns).toHaveBeenCalledTimes(1);
   });
 
+  it("ignores SSE event types it doesn't handle", async () => {
+    mockApi.getRuns.mockResolvedValueOnce({ runs: [runA] });
+    const { result } = renderHook(() => useRuns());
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    act(() => {
+      sseCallback?.({ type: "process:started", runId: "run-a" });
+    });
+
+    expect(result.current.runs).toEqual([runA]);
+    expect(mockApi.getRuns).toHaveBeenCalledTimes(1);
+  });
+
   it("exposes a refetch function that re-runs the fetch", async () => {
     mockApi.getRuns.mockResolvedValueOnce({ runs: [] });
     const { result } = renderHook(() => useRuns());
