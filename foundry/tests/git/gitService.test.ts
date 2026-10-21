@@ -253,5 +253,102 @@ describe("GitService", () => {
     it("throws GitError for invalid repo path", async () => {
       await expect(svc.currentBranch("/nonexistent")).rejects.toThrow(GitError);
     });
+
+    it("pruneWorktrees swallows failures as a best-effort cleanup", async () => {
+      // A non-git directory makes `git worktree prune` fail; it must not throw.
+      const nonGitDir = mkdtempSync(join(tmpdir(), "gitservice-nongit-"));
+      await expect(svc.pruneWorktrees(nonGitDir)).resolves.toBeUndefined();
+      rmSync(nonGitDir, { recursive: true, force: true });
+    });
+
+    it("removeWorktree swallows failures as a best-effort cleanup", async () => {
+      await expect(svc.removeWorktree(repoPath, "/nonexistent-worktree")).resolves.toBeUndefined();
+    });
+  });
+
+  describe("push / commitAndPush / remoteBranchExists", () => {
+    let bareDir: string;
+
+    beforeEach(() => {
+      bareDir = mkdtempSync(join(tmpdir(), "gitservice-bare-push-"));
+      git(["clone", "--bare", repoPath, bareDir], tmpdir());
+      git(["remote", "add", "origin", bareDir], repoPath);
+      git(["fetch", "origin"], repoPath);
+    });
+
+    afterEach(() => {
+      rmSync(bareDir, { recursive: true, force: true });
+    });
+
+    it("remoteBranchExists returns false when the branch has never been pushed", async () => {
+      expect(await svc.remoteBranchExists(repoPath, "never-pushed")).toBe(false);
+    });
+
+    it("push publishes the local branch to origin, and remoteBranchExists then returns true", async () => {
+      git(["checkout", "-b", "feature/pushed"], repoPath);
+      await svc.push(repoPath, "feature/pushed");
+
+      const branches = git(["branch", "-r"], repoPath);
+      expect(branches).toContain("origin/feature/pushed");
+      await svc.fetch(repoPath);
+      expect(await svc.remoteBranchExists(repoPath, "feature/pushed")).toBe(true);
+    });
+
+    it("commitAndPush verifies the branch, commits pending changes, then pushes", async () => {
+      git(["checkout", "-b", "feature/commit-and-push"], repoPath);
+      writeFileSync(join(repoPath, "new-file.txt"), "content\n");
+
+      await svc.commitAndPush(repoPath, "feature/commit-and-push", "Add new file");
+
+      const log = git(["log", "--oneline"], repoPath);
+      expect(log).toContain("Add new file");
+      const branches = git(["branch", "-r"], repoPath);
+      expect(branches).toContain("origin/feature/commit-and-push");
+    });
+
+    it("commitAndPush throws BranchMismatchError without pushing when on the wrong branch", async () => {
+      git(["checkout", "-b", "feature/wrong-branch"], repoPath);
+
+      await expect(
+        svc.commitAndPush(repoPath, "feature/expected-branch", "Should not commit"),
+      ).rejects.toThrow(BranchMismatchError);
+
+      const branches = git(["branch", "-r"], repoPath);
+      expect(branches).not.toContain("origin/feature/expected-branch");
+    });
+
+    it("setupRunWorktree warns but still resets the local branch when origin already has it", async () => {
+      const branchName = "feature/already-on-origin";
+      git(["checkout", "-b", branchName], repoPath);
+      writeFileSync(join(repoPath, "remote-only.txt"), "x\n");
+      git(["add", "."], repoPath);
+      git(["commit", "-m", "remote-only commit"], repoPath);
+      await svc.push(repoPath, branchName);
+      git(["checkout", "main"], repoPath);
+      git(["branch", "-D", branchName], repoPath);
+
+      const warnings: unknown[] = [];
+      const warnLogger = {
+        ...noopLogger,
+        warn: (...args: unknown[]) => warnings.push(args),
+      };
+      const warnSvc = new GitService(warnLogger);
+
+      const runId = "feedface-3456-7890-abcd-ef1234567890";
+      const result = await warnSvc.setupRunWorktree(repoPath, runId, "main", branchName);
+
+      expect(existsSync(result.worktreePath)).toBe(true);
+      expect(
+        warnings.some((args) =>
+          String((args as [unknown, string])[1]).includes("origin/<branch> already exists"),
+        ),
+      ).toBe(true);
+      // Local branch is reset to startPoint (main), so the remote-only commit
+      // is not reachable from the new worktree's HEAD.
+      const worktreeLog = git(["log", "--oneline"], result.worktreePath);
+      expect(worktreeLog).not.toContain("remote-only commit");
+
+      await warnSvc.removeWorktree(repoPath, result.worktreePath);
+    });
   });
 });

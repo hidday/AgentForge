@@ -79,7 +79,6 @@ describe("ActionBar", () => {
       render(<ActionBar runId="run-1" state="AwaitingPlanApproval" onAction={onAction} />);
       await userEvent.click(screen.getByRole("button", { name: /approve plan/i }));
 
-      expect(screen.getByText("Approve Plan").closest("div")).toBeDefined();
       expect(
         screen.getByText(
           "This will approve the current plan and start implementation. The AI agent will begin coding.",
@@ -140,7 +139,10 @@ describe("ActionBar", () => {
         screen.getByPlaceholderText(/describe what should change/i),
         "  tighten the rollback step  ",
       );
-      await userEvent.click(screen.getByRole("button", { name: "Reject Plan" }));
+      // Two "Reject Plan" buttons exist once the dialog is open: the original trigger
+      // (still rendered in the sticky action bar) and this dialog's own confirm button,
+      // which is rendered later in the tree.
+      await userEvent.click(screen.getAllByRole("button", { name: "Reject Plan" })[1]);
 
       await waitFor(() => {
         expect(mockApi.rejectPlan).toHaveBeenCalledWith(
@@ -156,7 +158,10 @@ describe("ActionBar", () => {
       render(<ActionBar runId="run-1" state="AwaitingPlanApproval" onAction={vi.fn()} />);
       await userEvent.click(screen.getByRole("button", { name: /reject plan/i }));
       await userEvent.click(screen.getByText("Start fresh"));
-      await userEvent.click(screen.getByRole("button", { name: "Reject Plan" }));
+      // Two "Reject Plan" buttons exist once the dialog is open: the original trigger
+      // (still rendered in the sticky action bar) and this dialog's own confirm button,
+      // which is rendered later in the tree.
+      await userEvent.click(screen.getAllByRole("button", { name: "Reject Plan" })[1]);
 
       await waitFor(() => {
         expect(mockApi.rejectPlan).toHaveBeenCalledWith("run-1", undefined, "fresh");
@@ -194,7 +199,9 @@ describe("ActionBar", () => {
     const onAction = vi.fn();
     render(<ActionBar runId="run-1" state="Implementing" onAction={onAction} />);
     await userEvent.click(screen.getByRole("button", { name: /pause/i }));
-    await userEvent.click(screen.getByRole("button", { name: "Pause" }));
+    // The trigger button and the dialog's confirm button are both labeled "Pause";
+    // the confirm button is rendered later in the tree.
+    await userEvent.click(screen.getAllByRole("button", { name: "Pause" })[1]);
     await waitFor(() => {
       expect(mockApi.pauseRun).toHaveBeenCalledWith("run-1");
     });
@@ -207,7 +214,8 @@ describe("ActionBar", () => {
       const onAction = vi.fn();
       render(<ActionBar runId="run-1" state={state} onAction={onAction} />);
       await userEvent.click(screen.getByRole("button", { name: /resume/i }));
-      await userEvent.click(screen.getByRole("button", { name: "Resume" }));
+      // Same name collision as Pause: trigger + dialog confirm button both say "Resume".
+      await userEvent.click(screen.getAllByRole("button", { name: "Resume" })[1]);
       await waitFor(() => {
         expect(mockApi.resumeRun).toHaveBeenCalledWith("run-1");
       });
@@ -263,7 +271,7 @@ describe("ActionBar", () => {
     const onAction = vi.fn();
     render(<ActionBar runId="run-1" state="Implementing" onAction={onAction} />);
     await userEvent.click(screen.getByRole("button", { name: /pause/i }));
-    await userEvent.click(screen.getByRole("button", { name: "Pause" }));
+    await userEvent.click(screen.getAllByRole("button", { name: "Pause" })[1]);
 
     await waitFor(() => {
       expect(

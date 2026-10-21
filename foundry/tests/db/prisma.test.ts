@@ -1,119 +1,111 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-const prismaClientCtor = vi.fn();
-const disconnectMock = vi.fn().mockResolvedValue(undefined);
-const adapterCtor = vi.fn();
+const PrismaClientMock = vi.fn().mockImplementation(function (
+  this: { opts: unknown; $disconnect: () => Promise<void> },
+  opts: unknown,
+) {
+  this.opts = opts;
+  this.$disconnect = vi.fn().mockResolvedValue(undefined);
+});
+const PrismaPgMock = vi.fn().mockImplementation(function (this: { opts: unknown }, opts: unknown) {
+  this.opts = opts;
+});
 
-vi.mock("../../src/generated/prisma/client.js", () => ({
-  PrismaClient: class {
-    $disconnect = disconnectMock;
-    constructor(opts: unknown) {
-      prismaClientCtor(opts);
-    }
-  },
-}));
+vi.mock("../../src/generated/prisma/client.js", () => ({ PrismaClient: PrismaClientMock }));
+vi.mock("@prisma/adapter-pg", () => ({ PrismaPg: PrismaPgMock }));
 
-vi.mock("@prisma/adapter-pg", () => ({
-  PrismaPg: class {
-    constructor(opts: unknown) {
-      adapterCtor(opts);
-    }
-  },
-}));
-
-describe("getPrismaClient / disconnectPrisma", () => {
+describe("db/prisma", () => {
   beforeEach(() => {
     vi.resetModules();
-    prismaClientCtor.mockClear();
-    disconnectMock.mockClear();
-    adapterCtor.mockClear();
+    PrismaClientMock.mockClear();
+    PrismaPgMock.mockClear();
   });
 
-  it("constructs a PrismaClient wired to env.DATABASE_URL via the pg adapter", async () => {
+  it("constructs a PrismaClient with a pg adapter from env.DATABASE_URL and default log levels", async () => {
     vi.doMock("../../src/config/env.js", () => ({
-      env: { DATABASE_URL: "postgresql://test:test@localhost:5432/test", LOG_LEVEL: "info" },
+      env: { DATABASE_URL: "postgresql://x", LOG_LEVEL: "info" },
+    }));
+    const { getPrismaClient } = await import("../../src/db/prisma.js");
+
+    const client = getPrismaClient();
+
+    expect(PrismaPgMock).toHaveBeenCalledWith({ connectionString: "postgresql://x" });
+    expect(PrismaClientMock).toHaveBeenCalledWith(expect.objectContaining({ log: ["warn", "error"] }));
+    expect(client).toBeInstanceOf(PrismaClientMock);
+  });
+
+  it("enables verbose query logging when LOG_LEVEL is debug", async () => {
+    vi.doMock("../../src/config/env.js", () => ({
+      env: { DATABASE_URL: "postgresql://x", LOG_LEVEL: "debug" },
     }));
     const { getPrismaClient } = await import("../../src/db/prisma.js");
 
     getPrismaClient();
 
-    expect(adapterCtor).toHaveBeenCalledWith({
-      connectionString: "postgresql://test:test@localhost:5432/test",
-    });
-    expect(prismaClientCtor).toHaveBeenCalledTimes(1);
+    expect(PrismaClientMock).toHaveBeenCalledWith(
+      expect.objectContaining({ log: ["query", "info", "warn", "error"] }),
+    );
   });
 
-  it("returns the same singleton instance on repeated calls", async () => {
+  it("enables verbose query logging when LOG_LEVEL is trace", async () => {
     vi.doMock("../../src/config/env.js", () => ({
-      env: { DATABASE_URL: "postgresql://test:test@localhost:5432/test", LOG_LEVEL: "info" },
-    }));
-    const { getPrismaClient } = await import("../../src/db/prisma.js");
-
-    const a = getPrismaClient();
-    const b = getPrismaClient();
-
-    expect(a).toBe(b);
-    expect(prismaClientCtor).toHaveBeenCalledTimes(1);
-  });
-
-  it("enables verbose query/info/warn/error logging when LOG_LEVEL is debug", async () => {
-    vi.doMock("../../src/config/env.js", () => ({
-      env: { DATABASE_URL: "postgresql://test:test@localhost:5432/test", LOG_LEVEL: "debug" },
+      env: { DATABASE_URL: "postgresql://x", LOG_LEVEL: "trace" },
     }));
     const { getPrismaClient } = await import("../../src/db/prisma.js");
 
     getPrismaClient();
 
-    const opts = prismaClientCtor.mock.calls[0][0] as { log: string[] };
-    expect(opts.log).toEqual(["query", "info", "warn", "error"]);
+    expect(PrismaClientMock).toHaveBeenCalledWith(
+      expect.objectContaining({ log: ["query", "info", "warn", "error"] }),
+    );
   });
 
-  it("enables verbose logging for LOG_LEVEL trace too", async () => {
+  it("keeps warn/error-only logging for levels other than debug/trace", async () => {
     vi.doMock("../../src/config/env.js", () => ({
-      env: { DATABASE_URL: "postgresql://test:test@localhost:5432/test", LOG_LEVEL: "trace" },
+      env: { DATABASE_URL: "postgresql://x", LOG_LEVEL: "error" },
     }));
     const { getPrismaClient } = await import("../../src/db/prisma.js");
 
     getPrismaClient();
 
-    const opts = prismaClientCtor.mock.calls[0][0] as { log: string[] };
-    expect(opts.log).toEqual(["query", "info", "warn", "error"]);
+    expect(PrismaClientMock).toHaveBeenCalledWith(expect.objectContaining({ log: ["warn", "error"] }));
   });
 
-  it("only logs warn/error for non-debug, non-trace log levels", async () => {
+  it("returns the same client instance on repeated calls (singleton)", async () => {
     vi.doMock("../../src/config/env.js", () => ({
-      env: { DATABASE_URL: "postgresql://test:test@localhost:5432/test", LOG_LEVEL: "info" },
+      env: { DATABASE_URL: "postgresql://x", LOG_LEVEL: "info" },
     }));
     const { getPrismaClient } = await import("../../src/db/prisma.js");
 
-    getPrismaClient();
+    const first = getPrismaClient();
+    const second = getPrismaClient();
 
-    const opts = prismaClientCtor.mock.calls[0][0] as { log: string[] };
-    expect(opts.log).toEqual(["warn", "error"]);
+    expect(first).toBe(second);
+    expect(PrismaClientMock).toHaveBeenCalledTimes(1);
   });
 
-  it("disconnects and resets the singleton so the next call constructs a fresh client", async () => {
+  it("disconnects and clears the singleton so the next call constructs a fresh client", async () => {
     vi.doMock("../../src/config/env.js", () => ({
-      env: { DATABASE_URL: "postgresql://test:test@localhost:5432/test", LOG_LEVEL: "info" },
+      env: { DATABASE_URL: "postgresql://x", LOG_LEVEL: "info" },
     }));
     const { getPrismaClient, disconnectPrisma } = await import("../../src/db/prisma.js");
 
-    getPrismaClient();
+    const first = getPrismaClient() as unknown as { $disconnect: ReturnType<typeof vi.fn> };
     await disconnectPrisma();
+    const second = getPrismaClient();
 
-    expect(disconnectMock).toHaveBeenCalledTimes(1);
-
-    getPrismaClient();
-    expect(prismaClientCtor).toHaveBeenCalledTimes(2);
+    expect(first.$disconnect).toHaveBeenCalledTimes(1);
+    expect(second).not.toBe(first);
+    expect(PrismaClientMock).toHaveBeenCalledTimes(2);
   });
 
-  it("is a no-op when disconnectPrisma is called before any client was created", async () => {
+  it("is a no-op when disconnecting before any client was ever created", async () => {
     vi.doMock("../../src/config/env.js", () => ({
-      env: { DATABASE_URL: "postgresql://test:test@localhost:5432/test", LOG_LEVEL: "info" },
+      env: { DATABASE_URL: "postgresql://x", LOG_LEVEL: "info" },
     }));
     const { disconnectPrisma } = await import("../../src/db/prisma.js");
 
     await expect(disconnectPrisma()).resolves.toBeUndefined();
-    expect(disconnectMock).not.toHaveBeenCalled();
+    expect(PrismaClientMock).not.toHaveBeenCalled();
   });
 });
