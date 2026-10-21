@@ -95,11 +95,13 @@ describe("ArtifactTabs", () => {
           makeArtifact({
             id: "rej1",
             type: "RejectionContext",
+            version: 1,
             payloadJson: { planVersion: 1, feedback: "first rejection", source: "api" },
           }),
           makeArtifact({
             id: "rej2",
             type: "RejectionContext",
+            version: 2,
             payloadJson: { planVersion: 2, feedback: "second rejection", source: "linear" },
           }),
         ]}

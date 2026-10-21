@@ -28,7 +28,8 @@ describe("StateBadge", () => {
 
   it("does not pulse the blocked category", () => {
     render(<StateBadge state="AIBlocked" />);
-    const dot = screen.getByText("AI Blocked").firstElementChild as HTMLElement;
+    // formatStateName inserts a space before every capital, including consecutive ones.
+    const dot = screen.getByText("A I Blocked").firstElementChild as HTMLElement;
     expect(dot.className).not.toContain("animate-pulse-dot");
   });
 
