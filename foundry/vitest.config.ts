@@ -12,7 +12,10 @@ export default defineConfig({
       // it is exercised by running the app, not by unit tests.
       // src/generated/** is Prisma-generated client code ("Do not edit
       // directly", @ts-nocheck) — not authored, not meaningfully testable.
-      exclude: ["src/server.ts", "src/generated/**"],
+      // runnerTypes.ts contains only `interface` declarations, every import
+      // of it is `import type`, and TypeScript erases both entirely — the
+      // compiled module has no executable statements to cover.
+      exclude: ["src/server.ts", "src/generated/**", "src/runtime/runnerTypes.ts"],
       reporter: ["text", "json-summary", "html"],
       reportsDirectory: "coverage",
     },

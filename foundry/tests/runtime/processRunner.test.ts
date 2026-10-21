@@ -71,7 +71,10 @@ beforeEach(() => {
 afterEach(() => {
   vi.useRealTimers();
   vi.restoreAllMocks();
-  rmSync(spoolDir, { recursive: true, force: true });
+  // A log WriteStream from the test just finished may still be mid-close;
+  // retry transient ENOTEMPTY/EBUSY instead of racing it (see Node's own
+  // rmSync retry knobs, meant for exactly this).
+  rmSync(spoolDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
 });
 
 describe("ProcessRunner construction", () => {
