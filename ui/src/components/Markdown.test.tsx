@@ -14,9 +14,15 @@ describe("Markdown", () => {
   });
 
   it("renders headings", () => {
-    render(<Markdown>{"# Big heading\n\n### Small heading"}</Markdown>);
-    expect(screen.getByText("Big heading").tagName).toBe("H1");
-    expect(screen.getByText("Small heading").tagName).toBe("H3");
+    render(
+      <Markdown>
+        {"# H1 heading\n\n## H2 heading\n\n### H3 heading\n\n#### H4 heading"}
+      </Markdown>,
+    );
+    expect(screen.getByText("H1 heading").tagName).toBe("H1");
+    expect(screen.getByText("H2 heading").tagName).toBe("H2");
+    expect(screen.getByText("H3 heading").tagName).toBe("H3");
+    expect(screen.getByText("H4 heading").tagName).toBe("H4");
   });
 
   it("renders bold and italic text", () => {

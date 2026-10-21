@@ -116,6 +116,21 @@ describe("RunsTable", () => {
     expect(link.getAttribute("target")).toBe("_blank");
   });
 
+  it("stops the external Linear link's click from bubbling up to an ancestor handler", async () => {
+    const user = userEvent.setup();
+    const parentClick = vi.fn();
+    render(
+      <MemoryRouter>
+        <div onClick={parentClick}>
+          <RunsTable runs={[makeRun()]} />
+        </div>
+      </MemoryRouter>,
+    );
+
+    await user.click(screen.getByTitle("Open in Linear"));
+    expect(parentClick).not.toHaveBeenCalled();
+  });
+
   it("does not render the external Linear link when linearIssueUrl is null", () => {
     renderWithRouter(<RunsTable runs={[makeRun({ linearIssueUrl: null })]} />);
     expect(screen.queryByTitle("Open in Linear")).toBeNull();

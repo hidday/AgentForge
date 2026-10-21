@@ -181,6 +181,29 @@ describe("ArtifactTabs", () => {
     expect(screen.getByText("Looks good")).toBeDefined();
   });
 
+  it("styles a 'partially_incorporated' disposition distinctly, and falls back to a neutral style for an unrecognized status", () => {
+    render(
+      <ArtifactTabs
+        artifacts={[
+          makeArtifact({
+            type: "PlanRevision",
+            payloadJson: {
+              dispositions: [
+                { findingId: "F3", status: "partially_incorporated", rationale: "Half done" },
+                { findingId: "F4", status: "pending_review", rationale: "Not yet triaged" },
+              ],
+            },
+          }),
+        ]}
+      />,
+    );
+    const partial = screen.getByText("partially incorporated");
+    expect(partial.className).toContain("bg-state-waiting-bg");
+
+    const unknown = screen.getByText("pending review");
+    expect(unknown.className).toContain("bg-surface-hover");
+  });
+
   it("renders the plan revision empty state when there are no dispositions", () => {
     render(
       <ArtifactTabs

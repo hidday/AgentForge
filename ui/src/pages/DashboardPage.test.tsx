@@ -143,6 +143,26 @@ describe("DashboardPage", () => {
     expect(screen.getByText("2 runs")).toBeDefined();
   });
 
+  it("buckets a run whose state isn't in the category map under 'idle' (counted in Total, excluded from every category filter)", () => {
+    useRunsMock.mockReturnValue({
+      runs: [
+        makeRun({ id: "r1", state: "Done" }), // done
+        makeRun({ id: "r2", state: "SomeFutureState" }), // unmapped -> idle
+      ],
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+    render(<DashboardPage />);
+    expect(screen.getByText("2")).toBeDefined(); // Total includes the unmapped run
+
+    fireEvent.click(screen.getByRole("button", { name: "Done" }));
+    expect(screen.getByText("1 runs")).toBeDefined(); // only the mapped "Done" run
+
+    fireEvent.click(screen.getByRole("button", { name: "All" }));
+    expect(screen.getByText("2 runs")).toBeDefined(); // unmapped run still shows under "All"
+  });
+
   it("opens the Linear sync dialog and shows the ingest summary banner, auto-dismissing it", () => {
     vi.useFakeTimers();
     useRunsMock.mockReturnValue({
