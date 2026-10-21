@@ -44,6 +44,23 @@ const RUN_ID = "run-1";
 describe("ChatPanel", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // jsdom doesn't implement scrollIntoView; stub it so the component's
+    // feature-detection guard (`typeof ... === "function"`) takes its true
+    // branch and the auto-scroll effect actually runs.
+    Element.prototype.scrollIntoView = vi.fn();
+  });
+
+  it("collapses the message list when the header is clicked, and expands it again on a second click", async () => {
+    const user = userEvent.setup();
+    render(<ChatPanel runId={RUN_ID} artifacts={[]} />);
+
+    expect(screen.getByText(/No messages yet/i)).toBeDefined();
+
+    await user.click(screen.getByText("Chat with Agent"));
+    expect(screen.queryByText(/No messages yet/i)).toBeNull();
+
+    await user.click(screen.getByText("Chat with Agent"));
+    expect(screen.getByText(/No messages yet/i)).toBeDefined();
   });
 
   it("renders 'No messages yet' empty state when artifacts array is empty", () => {

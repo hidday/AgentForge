@@ -304,4 +304,197 @@ describe("PlannerAgent.run()", () => {
       expect(prompt).not.toContain("{{relatedContextSection}}");
     });
   });
+
+  describe("planReviewFindings injection", () => {
+    it("renders the AI Plan Review Findings section with each finding when provided", async () => {
+      const { agent, getPrompt } = buildPlannerAgent();
+      const bundle = makeTaskBundle();
+
+      await agent.run(bundle, "run-1", {
+        planReviewFindings: {
+          summary: "Plan has a scoping gap.",
+          findings: [
+            { id: "f1", severity: "high", title: "Missing migration step", details: "Schema change needs a migration." },
+            { id: "f2", severity: "low", title: "Vague step 2", details: "Needs more detail." },
+          ],
+        },
+      });
+
+      const prompt = getPrompt();
+      expect(prompt).toContain("## AI Plan Review Findings (from previous plan)");
+      expect(prompt).toContain("Plan has a scoping gap.");
+      expect(prompt).toContain("- **[high] Missing migration step** (f1): Schema change needs a migration.");
+      expect(prompt).toContain("- **[low] Vague step 2** (f2): Needs more detail.");
+      expect(prompt).toContain("Incorporate these findings into the revised plan");
+    });
+
+    it("omits the AI Plan Review Findings section when planReviewFindings is absent", async () => {
+      const { agent, getPrompt } = buildPlannerAgent();
+      const bundle = makeTaskBundle();
+
+      await agent.run(bundle, "run-1");
+
+      const prompt = getPrompt();
+      expect(prompt).not.toContain("## AI Plan Review Findings");
+    });
+  });
+
+  describe("previousPlan injection", () => {
+    it("renders the previously rejected plan with steps, risks, assumptions, and open questions", async () => {
+      const { agent, getPrompt } = buildPlannerAgent();
+      const bundle = makeTaskBundle();
+
+      await agent.run(bundle, "run-1", {
+        previousPlan: {
+          planVersion: 2,
+          summary: "Old summary",
+          assumptions: ["Assume Postgres is already provisioned"],
+          openQuestions: [
+            { id: "q1", question: "Which auth provider?", requiredForExecution: true },
+            { id: "q2", question: "Optional styling?", requiredForExecution: false },
+          ],
+          risks: ["Could break existing sessions"],
+          steps: [{ id: "s1", title: "Old step", description: "Old description" }],
+          testPlan: "Old test plan",
+          confidence: 0.6,
+        },
+      });
+
+      const prompt = getPrompt();
+      expect(prompt).toContain("## Previously Rejected Plan (v2)");
+      expect(prompt).toContain("Old summary");
+      expect(prompt).toContain("**Confidence:** 60%");
+      expect(prompt).toContain("1. **Old step** (s1): Old description");
+      expect(prompt).toContain("**Risks:**\n- Could break existing sessions");
+      expect(prompt).toContain("**Assumptions:**\n- Assume Postgres is already provisioned");
+      expect(prompt).toContain("- [q1] Which auth provider? *(blocks execution)*");
+      expect(prompt).toContain("- [q2] Optional styling?");
+      expect(prompt).not.toContain("Optional styling? *(blocks execution)*");
+      expect(prompt).toContain("Old test plan");
+      expect(prompt).toContain("Use this as the starting point for the new plan.");
+    });
+
+    it("omits risks/assumptions/open-questions sub-sections when those arrays are empty", async () => {
+      const { agent, getPrompt } = buildPlannerAgent();
+      const bundle = makeTaskBundle();
+
+      await agent.run(bundle, "run-1", {
+        previousPlan: {
+          planVersion: 1,
+          summary: "Minimal plan",
+          assumptions: [],
+          openQuestions: [],
+          risks: [],
+          steps: [{ id: "s1", title: "Step", description: "Desc" }],
+          testPlan: "Test plan",
+          confidence: 0.5,
+        },
+      });
+
+      const prompt = getPrompt();
+      expect(prompt).toContain("## Previously Rejected Plan (v1)");
+      expect(prompt).not.toContain("**Risks:**");
+      expect(prompt).not.toContain("**Assumptions:**");
+      expect(prompt).not.toContain("**Open Questions:**");
+    });
+
+    it("omits the previous plan section when previousPlan is absent", async () => {
+      const { agent, getPrompt } = buildPlannerAgent();
+      const bundle = makeTaskBundle();
+
+      await agent.run(bundle, "run-1");
+
+      const prompt = getPrompt();
+      expect(prompt).not.toContain("## Previously Rejected Plan");
+    });
+  });
+
+  describe("priorSkills injection", () => {
+    it("renders a heading per skill using the skill name when present", async () => {
+      const { agent, getPrompt } = buildPlannerAgent();
+      const bundle = makeTaskBundle();
+
+      await agent.run(bundle, "run-1", {
+        priorSkills: [
+          {
+            id: "skill-1",
+            name: "auth-middleware",
+            description: "Use when adding auth middleware.",
+            taskCategory: "auth",
+            skillMarkdown: "Use JWT with RS256.",
+          },
+        ],
+      });
+
+      const prompt = getPrompt();
+      expect(prompt).toContain("## Prior Skills from Similar Tasks");
+      expect(prompt).toContain("### auth-middleware (auth)");
+      expect(prompt).toContain("Use when adding auth middleware.");
+      expect(prompt).toContain("Use JWT with RS256.");
+    });
+
+    it("falls back to taskCategory as the heading and omits the intro line when name/description are absent", async () => {
+      const { agent, getPrompt } = buildPlannerAgent();
+      const bundle = makeTaskBundle();
+
+      await agent.run(bundle, "run-1", {
+        priorSkills: [
+          {
+            id: "skill-2",
+            name: null,
+            description: null,
+            taskCategory: "rate limiting",
+            skillMarkdown: "Use a token bucket.",
+          },
+        ],
+      });
+
+      const prompt = getPrompt();
+      expect(prompt).toContain("### rate limiting\n\nUse a token bucket.");
+    });
+  });
+
+  describe("planVersionOverride", () => {
+    it("overrides the model-returned planVersion on the returned plan and the Plan artifact", async () => {
+      const { agent, artifactRepo } = buildPlannerAgent();
+      const bundle = makeTaskBundle();
+
+      const plan = await agent.run(bundle, "run-1", { planVersionOverride: 7 });
+
+      expect(plan.planVersion).toBe(7);
+      const calls = artifactRepo.create.mock.calls.map((c: unknown[]) => c[0]) as {
+        type: string;
+        version: number;
+      }[];
+      const planArtifact = calls.find((a) => a.type === "Plan");
+      expect(planArtifact?.version).toBe(7);
+    });
+
+    it("keeps the model-returned planVersion when no override is given", async () => {
+      const { agent } = buildPlannerAgent();
+      const bundle = makeTaskBundle();
+
+      const plan = await agent.run(bundle, "run-1");
+
+      expect(plan.planVersion).toBe(2);
+    });
+  });
+
+  describe("artifact persistence and return value", () => {
+    it("persists a PlannerTranscript artifact (raw) and a Plan artifact (parsed), then returns the plan", async () => {
+      const { agent, artifactRepo } = buildPlannerAgent();
+      const bundle = makeTaskBundle();
+
+      const plan = await agent.run(bundle, "run-1");
+
+      expect(artifactRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({ runId: "run-1", type: "PlannerTranscript", rawText: "raw text" }),
+      );
+      expect(artifactRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({ runId: "run-1", type: "Plan", version: 2 }),
+      );
+      expect(plan.summary).toBe("Test plan");
+      expect(plan.steps).toHaveLength(1);
+    });
+  });
 });
