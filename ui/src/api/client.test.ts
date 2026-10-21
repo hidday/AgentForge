@@ -216,6 +216,12 @@ describe("api client", () => {
       expect.objectContaining({ body: JSON.stringify({ note: "note" }) }),
     );
 
+    await api.reReviewPlan("run-1", "");
+    expect(fetch).toHaveBeenLastCalledWith(
+      "/api/runs/run-1/actions/re-review-plan",
+      expect.objectContaining({ body: JSON.stringify({ note: undefined }) }),
+    );
+
     await api.revisePlan("run-1");
     expect(fetch).toHaveBeenLastCalledWith(
       "/api/runs/run-1/actions/revise-plan",

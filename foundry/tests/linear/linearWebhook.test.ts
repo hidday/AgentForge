@@ -152,7 +152,11 @@ describe("registerLinearWebhook", () => {
     const response = await app.inject({
       method: "POST",
       url: "/webhooks/linear",
-      payload: { action: "create", type: "Comment", data: { id: "comment-1", body: "/approve" } },
+      payload: {
+        action: "create",
+        type: "Comment",
+        data: { id: "comment-1", body: "/approve-plan" },
+      },
     });
 
     expect(response.statusCode).toBe(200);
