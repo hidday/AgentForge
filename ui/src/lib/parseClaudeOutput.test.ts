@@ -128,6 +128,40 @@ describe("parseClaudeOutput – tool_use extraction", () => {
     expect(result[0].type).toBe("tool_use");
     expect(result[0].content).toContain("foo");
   });
+
+  it("returns an empty string for non-object tool input", () => {
+    const line = JSON.stringify({
+      content: [{ type: "tool_use", name: "NoInput", input: "not-an-object" }],
+    });
+    const result = parseClaudeOutput(line);
+    expect(result[0].content).toBe("");
+  });
+
+  it("uses the 'path' field when present (and no command/file_path)", () => {
+    const line = JSON.stringify({
+      content: [{ type: "tool_use", name: "Glob", input: { path: "/tmp/dir" } }],
+    });
+    const result = parseClaudeOutput(line);
+    expect(result[0].content).toBe("/tmp/dir");
+  });
+
+  it("returns short string content as-is, without truncation", () => {
+    const line = JSON.stringify({
+      content: [{ type: "tool_use", name: "Write", input: { content: "short text" } }],
+    });
+    const result = parseClaudeOutput(line);
+    expect(result[0].content).toBe("short text");
+  });
+
+  it("truncates a long JSON summary of tool input with unknown fields", () => {
+    const bigObject = { foo: "x".repeat(300) };
+    const line = JSON.stringify({
+      content: [{ type: "tool_use", name: "Custom", input: bigObject }],
+    });
+    const result = parseClaudeOutput(line);
+    expect(result[0].content.endsWith("…")).toBe(true);
+    expect(result[0].content.length).toBe(201);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -181,6 +215,20 @@ describe("parseClaudeOutput – tool_result extraction", () => {
   it("marks is_error:true tool_result correctly", () => {
     const line = JSON.stringify([{ type: "tool_result", content: "boom", is_error: true }]);
     expect(parseClaudeOutput(line)[0].isError).toBe(true);
+  });
+
+  it("skips non-object entries in a content array instead of throwing", () => {
+    const line = JSON.stringify(["a string entry", 42, null, { type: "tool_result", content: "kept" }]);
+    const result = parseClaudeOutput(line);
+    expect(result).toEqual<ParsedBlock[]>([{ type: "tool_result", content: "kept", isError: false }]);
+  });
+
+  it("JSON-stringifies a tool_result whose content is an object rather than a string", () => {
+    const line = JSON.stringify([
+      { type: "tool_result", content: { ok: true, count: 3 }, is_error: false },
+    ]);
+    const result = parseClaudeOutput(line);
+    expect(result[0].content).toBe(JSON.stringify({ ok: true, count: 3 }));
   });
 });
 
