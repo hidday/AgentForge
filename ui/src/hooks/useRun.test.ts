@@ -31,7 +31,11 @@ function fireSSE(event: DashboardEvent) {
   });
 }
 
-const detail = { run: { id: "r1", state: "Todo" }, artifacts: [], events: [] } as never;
+const detail = {
+  run: { id: "r1", state: "Todo" },
+  artifacts: [],
+  events: [],
+} as unknown as { run: { id: string; state: string }; artifacts: never[]; events: never[] };
 
 describe("useRun", () => {
   beforeEach(() => {
