@@ -137,6 +137,36 @@ describe("RunDetailPage", () => {
     expect(screen.getByTestId("state-badge").textContent).toBe("Implementing");
   });
 
+  it("falls back to the issue identifier when there is no title", () => {
+    const run = baseRun({ linearIssueTitle: null, linearIssueIdentifier: "ENG-42" });
+    mockUseRun.mockReturnValue({
+      data: { run, artifacts: [], events: [] },
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+    renderAt();
+
+    expect(screen.getByText("ENG-42")).toBeDefined();
+  });
+
+  it("falls back to the issue id prefix when there is neither a title nor an identifier", () => {
+    const run = baseRun({
+      linearIssueTitle: null,
+      linearIssueIdentifier: null,
+      linearIssueId: "issue-abcdefgh-9999",
+    });
+    mockUseRun.mockReturnValue({
+      data: { run, artifacts: [], events: [] },
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+    renderAt();
+
+    expect(screen.getByText("issue-ab")).toBeDefined();
+  });
+
   it("does not render branch/PR/editor links when the run has no branch", () => {
     const run = baseRun({ branchName: null, prNumber: null });
     mockUseRun.mockReturnValue({

@@ -67,6 +67,30 @@ describe("ArtifactTabs", () => {
     expect(screen.getByText("No data available")).toBeDefined();
   });
 
+  it("shows 'No rejection feedback recorded' when the rejection artifacts disappear on a later update", async () => {
+    const initial = [
+      makeArtifact({ id: "a1", type: "Plan", payloadJson: { summary: "Plan summary" } }),
+      makeArtifact({
+        id: "a2",
+        type: "RejectionContext",
+        payloadJson: { planVersion: 1, feedback: "Needs rework", source: "api" },
+      }),
+    ];
+    const { rerender } = render(<ArtifactTabs artifacts={initial} />);
+
+    await userEvent.click(screen.getByRole("button", { name: "Rejection Feedback" }));
+    expect(screen.getByText("Needs rework")).toBeDefined();
+
+    // The rejection artifact disappears from a later poll while the tab's
+    // own state (activeTab) persists across the prop update.
+    const updated = [
+      makeArtifact({ id: "a1", type: "Plan", payloadJson: { summary: "Plan summary" } }),
+    ];
+    rerender(<ArtifactTabs artifacts={updated} />);
+
+    expect(screen.getByText("No rejection feedback recorded")).toBeDefined();
+  });
+
   it("renders the execution report for the Execution tab", () => {
     const artifacts = [
       makeArtifact({
@@ -109,6 +133,14 @@ describe("ArtifactTabs", () => {
     expect(screen.getByText("No dispositions recorded")).toBeDefined();
   });
 
+  it("shows 'No dispositions recorded' when a plan revision payload omits dispositions entirely", () => {
+    const artifacts = [
+      makeArtifact({ id: "a1", type: "PlanRevision", payloadJson: {} }),
+    ];
+    render(<ArtifactTabs artifacts={artifacts} />);
+    expect(screen.getByText("No dispositions recorded")).toBeDefined();
+  });
+
   it("renders remediation resolutions with accepted/rejected/other status styling", () => {
     const artifacts = [
       makeArtifact({
@@ -140,6 +172,14 @@ describe("ArtifactTabs", () => {
         type: "Remediation",
         payloadJson: { resolution: [] },
       }),
+    ];
+    render(<ArtifactTabs artifacts={artifacts} />);
+    expect(screen.getByText(/v2/)).toBeDefined();
+  });
+
+  it("renders remediation with no resolution entries when the payload omits the field entirely", () => {
+    const artifacts = [
+      makeArtifact({ id: "a1", type: "Remediation", payloadJson: {} }),
     ];
     render(<ArtifactTabs artifacts={artifacts} />);
     expect(screen.getByText(/v2/)).toBeDefined();

@@ -15,26 +15,42 @@ vi.mock("@/components/RunsTable.tsx", () => ({
 }));
 
 let capturedOnIngestComplete: ((s: { started: number; skipped: number }) => void) | null = null;
+let capturedOnClose: (() => void) | null = null;
 
 vi.mock("@/components/LinearSyncDialog.tsx", () => ({
   LinearSyncDialog: ({
     open,
+    onClose,
     onIngestComplete,
   }: {
     open: boolean;
+    onClose: () => void;
     onIngestComplete: (s: { started: number; skipped: number }) => void;
   }) => {
     capturedOnIngestComplete = onIngestComplete;
+    capturedOnClose = onClose;
     return open ? <div data-testid="sync-dialog">sync dialog</div> : null;
   },
 }));
 
+let capturedOnDismiss: (() => void) | null = null;
 vi.mock("@/components/IngestSummaryBanner.tsx", () => ({
-  IngestSummaryBanner: ({ started, skipped }: { started: number; skipped: number }) => (
-    <div data-testid="ingest-banner">
-      started={started} skipped={skipped}
-    </div>
-  ),
+  IngestSummaryBanner: ({
+    started,
+    skipped,
+    onDismiss,
+  }: {
+    started: number;
+    skipped: number;
+    onDismiss: () => void;
+  }) => {
+    capturedOnDismiss = onDismiss;
+    return (
+      <div data-testid="ingest-banner">
+        started={started} skipped={skipped}
+      </div>
+    );
+  },
 }));
 
 import { DashboardPage } from "./DashboardPage.tsx";
@@ -47,6 +63,8 @@ describe("DashboardPage", () => {
   beforeEach(() => {
     mockUseRuns.mockReset();
     capturedOnIngestComplete = null;
+    capturedOnClose = null;
+    capturedOnDismiss = null;
   });
 
   afterEach(() => {
@@ -141,5 +159,60 @@ describe("DashboardPage", () => {
     });
 
     expect(screen.queryByTestId("ingest-banner")).toBeNull();
+  });
+
+  it("dismisses the ingest banner immediately when its onDismiss is invoked", () => {
+    vi.useFakeTimers();
+    mockUseRuns.mockReturnValue({ runs: [], loading: false, error: null, refetch: vi.fn() });
+    render(<DashboardPage />);
+
+    act(() => {
+      capturedOnIngestComplete!({ started: 1, skipped: 0 });
+    });
+    expect(screen.getByTestId("ingest-banner")).toBeDefined();
+
+    act(() => {
+      capturedOnDismiss!();
+    });
+    expect(screen.queryByTestId("ingest-banner")).toBeNull();
+  });
+
+  it("closes the sync dialog when its onClose is invoked", async () => {
+    mockUseRuns.mockReturnValue({ runs: [], loading: false, error: null, refetch: vi.fn() });
+    render(<DashboardPage />);
+
+    await userEvent.click(screen.getByRole("button", { name: /Sync from Linear/i }));
+    expect(screen.getByTestId("sync-dialog")).toBeDefined();
+
+    act(() => {
+      capturedOnClose!();
+    });
+    expect(screen.queryByTestId("sync-dialog")).toBeNull();
+  });
+
+  it("counts a run with a state absent from STATE_CATEGORY_MAP under 'idle'", () => {
+    mockUseRuns.mockReturnValue({
+      runs: [run("a", "SomeUnmappedFutureState")],
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+    const { container } = render(<DashboardPage />);
+
+    const statLabels = Array.from(
+      container.querySelectorAll(".grid.grid-cols-5 > div"),
+    ).map((el) => ({
+      label: el.querySelector(".text-xs")!.textContent,
+      value: el.querySelector(".text-2xl")!.textContent,
+    }));
+
+    // Not counted as active/waiting/blocked/done — only Total reflects it.
+    expect(statLabels).toEqual([
+      { label: "Total", value: "1" },
+      { label: "Active", value: "0" },
+      { label: "Awaiting", value: "0" },
+      { label: "Blocked", value: "0" },
+      { label: "Done", value: "0" },
+    ]);
   });
 });

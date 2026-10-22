@@ -223,6 +223,12 @@ describe("parseClaudeOutput – tool_result extraction", () => {
     expect(result).toEqual<ParsedBlock[]>([{ type: "tool_result", content: "kept", isError: false }]);
   });
 
+  it("stringifies a nullish tool_result content as an empty string", () => {
+    const line = JSON.stringify([{ type: "tool_result", is_error: false }]);
+    const result = parseClaudeOutput(line);
+    expect(result[0].content).toBe("");
+  });
+
   it("JSON-stringifies a tool_result whose content is an object rather than a string", () => {
     const line = JSON.stringify([
       { type: "tool_result", content: { ok: true, count: 3 }, is_error: false },

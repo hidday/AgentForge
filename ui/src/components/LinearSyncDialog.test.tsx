@@ -146,6 +146,27 @@ describe("LinearSyncDialog", () => {
     expect(onIngested).toHaveBeenCalledOnce();
   });
 
+  it("shows a generic error when ingestIssues rejects with a non-Error value", async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    mockApi.ingestIssues.mockRejectedValue("some non-Error rejection");
+
+    render(
+      <LinearSyncDialog
+        open={true}
+        onClose={vi.fn()}
+        onIngested={vi.fn()}
+        onIngestComplete={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => expect(screen.getByText(issueA.title)).toBeDefined());
+    await user.click(screen.getByRole("button", { name: /start 2 runs/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText("Failed to ingest issues")).toBeDefined();
+    });
+  });
+
   it("stays open and surfaces the error when ingestIssues rejects", async () => {
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     const onClose = vi.fn();
@@ -303,6 +324,146 @@ describe("LinearSyncDialog", () => {
     await waitFor(() => {
       expect(screen.getByText("Linear API down")).toBeDefined();
     });
+  });
+
+  it("shows a generic error message when fetchPendingIssues rejects with a non-Error value", async () => {
+    mockApi.fetchPendingIssues.mockRejectedValue("some non-Error rejection");
+
+    render(
+      <LinearSyncDialog
+        open={true}
+        onClose={vi.fn()}
+        onIngested={vi.fn()}
+        onIngestComplete={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("Failed to fetch issues")).toBeDefined();
+    });
+  });
+
+  it("'select all' checkbox selects everything when some issues are currently deselected", async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    render(
+      <LinearSyncDialog
+        open={true}
+        onClose={vi.fn()}
+        onIngested={vi.fn()}
+        onIngestComplete={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => expect(screen.getByText(issueA.title)).toBeDefined());
+
+    // Deselect one issue first so not everything is selected.
+    const issueACheckbox = screen.getByText(issueA.title).closest("label")!.querySelector(
+      "input[type=checkbox]",
+    )!;
+    await user.click(issueACheckbox);
+    expect(screen.getByRole("button", { name: /start 1 run\b/i })).toBeDefined();
+
+    // Clicking "select all" while not everything is selected re-selects all.
+    await user.click(screen.getByLabelText(/select all/i));
+    expect(screen.getByRole("button", { name: /start 2 runs/i })).toBeDefined();
+  });
+
+  it("does not schedule a second min-delay timer when maybeAutoClose is re-triggered while one is already pending", async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    const onClose = vi.fn();
+    mockApi.ingestIssues.mockReturnValue(new Promise(() => {}));
+
+    render(
+      <LinearSyncDialog
+        open={true}
+        onClose={onClose}
+        onIngested={vi.fn()}
+        onIngestComplete={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => expect(screen.getByText(issueA.title)).toBeDefined());
+    const startBtn = screen.getByRole("button", { name: /start 2 runs/i });
+    await user.click(startBtn);
+
+    // Both seen -> schedules the min-delay timer (closedRef not yet set).
+    fireSSE({ type: "run:created", runId: "run-a", issueId: issueA.id });
+    fireSSE({ type: "run:created", runId: "run-b", issueId: issueB.id });
+    // A duplicate event for an already-seen id re-invokes maybeAutoClose
+    // while the timer from above is already pending ("already scheduled").
+    fireSSE({ type: "run:created", runId: "run-a-dup", issueId: issueA.id });
+
+    await act(async () => {
+      vi.advanceTimersByTime(700);
+    });
+
+    await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
+  });
+
+  it("clears a pending min-delay timer when the dialog closes and re-opens before it fires", async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    mockApi.ingestIssues.mockReturnValue(new Promise(() => {}));
+
+    const { rerender } = render(
+      <LinearSyncDialog
+        open={true}
+        onClose={vi.fn()}
+        onIngested={vi.fn()}
+        onIngestComplete={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => expect(screen.getByText(issueA.title)).toBeDefined());
+    await user.click(screen.getByRole("button", { name: /start 2 runs/i }));
+
+    // Schedule the min-delay timer (both seen, well within the window).
+    fireSSE({ type: "run:created", runId: "run-a", issueId: issueA.id });
+    fireSSE({ type: "run:created", runId: "run-b", issueId: issueB.id });
+
+    // Close and re-open before the timer fires — the re-open effect should
+    // clear the stale pending timer rather than leaving it dangling.
+    rerender(
+      <LinearSyncDialog
+        open={false}
+        onClose={vi.fn()}
+        onIngested={vi.fn()}
+        onIngestComplete={vi.fn()}
+      />,
+    );
+    mockApi.fetchPendingIssues.mockResolvedValue({ issues: [issueA, issueB] });
+    rerender(
+      <LinearSyncDialog
+        open={true}
+        onClose={vi.fn()}
+        onIngested={vi.fn()}
+        onIngestComplete={vi.fn()}
+      />,
+    );
+
+    // No crash, and the fresh cycle starts clean (not pre-closed).
+    await waitFor(() => expect(screen.getByText(issueA.title)).toBeDefined());
+  });
+
+  it("clears a pending min-delay timer on unmount", async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    mockApi.ingestIssues.mockReturnValue(new Promise(() => {}));
+
+    const { unmount } = render(
+      <LinearSyncDialog
+        open={true}
+        onClose={vi.fn()}
+        onIngested={vi.fn()}
+        onIngestComplete={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => expect(screen.getByText(issueA.title)).toBeDefined());
+    await user.click(screen.getByRole("button", { name: /start 2 runs/i }));
+    fireSSE({ type: "run:created", runId: "run-a", issueId: issueA.id });
+    fireSSE({ type: "run:created", runId: "run-b", issueId: issueB.id });
+
+    // Unmounting while the min-delay timer is pending must not throw.
+    expect(() => unmount()).not.toThrow();
   });
 
   it("'select all' checkbox deselects everything when all issues are already selected", async () => {
