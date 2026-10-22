@@ -309,11 +309,16 @@ describe("buildChatSystemPrompt", () => {
     const planArtifact = makeArtifact({
       type: "Plan",
       version: 1,
-      payloadJson: { risks: ["Plain string risk"], assumptions: ["Plain string assumption"] },
+      payloadJson: {
+        risks: ["Plain string risk"],
+        assumptions: ["Plain string assumption"],
+        openQuestions: ["Plain string question"],
+      },
     });
     const result = buildChatSystemPrompt(makeRun(), [planArtifact]);
     expect(result).toContain("  - Plain string risk");
     expect(result).toContain("  - Plain string assumption");
+    expect(result).toContain("  - Plain string question");
   });
 
   it("renders multiple RejectionContext artifacts, one line each", () => {
@@ -430,5 +435,69 @@ describe("buildChatSystemPrompt", () => {
     const result = buildChatSystemPrompt(makeRun(), [planV3, planV1]);
     expect(result).toContain("v3");
     expect(result).not.toContain("v1");
+  });
+
+  it("stringifies non-string plan risks/assumptions/openQuestions and falls back to '' for missing step fields", () => {
+    const plan = makeArtifact({
+      type: "Plan",
+      payloadJson: {
+        summary: "s",
+        steps: [{}], // missing id/title/description
+        risks: [{ code: "R1" }], // non-string -> JSON.stringify
+        assumptions: [{ code: "A1" }],
+        openQuestions: [{ code: "Q1" }],
+      },
+    });
+    const result = buildChatSystemPrompt(makeRun(), [plan]);
+    expect(result).toContain("**** : "); // step id/title/description all fell back to ""
+    expect(result).toContain('{"code":"R1"}');
+    expect(result).toContain('{"code":"A1"}');
+    expect(result).toContain('{"code":"Q1"}');
+  });
+
+  it("falls back to '' for missing HumanAnswers questionId/answer fields", () => {
+    const artifact = makeArtifact({
+      type: "HumanAnswers",
+      payloadJson: { answers: [{}] },
+    });
+    const result = buildChatSystemPrompt(makeRun(), [artifact]);
+    expect(result).toContain("**[]:** ");
+  });
+
+  it("falls back to '' for missing ResearchedAnswers fields and omits the summary line when absent", () => {
+    const artifact = makeArtifact({
+      type: "ResearchedAnswers",
+      payloadJson: { answers: [{}] }, // no summary, no questionId/confidence/answer/sources
+    });
+    const result = buildChatSystemPrompt(makeRun(), [artifact]);
+    expect(result).toContain("**[] ():** ");
+    expect(result).not.toContain("**Summary:**");
+  });
+
+  it("falls back to '' for a PlanReview finding missing severity/title/id/details", () => {
+    const artifact = makeArtifact({
+      type: "PlanReview",
+      payloadJson: { findings: [{}] },
+    });
+    const result = buildChatSystemPrompt(makeRun(), [artifact]);
+    expect(result).toContain("**[] ** ():");
+  });
+
+  it("falls back to '?' status and omits the dash-details suffix when a check has no details", () => {
+    const artifact = makeArtifact({
+      type: "ExecutionReport",
+      payloadJson: {
+        checks: {
+          lint: {}, // no status, no details
+          typecheck: { status: "pass" }, // status but no details
+          tests: { status: "pass", details: "all good" },
+        },
+      },
+    });
+    const result = buildChatSystemPrompt(makeRun(), [artifact]);
+    expect(result).toContain("**Lint:** ?");
+    expect(result).toContain("**Typecheck:** pass");
+    expect(result).not.toContain("**Typecheck:** pass —");
+    expect(result).toContain("**Tests:** pass — all good");
   });
 });

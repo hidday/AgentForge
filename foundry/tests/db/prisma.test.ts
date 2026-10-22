@@ -53,4 +53,19 @@ describe("db/prisma", () => {
     await expect(disconnectPrisma()).resolves.toBeUndefined();
     expect(disconnectMock).not.toHaveBeenCalled();
   });
+
+  it("enables query/info/warn/error logging when LOG_LEVEL is 'debug' or 'trace'", async () => {
+    vi.doMock("../../src/config/env.js", () => ({
+      env: { DATABASE_URL: "postgresql://test:test@localhost:5432/test", LOG_LEVEL: "trace" },
+    }));
+
+    const { getPrismaClient } = await import("../../src/db/prisma.js");
+    getPrismaClient();
+
+    expect(PrismaClientMock.mock.calls[0]![0]).toMatchObject({
+      log: ["query", "info", "warn", "error"],
+    });
+
+    vi.doUnmock("../../src/config/env.js");
+  });
 });

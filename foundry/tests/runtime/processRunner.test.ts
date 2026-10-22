@@ -531,6 +531,56 @@ describe("ProcessRunner.rehydrateOrphans()", () => {
     vi.clearAllTimers();
   });
 
+  it("ignores a stale fs.watch callback once the orphan has already been finalized, and skips re-buffering when the file has not grown", () => {
+    vi.useFakeTimers();
+    const logger = makeLogger();
+    const emitter = makeEmitter();
+    const runner = new ProcessRunner("real", logger as never, emitter as never, "/tmp/spool");
+
+    mockedReaddirSync.mockReturnValue(["alive.json"] as never);
+    const manifest = {
+      id: "p-alive",
+      pid: 778,
+      command: "claude",
+      runId: "run-9",
+      stage: "executor",
+      runtime: "claude-code",
+      startedAt: new Date().toISOString(),
+    };
+
+    const logContent = "initial log\n";
+    mockedReadFileSync.mockImplementation((_path: unknown, encoding?: unknown) => {
+      if (encoding === "utf-8") {
+        if (String(_path).endsWith("alive.json")) return JSON.stringify(manifest);
+        return logContent;
+      }
+      return Buffer.from(logContent);
+    });
+
+    const killSpy = vi.spyOn(process, "kill").mockReturnValue(true as never);
+    const fakeWatcher = { close: vi.fn() };
+    mockedWatch.mockReturnValue(fakeWatcher as never);
+
+    runner.rehydrateOrphans();
+    const watchCallback = mockedWatch.mock.calls[0]![1] as () => void;
+
+    // File content unchanged: the watcher fires but there's nothing new to
+    // append, so appendToBuffer is skipped.
+    watchCallback();
+    expect(runner.getProcessOutput("p-alive")).toBe("initial log\n");
+
+    // The active process entry disappears (e.g. explicit completion via the
+    // normal exec() path) before a second, stale watch callback fires.
+    (runner as unknown as { activeProcesses: Map<string, unknown> }).activeProcesses.delete(
+      "p-alive",
+    );
+    watchCallback();
+    expect(fakeWatcher.close).toHaveBeenCalled();
+
+    killSpy.mockRestore();
+    vi.clearAllTimers();
+  });
+
   it("logs a warning and continues when a manifest file is malformed", () => {
     const logger = makeLogger();
     const runner = new ProcessRunner("real", logger as never, undefined, "/tmp/spool");

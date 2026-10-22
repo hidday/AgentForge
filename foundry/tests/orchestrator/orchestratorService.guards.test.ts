@@ -203,3 +203,52 @@ describe("OrchestratorService.approveHumanReview — Done-state cleanup", () => 
     expect(agentSkillRepo.archiveIfLowUtility).toHaveBeenCalledWith(updatedSkill);
   });
 });
+
+describe("OrchestratorService.updateSkillMetrics (invoked directly)", () => {
+  // `updateSkillMetrics` is private; it reads `this.agentSkillRepo`,
+  // `this.eventRepo`, and `this.logger` but needs no full service instance,
+  // so we call it directly via `.call(fakeThis, ...)` to exercise its
+  // remaining branches without driving a full run lifecycle.
+  type Updater = {
+    updateSkillMetrics(runId: string, success: boolean): Promise<void>;
+  };
+  const updateSkillMetrics = (
+    OrchestratorService.prototype as unknown as Updater
+  ).updateSkillMetrics;
+
+  it("does nothing when there are no SKILL_INJECTION events for the run", async () => {
+    const agentSkillRepo = {
+      incrementSuccess: vi.fn(),
+      incrementFailure: vi.fn(),
+      archiveIfLowUtility: vi.fn(),
+    };
+    const eventRepo = { findByRunId: vi.fn().mockResolvedValue([makeEvent({ eventType: "OTHER" })]) };
+    const fakeThis = { agentSkillRepo, eventRepo, logger: { warn: vi.fn() } };
+
+    await updateSkillMetrics.call(fakeThis, "run-1", true);
+
+    expect(agentSkillRepo.incrementSuccess).not.toHaveBeenCalled();
+    expect(agentSkillRepo.incrementFailure).not.toHaveBeenCalled();
+  });
+
+  it("calls incrementFailure (not incrementSuccess) for every injected skill when success is false", async () => {
+    const injectionEvent = makeEvent({
+      eventType: "SKILL_INJECTION",
+      payloadJson: { skillIds: ["skill-1"] },
+    });
+    const updatedSkill = { id: "skill-1" };
+    const agentSkillRepo = {
+      incrementSuccess: vi.fn(),
+      incrementFailure: vi.fn().mockResolvedValue(updatedSkill),
+      archiveIfLowUtility: vi.fn().mockResolvedValue(undefined),
+    };
+    const eventRepo = { findByRunId: vi.fn().mockResolvedValue([injectionEvent]) };
+    const fakeThis = { agentSkillRepo, eventRepo, logger: { warn: vi.fn() } };
+
+    await updateSkillMetrics.call(fakeThis, "run-1", false);
+
+    expect(agentSkillRepo.incrementFailure).toHaveBeenCalledWith("skill-1");
+    expect(agentSkillRepo.incrementSuccess).not.toHaveBeenCalled();
+    expect(agentSkillRepo.archiveIfLowUtility).toHaveBeenCalledWith(updatedSkill);
+  });
+});

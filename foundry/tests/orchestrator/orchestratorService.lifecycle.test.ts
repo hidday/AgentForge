@@ -607,6 +607,46 @@ describe("OrchestratorService.runPlanning (re-plan from Todo after rejection)", 
     expect(result.planVersion).toBe(2);
   });
 
+  it("buildTaskBundle uses the remote default branch and warns when it differs from the configured one", async () => {
+    const run = makeRun({ state: RunState.Planning, planVersion: 1 });
+    const store = makeStore(run);
+    store.artifacts.push(asArtifact({ type: "Plan", version: 1, payloadJson: makePlan() }));
+    const built = buildDeps(store);
+    built.githubClient.getDefaultBranch = vi.fn().mockResolvedValue("develop");
+    built.setPlannerPlan(makePlan({ planVersion: 2 }));
+    built.setPlanReviewerResult(makePlanReview());
+    const svc = new OrchestratorService(built.deps as never);
+
+    await svc.runPlanning("run-1");
+
+    const bundle = built.plannerAgent.run.mock.calls[0][0];
+    expect(bundle.repo.defaultBranch).toBe("develop");
+    expect(built.logger.warn).toHaveBeenCalledWith(
+      expect.objectContaining({ config: "main", remote: "develop" }),
+      "Config defaultBranch differs from GitHub, using remote value",
+    );
+  });
+
+  it("buildTaskBundle keeps the configured default branch when the remote value matches", async () => {
+    const run = makeRun({ state: RunState.Planning, planVersion: 1 });
+    const store = makeStore(run);
+    store.artifacts.push(asArtifact({ type: "Plan", version: 1, payloadJson: makePlan() }));
+    const built = buildDeps(store);
+    built.githubClient.getDefaultBranch = vi.fn().mockResolvedValue("main");
+    built.setPlannerPlan(makePlan({ planVersion: 2 }));
+    built.setPlanReviewerResult(makePlanReview());
+    const svc = new OrchestratorService(built.deps as never);
+
+    await svc.runPlanning("run-1");
+
+    const bundle = built.plannerAgent.run.mock.calls[0][0];
+    expect(bundle.repo.defaultBranch).toBe("main");
+    expect(built.logger.warn).not.toHaveBeenCalledWith(
+      expect.anything(),
+      "Config defaultBranch differs from GitHub, using remote value",
+    );
+  });
+
   it("pauses for human clarification when the re-plan has blocking open questions", async () => {
     const run = makeRun({ state: RunState.Planning, planVersion: 1 });
     const store = makeStore(run);

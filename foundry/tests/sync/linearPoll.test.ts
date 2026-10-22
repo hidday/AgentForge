@@ -139,4 +139,17 @@ describe("LinearPollService.startRunsForIssues", () => {
     expect(result).toEqual({ started: ["issue-2"], skipped: ["issue-1"] });
     expect(logger.error).toHaveBeenCalled();
   });
+
+  it("stringifies a non-Error rejection from startRun when logging the failure", async () => {
+    const { svc, orchestrator, logger } = makeDeps();
+    orchestrator.startRun.mockRejectedValue("rate limited");
+
+    const result = await svc.startRunsForIssues(["issue-1"]);
+
+    expect(result).toEqual({ started: [], skipped: ["issue-1"] });
+    expect(logger.error).toHaveBeenCalledWith(
+      expect.objectContaining({ issueId: "issue-1", error: "rate limited" }),
+      "Failed to start run for issue",
+    );
+  });
 });

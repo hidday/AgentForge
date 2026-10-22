@@ -40,6 +40,13 @@ describe("RealGitHubClient", () => {
         /Invalid repo format/,
       );
     });
+
+    it("rejects a repo string with a leading slash (empty owner)", async () => {
+      const { client } = makeClient();
+      await expect(client.getDefaultBranch("/repo-with-no-owner")).rejects.toThrow(
+        /Invalid repo format/,
+      );
+    });
   });
 
   describe("verifyRepoAccess", () => {
@@ -383,6 +390,21 @@ describe("RealGitHubClient", () => {
       expect(octokit.pulls.createReview).toHaveBeenLastCalledWith(
         expect.objectContaining({ event: "COMMENT" }),
       );
+    });
+
+    it("never attempts the own-PR COMMENT fallback when the event is already COMMENT", async () => {
+      const { client, octokit } = makeClient();
+      octokit.pulls.createReview.mockRejectedValue(
+        new Error("Can not request changes on your own pull request"),
+      );
+
+      await expect(
+        client.submitPRReview("acme/repo", 5, "Just a note", "COMMENT"),
+      ).rejects.toThrow(/submitPRReview/);
+
+      // event is already "COMMENT", so the `event !== "COMMENT"` guard short-circuits
+      // the fallback regardless of the error message, and createReview is called once.
+      expect(octokit.pulls.createReview).toHaveBeenCalledTimes(1);
     });
 
     it("rethrows other errors wrapped with context", async () => {

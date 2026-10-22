@@ -574,12 +574,14 @@ describe("DistillationAgent", () => {
           taskCategory: "database migration",
           skillMarkdown: "Run migrations inside a transaction.",
         }),
-        makeSkill({
-          id: "skill-unnamed",
-          name: null,
-          taskCategory: "rate limiting",
-          skillMarkdown: "Use a token bucket in Redis.",
-        }),
+        {
+          ...makeSkill({
+            id: "skill-unnamed",
+            taskCategory: "rate limiting",
+            skillMarkdown: "Use a token bucket in Redis.",
+          }),
+          name: null, // makeSkill's `??` default would otherwise swallow an explicit null
+        },
       ]);
       deps.agentSkillRepo.countActiveByRepo.mockResolvedValue(2);
 
@@ -617,7 +619,7 @@ describe("DistillationAgent", () => {
 
       // summarizeRemediation was invoked (remediationArtifact truthy) and hit its cap-exceeded branch.
       expect(promptArg).toContain("## Remediation Summary");
-      expect(promptArg).toContain("Ready for human review: true");
+      expect(promptArg).toContain("**Ready for human review**: true");
 
       // existingSkillsSummary non-empty branch, with both the named and unnamed skill label forms.
       expect(promptArg).toContain("[db-migration-helper]");
@@ -658,6 +660,81 @@ describe("DistillationAgent", () => {
       expect(promptArg).toContain("notAValidExecutionReport");
     });
   });
+
+    it("renders the '_none_' fallback for empty steps/filesChanged/resolution arrays", async () => {
+      const deps = buildDeps();
+      const planArtifact = {
+        id: "plan-artifact-empty",
+        runId: "run-1",
+        type: "Plan" as const,
+        version: 1,
+        payloadJson: {
+          planVersion: 1,
+          summary: "Trivial no-op plan.",
+          assumptions: [],
+          openQuestions: [],
+          risks: [],
+          steps: [], // -> "_none_"
+          testPlan: "N/A",
+          confidence: 0.5,
+        },
+        rawText: "{}",
+        createdAt: new Date(),
+      };
+      const executionArtifact = {
+        id: "exec-artifact-empty",
+        runId: "run-1",
+        type: "ExecutionReport" as const,
+        version: 1,
+        payloadJson: {
+          executionVersion: 1,
+          summary: "No files touched.",
+          filesChanged: [], // -> "_none_"
+          checks: {
+            lint: { status: "pass", details: "" },
+            typecheck: { status: "pass", details: "" },
+            tests: { status: "pass", details: "" },
+          },
+          notes: [],
+          prDraftCreated: false,
+          score: 0.5,
+          scoreRationale: "N/A",
+        },
+        rawText: "{}",
+        createdAt: new Date(),
+      };
+      const remediationArtifact = {
+        id: "remediation-artifact-empty",
+        runId: "run-1",
+        type: "Remediation" as const,
+        version: 1,
+        payloadJson: {
+          reviewId: "review-empty",
+          resolution: [], // -> "_none_"
+          readyForHumanReview: false,
+          executionReport: executionArtifact.payloadJson,
+        },
+        rawText: "{}",
+        createdAt: new Date(),
+      };
+      deps.artifactRepo.findLatestByType.mockImplementation((_runId: string, type: string) => {
+        if (type === "Plan") return Promise.resolve(planArtifact);
+        if (type === "ExecutionReport") return Promise.resolve(executionArtifact);
+        if (type === "Remediation") return Promise.resolve(remediationArtifact);
+        return Promise.resolve(null);
+      });
+      deps.agentRunner.run.mockResolvedValue(
+        makeDistillationOutput({ shouldPersist: false, reason: "n/a" }),
+      );
+
+      const agent = buildAgent(deps);
+      await agent.run("run-1", makeRun());
+
+      const promptArg = (deps.agentRunner.run.mock.calls[0] as [unknown, { prompt: string }])[1]
+        .prompt as string;
+      const noneCount = promptArg.split("_none_").length - 1;
+      expect(noneCount).toBeGreaterThanOrEqual(3); // steps, filesChanged, resolution all empty
+    });
 
   describe("(k) LLM call rejects with a non-Error value", () => {
     it("still emits reason='parse_error' when the rejection is a plain string, not an Error instance", async () => {

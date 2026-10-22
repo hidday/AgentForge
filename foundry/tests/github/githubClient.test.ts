@@ -20,6 +20,10 @@ describe("MockGitHubClient", () => {
     expect(client.getCreatedBranches()).toEqual(["ai/feature-1", "ai/feature-2"]);
   });
 
+  it("commentOnPR resolves without throwing", async () => {
+    await expect(client.commentOnPR("acme/repo", 100, "Looks good")).resolves.toBeUndefined();
+  });
+
   it("assigns incrementing PR numbers starting at 100 and records them as draft", async () => {
     const pr1 = await client.createDraftPR("acme/repo", "head-1", "main", "Title 1", "Body 1");
     const pr2 = await client.createDraftPR("acme/repo", "head-2", "main", "Title 2", "Body 2");

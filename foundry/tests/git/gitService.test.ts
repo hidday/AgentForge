@@ -431,5 +431,45 @@ describe("GitService", () => {
     it("throws GitError for invalid repo path", async () => {
       await expect(svc.currentBranch("/nonexistent")).rejects.toThrow(GitError);
     });
+
+    it("wraps a failing fetch (no origin remote) in a GitError", async () => {
+      await expect(svc.fetch(repoPath)).rejects.toThrow(GitError);
+    });
+
+    it("wraps a failing createWorktree (bad start point) in a GitError", async () => {
+      const worktreePath = join(repoPath, ".worktrees", "bad");
+      await expect(
+        svc.createWorktree(repoPath, worktreePath, "ai/bad-start", "not-a-real-ref"),
+      ).rejects.toThrow(GitError);
+    });
+
+    it("pruneWorktrees swallows the error and warns instead of throwing on a non-git directory", async () => {
+      const notARepo = mkdtempSync(join(tmpdir(), "gitservice-notrepo-"));
+      try {
+        const warnLogger = { ...noopLogger, warn: vi.fn() };
+        const warnSvc = new GitService(warnLogger);
+        await expect(warnSvc.pruneWorktrees(notARepo)).resolves.toBeUndefined();
+        expect(warnLogger.warn).toHaveBeenCalledWith(
+          expect.objectContaining({ repoPath: notARepo }),
+          "Failed to prune worktrees (best-effort cleanup)",
+        );
+      } finally {
+        rmSync(notARepo, { recursive: true, force: true });
+      }
+    });
+
+    it("findWorktreeForBranch wraps a failing 'worktree list' in a GitError", async () => {
+      const notARepo = mkdtempSync(join(tmpdir(), "gitservice-notrepo-"));
+      try {
+        await expect(svc.findWorktreeForBranch(notARepo, "any-branch")).rejects.toThrow(GitError);
+      } finally {
+        rmSync(notARepo, { recursive: true, force: true });
+      }
+    });
+
+    it("GitError formats a non-Error cause via String() instead of .message", () => {
+      const err = new GitError("fetch", "/tmp/repo", "a plain string failure");
+      expect(err.message).toBe("git fetch failed in /tmp/repo: a plain string failure");
+    });
   });
 });
