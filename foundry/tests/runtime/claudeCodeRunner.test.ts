@@ -322,6 +322,59 @@ describe("ClaudeCodeRunner.chatRun() — arg filtering and error surfacing", () 
     expect(result.durationMs).toBe(123);
   });
 
+  it("extracts the final result line from an NDJSON stream-json payload", async () => {
+    const ndjson = [
+      JSON.stringify({ type: "system", subtype: "init" }),
+      JSON.stringify({ type: "assistant", message: { content: "thinking..." } }),
+      JSON.stringify({ type: "result", result: "Final answer from stream", is_error: false }),
+    ].join("\n");
+    const processRunner = makeMockProcessRunner({
+      stdout: ndjson,
+      stderr: "",
+      exitCode: 0,
+      durationMs: 55,
+      timedOut: false,
+    });
+    const runner = new ClaudeCodeRunner(
+      processRunner as never,
+      "claude",
+      [],
+      "claude-opus-4-8",
+      makeMockLogger() as never,
+    );
+
+    const result = await runner.chatRun(
+      { prompt: "Hello", workingDirectory: "/tmp", timeoutMs: 1000 },
+      "chat",
+    );
+
+    expect(result.text).toBe("Final answer from stream");
+  });
+
+  it("falls back to the raw output when it is neither a JSON envelope nor NDJSON", async () => {
+    const processRunner = makeMockProcessRunner({
+      stdout: "plain unstructured CLI output, not JSON at all",
+      stderr: "",
+      exitCode: 0,
+      durationMs: 10,
+      timedOut: false,
+    });
+    const runner = new ClaudeCodeRunner(
+      processRunner as never,
+      "claude",
+      [],
+      "claude-opus-4-8",
+      makeMockLogger() as never,
+    );
+
+    const result = await runner.chatRun(
+      { prompt: "Hello", workingDirectory: "/tmp", timeoutMs: 1000 },
+      "chat",
+    );
+
+    expect(result.text).toBe("plain unstructured CLI output, not JSON at all");
+  });
+
   it("throws and logs when CLI exits non-zero", async () => {
     const processRunner = makeMockProcessRunner({
       stdout: JSON.stringify({ type: "result", result: "Something went wrong", is_error: false }),

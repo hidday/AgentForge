@@ -31,4 +31,10 @@ describe("agentModels", () => {
     expect(resolveAgentModel("plan-reviewer", env)).toBe("gpt-5.6-sol");
     expect(resolveAgentModel("reviewer", env)).toBe("gpt-5.6-sol");
   });
+
+  it("throws on an unrecognized stage/tier (exhaustiveness guard)", () => {
+    expect(() => resolveAgentModel("not-a-real-stage" as never, env)).toThrow(
+      /Unknown agent model tier/,
+    );
+  });
 });

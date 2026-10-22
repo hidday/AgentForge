@@ -21,4 +21,9 @@ describe("skillNaming", () => {
       "dev-env-pause-resume",
     );
   });
+
+  it("slugifySkillName falls back to 'distilled-skill' when nothing slugifiable remains", () => {
+    expect(slugifySkillName("!!!")).toBe("distilled-skill");
+    expect(slugifySkillName("")).toBe("distilled-skill");
+  });
 });

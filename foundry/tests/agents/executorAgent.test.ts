@@ -208,4 +208,35 @@ describe("ExecutorAgent.run()", () => {
     expect(payload?.score).toBe(0.42);
     expect(payload?.executionVersion).toBe(1);
   });
+
+  it("logs isRetry=true when only existingPR is set (no existingBranch)", async () => {
+    const { agent, logger } = buildAgent();
+
+    await agent.run(makePlan(), makeTaskBundle(), "run-1", { existingPR: 777 });
+
+    const startLog = logger.info.mock.calls.find(
+      (c: unknown[]) => c[1] === "Starting executor agent",
+    );
+    expect((startLog?.[0] as { isRetry?: boolean })?.isRetry).toBe(true);
+  });
+
+  it("injects the operator note into the user prompt when options.operatorNote is set", async () => {
+    const { agent, getUserPrompt } = buildAgent();
+
+    await agent.run(makePlan(), makeTaskBundle(), "run-1", undefined, {
+      operatorNote: "Please use the new auth service, not the legacy one.",
+    });
+
+    const userPrompt = getUserPrompt();
+    expect(userPrompt).toContain("## Operator Note");
+    expect(userPrompt).toContain("Please use the new auth service, not the legacy one.");
+  });
+
+  it("omits the operator note section entirely when no operator note is given", async () => {
+    const { agent, getUserPrompt } = buildAgent();
+
+    await agent.run(makePlan(), makeTaskBundle(), "run-1");
+
+    expect(getUserPrompt()).not.toContain("## Operator Note");
+  });
 });

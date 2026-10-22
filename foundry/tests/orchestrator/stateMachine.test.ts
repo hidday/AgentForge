@@ -40,4 +40,11 @@ describe("stateMachine - clarification transitions", () => {
     expect(validEvents).toHaveLength(1);
     expect(validEvents).toContain(RunEvent.RESET_TO_TODO);
   });
+
+  it("getValidEvents returns an empty array for a terminal state with no outgoing transitions", () => {
+    // Done is a terminal state: it never appears as a "from" state in the
+    // transition table, so the lookup falls through to the empty-array branch.
+    const validEvents = getValidEvents(RunState.Done);
+    expect(validEvents).toEqual([]);
+  });
 });

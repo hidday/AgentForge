@@ -99,6 +99,14 @@ describe("parseClaudeOutput – tool_use extraction", () => {
     ]);
   });
 
+  it("produces no block for a content_block_start event whose content_block is not a tool_use", () => {
+    const line = JSON.stringify({
+      type: "content_block_start",
+      content_block: { type: "text", text: "" },
+    });
+    expect(parseClaudeOutput(line)).toEqual([]);
+  });
+
   it("extracts a tool_use from content_block_start event", () => {
     const line = JSON.stringify({
       type: "content_block_start",
@@ -127,6 +135,40 @@ describe("parseClaudeOutput – tool_use extraction", () => {
     const result = parseClaudeOutput(line);
     expect(result[0].type).toBe("tool_use");
     expect(result[0].content).toContain("foo");
+  });
+
+  it("returns an empty string for non-object tool input", () => {
+    const line = JSON.stringify({
+      content: [{ type: "tool_use", name: "NoInput", input: "not-an-object" }],
+    });
+    const result = parseClaudeOutput(line);
+    expect(result[0].content).toBe("");
+  });
+
+  it("uses the 'path' field when present (and no command/file_path)", () => {
+    const line = JSON.stringify({
+      content: [{ type: "tool_use", name: "Glob", input: { path: "/tmp/dir" } }],
+    });
+    const result = parseClaudeOutput(line);
+    expect(result[0].content).toBe("/tmp/dir");
+  });
+
+  it("returns short string content as-is, without truncation", () => {
+    const line = JSON.stringify({
+      content: [{ type: "tool_use", name: "Write", input: { content: "short text" } }],
+    });
+    const result = parseClaudeOutput(line);
+    expect(result[0].content).toBe("short text");
+  });
+
+  it("truncates a long JSON summary of tool input with unknown fields", () => {
+    const bigObject = { foo: "x".repeat(300) };
+    const line = JSON.stringify({
+      content: [{ type: "tool_use", name: "Custom", input: bigObject }],
+    });
+    const result = parseClaudeOutput(line);
+    expect(result[0].content.endsWith("…")).toBe(true);
+    expect(result[0].content.length).toBe(201);
   });
 });
 
@@ -170,6 +212,11 @@ describe("parseClaudeOutput – tool_result extraction", () => {
     expect(parseClaudeOutput(line)).toEqual([]);
   });
 
+  it("skips a null tool_use_result without throwing (neither string nor object branch matches)", () => {
+    const line = JSON.stringify({ tool_use_result: null });
+    expect(parseClaudeOutput(line)).toEqual([]);
+  });
+
   it("extracts tool_result from a bare content array", () => {
     const line = JSON.stringify([{ type: "tool_result", content: "ok", is_error: false }]);
     const result = parseClaudeOutput(line);
@@ -181,6 +228,31 @@ describe("parseClaudeOutput – tool_result extraction", () => {
   it("marks is_error:true tool_result correctly", () => {
     const line = JSON.stringify([{ type: "tool_result", content: "boom", is_error: true }]);
     expect(parseClaudeOutput(line)[0].isError).toBe(true);
+  });
+
+  it("skips non-object entries in a content array instead of throwing", () => {
+    const line = JSON.stringify(["a string entry", 42, null, { type: "tool_result", content: "kept" }]);
+    const result = parseClaudeOutput(line);
+    expect(result).toEqual<ParsedBlock[]>([{ type: "tool_result", content: "kept", isError: false }]);
+  });
+
+  it("produces no block for a content-array entry whose type is not text/tool_use/tool_result", () => {
+    const line = JSON.stringify([{ type: "thinking", thinking: "pondering..." }]);
+    expect(parseClaudeOutput(line)).toEqual([]);
+  });
+
+  it("stringifies a nullish tool_result content as an empty string", () => {
+    const line = JSON.stringify([{ type: "tool_result", is_error: false }]);
+    const result = parseClaudeOutput(line);
+    expect(result[0].content).toBe("");
+  });
+
+  it("JSON-stringifies a tool_result whose content is an object rather than a string", () => {
+    const line = JSON.stringify([
+      { type: "tool_result", content: { ok: true, count: 3 }, is_error: false },
+    ]);
+    const result = parseClaudeOutput(line);
+    expect(result[0].content).toBe(JSON.stringify({ ok: true, count: 3 }));
   });
 });
 
@@ -325,6 +397,14 @@ describe("parseClaudeOutput – partial line noise filtering", () => {
   it("filters partial lines with stop_reason:null + stop_sequence:null", () => {
     const fragment =
       'parser"},"caller":{"type":"direct"}}],"stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":2}}';
+    expect(parseClaudeOutput(fragment)).toEqual([]);
+  });
+
+  it("filters a stop_reason/stop_sequence fragment that contains no other metadata keywords", () => {
+    // Deliberately avoids any METADATA_NOISE_RE keyword (input_tokens, etc.)
+    // and the parent_tool_use_id+session_id pair, so this exercises the
+    // stop_reason/stop_sequence check specifically rather than an earlier one.
+    const fragment = 'cted"},"stop_reason":null,"stop_sequence":null,"model":"claude-3"}';
     expect(parseClaudeOutput(fragment)).toEqual([]);
   });
 

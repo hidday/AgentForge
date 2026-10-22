@@ -150,4 +150,16 @@ describe("PlanReviserAgent.run() relatedContext rendering", () => {
     expect(prompt).not.toContain("Background: Related Linear Context");
     expect(prompt).not.toContain("{{relatedContextSection}}");
   });
+
+  it("injects the operator note into the prompt when options.operatorNote is set", async () => {
+    const { agent, getPrompt } = buildPlanReviserAgent();
+
+    await agent.run(makePlan(), makePlanReview(), makeTaskBundle(), "run-1", {
+      operatorNote: "Keep the migration behind a feature flag.",
+    });
+
+    const prompt = getPrompt();
+    expect(prompt).toContain("## Operator Note");
+    expect(prompt).toContain("Keep the migration behind a feature flag.");
+  });
 });
