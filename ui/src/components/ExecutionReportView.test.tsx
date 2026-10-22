@@ -36,6 +36,12 @@ describe("ExecutionReportView", () => {
     expect(screen.getByText("Partially complete")).toBeDefined();
   });
 
+  it("uses the low-score (blocked) bar color when score is below 0.4", () => {
+    const { container } = render(<ExecutionReportView report={{ score: 0.2 }} />);
+    expect(screen.getByText("Score: 20%")).toBeDefined();
+    expect(container.querySelector(".bg-state-blocked")).not.toBeNull();
+  });
+
   it("renders the markdown summary through the Markdown component", () => {
     render(<ExecutionReportView report={{ summary: "Did the thing." }} />);
     expect(screen.getByTestId("markdown-content").textContent).toBe("Did the thing.");

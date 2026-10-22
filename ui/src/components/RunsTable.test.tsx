@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import type { Run } from "@/api/client.ts";
@@ -82,6 +82,18 @@ describe("RunsTable", () => {
     expect(screen.getByText("ENG-99")).toBeDefined();
   });
 
+  it("falls back to the issue id prefix when there is neither a title nor an identifier", () => {
+    const run = makeRun({
+      id: "r1",
+      state: "Todo",
+      linearIssueTitle: null,
+      linearIssueIdentifier: null,
+      linearIssueId: "issue-abcdefgh-1234",
+    });
+    renderWithRouter(<RunsTable runs={[run]} />);
+    expect(screen.getByText("issue-ab")).toBeDefined();
+  });
+
   it("renders an external Linear link only when linearIssueUrl is present", () => {
     const withUrl = makeRun({
       id: "r1",
@@ -111,6 +123,33 @@ describe("RunsTable", () => {
 
     await userEvent.click(screen.getByTitle("Approve Plan"));
     expect(mockApi.approvePlan).toHaveBeenCalledWith("r1");
+    expect(onAction).toHaveBeenCalledTimes(1);
+  });
+
+  it("stops click propagation on the external Linear link so it doesn't also trigger the row link", () => {
+    const run = makeRun({
+      id: "r1",
+      state: "Todo",
+      linearIssueUrl: "https://linear.app/issue/1",
+    });
+    renderWithRouter(<RunsTable runs={[run]} />);
+
+    const link = screen.getByTitle("Open in Linear");
+    const clickEvent = new MouseEvent("click", { bubbles: true, cancelable: true });
+    const stopPropagationSpy = vi.spyOn(clickEvent, "stopPropagation");
+    fireEvent(link, clickEvent);
+
+    expect(stopPropagationSpy).toHaveBeenCalled();
+  });
+
+  it("Reject Plan action calls api.rejectPlan with the run id", async () => {
+    mockApi.rejectPlan.mockResolvedValue({ ok: true, state: "Blocked" });
+    const onAction = vi.fn();
+    const run = makeRun({ id: "r1", state: "AwaitingPlanApproval" });
+    renderWithRouter(<RunsTable runs={[run]} onAction={onAction} />);
+
+    await userEvent.click(screen.getByTitle("Reject Plan"));
+    expect(mockApi.rejectPlan).toHaveBeenCalledWith("r1");
     expect(onAction).toHaveBeenCalledTimes(1);
   });
 

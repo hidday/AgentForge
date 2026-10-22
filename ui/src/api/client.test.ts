@@ -94,6 +94,13 @@ describe("api client", () => {
     expect(JSON.parse(options.body as string)).toEqual({ context: "start over", mode: "fresh" });
   });
 
+  it("rejectPlan omits context from the body when not provided", async () => {
+    const fetchMock = mockFetchOnce({ ok: true, json: () => Promise.resolve({ ok: true, state: "Blocked" }) });
+    await api.rejectPlan("run-1");
+    const [, options] = fetchMock.mock.calls[0]!;
+    expect(JSON.parse(options.body as string)).toEqual({ mode: "iterate" });
+  });
+
   it("pauseRun sends a bare POST with no body and no content-type header", async () => {
     const fetchMock = mockFetchOnce({ ok: true, json: () => Promise.resolve({ ok: true }) });
     await api.pauseRun("run-1");
@@ -146,5 +153,144 @@ describe("api client", () => {
       json: () => Promise.resolve({ message: "not found" }),
     });
     await expect(api.getRun("missing")).rejects.toThrow("HTTP 404");
+  });
+
+  it("getRunSkills() requests /api/runs/:id/skills and returns the parsed body", async () => {
+    const payload = { injectedSkills: [], distillationDecision: null, distilledSkill: null };
+    const fetchMock = mockFetchOnce({ ok: true, json: () => Promise.resolve(payload) });
+    const result = await api.getRunSkills("run-1");
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/runs/run-1/skills",
+      expect.objectContaining({ headers: {} }),
+    );
+    expect(result).toEqual(payload);
+  });
+
+  it("getArtifacts() requests /api/runs/:id/artifacts and returns the parsed body", async () => {
+    const payload = { artifacts: [] };
+    const fetchMock = mockFetchOnce({ ok: true, json: () => Promise.resolve(payload) });
+    const result = await api.getArtifacts("run-1");
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/runs/run-1/artifacts",
+      expect.objectContaining({ headers: {} }),
+    );
+    expect(result).toEqual(payload);
+  });
+
+  it("getEvents() requests /api/runs/:id/events and returns the parsed body", async () => {
+    const payload = { events: [] };
+    const fetchMock = mockFetchOnce({ ok: true, json: () => Promise.resolve(payload) });
+    const result = await api.getEvents("run-1");
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/runs/run-1/events",
+      expect.objectContaining({ headers: {} }),
+    );
+    expect(result).toEqual(payload);
+  });
+
+  it("reReviewPlan sends a POST with the note in the body", async () => {
+    const fetchMock = mockFetchOnce({ ok: true, json: () => Promise.resolve({ ok: true, runId: "run-1" }) });
+    await api.reReviewPlan("run-1", "please re-check");
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/runs/run-1/actions/re-review-plan",
+      expect.objectContaining({
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ note: "please re-check" }),
+      }),
+    );
+  });
+
+  it("reReviewPlan omits the note from the body when not provided", async () => {
+    const fetchMock = mockFetchOnce({ ok: true, json: () => Promise.resolve({ ok: true, runId: "run-1" }) });
+    await api.reReviewPlan("run-1");
+    const [, options] = fetchMock.mock.calls[0]!;
+    expect(JSON.parse(options.body as string)).toEqual({ note: undefined });
+  });
+
+  it("revisePlan sends a POST with the note in the body", async () => {
+    const fetchMock = mockFetchOnce({ ok: true, json: () => Promise.resolve({ ok: true, runId: "run-1" }) });
+    await api.revisePlan("run-1", "tweak the approach");
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/runs/run-1/actions/revise-plan",
+      expect.objectContaining({
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ note: "tweak the approach" }),
+      }),
+    );
+  });
+
+  it("revisePlan omits the note from the body when not provided", async () => {
+    const fetchMock = mockFetchOnce({ ok: true, json: () => Promise.resolve({ ok: true, runId: "run-1" }) });
+    await api.revisePlan("run-1");
+    const [, options] = fetchMock.mock.calls[0]!;
+    expect(JSON.parse(options.body as string)).toEqual({ note: undefined });
+  });
+
+  it("approveReview sends a bare POST with no body and no content-type header", async () => {
+    const fetchMock = mockFetchOnce({ ok: true, json: () => Promise.resolve({ ok: true, state: "Approved" }) });
+    await api.approveReview("run-1");
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/runs/run-1/actions/approve-review",
+      expect.objectContaining({ method: "POST", headers: {} }),
+    );
+  });
+
+  it("resumeRun sends a bare POST with no body and no content-type header", async () => {
+    const fetchMock = mockFetchOnce({ ok: true, json: () => Promise.resolve({ ok: true }) });
+    await api.resumeRun("run-1");
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/runs/run-1/actions/resume",
+      expect.objectContaining({ method: "POST", headers: {} }),
+    );
+  });
+
+  it("retryStage sends a bare POST and returns the parsed body", async () => {
+    const payload = { ok: true, state: "Executing", retrying: true };
+    const fetchMock = mockFetchOnce({ ok: true, json: () => Promise.resolve(payload) });
+    const result = await api.retryStage("run-1");
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/runs/run-1/actions/retry",
+      expect.objectContaining({ method: "POST", headers: {} }),
+    );
+    expect(result).toEqual(payload);
+  });
+
+  it("getProcessOutput() requests /api/processes/:id/output and returns the parsed body", async () => {
+    const payload = { processId: "p1", output: "hello" };
+    const fetchMock = mockFetchOnce({ ok: true, json: () => Promise.resolve(payload) });
+    const result = await api.getProcessOutput("p1");
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/processes/p1/output",
+      expect.objectContaining({ headers: {} }),
+    );
+    expect(result).toEqual(payload);
+  });
+
+  it("fetchPendingIssues() requests /api/linear/pending and returns the parsed body", async () => {
+    const payload = { issues: [] };
+    const fetchMock = mockFetchOnce({ ok: true, json: () => Promise.resolve(payload) });
+    const result = await api.fetchPendingIssues();
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/linear/pending",
+      expect.objectContaining({ headers: {} }),
+    );
+    expect(result).toEqual(payload);
+  });
+
+  it("sendChatMessage POSTs the message and returns the reply", async () => {
+    const payload = { reply: "hi there", durationMs: 42 };
+    const fetchMock = mockFetchOnce({ ok: true, json: () => Promise.resolve(payload) });
+    const result = await api.sendChatMessage("run-1", "hello?");
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/runs/run-1/chat",
+      expect.objectContaining({
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message: "hello?" }),
+      }),
+    );
+    expect(result).toEqual(payload);
   });
 });

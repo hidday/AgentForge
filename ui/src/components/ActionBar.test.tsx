@@ -101,6 +101,19 @@ describe("ActionBar", () => {
     expect(mockApi.rejectPlan).toHaveBeenCalledWith(RUN_ID, undefined, "fresh");
   });
 
+  it("switches back to 'iterate' mode after selecting 'fresh', and rejects with that mode", async () => {
+    render(<ActionBar runId={RUN_ID} state="AwaitingPlanApproval" onAction={vi.fn()} />);
+    await userEvent.click(screen.getByRole("button", { name: /^Reject Plan$/i }));
+
+    await userEvent.click(screen.getByText("Start fresh"));
+    await userEvent.click(screen.getByText("Revise plan"));
+
+    const confirmButtons = screen.getAllByRole("button", { name: "Reject Plan" });
+    await userEvent.click(confirmButtons[confirmButtons.length - 1]);
+
+    expect(mockApi.rejectPlan).toHaveBeenCalledWith(RUN_ID, undefined, "iterate");
+  });
+
   it("cancels the reject dialog without calling rejectPlan", async () => {
     render(<ActionBar runId={RUN_ID} state="AwaitingPlanApproval" onAction={vi.fn()} />);
     await userEvent.click(screen.getByRole("button", { name: /^Reject Plan$/i }));

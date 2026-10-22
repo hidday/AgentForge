@@ -4,6 +4,22 @@ import userEvent from "@testing-library/user-event";
 import { AgentOutputPanel } from "./AgentOutputPanel.tsx";
 import type { ActiveProcess } from "@/api/client.ts";
 
+// parseClaudeOutput's real parser never emits a `type: "error"` block today
+// (no current NDJSON shape maps to it), but BlockRenderer still has a
+// dedicated branch for it as defensive handling for a future/unknown error
+// shape. Mock the parser for one test to exercise that branch directly.
+vi.mock("@/lib/parseClaudeOutput.ts", async () => {
+  const actual =
+    await vi.importActual<typeof import("@/lib/parseClaudeOutput.ts")>(
+      "@/lib/parseClaudeOutput.ts",
+    );
+  return {
+    ...actual,
+    parseClaudeOutput: vi.fn(actual.parseClaudeOutput),
+  };
+});
+import { parseClaudeOutput } from "@/lib/parseClaudeOutput.ts";
+
 function makeProcess(partial: Partial<ActiveProcess> = {}): ActiveProcess {
   return {
     id: "p1",
@@ -80,6 +96,12 @@ describe("AgentOutputPanel", () => {
     expect(screen.getByText("parsed")).toBeDefined();
   });
 
+  it("shows 'Waiting for output...' in raw view when output is empty but a process is active", async () => {
+    render(<AgentOutputPanel processes={[makeProcess()]} output="" />);
+    await userEvent.click(screen.getByText("raw"));
+    expect(screen.getByText("Waiting for output...")).toBeDefined();
+  });
+
   it("renders a tool_use block with its tool name and expandable input, toggling on click", async () => {
     const output = JSON.stringify([
       { type: "tool_use", name: "Read", input: { file_path: "/tmp/a.ts" } },
@@ -90,6 +112,16 @@ describe("AgentOutputPanel", () => {
 
     await userEvent.click(screen.getByText("Read"));
     expect(screen.queryByText("/tmp/a.ts")).toBeNull();
+  });
+
+  it("renders a successful tool_result without the error styling or label", () => {
+    const output = JSON.stringify([
+      { type: "tool_result", content: "all good", is_error: false },
+    ]);
+    const { container } = render(<AgentOutputPanel processes={[makeProcess()]} output={output} />);
+    expect(screen.getByText("all good")).toBeDefined();
+    expect(screen.queryByText("Error")).toBeNull();
+    expect(container.querySelector(".border-emerald-500\\/40")).not.toBeNull();
   });
 
   it("renders a tool_result error block with the error styling and label", () => {
@@ -104,6 +136,17 @@ describe("AgentOutputPanel", () => {
   it("renders a raw-fallback block for an unparseable, non-noise line", () => {
     render(<AgentOutputPanel processes={[makeProcess()]} output="plain unstructured line" />);
     expect(screen.getByText("plain unstructured line")).toBeDefined();
+  });
+
+  it("renders an 'error'-type block with the error icon and styling", () => {
+    vi.mocked(parseClaudeOutput).mockReturnValueOnce([
+      { type: "error", content: "fatal: something went badly wrong" },
+    ]);
+    const { container } = render(
+      <AgentOutputPanel processes={[makeProcess()]} output="irrelevant" />,
+    );
+    expect(screen.getByText("fatal: something went badly wrong")).toBeDefined();
+    expect(container.querySelector(".text-red-400")).not.toBeNull();
   });
 
   it("updates the elapsed timer display over time for an active process", () => {

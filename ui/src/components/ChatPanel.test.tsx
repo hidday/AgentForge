@@ -51,6 +51,17 @@ describe("ChatPanel", () => {
     expect(screen.getByText(/No messages yet/i)).toBeDefined();
   });
 
+  it("defaults content to an empty string when the artifact payload has no content field", () => {
+    const artifacts: Artifact[] = [
+      { ...makeArtifact("user", "", "a1", "2024-01-01T00:00:01Z"), payloadJson: { role: "user" } },
+    ];
+    const { container } = render(<ChatPanel runId={RUN_ID} artifacts={artifacts} />);
+    // The message bubble renders, just with empty content — no crash.
+    const bubble = container.querySelector("span.whitespace-pre-wrap");
+    expect(bubble).not.toBeNull();
+    expect(bubble?.textContent).toBe("");
+  });
+
   it("renders user and assistant messages from ChatMessage artifacts in chronological order", () => {
     const artifacts: Artifact[] = [
       makeArtifact("assistant", "Second message", "a2", "2024-01-01T00:00:02Z"),
@@ -250,5 +261,90 @@ describe("ChatPanel", () => {
       // "New question" should NOT appear
       expect(screen.queryByText("New question")).toBeNull();
     });
+  });
+
+  it("clicking the header toggles the panel closed, hiding the message list and input", async () => {
+    const artifacts: Artifact[] = [
+      makeArtifact("user", "Existing message", "a1", "2024-01-01T00:00:01Z"),
+    ];
+    render(<ChatPanel runId={RUN_ID} artifacts={artifacts} />);
+
+    expect(screen.getByText("Existing message")).toBeDefined();
+    expect(screen.getByPlaceholderText(/ask the agent/i)).toBeDefined();
+
+    const header = screen.getByRole("button", { name: /chat with agent/i });
+    await userEvent.click(header);
+
+    expect(screen.queryByText("Existing message")).toBeNull();
+    expect(screen.queryByPlaceholderText(/ask the agent/i)).toBeNull();
+
+    // Clicking again re-opens it
+    await userEvent.click(header);
+    expect(screen.getByText("Existing message")).toBeDefined();
+  });
+
+  it("shows a generic fallback message when the rejection is not an Error instance", async () => {
+    mockApi.sendChatMessage.mockRejectedValue("some non-Error rejection");
+
+    render(<ChatPanel runId={RUN_ID} artifacts={[]} />);
+    const input = screen.getByPlaceholderText(/ask the agent/i);
+    await userEvent.type(input, "Question");
+    await userEvent.click(screen.getByRole("button", { name: /send/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/chat request failed/i)).toBeDefined();
+    });
+  });
+
+  it("submitting the form while a request is already in flight does not send a second request", async () => {
+    let resolveRequest!: (v: { reply: string; durationMs: number }) => void;
+    mockApi.sendChatMessage.mockReturnValue(
+      new Promise<{ reply: string; durationMs: number }>((res) => {
+        resolveRequest = res;
+      }),
+    );
+
+    render(<ChatPanel runId={RUN_ID} artifacts={[]} />);
+    const input = screen.getByPlaceholderText(/ask the agent/i);
+    await userEvent.type(input, "First question");
+    const form = screen.getByPlaceholderText(/ask the agent/i).closest("form")!;
+
+    // First submit kicks off the in-flight request.
+    await act(async () => {
+      form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    });
+    expect(mockApi.sendChatMessage).toHaveBeenCalledTimes(1);
+
+    // A second submit while isLoading is true must be a no-op (the button is
+    // disabled, but the handler itself also guards on isLoading).
+    await act(async () => {
+      form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    });
+    expect(mockApi.sendChatMessage).toHaveBeenCalledTimes(1);
+
+    act(() => {
+      resolveRequest({ reply: "Done", durationMs: 50 });
+    });
+    await waitFor(() => {
+      expect(screen.queryByText(/agent is thinking/i)).toBeNull();
+    });
+  });
+
+  it("auto-scrolls the bottom anchor into view when a new message arrives, when scrollIntoView is available", () => {
+    const scrollIntoViewMock = vi.fn();
+    Element.prototype.scrollIntoView = scrollIntoViewMock;
+
+    const { rerender } = render(<ChatPanel runId={RUN_ID} artifacts={[]} />);
+    scrollIntoViewMock.mockClear();
+
+    const artifacts: Artifact[] = [
+      makeArtifact("user", "A new message", "a1", "2024-01-01T00:00:01Z"),
+    ];
+    rerender(<ChatPanel runId={RUN_ID} artifacts={artifacts} />);
+
+    expect(scrollIntoViewMock).toHaveBeenCalledWith({ behavior: "smooth" });
+
+    // @ts-expect-error -- cleanup the global stub so other tests aren't affected
+    delete Element.prototype.scrollIntoView;
   });
 });

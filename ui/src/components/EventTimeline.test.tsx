@@ -79,4 +79,14 @@ describe("EventTimeline", () => {
     render(<EventTimeline events={events} />);
     expect(screen.getByText("user-command")).toBeDefined();
   });
+
+  it("falls back to the default source icon for an unrecognized source", () => {
+    const events = [makeEvent({ id: "e1", source: "api" })];
+    const { container } = render(<EventTimeline events={events} />);
+    expect(screen.getByText("api")).toBeDefined();
+    // The source row renders exactly one icon regardless of which component
+    // it resolved to (User/Bot) — confirms the `?? Bot` fallback path ran
+    // without throwing for an unmapped source string.
+    expect(container.querySelectorAll("svg").length).toBeGreaterThan(0);
+  });
 });

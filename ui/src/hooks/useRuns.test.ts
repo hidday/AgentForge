@@ -102,6 +102,18 @@ describe("useRuns", () => {
     expect(mockApi.getRuns).toHaveBeenCalledTimes(1);
   });
 
+  it("ignores SSE event types it doesn't handle, without refetching or changing runs", async () => {
+    mockApi.getRuns.mockResolvedValue({ runs: [runA, runB] });
+    const { result } = renderHook(() => useRuns());
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    fireSSE({ type: "run:artifact-created", runId: "r1" });
+    await Promise.resolve();
+
+    expect(result.current.runs).toEqual([runA, runB]);
+    expect(mockApi.getRuns).toHaveBeenCalledTimes(1);
+  });
+
   it("refetch() exposed on the hook re-invokes api.getRuns", async () => {
     mockApi.getRuns.mockResolvedValue({ runs: [] });
     const { result } = renderHook(() => useRuns());

@@ -114,6 +114,45 @@ describe("useActiveProcesses", () => {
     expect(result.current.processes).toEqual([]);
   });
 
+  it("does not set output after unmount even if getProcessOutput resolves late", async () => {
+    mockApi.getActiveProcesses.mockResolvedValue({ processes: [activeProc] });
+    let resolveOutput!: (v: { processId: string; output: string }) => void;
+    mockApi.getProcessOutput.mockReturnValue(
+      new Promise((res) => {
+        resolveOutput = res;
+      }),
+    );
+
+    const { result, unmount } = renderHook(() => useActiveProcesses("r1"));
+    await waitFor(() => expect(mockApi.getProcessOutput).toHaveBeenCalledWith("proc-1"));
+
+    unmount();
+    await act(async () => {
+      resolveOutput({ processId: "proc-1", output: "late output" });
+      await Promise.resolve();
+    });
+
+    // Output was never applied — the cancelled check after the await caught it.
+    expect(result.current.output).toBe("");
+  });
+
+  it("defaults missing optional fields on a process:started event", async () => {
+    mockApi.getActiveProcesses.mockResolvedValue({ processes: [] });
+    const { result } = renderHook(() => useActiveProcesses("r1"));
+    await waitFor(() => expect(mockApi.getActiveProcesses).toHaveBeenCalled());
+
+    fireSSE({ type: "process:started", runId: "r1", processId: undefined });
+
+    await waitFor(() => expect(result.current.processes).toHaveLength(1));
+    const entry = result.current.processes[0]!;
+    expect(entry.id).toBe("");
+    expect(entry.command).toBe("");
+    expect(entry.stage).toBe("");
+    expect(entry.runtime).toBe("");
+    expect(typeof entry.startedAt).toBe("string");
+    expect(entry.startedAt.length).toBeGreaterThan(0);
+  });
+
   it("appends a process on a process:started event for this run, resetting output", async () => {
     mockApi.getActiveProcesses.mockResolvedValue({ processes: [] });
     const { result } = renderHook(() => useActiveProcesses("r1"));

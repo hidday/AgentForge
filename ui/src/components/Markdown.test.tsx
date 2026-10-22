@@ -59,4 +59,41 @@ describe("Markdown", () => {
     const { container } = render(<Markdown>{""}</Markdown>);
     expect(container.textContent).toBe("");
   });
+
+  it("renders an ordered list as an ol > li structure", () => {
+    const { container } = render(<Markdown>{"1. one\n2. two"}</Markdown>);
+    const ol = container.querySelector("ol");
+    expect(ol).not.toBeNull();
+    expect(ol?.className).toContain("list-decimal");
+    expect(container.querySelectorAll("li").length).toBe(2);
+  });
+
+  it("renders italic text inside an em tag", () => {
+    render(<Markdown>{"*italic text*"}</Markdown>);
+    const em = screen.getByText("italic text");
+    expect(em.tagName).toBe("EM");
+    expect(em.className).toContain("italic");
+  });
+
+  it("renders h1-h4 headings with their respective tag names", () => {
+    const { container } = render(
+      <Markdown>{"# H1\n\n## H2\n\n### H3\n\n#### H4"}</Markdown>,
+    );
+    expect(container.querySelector("h1")?.textContent).toBe("H1");
+    expect(container.querySelector("h2")?.textContent).toBe("H2");
+    expect(container.querySelector("h3")?.textContent).toBe("H3");
+    expect(container.querySelector("h4")?.textContent).toBe("H4");
+  });
+
+  it("renders a blockquote", () => {
+    const { container } = render(<Markdown>{"> quoted text"}</Markdown>);
+    const blockquote = container.querySelector("blockquote");
+    expect(blockquote).not.toBeNull();
+    expect(blockquote?.textContent).toContain("quoted text");
+  });
+
+  it("renders a horizontal rule for a thematic break", () => {
+    const { container } = render(<Markdown>{"above\n\n---\n\nbelow"}</Markdown>);
+    expect(container.querySelector("hr")).not.toBeNull();
+  });
 });
