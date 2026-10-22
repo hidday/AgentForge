@@ -539,6 +539,47 @@ describe("GET /api/runs/:id/summary", () => {
     expect(body.plan.stepCount).toBe(1);
   });
 
+  it("falls back to String() for a risk value that JSON.stringify cannot serialize", async () => {
+    const { app, mockRunRepo, mockArtifactRepo } = await buildApp();
+    mockRunRepo.findById.mockResolvedValue(makeRun());
+    const planPayload = {
+      summary: "Add auth",
+      risks: [10n],
+    };
+    mockArtifactRepo.findLatestByType.mockImplementation((_runId: string, type: string) => {
+      if (type === "Plan") return Promise.resolve(makeArtifact("Plan", planPayload, 1));
+      return Promise.resolve(null);
+    });
+
+    const response = await app.inject({ method: "GET", url: "/api/runs/run-1/summary" });
+
+    expect(response.statusCode).toBe(200);
+    const body = JSON.parse(response.body) as { plan: { risks: string[] } };
+    // JSON.stringify(10n) throws (BigInt isn't serializable); the catch
+    // branch falls back to String(10n) === "10".
+    expect(body.plan.risks[0]).toBe("10");
+  });
+
+  it("returns an empty steps array and zero stepCount when plan.steps is not an array", async () => {
+    const { app, mockRunRepo, mockArtifactRepo } = await buildApp();
+    mockRunRepo.findById.mockResolvedValue(makeRun());
+    const planPayload = {
+      summary: "Add auth",
+      // steps omitted entirely — Array.isArray(undefined) is false
+    };
+    mockArtifactRepo.findLatestByType.mockImplementation((_runId: string, type: string) => {
+      if (type === "Plan") return Promise.resolve(makeArtifact("Plan", planPayload, 1));
+      return Promise.resolve(null);
+    });
+
+    const response = await app.inject({ method: "GET", url: "/api/runs/run-1/summary" });
+
+    expect(response.statusCode).toBe(200);
+    const body = JSON.parse(response.body) as { plan: { steps: unknown[]; stepCount: number } };
+    expect(body.plan.steps).toEqual([]);
+    expect(body.plan.stepCount).toBe(0);
+  });
+
   it("includes planReview, review and executionReport sections when those artifacts exist", async () => {
     const { app, mockRunRepo, mockArtifactRepo } = await buildApp();
     mockRunRepo.findById.mockResolvedValue(makeRun());

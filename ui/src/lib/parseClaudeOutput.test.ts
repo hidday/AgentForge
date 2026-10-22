@@ -99,6 +99,14 @@ describe("parseClaudeOutput – tool_use extraction", () => {
     ]);
   });
 
+  it("produces no block for a content_block_start event whose content_block is not a tool_use", () => {
+    const line = JSON.stringify({
+      type: "content_block_start",
+      content_block: { type: "text", text: "" },
+    });
+    expect(parseClaudeOutput(line)).toEqual([]);
+  });
+
   it("extracts a tool_use from content_block_start event", () => {
     const line = JSON.stringify({
       type: "content_block_start",
@@ -204,6 +212,11 @@ describe("parseClaudeOutput – tool_result extraction", () => {
     expect(parseClaudeOutput(line)).toEqual([]);
   });
 
+  it("skips a null tool_use_result without throwing (neither string nor object branch matches)", () => {
+    const line = JSON.stringify({ tool_use_result: null });
+    expect(parseClaudeOutput(line)).toEqual([]);
+  });
+
   it("extracts tool_result from a bare content array", () => {
     const line = JSON.stringify([{ type: "tool_result", content: "ok", is_error: false }]);
     const result = parseClaudeOutput(line);
@@ -221,6 +234,11 @@ describe("parseClaudeOutput – tool_result extraction", () => {
     const line = JSON.stringify(["a string entry", 42, null, { type: "tool_result", content: "kept" }]);
     const result = parseClaudeOutput(line);
     expect(result).toEqual<ParsedBlock[]>([{ type: "tool_result", content: "kept", isError: false }]);
+  });
+
+  it("produces no block for a content-array entry whose type is not text/tool_use/tool_result", () => {
+    const line = JSON.stringify([{ type: "thinking", thinking: "pondering..." }]);
+    expect(parseClaudeOutput(line)).toEqual([]);
   });
 
   it("stringifies a nullish tool_result content as an empty string", () => {
