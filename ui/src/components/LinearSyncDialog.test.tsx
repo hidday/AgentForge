@@ -321,7 +321,7 @@ describe("LinearSyncDialog", () => {
 
     await user.click(screen.getByLabelText(/select all/i));
 
-    expect(screen.getByRole("button", { name: /start 0 runs/i })).toBeDefined();
+    expect(screen.getByRole("button", { name: /start 0 run\b/i })).toBeDefined();
   });
 
   it("toggling a single issue's checkbox off and back on re-selects it", async () => {
