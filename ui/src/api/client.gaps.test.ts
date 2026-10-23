@@ -10,23 +10,23 @@ function jsonResponse(body: unknown, ok = true, status = 200) {
 }
 
 describe("api client gaps", () => {
-  const originalFetch = global.fetch;
+  const originalFetch = globalThis.fetch;
 
   beforeEach(() => {
-    global.fetch = vi.fn();
+    globalThis.fetch = vi.fn();
   });
 
   afterEach(() => {
-    global.fetch = originalFetch;
+    globalThis.fetch = originalFetch;
     vi.restoreAllMocks();
   });
 
   it("retryStage posts to the retry action endpoint and returns the parsed retry state", async () => {
-    (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValue(
+    (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValue(
       jsonResponse({ ok: true, state: "Executing", retrying: true }),
     );
     const result = await api.retryStage("r1");
-    const [url, options] = (global.fetch as ReturnType<typeof vi.fn>).mock.calls[0];
+    const [url, options] = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0];
     expect(url).toBe("/api/runs/r1/actions/retry");
     expect(options.method).toBe("POST");
     expect(options.headers).toEqual({});
@@ -34,11 +34,11 @@ describe("api client gaps", () => {
   });
 
   it("getProcessOutput requests the process output sub-resource and returns it", async () => {
-    (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValue(
+    (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValue(
       jsonResponse({ processId: "p1", output: "some log output" }),
     );
     const result = await api.getProcessOutput("p1");
-    expect(global.fetch).toHaveBeenCalledWith("/api/processes/p1/output", expect.anything());
+    expect(globalThis.fetch).toHaveBeenCalledWith("/api/processes/p1/output", expect.anything());
     expect(result).toEqual({ processId: "p1", output: "some log output" });
   });
 
@@ -46,18 +46,18 @@ describe("api client gaps", () => {
     const issues = [
       { id: "i1", title: "Fix bug", description: "desc", state: "Todo", labels: [], priority: 2 },
     ];
-    (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValue(jsonResponse({ issues }));
+    (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValue(jsonResponse({ issues }));
     const result = await api.fetchPendingIssues();
-    expect(global.fetch).toHaveBeenCalledWith("/api/linear/pending", expect.anything());
+    expect(globalThis.fetch).toHaveBeenCalledWith("/api/linear/pending", expect.anything());
     expect(result).toEqual({ issues });
   });
 
   it("answerQuestions posts the answers array and returns the updated run", async () => {
     const answers = [{ questionId: "q1", answer: "yes" }];
     const run = { id: "r1", state: "Planning" };
-    (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValue(jsonResponse({ ok: true, run }));
+    (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValue(jsonResponse({ ok: true, run }));
     const result = await api.answerQuestions("r1", answers);
-    const [url, options] = (global.fetch as ReturnType<typeof vi.fn>).mock.calls[0];
+    const [url, options] = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0];
     expect(url).toBe("/api/runs/r1/actions/answer-questions");
     expect(options.method).toBe("POST");
     expect(options.headers).toEqual({ "Content-Type": "application/json" });
@@ -66,7 +66,7 @@ describe("api client gaps", () => {
   });
 
   it("fetchPendingIssues propagates a server error message when the response is not ok", async () => {
-    (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValue(
+    (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValue(
       jsonResponse({ error: "Linear unavailable" }, false, 502),
     );
     await expect(api.fetchPendingIssues()).rejects.toThrow("Linear unavailable");
@@ -74,24 +74,24 @@ describe("api client gaps", () => {
 
   it("getArtifacts requests the run's artifacts sub-resource and returns them", async () => {
     const artifacts = [{ id: "a1", runId: "r1", type: "Plan", version: 1, payloadJson: {}, rawText: "", createdAt: "t" }];
-    (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValue(jsonResponse({ artifacts }));
+    (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValue(jsonResponse({ artifacts }));
     const result = await api.getArtifacts("r1");
-    expect(global.fetch).toHaveBeenCalledWith("/api/runs/r1/artifacts", expect.anything());
+    expect(globalThis.fetch).toHaveBeenCalledWith("/api/runs/r1/artifacts", expect.anything());
     expect(result).toEqual({ artifacts });
   });
 
   it("getEvents requests the run's events sub-resource and returns them", async () => {
     const events = [{ id: "e1", runId: "r1", eventType: "run:created", source: "system", payloadJson: {}, createdAt: "t" }];
-    (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValue(jsonResponse({ events }));
+    (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValue(jsonResponse({ events }));
     const result = await api.getEvents("r1");
-    expect(global.fetch).toHaveBeenCalledWith("/api/runs/r1/events", expect.anything());
+    expect(globalThis.fetch).toHaveBeenCalledWith("/api/runs/r1/events", expect.anything());
     expect(result).toEqual({ events });
   });
 
   it("reReviewPlan posts the note to the re-review-plan action endpoint", async () => {
-    (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValue(jsonResponse({ ok: true, runId: "r1" }));
+    (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValue(jsonResponse({ ok: true, runId: "r1" }));
     const result = await api.reReviewPlan("r1", "focus on tests");
-    const [url, options] = (global.fetch as ReturnType<typeof vi.fn>).mock.calls[0];
+    const [url, options] = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0];
     expect(url).toBe("/api/runs/r1/actions/re-review-plan");
     expect(options.method).toBe("POST");
     expect(JSON.parse(options.body)).toEqual({ note: "focus on tests" });
@@ -99,24 +99,24 @@ describe("api client gaps", () => {
   });
 
   it("reReviewPlan omits the note field (as undefined) when called without one", async () => {
-    (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValue(jsonResponse({ ok: true, runId: "r1" }));
+    (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValue(jsonResponse({ ok: true, runId: "r1" }));
     await api.reReviewPlan("r1");
-    const [, options] = (global.fetch as ReturnType<typeof vi.fn>).mock.calls[0];
+    const [, options] = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0];
     expect(JSON.parse(options.body)).toEqual({});
   });
 
   it("revisePlan posts to the revise-plan action endpoint, omitting the note when not given", async () => {
-    (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValue(jsonResponse({ ok: true, runId: "r1" }));
+    (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValue(jsonResponse({ ok: true, runId: "r1" }));
     await api.revisePlan("r1");
-    const [url, options] = (global.fetch as ReturnType<typeof vi.fn>).mock.calls[0];
+    const [url, options] = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0];
     expect(url).toBe("/api/runs/r1/actions/revise-plan");
     expect(JSON.parse(options.body)).toEqual({});
   });
 
   it("approveReview posts a bodiless request to the approve-review action endpoint", async () => {
-    (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValue(jsonResponse({ ok: true, state: "Done" }));
+    (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValue(jsonResponse({ ok: true, state: "Done" }));
     const result = await api.approveReview("r1");
-    const [url, options] = (global.fetch as ReturnType<typeof vi.fn>).mock.calls[0];
+    const [url, options] = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0];
     expect(url).toBe("/api/runs/r1/actions/approve-review");
     expect(options.method).toBe("POST");
     expect(options.headers).toEqual({});
@@ -124,9 +124,9 @@ describe("api client gaps", () => {
   });
 
   it("resumeRun posts a bodiless request to the resume action endpoint", async () => {
-    (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValue(jsonResponse({ ok: true }));
+    (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValue(jsonResponse({ ok: true }));
     const result = await api.resumeRun("r1");
-    const [url, options] = (global.fetch as ReturnType<typeof vi.fn>).mock.calls[0];
+    const [url, options] = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0];
     expect(url).toBe("/api/runs/r1/actions/resume");
     expect(options.method).toBe("POST");
     expect(result).toEqual({ ok: true });

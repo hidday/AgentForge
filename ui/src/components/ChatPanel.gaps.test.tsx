@@ -18,12 +18,7 @@ import { api } from "@/api/client.ts";
 
 const mockApi = api as unknown as { sendChatMessage: ReturnType<typeof vi.fn> };
 
-function makeArtifact(
-  role: "user" | "assistant",
-  payloadJson: unknown,
-  id: string,
-  createdAt: string,
-): Artifact {
+function makeArtifact(payloadJson: unknown, id: string, createdAt: string): Artifact {
   return {
     id,
     runId: "run-1",
@@ -44,7 +39,7 @@ describe("ChatPanel gaps", () => {
 
   it("renders an empty string for a ChatMessage artifact whose payload has no content field", () => {
     const artifacts: Artifact[] = [
-      makeArtifact("user", { role: "user" }, "a1", "2024-01-01T00:00:01Z"),
+      makeArtifact({ role: "user" }, "a1", "2024-01-01T00:00:01Z"),
     ];
     render(<ChatPanel runId={RUN_ID} artifacts={artifacts} />);
 
