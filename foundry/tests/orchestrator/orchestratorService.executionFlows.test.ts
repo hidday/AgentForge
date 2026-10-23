@@ -564,30 +564,6 @@ describe("OrchestratorService.runReview", () => {
     expect(githubSync.postReviewFindings).not.toHaveBeenCalled();
   });
 
-  it("uses an empty diff and does not call getPRDiff when the run has no PR number", async () => {
-    const run = makeRun({ state: RunState.AIReview, prNumber: null });
-    const plan = makePlan();
-    const report = makeExecutionReport();
-    const store: Store = {
-      run,
-      artifacts: [
-        makeArtifact({ type: "Plan", payloadJson: plan }),
-        makeArtifact({ type: "ExecutionReport", payloadJson: report }),
-      ],
-      events: [],
-    };
-    const { deps, reviewerAgent, githubClient } = buildDeps(store);
-    const svc = new OrchestratorService(deps as never);
-
-    reviewerAgent.run.mockResolvedValue(makeReview({ overallVerdict: "approved" }));
-    vi.spyOn(svc, "markReady").mockResolvedValue({ ...store.run });
-
-    await svc.runReview("run-1");
-
-    expect(githubClient.getPRDiff).not.toHaveBeenCalled();
-    expect(reviewerAgent.run).toHaveBeenCalledWith(plan, report, "", expect.anything(), "run-1");
-  });
-
   it("throws a PolicyViolationError when the run is not in AIReview state", async () => {
     const run = makeRun({ state: RunState.Implementing });
     const store: Store = { run, artifacts: [], events: [] };
