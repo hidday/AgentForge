@@ -107,8 +107,9 @@ describe("LinearSyncDialog edge cases", () => {
     await userEvent.click(selectAllCheckbox);
     expect(selectAllCheckbox.checked).toBe(false);
     expect(
-      screen.getByRole("button", { name: /start \d+ runs?/i }),
-    ).toBeDisabled();
+      (screen.getByRole("button", { name: /start \d+ runs?/i }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(true);
 
     await userEvent.click(selectAllCheckbox);
     expect(selectAllCheckbox.checked).toBe(true);

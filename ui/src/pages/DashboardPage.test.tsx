@@ -125,11 +125,16 @@ describe("DashboardPage", () => {
     });
     renderPage();
 
-    expect(screen.getByText("Total").previousSibling?.textContent).toBe("5");
-    expect(screen.getByText("Active").previousSibling?.textContent).toBe("2");
-    expect(screen.getByText("Awaiting").previousSibling?.textContent).toBe("1");
-    expect(screen.getByText("Blocked").previousSibling?.textContent).toBe("1");
-    expect(screen.getByText("Done").previousSibling?.textContent).toBe("1");
+    // "Active" and "Done" also appear as filter-pill button labels, so scope
+    // these lookups to the stat labels (non-button <div> elements).
+    const statLabel = (label: string) =>
+      screen.getByText(label, { selector: "div" });
+
+    expect(statLabel("Total").previousSibling?.textContent).toBe("5");
+    expect(statLabel("Active").previousSibling?.textContent).toBe("2");
+    expect(statLabel("Awaiting").previousSibling?.textContent).toBe("1");
+    expect(statLabel("Blocked").previousSibling?.textContent).toBe("1");
+    expect(statLabel("Done").previousSibling?.textContent).toBe("1");
   });
 
   it("filters the visible runs when a filter pill is clicked", async () => {

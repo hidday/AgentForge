@@ -167,7 +167,12 @@ describe("RunDetailPage", () => {
     expect(screen.getByText("acme/widgets")).toBeDefined();
     expect(screen.getByText("agent/eng-1")).toBeDefined();
     expect(screen.getByText("PR #7")).toBeDefined();
-    expect(screen.getByText("Implementing")).toBeDefined();
+    // "Implementing" also appears in the stubbed ActionBar's state span, so
+    // find the specific StateBadge rendering of it.
+    const stateLabels = screen.getAllByText("Implementing");
+    expect(
+      stateLabels.some((el) => el.className.includes("state-active")),
+    ).toBe(true);
 
     const linearLink = screen.getByText("Linear").closest("a");
     expect(linearLink?.getAttribute("href")).toBe("https://linear.app/team/issue/ENG-1");

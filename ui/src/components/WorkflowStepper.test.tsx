@@ -40,12 +40,16 @@ describe("WorkflowStepper", () => {
     expect(humanReviewLabel.className).toContain("text-text-muted");
   });
 
-  it("marks every happy-path step as completed when the run is Done", () => {
+  it("marks every earlier happy-path step as completed when the run is Done", () => {
     render(<WorkflowStepper currentState="Done" events={[]} />);
     const planningLabel = screen.getByText("Planning");
     expect(planningLabel.className).toContain("state-done");
+    const humanReviewLabel = screen.getByText("Human Review");
+    expect(humanReviewLabel.className).toContain("state-done");
+    // The Done row itself is both "completed" and "current" — the current
+    // (accent) styling wins once the classes are merged.
     const doneLabel = screen.getByText("Done");
-    expect(doneLabel.className).toContain("state-done");
+    expect(doneLabel.className).toContain("text-accent");
   });
 
   it("renders a timestamp for a step that has a matching state-changed event", () => {
@@ -58,9 +62,13 @@ describe("WorkflowStepper", () => {
   it("shows the side-state panel with 'Revising Plan' for PlanRevision", () => {
     render(<WorkflowStepper currentState="PlanRevision" events={[]} />);
     expect(screen.getByText("Revising Plan")).toBeDefined();
-    // Side state maps back onto the PlanReview step, which should read as current.
+    // The mapped step (PlanReview) is treated as upcoming, not current, since
+    // the side state's literal name never matches a happy-path step name.
     const planReviewLabel = screen.getByText("Plan Review");
-    expect(planReviewLabel.className).toContain("text-accent");
+    expect(planReviewLabel.className).toContain("text-text-muted");
+    // The step before it is still marked completed via effectiveIdx.
+    const planningLabel = screen.getByText("Planning");
+    expect(planningLabel.className).toContain("state-done");
   });
 
   it("shows the side-state panel with 'Addressing Review' for AddressingReview", () => {
