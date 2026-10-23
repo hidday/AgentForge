@@ -341,6 +341,27 @@ describe("OrchestratorService.runExecution", () => {
     expect(commentCall![1]).toContain("Files changed (9)");
   });
 
+  it("omits the files-changed section entirely when the executor changed no files", async () => {
+    const run = makeRun({ branchName: "ai/run-1" });
+    const plan = makePlan({ planVersion: 1 });
+    const store: Store = { run, artifacts: [makeArtifact({ type: "Plan", payloadJson: plan })], events: [] };
+    const { deps, executorAgent, linearClient } = buildDeps(store);
+    const svc = new OrchestratorService(deps as never);
+
+    executorAgent.run.mockResolvedValue({
+      report: makeExecutionReport({ filesChanged: [] }),
+      prNumber: 11,
+    });
+    vi.spyOn(svc, "runReview").mockResolvedValue({ ...store.run, state: RunState.AIReview });
+
+    await svc.runExecution("run-1");
+
+    const commentCall = (linearClient.postComment as ReturnType<typeof vi.fn>).mock.calls.find(
+      (c: unknown[]) => typeof c[1] === "string" && (c[1] as string).includes("Execution Report"),
+    );
+    expect(commentCall![1]).not.toContain("Files changed");
+  });
+
   it("recovers a stranded execution: skips the executor and transitions straight to review", async () => {
     const run = makeRun({ branchName: "ai/run-1", prNumber: 5 });
     const plan = makePlan({ planVersion: 1 });

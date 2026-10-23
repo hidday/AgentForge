@@ -502,3 +502,71 @@ describe("OrchestratorService.approvePlan", () => {
     await expect(svc.approvePlan("run-1")).rejects.toThrow(/No plan artifact found/);
   });
 });
+
+describe("OrchestratorService.runPlanReview", () => {
+  it("throws when there is no Plan artifact for the run", async () => {
+    const run = makeRun({ state: RunState.Planning });
+    const { deps, artifactRepo } = buildDeps(run);
+    const svc = new OrchestratorService(deps as never);
+
+    artifactRepo.findLatestByType.mockResolvedValue(null);
+
+    await expect(svc.runPlanReview("run-1")).rejects.toThrow(/No plan artifact found/);
+  });
+
+  it("approved verdict transitions to AwaitingPlanApproval and posts the plan comment", async () => {
+    const run = makeRun({ state: RunState.PlanReview, planVersion: 1 });
+    const { deps, artifactRepo, planReviewerAgent, linearClient } = buildDeps(run);
+    const svc = new OrchestratorService(deps as never);
+
+    const plan = makePlan({ planVersion: 1 });
+    artifactRepo.findLatestByType.mockImplementation((_runId: string, type: string) =>
+      type === "Plan" ? Promise.resolve(makeArtifact({ type: "Plan", payloadJson: plan })) : Promise.resolve(null),
+    );
+    planReviewerAgent.run.mockResolvedValue({
+      reviewId: "pr-1",
+      summary: "all good",
+      findings: [],
+      overallVerdict: "approved",
+    });
+
+    const result = await svc.runPlanReview("run-1");
+
+    expect(result.state).toBe(RunState.AwaitingPlanApproval);
+    const commentCall = (linearClient.postComment as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(commentCall[1]).toContain("AI plan review: approved");
+  });
+
+  it("changes_requested verdict posts the plan-review comment and delegates to runPlanRevision", async () => {
+    const run = makeRun({ state: RunState.PlanReview, planVersion: 1 });
+    const { deps, artifactRepo, planReviewerAgent, linearClient } = buildDeps(run);
+    const svc = new OrchestratorService(deps as never);
+
+    const plan = makePlan({ planVersion: 1 });
+    artifactRepo.findLatestByType.mockImplementation((_runId: string, type: string) =>
+      type === "Plan" ? Promise.resolve(makeArtifact({ type: "Plan", payloadJson: plan })) : Promise.resolve(null),
+    );
+    const planReview = {
+      reviewId: "pr-1",
+      summary: "needs work",
+      findings: [
+        { id: "f1", severity: "important", type: "bug", affectedStepId: "s1", title: "t", details: "d" },
+      ],
+      overallVerdict: "changes_requested" as const,
+    };
+    planReviewerAgent.run.mockResolvedValue(planReview);
+
+    const revisionSpy = vi
+      .spyOn(svc, "runPlanRevision")
+      .mockResolvedValue({ ...run, state: RunState.AwaitingPlanApproval });
+
+    const result = await svc.runPlanReview("run-1");
+
+    expect(revisionSpy).toHaveBeenCalledWith("run-1");
+    expect(result.state).toBe(RunState.AwaitingPlanApproval);
+
+    const commentCall = (linearClient.postComment as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(commentCall[1]).toContain("Changes Requested");
+    expect(commentCall[1]).toContain("step s1");
+  });
+});
