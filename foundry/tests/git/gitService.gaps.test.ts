@@ -3,7 +3,7 @@ import { mkdtempSync, writeFileSync, rmSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { execFileSync } from "node:child_process";
-import { GitService, GitError } from "../../src/git/gitService.js";
+import { GitService, GitError, buildWorktreeDirName } from "../../src/git/gitService.js";
 
 // Covers GitService branches not exercised by gitService.test.ts: the error
 // (GitError-throwing) paths of fetch/createWorktree/findWorktreeForBranch/
@@ -39,6 +39,31 @@ function noopLogger() {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
   } as any;
 }
+
+describe("GitError — non-Error cause", () => {
+  it("stringifies a non-Error cause in the constructed message", () => {
+    const err = new GitError("fetch", "/repo", "plain string cause");
+    expect(err.message).toBe("git fetch failed in /repo: plain string cause");
+    expect(err.name).toBe("GitError");
+  });
+});
+
+describe("buildWorktreeDirName — shortenSlug's maxLen break branch", () => {
+  it("stops accumulating slug words (keeping only the prior ones) once the next word would exceed maxLen", () => {
+    // "shortword" (9 chars) fits; appending "-" + 28 more chars would make the
+    // running slug 38 chars, over the 30-char cap, so shortenSlug should stop
+    // and keep only "shortword".
+    const longSecondWord = "y".repeat(28);
+    const dirName = buildWorktreeDirName("abcdefgh", `eng-42-shortword-${longSecondWord}-tail`);
+    expect(dirName).toBe("run-abcdefgh-eng-42-shortword");
+  });
+
+  it("falls back to omitting the slug entirely when even the first word alone exceeds maxLen", () => {
+    const hugeFirstWord = "z".repeat(40);
+    const dirName = buildWorktreeDirName("abcdefgh", `eng-42-${hugeFirstWord}`);
+    expect(dirName).toBe("run-abcdefgh-eng-42");
+  });
+});
 
 describe("GitService — error and best-effort branches", () => {
   let repoPath: string;

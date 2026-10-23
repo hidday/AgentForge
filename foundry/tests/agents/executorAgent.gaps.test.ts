@@ -106,8 +106,21 @@ function buildAgent() {
     logger as never,
   );
 
-  return { agent, getUserPrompt: () => capturedUserPrompt };
+  return { agent, getUserPrompt: () => capturedUserPrompt, logger };
 }
+
+describe("ExecutorAgent.run() isRetry detection", () => {
+  it("logs isRetry:true when only retry.existingPR is set (existingBranch absent)", async () => {
+    const { agent, logger } = buildAgent();
+
+    await agent.run(makePlan(), makeTaskBundle(), "run-1", { existingPR: 555 });
+
+    const startLog = logger.info.mock.calls.find((c: unknown[]) => c[1] === "Starting executor agent");
+    expect(startLog).toBeDefined();
+    const payload = startLog?.[0] as Record<string, unknown> | undefined;
+    expect(payload?.isRetry).toBe(true);
+  });
+});
 
 describe("ExecutorAgent.run() operatorNote", () => {
   it("renders the Operator Note section with the note text when options.operatorNote is set", async () => {
