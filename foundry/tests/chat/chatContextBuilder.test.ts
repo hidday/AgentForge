@@ -232,6 +232,84 @@ describe("buildChatSystemPrompt", () => {
     expect(result).not.toContain("x".repeat(4001));
   });
 
+  it("includes Plan Review Findings section when a PlanReview artifact with findings is present", () => {
+    const artifact = makeArtifact({
+      type: "PlanReview",
+      version: 1,
+      payloadJson: {
+        summary: "Plan has a gap around rollback.",
+        findings: [
+          {
+            id: "pr1",
+            severity: "important",
+            title: "No rollback plan",
+            details: "The plan doesn't describe how to roll back the migration.",
+          },
+        ],
+      },
+    });
+    const result = buildChatSystemPrompt(makeRun(), [artifact]);
+    expect(result).toContain("## Plan Review Findings");
+    expect(result).toContain("Plan has a gap around rollback.");
+    expect(result).toContain("[important] No rollback plan");
+    expect(result).toContain("(pr1):");
+    expect(result).toContain("The plan doesn't describe how to roll back the migration.");
+  });
+
+  it("omits Plan Review Findings section when no PlanReview artifact is present", () => {
+    const result = buildChatSystemPrompt(makeRun(), []);
+    expect(result).not.toContain("## Plan Review Findings");
+  });
+
+  it("omits Plan Review Findings section when the PlanReview artifact has no summary and no findings", () => {
+    const artifact = makeArtifact({
+      type: "PlanReview",
+      version: 1,
+      payloadJson: { findings: [] },
+    });
+    const result = buildChatSystemPrompt(makeRun(), [artifact]);
+    expect(result).not.toContain("## Plan Review Findings");
+  });
+
+  it("includes Code Review Findings section when a Review artifact with findings is present", () => {
+    const artifact = makeArtifact({
+      type: "Review",
+      version: 1,
+      payloadJson: {
+        summary: "One blocker found in the auth flow.",
+        findings: [
+          {
+            id: "f1",
+            severity: "blocker",
+            title: "Missing auth check",
+            details: "The endpoint does not verify the caller's token.",
+          },
+        ],
+      },
+    });
+    const result = buildChatSystemPrompt(makeRun(), [artifact]);
+    expect(result).toContain("## Code Review Findings");
+    expect(result).toContain("One blocker found in the auth flow.");
+    expect(result).toContain("[blocker] Missing auth check");
+    expect(result).toContain("(f1):");
+    expect(result).toContain("The endpoint does not verify the caller's token.");
+  });
+
+  it("omits Code Review Findings section when no Review artifact is present", () => {
+    const result = buildChatSystemPrompt(makeRun(), []);
+    expect(result).not.toContain("## Code Review Findings");
+  });
+
+  it("omits Code Review Findings section when the Review artifact has no summary and no findings", () => {
+    const artifact = makeArtifact({
+      type: "Review",
+      version: 1,
+      payloadJson: { findings: [] },
+    });
+    const result = buildChatSystemPrompt(makeRun(), [artifact]);
+    expect(result).not.toContain("## Code Review Findings");
+  });
+
   it("uses the Plan artifact with the highest version when multiple exist", () => {
     const planV1 = makeArtifact({
       type: "Plan",

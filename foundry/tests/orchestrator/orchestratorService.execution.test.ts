@@ -304,23 +304,19 @@ describe("OrchestratorService.runExecution -- crash recovery", () => {
       },
     ]);
 
-    // runReview will then run; make it throw via policy (no executionReport match for AIReview state)
-    // but first the transition EXECUTION_FINISHED -> AIReview must succeed.
     runRepo.updateState.mockResolvedValue(makeRun({ state: RunState.AIReview, prNumber: 99 }));
 
-    // runReview requires state AIReview; after recovery transition, run state becomes AIReview.
-    // Stub reviewerAgent so runReview can complete.
-    (deps.reviewerAgent.run as ReturnType<typeof vi.fn>).mockResolvedValue({
-      reviewId: "rev-1",
-      summary: "ok",
-      findings: [],
-      overallVerdict: "approved",
-    });
+    // Isolate runExecution's own recovery logic from the downstream review flow,
+    // which is covered separately.
+    const reviewSpy = vi
+      .spyOn(svc, "runReview")
+      .mockResolvedValue(makeRun({ state: RunState.AIReview, prNumber: 99 }));
 
     await svc.runExecution("run-1");
 
     // Executor must NOT have been invoked a second time.
     expect(executorAgent.run).not.toHaveBeenCalled();
+    expect(reviewSpy).toHaveBeenCalledWith("run-1");
 
     const eventTypes = eventRepo.create.mock.calls.map(
       (c: unknown[]) => (c[0] as { eventType: string }).eventType,
@@ -379,12 +375,9 @@ describe("OrchestratorService.runExecution -- crash recovery", () => {
       prNumber: 100,
     });
     runRepo.updateState.mockResolvedValue(makeRun({ state: RunState.AIReview, prNumber: 100 }));
-    (deps.reviewerAgent.run as ReturnType<typeof vi.fn>).mockResolvedValue({
-      reviewId: "rev-1",
-      summary: "ok",
-      findings: [],
-      overallVerdict: "approved",
-    });
+    vi.spyOn(svc, "runReview").mockResolvedValue(
+      makeRun({ state: RunState.AIReview, prNumber: 100 }),
+    );
 
     await svc.runExecution("run-1");
 
