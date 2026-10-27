@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { mkdtempSync, writeFileSync, rmSync, existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -9,6 +9,11 @@ import {
   GitError,
   buildWorktreeDirName,
 } from "../../src/git/gitService.js";
+
+vi.mock("node:fs", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs")>();
+  return { ...actual, existsSync: vi.fn(actual.existsSync) };
+});
 
 function git(args: string[], cwd: string): string {
   return execFileSync("git", args, { cwd, encoding: "utf-8" }).trim();
@@ -27,13 +32,20 @@ function createTestRepo(): string {
 
 const noopLogger = {
   info: () => {},
-  warn: () => {},
+  warn: vi.fn(),
   error: () => {},
   debug: () => {},
   fatal: () => {},
   child: () => noopLogger,
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
 } as any;
+
+/** Extracts the message string from each recorded `logger.warn(fields, message)` call. */
+function logWarnings(): string[] {
+  return (noopLogger.warn as ReturnType<typeof vi.fn>).mock.calls.map(
+    (call: unknown[]) => call[1] as string,
+  );
+}
 
 describe("GitService", () => {
   let repoPath: string;
@@ -42,6 +54,7 @@ describe("GitService", () => {
   beforeEach(() => {
     repoPath = createTestRepo();
     svc = new GitService(noopLogger);
+    noopLogger.warn.mockClear();
   });
 
   afterEach(() => {
@@ -178,6 +191,53 @@ describe("GitService", () => {
       expect(await svc.currentBranch(result.worktreePath)).toBe(branchName);
       expect(result.worktreePath).not.toBe(stalePath);
       expect(existsSync(stalePath)).toBe(false);
+
+      await svc.removeWorktree(repoPath, result.worktreePath);
+    });
+
+    it("removes a stale directory sitting at the exact computed worktree path before recreating it", async () => {
+      const runId = "1a2b3c4d-3456-7890-abcd-ef1234567890";
+      const branchName = "hidday/pry-200-exact-path-collision";
+      const shortId = runId.slice(0, 8);
+      const dirName = buildWorktreeDirName(shortId, branchName);
+      const computedPath = join(repoPath, ".worktrees", dirName);
+
+      // Force existsSync(worktreePath) to report true exactly once, simulating
+      // a leftover directory at the exact path setupRunWorktree will compute,
+      // without actually needing a non-empty directory on disk.
+      const existsSyncMock = vi.mocked(existsSync);
+      existsSyncMock.mockImplementationOnce(() => true);
+
+      const result = await svc.setupRunWorktree(repoPath, runId, "main", branchName);
+
+      expect(result.worktreePath).toBe(computedPath);
+      expect(existsSync(result.worktreePath)).toBe(true);
+      expect(await svc.currentBranch(result.worktreePath)).toBe(branchName);
+
+      await svc.removeWorktree(repoPath, result.worktreePath);
+    });
+
+    it("warns but continues when the remote branch already exists (reset-to-startPoint path)", async () => {
+      const branchName = "hidday/pry-300-remote-exists";
+      // Create the branch, push it to the bare "origin", then delete the local
+      // branch so setupRunWorktree must recreate it fresh while the remote
+      // copy still exists -- exercising the remoteBranchExists() warning.
+      git(["checkout", "-b", branchName], repoPath);
+      git(["push", "-u", "origin", branchName], repoPath);
+      git(["checkout", "main"], repoPath);
+      git(["branch", "-D", branchName], repoPath);
+
+      const runId = "cafebabe-3456-7890-abcd-ef1234567890";
+      const result = await svc.setupRunWorktree(repoPath, runId, "main", branchName);
+
+      expect(await svc.currentBranch(result.worktreePath)).toBe(branchName);
+      expect(logWarnings()).toEqual(
+        expect.arrayContaining([
+          expect.stringContaining(
+            "origin/<branch> already exists; local branch will be reset to startPoint",
+          ),
+        ]),
+      );
 
       await svc.removeWorktree(repoPath, result.worktreePath);
     });

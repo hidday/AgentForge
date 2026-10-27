@@ -181,4 +181,165 @@ describe("LinearSyncDialog", () => {
     // can retry.
     expect(screen.getByRole("button", { name: /start 2 runs/i })).toBeDefined();
   });
+
+  it("shows a loading indicator while issues are being fetched", async () => {
+    let resolveFetch!: (v: { issues: typeof issueA[] }) => void;
+    mockApi.fetchPendingIssues.mockReturnValue(
+      new Promise((res) => {
+        resolveFetch = res;
+      }),
+    );
+
+    render(
+      <LinearSyncDialog open={true} onClose={vi.fn()} onIngested={vi.fn()} />,
+    );
+
+    expect(screen.getByText(/fetching issues from linear/i)).toBeDefined();
+
+    await act(async () => {
+      resolveFetch({ issues: [issueA, issueB] });
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByText(/fetching issues from linear/i)).toBeNull();
+    });
+  });
+
+  it("shows an error message when fetching issues fails", async () => {
+    mockApi.fetchPendingIssues.mockRejectedValue(new Error("Linear API down"));
+
+    render(
+      <LinearSyncDialog open={true} onClose={vi.fn()} onIngested={vi.fn()} />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("Linear API down")).toBeDefined();
+    });
+    // No issue rows and no Start button when there's an error
+    expect(screen.queryByRole("button", { name: /start \d+ run/i })).toBeNull();
+  });
+
+  it("shows an empty state when there are no pending issues", async () => {
+    mockApi.fetchPendingIssues.mockResolvedValue({ issues: [] });
+
+    render(
+      <LinearSyncDialog open={true} onClose={vi.fn()} onIngested={vi.fn()} />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("No pending issues found")).toBeDefined();
+    });
+    expect(screen.queryByRole("button", { name: /start \d+ run/i })).toBeNull();
+  });
+
+  it("re-fetches issues when the refresh button is clicked", async () => {
+    render(
+      <LinearSyncDialog open={true} onClose={vi.fn()} onIngested={vi.fn()} />,
+    );
+
+    await waitFor(() => expect(screen.getByText(issueA.title)).toBeDefined());
+    expect(mockApi.fetchPendingIssues).toHaveBeenCalledTimes(1);
+
+    await userEvent.click(screen.getByTitle("Refresh"));
+
+    await waitFor(() => {
+      expect(mockApi.fetchPendingIssues).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  it("deselecting one issue via its checkbox updates the Start button count and unchecks Select all", async () => {
+    render(
+      <LinearSyncDialog open={true} onClose={vi.fn()} onIngested={vi.fn()} />,
+    );
+
+    await waitFor(() => expect(screen.getByText(issueA.title)).toBeDefined());
+    expect(screen.getByRole("button", { name: /start 2 runs/i })).toBeDefined();
+
+    const issueACheckbox = screen.getByText(issueA.title).closest("label")!.querySelector(
+      'input[type="checkbox"]',
+    ) as HTMLInputElement;
+    await userEvent.click(issueACheckbox);
+
+    expect(screen.getByRole("button", { name: /start 1 run$/i })).toBeDefined();
+
+    const selectAllCheckbox = screen.getByText(/select all/i).closest("label")!.querySelector(
+      'input[type="checkbox"]',
+    ) as HTMLInputElement;
+    expect(selectAllCheckbox.checked).toBe(false);
+  });
+
+  it("toggling 'Select all' off clears the selection, and clicking it again re-selects every issue", async () => {
+    render(
+      <LinearSyncDialog open={true} onClose={vi.fn()} onIngested={vi.fn()} />,
+    );
+
+    await waitFor(() => expect(screen.getByText(issueA.title)).toBeDefined());
+
+    const selectAllCheckbox = screen.getByText(/select all/i).closest("label")!.querySelector(
+      'input[type="checkbox"]',
+    ) as HTMLInputElement;
+
+    await userEvent.click(selectAllCheckbox);
+    // Start button disappears from the "N Runs" label logic entirely disabled
+    expect((screen.getByRole("button", { name: /start 0 runs/i }) as HTMLButtonElement).disabled).toBe(
+      true,
+    );
+
+    await userEvent.click(selectAllCheckbox);
+    expect(screen.getByRole("button", { name: /start 2 runs/i })).toBeDefined();
+  });
+
+  it("renders project and label tags, and falls back to 'None' priority for an unrecognized value", async () => {
+    mockApi.fetchPendingIssues.mockResolvedValue({
+      issues: [
+        {
+          id: "issue-c",
+          title: "Tagged issue",
+          description: "",
+          state: "Todo",
+          labels: ["bug", "urgent-fix"],
+          priority: 99,
+          project: "Core Platform",
+        },
+      ],
+    });
+
+    render(
+      <LinearSyncDialog open={true} onClose={vi.fn()} onIngested={vi.fn()} />,
+    );
+
+    await waitFor(() => expect(screen.getByText("Tagged issue")).toBeDefined());
+    expect(screen.getByText("Core Platform")).toBeDefined();
+    expect(screen.getByText("bug")).toBeDefined();
+    expect(screen.getByText("urgent-fix")).toBeDefined();
+    expect(screen.getByText("None")).toBeDefined();
+  });
+
+  it("uses the singular 'Run' label when exactly one issue is selected", async () => {
+    mockApi.fetchPendingIssues.mockResolvedValue({ issues: [issueA] });
+
+    render(
+      <LinearSyncDialog open={true} onClose={vi.fn()} onIngested={vi.fn()} />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Start 1 Run" })).toBeDefined();
+    });
+  });
+
+  it("clears tracked state and timers when the dialog is closed and does not auto-close on stale events", async () => {
+    const onClose = vi.fn();
+    mockApi.ingestIssues.mockReturnValue(new Promise(() => {}));
+
+    const { rerender } = render(
+      <LinearSyncDialog open={true} onClose={onClose} onIngested={vi.fn()} />,
+    );
+
+    await waitFor(() => expect(screen.getByText(issueA.title)).toBeDefined());
+    await userEvent.click(screen.getByRole("button", { name: /start 2 runs/i }));
+
+    // Close the dialog mid-flight (unmount effect should clear pending timers safely)
+    rerender(<LinearSyncDialog open={false} onClose={onClose} onIngested={vi.fn()} />);
+    expect(onClose).not.toHaveBeenCalled();
+  });
 });

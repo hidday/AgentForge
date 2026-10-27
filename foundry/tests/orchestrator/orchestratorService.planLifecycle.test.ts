@@ -298,8 +298,10 @@ describe("OrchestratorService.retryRun", () => {
     runRepo.findById.mockResolvedValue(run);
     runRepo.update
       .mockResolvedValueOnce({ ...run, workingDirectory: "/tmp/worktree", branchName: "ai/run-1" })
-      .mockResolvedValue({ ...run, planVersion: 1 });
-    runRepo.updateState.mockResolvedValue(makeRun({ state: RunState.PlanReview }));
+      .mockResolvedValue(makeRun({ state: RunState.Planning, branchName: "ai/run-1", planVersion: 1 }));
+    runRepo.updateState
+      .mockResolvedValueOnce(makeRun({ state: RunState.Planning, branchName: "ai/run-1" }))
+      .mockResolvedValueOnce(makeRun({ state: RunState.PlanReview, branchName: "ai/run-1" }));
 
     plannerAgent.run.mockResolvedValue(makePlan({ openQuestions: [] }));
     artifactRepo.findLatestByType.mockResolvedValue(null);
@@ -320,8 +322,12 @@ describe("OrchestratorService.retryRun", () => {
 
     const run = makeRun({ state: RunState.Todo, branchName: "ai/existing" });
     runRepo.findById.mockResolvedValue(run);
-    runRepo.update.mockResolvedValue({ ...run, planVersion: 1 });
-    runRepo.updateState.mockResolvedValue(makeRun({ state: RunState.PlanReview }));
+    runRepo.update.mockResolvedValue(
+      makeRun({ state: RunState.Planning, branchName: "ai/existing", planVersion: 1 }),
+    );
+    runRepo.updateState
+      .mockResolvedValueOnce(makeRun({ state: RunState.Planning, branchName: "ai/existing" }))
+      .mockResolvedValueOnce(makeRun({ state: RunState.PlanReview, branchName: "ai/existing" }));
 
     plannerAgent.run.mockResolvedValue(makePlan({ openQuestions: [] }));
     artifactRepo.findLatestByType.mockResolvedValue(null);
@@ -341,10 +347,15 @@ describe("OrchestratorService.retryRun", () => {
 
     const run = makeRun({ state: RunState.Todo, branchName: "ai/existing" });
     runRepo.findById.mockResolvedValue(run);
-    runRepo.update.mockResolvedValue({ ...run, planVersion: 1 });
+    runRepo.update.mockResolvedValue(
+      makeRun({ state: RunState.Planning, branchName: "ai/existing", planVersion: 1 }),
+    );
     runRepo.updateState
-      .mockResolvedValueOnce(makeRun({ state: RunState.PlanReview }))
-      .mockResolvedValueOnce(makeRun({ state: RunState.HumanClarificationNeeded }));
+      .mockResolvedValueOnce(makeRun({ state: RunState.Planning, branchName: "ai/existing" }))
+      .mockResolvedValueOnce(makeRun({ state: RunState.PlanReview, branchName: "ai/existing" }))
+      .mockResolvedValueOnce(
+        makeRun({ state: RunState.HumanClarificationNeeded, branchName: "ai/existing" }),
+      );
 
     plannerAgent.run.mockResolvedValue(
       makePlan({

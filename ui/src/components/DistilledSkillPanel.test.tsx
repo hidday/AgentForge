@@ -32,6 +32,43 @@ const skill: SkillDocument = {
 };
 
 describe("DistilledSkillPanel", () => {
+  it("renders a loading indicator when loading is true, regardless of other props", () => {
+    render(
+      <DistilledSkillPanel
+        distilledSkill={null}
+        distillationDecision={null}
+        loading={true}
+      />,
+    );
+    expect(screen.getByText("Loading distilled skill...")).toBeDefined();
+    expect(screen.queryByText("Distilled Skill")).toBeNull();
+  });
+
+  it("renders an error message and takes precedence over the loading state being false", () => {
+    render(
+      <DistilledSkillPanel
+        distilledSkill={null}
+        distillationDecision={null}
+        error="Failed to fetch skill data"
+      />,
+    );
+    expect(screen.getByText("Failed to fetch skill data")).toBeDefined();
+    expect(screen.queryByText("Distilled Skill")).toBeNull();
+  });
+
+  it("prioritizes the loading state over an error when both are set", () => {
+    render(
+      <DistilledSkillPanel
+        distilledSkill={null}
+        distillationDecision={null}
+        loading={true}
+        error="should be hidden while loading"
+      />,
+    );
+    expect(screen.getByText("Loading distilled skill...")).toBeDefined();
+    expect(screen.queryByText("should be hidden while loading")).toBeNull();
+  });
+
   it("renders nothing when distillation did not persist a skill", () => {
     const { container } = render(
       <DistilledSkillPanel

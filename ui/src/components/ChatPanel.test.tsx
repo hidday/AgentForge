@@ -214,6 +214,57 @@ describe("ChatPanel", () => {
     expect(screen.queryByText("Failing question")).toBeNull();
   });
 
+  it("collapses the message list when the header is clicked, and expands it again", async () => {
+    render(
+      <ChatPanel
+        runId={RUN_ID}
+        artifacts={[makeArtifact("user", "Hi there", "a1", "2024-01-01T00:00:01Z")]}
+      />,
+    );
+
+    expect(screen.getByText("Hi there")).toBeDefined();
+    expect(screen.getByPlaceholderText(/ask the agent/i)).toBeDefined();
+
+    const header = screen.getByRole("button", { name: /chat with agent/i });
+    await userEvent.click(header);
+
+    expect(screen.queryByText("Hi there")).toBeNull();
+    expect(screen.queryByPlaceholderText(/ask the agent/i)).toBeNull();
+
+    await userEvent.click(header);
+    expect(screen.getByText("Hi there")).toBeDefined();
+  });
+
+  it("shows the unread-style message count badge once there are messages, and omits it when empty", () => {
+    const { rerender } = render(<ChatPanel runId={RUN_ID} artifacts={[]} />);
+    expect(screen.queryByText("1")).toBeNull();
+
+    rerender(
+      <ChatPanel
+        runId={RUN_ID}
+        artifacts={[makeArtifact("user", "One message", "a1", "2024-01-01T00:00:01Z")]}
+      />,
+    );
+    expect(screen.getByText("1")).toBeDefined();
+  });
+
+  it("scrolls the message anchor into view when scrollIntoView is available on the element", async () => {
+    const scrollIntoView = vi.fn();
+    const originalScrollIntoView = (
+      HTMLDivElement.prototype as unknown as { scrollIntoView?: () => void }
+    ).scrollIntoView;
+    (HTMLDivElement.prototype as unknown as { scrollIntoView: () => void }).scrollIntoView =
+      scrollIntoView;
+
+    try {
+      render(<ChatPanel runId={RUN_ID} artifacts={[]} />);
+      expect(scrollIntoView).toHaveBeenCalled();
+    } finally {
+      (HTMLDivElement.prototype as unknown as { scrollIntoView?: () => void }).scrollIntoView =
+        originalScrollIntoView;
+    }
+  });
+
   it("message list does not change from artifact-derived count when only local state changes", async () => {
     let resolveRequest!: (v: { reply: string; durationMs: number }) => void;
     mockApi.sendChatMessage.mockReturnValue(
