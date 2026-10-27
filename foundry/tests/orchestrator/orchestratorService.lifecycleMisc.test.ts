@@ -353,6 +353,19 @@ describe("OrchestratorService -- retrieveSkillsForPlanning (via startRun)", () =
     (deps.repoRegistry.validateWorkingDirectory as ReturnType<typeof vi.fn>).mockReturnValue(
       undefined,
     );
+    (deps.repoRegistry.getRepoByName as ReturnType<typeof vi.fn>).mockReturnValue({
+      name: "test-repo",
+      defaultBranch: "main",
+      allowedPaths: ["src/"],
+      protectedPaths: [],
+      constraints: {
+        requiredChecks: [],
+        maxFilesChanged: 10,
+        maxDiffLines: 500,
+        forbiddenPatterns: [],
+        mustNotTouch: [],
+      },
+    });
     (deps.runRepo.findActiveByIssueId as ReturnType<typeof vi.fn>).mockResolvedValue(null);
     (deps.runRepo.create as ReturnType<typeof vi.fn>).mockResolvedValue(todoRun);
     (deps.gitService.setupRunWorktree as ReturnType<typeof vi.fn>).mockResolvedValue({
@@ -370,7 +383,9 @@ describe("OrchestratorService -- retrieveSkillsForPlanning (via startRun)", () =
 
     runRepo.update
       .mockResolvedValueOnce({ ...todoRun, workingDirectory: "/tmp/worktree", branchName: "ai/run-test" })
-      .mockResolvedValue({ ...todoRun, planVersion: 1 });
+      .mockResolvedValue(
+        makeRun({ state: RunState.Planning, planVersion: 1, linearIssueTitle: "Add OAuth support" }),
+      );
     runRepo.updateState.mockResolvedValue(
       makeRun({ state: RunState.PlanReview, linearIssueTitle: "Add OAuth support" }),
     );
@@ -429,7 +444,9 @@ describe("OrchestratorService -- retrieveSkillsForPlanning (via startRun)", () =
 
     runRepo.update
       .mockResolvedValueOnce({ ...todoRun, workingDirectory: "/tmp/worktree", branchName: "ai/run-test" })
-      .mockResolvedValue({ ...todoRun, planVersion: 1 });
+      .mockResolvedValue(
+        makeRun({ state: RunState.Planning, planVersion: 1, linearIssueTitle: "Add OAuth support" }),
+      );
     runRepo.updateState.mockResolvedValue(
       makeRun({ state: RunState.PlanReview, linearIssueTitle: "Add OAuth support" }),
     );
@@ -468,7 +485,9 @@ describe("OrchestratorService -- retrieveSkillsForPlanning (via startRun)", () =
 
     runRepo.update
       .mockResolvedValueOnce({ ...todoRun, workingDirectory: "/tmp/worktree", branchName: "ai/run-test" })
-      .mockResolvedValue({ ...todoRun, planVersion: 1 });
+      .mockResolvedValue(
+        makeRun({ state: RunState.Planning, planVersion: 1, linearIssueTitle: "Add OAuth support" }),
+      );
     runRepo.updateState.mockResolvedValue(
       makeRun({ state: RunState.PlanReview, linearIssueTitle: "Add OAuth support" }),
     );
