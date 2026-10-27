@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, writeFileSync, rmSync, mkdirSync, mkfifoSync } from "node:fs";
+import { mkdtempSync, writeFileSync, rmSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { execFileSync } from "node:child_process";
@@ -209,12 +209,9 @@ describe("RepoRegistry", () => {
 
     it("throws when the .git entry exists but is neither a file nor a directory", () => {
       const gitPath = join(dir, ".git");
-      try {
-        mkfifoSync(gitPath, 0o600);
-      } catch {
-        // mkfifoSync is a recent Node addition; fall back to the mkfifo(1) binary.
-        execFileSync("mkfifo", [gitPath]);
-      }
+      // A named pipe is neither a regular file nor a directory, exercising
+      // the defensive branch that rejects unexpected .git entry types.
+      execFileSync("mkfifo", [gitPath]);
       const registry = new RepoRegistry("/repos", makeConfig(), logger);
       expect(() => registry.validateWorkingDirectory(dir)).toThrow(
         /Working directory has invalid \.git entry/,
