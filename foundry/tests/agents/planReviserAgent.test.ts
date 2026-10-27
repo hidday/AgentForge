@@ -103,7 +103,7 @@ function buildPlanReviserAgent() {
     logger as never,
   );
 
-  return { agent, getPrompt: () => capturedPrompt };
+  return { agent, logger, getPrompt: () => capturedPrompt };
 }
 
 describe("PlanReviserAgent.run() relatedContext rendering", () => {
@@ -149,5 +149,46 @@ describe("PlanReviserAgent.run() relatedContext rendering", () => {
     expect(prompt).not.toContain("BEGIN BACKGROUND CONTEXT");
     expect(prompt).not.toContain("Background: Related Linear Context");
     expect(prompt).not.toContain("{{relatedContextSection}}");
+  });
+});
+
+describe("PlanReviserAgent.run() operator note rendering", () => {
+  it("renders the Operator Note section when options.operatorNote is set", async () => {
+    const { agent, getPrompt } = buildPlanReviserAgent();
+    const bundle = makeTaskBundle();
+
+    await agent.run(makePlan(), makePlanReview(), bundle, "run-1", {
+      operatorNote: "Make sure the migration findings are addressed.",
+    });
+
+    const prompt = getPrompt();
+    expect(prompt).toContain("## Operator Note");
+    expect(prompt).toContain("Apply it alongside the existing reviewer findings");
+    expect(prompt).toContain("Make sure the migration findings are addressed.");
+    expect(prompt).not.toContain("{{operatorNoteSection}}");
+  });
+
+  it("omits the Operator Note section when no operatorNote option is provided", async () => {
+    const { agent, getPrompt } = buildPlanReviserAgent();
+    const bundle = makeTaskBundle();
+
+    await agent.run(makePlan(), makePlanReview(), bundle, "run-1");
+
+    const prompt = getPrompt();
+    expect(prompt).not.toContain("## Operator Note");
+  });
+
+  it("logs hasOperatorNote=true in the start log when an operatorNote is provided", async () => {
+    const { agent, logger } = buildPlanReviserAgent();
+    const bundle = makeTaskBundle();
+
+    await agent.run(makePlan(), makePlanReview(), bundle, "run-1", { operatorNote: "note" });
+
+    const startLog = logger.info.mock.calls.find(
+      (c: unknown[]) => c[1] === "Starting plan reviser agent (Claude CLI, boss mode)",
+    );
+    expect(startLog).toBeDefined();
+    const payload = startLog?.[0] as Record<string, unknown> | undefined;
+    expect(payload?.hasOperatorNote).toBe(true);
   });
 });

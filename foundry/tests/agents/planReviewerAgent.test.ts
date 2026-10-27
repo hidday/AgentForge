@@ -87,7 +87,7 @@ function buildPlanReviewerAgent() {
     logger as never,
   );
 
-  return { agent, getPrompt: () => capturedPrompt };
+  return { agent, logger, getPrompt: () => capturedPrompt };
 }
 
 describe("PlanReviewerAgent.run() relatedContext rendering", () => {
@@ -145,5 +145,59 @@ describe("PlanReviewerAgent.run() relatedContext rendering", () => {
     expect(prompt).not.toContain("BEGIN BACKGROUND CONTEXT");
     expect(prompt).not.toContain("Background: Related Linear Context");
     expect(prompt).not.toContain("{{relatedContextSection}}");
+  });
+});
+
+describe("PlanReviewerAgent.run() operator note rendering", () => {
+  it("renders the Operator Note section, weighted toward changes_requested, when options.operatorNote is set", async () => {
+    const { agent, getPrompt } = buildPlanReviewerAgent();
+    const bundle = makeTaskBundle();
+
+    await agent.run(makePlan(), bundle, "run-1", {
+      operatorNote: "The retry logic looks fragile under load.",
+    });
+
+    const prompt = getPrompt();
+    expect(prompt).toContain("## Operator Note");
+    expect(prompt).toContain("Weight it heavily");
+    expect(prompt).toContain("The retry logic looks fragile under load.");
+    expect(prompt).not.toContain("{{operatorNoteSection}}");
+  });
+
+  it("omits the Operator Note section when no operatorNote option is provided", async () => {
+    const { agent, getPrompt } = buildPlanReviewerAgent();
+    const bundle = makeTaskBundle();
+
+    await agent.run(makePlan(), bundle, "run-1");
+
+    const prompt = getPrompt();
+    expect(prompt).not.toContain("## Operator Note");
+  });
+
+  it("logs hasOperatorNote=true in the start log when an operatorNote is provided", async () => {
+    const { agent, logger } = buildPlanReviewerAgent();
+    const bundle = makeTaskBundle();
+
+    await agent.run(makePlan(), bundle, "run-1", { operatorNote: "note" });
+
+    const startLog = logger.info.mock.calls.find(
+      (c: unknown[]) => c[1] === "Starting plan reviewer agent (Codex CLI)",
+    );
+    expect(startLog).toBeDefined();
+    const payload = startLog?.[0] as Record<string, unknown> | undefined;
+    expect(payload?.hasOperatorNote).toBe(true);
+  });
+
+  it("logs hasOperatorNote=false in the start log when no operatorNote is provided", async () => {
+    const { agent, logger } = buildPlanReviewerAgent();
+    const bundle = makeTaskBundle();
+
+    await agent.run(makePlan(), bundle, "run-1");
+
+    const startLog = logger.info.mock.calls.find(
+      (c: unknown[]) => c[1] === "Starting plan reviewer agent (Codex CLI)",
+    );
+    const payload = startLog?.[0] as Record<string, unknown> | undefined;
+    expect(payload?.hasOperatorNote).toBe(false);
   });
 });

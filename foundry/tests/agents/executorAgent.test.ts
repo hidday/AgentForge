@@ -195,6 +195,44 @@ describe("ExecutorAgent.run()", () => {
     expect(githubClient.createDraftPR).not.toHaveBeenCalled();
   });
 
+  it("renders the Operator Note section into the user prompt when options.operatorNote is provided", async () => {
+    const { agent, getUserPrompt } = buildAgent();
+
+    await agent.run(makePlan(), makeTaskBundle(), "run-1", undefined, {
+      operatorNote: "Please double-check the rate limiter edge case.",
+    });
+
+    const prompt = getUserPrompt();
+    expect(prompt).toContain("## Operator Note");
+    expect(prompt).toContain("high-priority clarification");
+    expect(prompt).toContain("Please double-check the rate limiter edge case.");
+    expect(prompt).not.toContain("{{operatorNoteSection}}");
+  });
+
+  it("omits the Operator Note section when no operatorNote option is provided", async () => {
+    const { agent, getUserPrompt } = buildAgent();
+
+    await agent.run(makePlan(), makeTaskBundle(), "run-1");
+
+    const prompt = getUserPrompt();
+    expect(prompt).not.toContain("## Operator Note");
+  });
+
+  it("logs hasOperatorNote=true in the start log when an operatorNote is provided", async () => {
+    const { agent, logger } = buildAgent();
+
+    await agent.run(makePlan(), makeTaskBundle(), "run-1", undefined, {
+      operatorNote: "Watch for flaky tests.",
+    });
+
+    const startLog = logger.info.mock.calls.find(
+      (c: unknown[]) => c[1] === "Starting executor agent",
+    );
+    expect(startLog).toBeDefined();
+    const payload = startLog?.[0] as Record<string, unknown> | undefined;
+    expect(payload?.hasOperatorNote).toBe(true);
+  });
+
   it("logs the score and executionVersion in the completion event", async () => {
     const { agent, logger } = buildAgent({ score: 0.42 });
 
