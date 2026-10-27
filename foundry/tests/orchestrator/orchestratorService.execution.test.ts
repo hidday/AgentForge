@@ -502,12 +502,9 @@ describe("OrchestratorService.runExecution -- happy path", () => {
     });
 
     runRepo.updateState.mockResolvedValue(makeRun({ state: RunState.AIReview, prNumber: 10 }));
-    deps.reviewerAgent.run.mockResolvedValue({
-      reviewId: "rev-1",
-      summary: "ok",
-      findings: [],
-      overallVerdict: "approved",
-    });
+    const reviewSpy = vi
+      .spyOn(svc, "runReview")
+      .mockResolvedValue(makeRun({ state: RunState.AIReview, prNumber: 10 }));
 
     const result = await svc.runExecution("run-1");
 
@@ -522,6 +519,7 @@ describe("OrchestratorService.runExecution -- happy path", () => {
     );
     expect(eventTypes).toContain(RunEvent.EXECUTION_STARTED);
     expect(eventTypes).toContain(RunEvent.EXECUTION_FINISHED);
+    expect(reviewSpy).toHaveBeenCalledWith("run-1");
 
     expect(result).toBeDefined();
   });
