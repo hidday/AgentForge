@@ -280,8 +280,8 @@ describe("LinearSyncDialog", () => {
     ) as HTMLInputElement;
 
     await userEvent.click(selectAllCheckbox);
-    // Start button disappears from the "N Runs" label logic entirely disabled
-    expect((screen.getByRole("button", { name: /start 0 runs/i }) as HTMLButtonElement).disabled).toBe(
+    // With zero selected, the Start button is disabled (singular "Run" label).
+    expect((screen.getByRole("button", { name: /start 0 run/i }) as HTMLButtonElement).disabled).toBe(
       true,
     );
 

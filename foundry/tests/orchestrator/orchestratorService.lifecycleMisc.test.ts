@@ -131,6 +131,7 @@ function buildDeps(overrides: Record<string, unknown> = {}) {
       logger,
       dashboardEmitter,
       distillationAgent,
+      agentSkillRepo,
       ...overrides,
     },
     runRepo,
@@ -227,7 +228,7 @@ describe("OrchestratorService -- transitionAndRecord terminal cleanup", () => {
   });
 
   it("updates skill metrics on success (Done) using the agentSkillRepo", async () => {
-    const { deps, runRepo, eventRepo, agentSkillRepo } = buildDeps({ agentSkillRepo });
+    const { deps, runRepo, eventRepo, agentSkillRepo } = buildDeps();
     const svc = new OrchestratorService(deps as never);
 
     const run = makeRun({ state: RunState.ReadyForHumanReview });
@@ -265,7 +266,7 @@ describe("OrchestratorService -- transitionAndRecord terminal cleanup", () => {
   });
 
   it("skips skill metrics work entirely when no SKILL_INJECTION events exist", async () => {
-    const { deps, runRepo, eventRepo, agentSkillRepo } = buildDeps({ agentSkillRepo });
+    const { deps, runRepo, eventRepo, agentSkillRepo } = buildDeps();
     const svc = new OrchestratorService(deps as never);
 
     const run = makeRun({ state: RunState.ReadyForHumanReview });
@@ -280,7 +281,7 @@ describe("OrchestratorService -- transitionAndRecord terminal cleanup", () => {
   });
 
   it("swallows per-skill metric update errors and logs a warning", async () => {
-    const { deps, runRepo, eventRepo, agentSkillRepo, logger } = buildDeps({ agentSkillRepo });
+    const { deps, runRepo, eventRepo, agentSkillRepo, logger } = buildDeps();
     const svc = new OrchestratorService(deps as never);
 
     const run = makeRun({ state: RunState.ReadyForHumanReview });
@@ -361,7 +362,7 @@ describe("OrchestratorService -- retrieveSkillsForPlanning (via startRun)", () =
   }
 
   it("records a SKILL_INJECTION event when relevant skills are found", async () => {
-    const { deps, runRepo, eventRepo, agentSkillRepo } = buildDeps({ agentSkillRepo });
+    const { deps, runRepo, eventRepo, agentSkillRepo } = buildDeps();
     const svc = new OrchestratorService(deps as never);
 
     const todoRun = makeRun({ id: "run-1", state: RunState.Todo, linearIssueTitle: "Add OAuth support" });
@@ -420,7 +421,7 @@ describe("OrchestratorService -- retrieveSkillsForPlanning (via startRun)", () =
   });
 
   it("does not record a SKILL_INJECTION event when no skills are relevant", async () => {
-    const { deps, runRepo, eventRepo, agentSkillRepo } = buildDeps({ agentSkillRepo });
+    const { deps, runRepo, eventRepo, agentSkillRepo } = buildDeps();
     const svc = new OrchestratorService(deps as never);
 
     const todoRun = makeRun({ id: "run-1", state: RunState.Todo, linearIssueTitle: "Add OAuth support" });
