@@ -67,7 +67,7 @@ describe("ActionBar", () => {
       render(<ActionBar runId={RUN_ID} state="AwaitingPlanApproval" onAction={onAction} />);
 
       await userEvent.click(screen.getByRole("button", { name: /approve plan/i }));
-      expect(screen.getByText("Approve Plan")).toBeDefined();
+      expect(screen.getByRole("heading", { name: "Approve Plan" })).toBeDefined();
       expect(screen.getByText(/begin coding/i)).toBeDefined();
 
       const textarea = screen.getByPlaceholderText(/extra context/i);
@@ -113,7 +113,7 @@ describe("ActionBar", () => {
     it("clicking Re-review Plan opens its dialog and confirming calls api.reReviewPlan", async () => {
       render(<ActionBar runId={RUN_ID} state="AwaitingPlanApproval" onAction={vi.fn()} />);
       await userEvent.click(screen.getByRole("button", { name: /re-review plan/i }));
-      expect(screen.getByText("Re-review Plan")).toBeDefined();
+      expect(screen.getByRole("heading", { name: "Re-review Plan" })).toBeDefined();
       await userEvent.click(screen.getByRole("button", { name: /^re-review$/i }));
       await waitFor(() => {
         expect(mockApi.reReviewPlan).toHaveBeenCalledWith(RUN_ID, undefined);
@@ -123,7 +123,7 @@ describe("ActionBar", () => {
     it("clicking Revise Plan opens its dialog and confirming calls api.revisePlan", async () => {
       render(<ActionBar runId={RUN_ID} state="AwaitingPlanApproval" onAction={vi.fn()} />);
       await userEvent.click(screen.getByRole("button", { name: /revise plan/i }));
-      expect(screen.getByText("Revise Plan")).toBeDefined();
+      expect(screen.getByRole("heading", { name: "Revise Plan" })).toBeDefined();
       await userEvent.click(screen.getByRole("button", { name: /^revise$/i }));
       await waitFor(() => {
         expect(mockApi.revisePlan).toHaveBeenCalledWith(RUN_ID, undefined);
@@ -262,8 +262,9 @@ describe("ActionBar", () => {
     const onAction = vi.fn();
     render(<ActionBar runId={RUN_ID} state="Planning" onAction={onAction} />);
     await userEvent.click(screen.getByRole("button", { name: /^pause$/i }));
-    expect(screen.getByText("Pause Run")).toBeDefined();
-    await userEvent.click(screen.getByRole("button", { name: /^pause$/i }));
+    expect(screen.getByRole("heading", { name: "Pause Run" })).toBeDefined();
+    const pauseButtons = screen.getAllByRole("button", { name: /^pause$/i });
+    await userEvent.click(pauseButtons[pauseButtons.length - 1]);
     await waitFor(() => {
       expect(mockApi.pauseRun).toHaveBeenCalledWith(RUN_ID);
     });
@@ -277,8 +278,9 @@ describe("ActionBar", () => {
       render(<ActionBar runId={RUN_ID} state={state} onAction={onAction} />);
       const resumeBtn = screen.getByRole("button", { name: /^resume$/i });
       await userEvent.click(resumeBtn);
-      expect(screen.getByText("Resume Run")).toBeDefined();
-      await userEvent.click(screen.getByRole("button", { name: /^resume$/i }));
+      expect(screen.getByRole("heading", { name: "Resume Run" })).toBeDefined();
+      const resumeButtons = screen.getAllByRole("button", { name: /^resume$/i });
+      await userEvent.click(resumeButtons[resumeButtons.length - 1]);
       await waitFor(() => {
         expect(mockApi.resumeRun).toHaveBeenCalledWith(RUN_ID);
       });
