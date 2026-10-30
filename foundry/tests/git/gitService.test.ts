@@ -343,5 +343,14 @@ describe("GitService", () => {
     it("commitAll throws GitError when the underlying git command fails", async () => {
       await expect(svc.commitAll("/nonexistent", "msg")).rejects.toThrow(GitError);
     });
+
+    it("findWorktreeForBranch throws GitError for a nonexistent path", async () => {
+      await expect(svc.findWorktreeForBranch("/nonexistent", "main")).rejects.toThrow(GitError);
+    });
+
+    it("removeWorktree swallows the error (best-effort) when the path isn't a registered worktree", async () => {
+      const notAWorktree = join(repoPath, "not-a-worktree");
+      await expect(svc.removeWorktree(repoPath, notAWorktree)).resolves.toBeUndefined();
+    });
   });
 });

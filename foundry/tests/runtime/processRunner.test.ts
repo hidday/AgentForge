@@ -483,6 +483,183 @@ describe("ProcessRunner — rehydrateOrphans", () => {
     await new Promise((r) => setTimeout(r, 50));
   });
 
+  it("rehydrates an alive orphan whose log file doesn't exist yet", () => {
+    const emitter = makeEmitter();
+    const runner = new ProcessRunner("real", makeLogger() as never, emitter as never, spoolDir);
+
+    const logPath = join(spoolDir, "nolog-1.log"); // deliberately never created
+    const manifest = {
+      id: "nolog-1",
+      pid: 424242,
+      command: "echo",
+      args: [],
+      runId: "run-nolog",
+      stage: "executor",
+      runtime: "codex",
+      startedAt: new Date().toISOString(),
+      logFile: logPath,
+    };
+    writeFileSync(join(spoolDir, "nolog-1.json"), JSON.stringify(manifest));
+
+    vi.useFakeTimers();
+    const killSpy = vi
+      .spyOn(process, "kill")
+      .mockImplementationOnce(() => true as never)
+      .mockImplementation(() => {
+        throw new Error("no such process");
+      });
+
+    try {
+      runner.rehydrateOrphans();
+      expect(runner.getActiveProcesses()).toHaveLength(1);
+      // No log file existed, so the rolling buffer starts empty rather than throwing.
+      expect(runner.getProcessOutput("nolog-1")).toBe("");
+
+      vi.advanceTimersByTime(5_000);
+      expect(runner.getActiveProcesses()).toHaveLength(0);
+    } finally {
+      killSpy.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
+  it("silently tolerates a missing manifest file when finalizing a dead orphan", async () => {
+    const emitter = makeEmitter();
+    const logger = makeLogger();
+    const runner = new ProcessRunner("real", logger as never, emitter as never, spoolDir);
+
+    const logPath = join(spoolDir, "nomanifest-1.log");
+    writeFileSync(logPath, "x");
+    const manifestPath = join(spoolDir, "nomanifest-1.json");
+    writeFileSync(
+      manifestPath,
+      JSON.stringify({
+        id: "nomanifest-1",
+        pid: 424242,
+        command: "echo",
+        args: [],
+        runId: "run-nomanifest",
+        stage: "executor",
+        runtime: "codex",
+        startedAt: new Date().toISOString(),
+        logFile: logPath,
+      }),
+    );
+
+    vi.useFakeTimers();
+    const killSpy = vi
+      .spyOn(process, "kill")
+      .mockImplementationOnce(() => true as never)
+      .mockImplementation(() => {
+        throw new Error("no such process");
+      });
+
+    try {
+      runner.rehydrateOrphans();
+      expect(runner.getActiveProcesses()).toHaveLength(1);
+
+      // Remove the manifest before the finalize poll fires, so finalizeOrphan's
+      // best-effort manifest read/update throws and is swallowed.
+      rmSync(manifestPath);
+
+      vi.advanceTimersByTime(5_000);
+      expect(runner.getActiveProcesses()).toHaveLength(0);
+      expect(emitter.emitProcessCompleted).toHaveBeenCalledWith(
+        "run-nomanifest",
+        "nomanifest-1",
+        "executor",
+        "codex",
+        -1,
+        expect.any(Number),
+      );
+    } finally {
+      killSpy.mockRestore();
+      vi.useRealTimers();
+    }
+
+    await new Promise((r) => setTimeout(r, 50));
+  });
+
+  it("silently tolerates a missing manifest file when cleaning up a real completed process", async () => {
+    const emitter = makeEmitter();
+    const runner = new ProcessRunner("real", makeLogger() as never, emitter as never, spoolDir);
+
+    const promise = runner.execute({
+      command: process.execPath,
+      args: ["-e", "setTimeout(() => process.stdout.write('done'), 80);"],
+      cwd: "/tmp",
+      timeoutMs: 5000,
+      context: { runId: "run-midflight", stage: "executor", runtime: "codex" },
+    });
+
+    await new Promise((r) => setTimeout(r, 20));
+    const files = readdirSync(spoolDir).filter((f) => f.endsWith(".json"));
+    expect(files).toHaveLength(1);
+    // Remove the manifest mid-flight so cleanupProcess's best-effort
+    // read/update throws and is swallowed instead of crashing the process.
+    rmSync(join(spoolDir, files[0]!));
+
+    const result = await promise;
+    expect(result.exitCode).toBe(0);
+    expect(emitter.emitProcessCompleted).toHaveBeenCalledWith(
+      "run-midflight",
+      expect.any(String),
+      "executor",
+      "codex",
+      0,
+      expect.any(Number),
+    );
+  });
+
+  it("appends real on-disk log changes to the rolling buffer via the orphan's file watcher", async () => {
+    const runner = new ProcessRunner("real", makeLogger() as never, undefined, spoolDir);
+
+    const logPath = join(spoolDir, "tail-1.log");
+    writeFileSync(logPath, "initial\n");
+    const manifest = {
+      id: "tail-1",
+      pid: 424242,
+      command: "echo",
+      args: [],
+      runId: "run-tail",
+      stage: "executor",
+      runtime: "codex",
+      startedAt: new Date().toISOString(),
+      logFile: logPath,
+    };
+    writeFileSync(join(spoolDir, "tail-1.json"), JSON.stringify(manifest));
+
+    const killSpy = vi.spyOn(process, "kill").mockReturnValue(true as never);
+    try {
+      runner.rehydrateOrphans();
+      expect(runner.getActiveProcesses()).toHaveLength(1);
+
+      // Append to the log file on disk; the orphan's fs.watch should pick
+      // this up and extend the in-memory rolling buffer.
+      writeFileSync(logPath, "initial\nmore-content\n", { flag: "a" });
+
+      const deadline = Date.now() + 4000;
+      let output = runner.getProcessOutput("tail-1");
+      while (!output?.includes("more-content") && Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, 50));
+        output = runner.getProcessOutput("tail-1");
+      }
+      expect(output).toContain("more-content");
+    } finally {
+      // Make the orphan appear dead so its watcher/interval tear down
+      // before the test ends, instead of leaking past this test.
+      killSpy.mockImplementation(() => {
+        throw new Error("gone");
+      });
+      vi.useFakeTimers();
+      vi.advanceTimersByTime(5_000);
+      vi.useRealTimers();
+      killSpy.mockRestore();
+    }
+
+    await new Promise((r) => setTimeout(r, 50));
+  }, 10_000);
+
   it("logs a warning and continues when a manifest file contains invalid JSON", () => {
     writeFileSync(join(spoolDir, "broken.json"), "{not valid json");
     const logger = makeLogger();
