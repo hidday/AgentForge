@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { transition, getValidEvents } from "../../src/orchestrator/stateMachine.js";
+import { StateTransitionError } from "../../src/utils/errors.js";
 import { RunState } from "../../src/domain/runState.js";
 import { RunEvent } from "../../src/domain/runEvent.js";
 
@@ -39,5 +40,21 @@ describe("stateMachine - clarification transitions", () => {
     const validEvents = getValidEvents(RunState.Failed);
     expect(validEvents).toHaveLength(1);
     expect(validEvents).toContain(RunEvent.RESET_TO_TODO);
+  });
+
+  it("transition throws StateTransitionError for a terminal state with no transition table entry", () => {
+    expect(() => transition(RunState.Done, RunEvent.RESET_TO_TODO)).toThrow(
+      StateTransitionError,
+    );
+  });
+
+  it("transition throws StateTransitionError for a valid state with an unmapped event", () => {
+    expect(() => transition(RunState.Todo, RunEvent.HUMAN_APPROVED)).toThrow(
+      StateTransitionError,
+    );
+  });
+
+  it("getValidEvents returns an empty array for a terminal state with no transition table entry", () => {
+    expect(getValidEvents(RunState.Done)).toEqual([]);
   });
 });
