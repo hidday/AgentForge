@@ -239,8 +239,12 @@ describe("ProcessRunner — context tracking, active processes, and output", () 
       context: { runId: "run-1", stage: "executor", runtime: "claude-code" },
     });
 
-    await new Promise((r) => setTimeout(r, 60));
-    const active = runner.getActiveProcesses();
+    const deadline = Date.now() + 4000;
+    let active = runner.getActiveProcesses();
+    while (active.length === 0 && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 25));
+      active = runner.getActiveProcesses();
+    }
     expect(active).toHaveLength(1);
     expect(active[0]).toMatchObject({ runId: "run-1", stage: "executor", runtime: "claude-code" });
     expect(active[0]!.elapsedMs).toBeGreaterThanOrEqual(0);
@@ -276,9 +280,13 @@ describe("ProcessRunner — context tracking, active processes, and output", () 
       context: { runId: "run-2", stage: "executor", runtime: "codex" },
     });
 
-    await new Promise((r) => setTimeout(r, 60));
-    const active = runner.getActiveProcesses();
-    const output = runner.getProcessOutput(active[0]!.id);
+    const deadline = Date.now() + 4000;
+    let output: string | null = null;
+    while (!output?.includes("live-output") && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 25));
+      const active = runner.getActiveProcesses();
+      if (active[0]) output = runner.getProcessOutput(active[0].id);
+    }
     expect(output).toContain("live-output");
 
     await promise;
@@ -568,8 +576,12 @@ describe("ProcessRunner — rehydrateOrphans", () => {
       context: { runId: "run-midflight", stage: "executor", runtime: "codex" },
     });
 
-    await new Promise((r) => setTimeout(r, 20));
-    const files = readdirSync(spoolDir).filter((f) => f.endsWith(".json"));
+    const deadline = Date.now() + 4000;
+    let files = readdirSync(spoolDir).filter((f) => f.endsWith(".json"));
+    while (files.length === 0 && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 10));
+      files = readdirSync(spoolDir).filter((f) => f.endsWith(".json"));
+    }
     expect(files).toHaveLength(1);
     // Remove the manifest mid-flight so cleanupProcess's best-effort
     // read/update throws and is swallowed instead of crashing the process.
@@ -632,6 +644,15 @@ describe("ProcessRunner — rehydrateOrphans", () => {
       vi.useRealTimers();
       killSpy.mockRestore();
     }
+    expect(runner.getActiveProcesses()).toHaveLength(0);
+
+    // One more on-disk change after finalization: the watcher is still
+    // registered (close() hasn't necessarily taken effect for an
+    // already-queued native event), so its callback must tolerate the
+    // entry having already been removed instead of throwing.
+    writeFileSync(logPath, "initial\nmore-content\nafter-finalize\n", { flag: "a" });
+    await new Promise((r) => setTimeout(r, 200));
+    expect(runner.getActiveProcesses()).toHaveLength(0);
 
     await new Promise((r) => setTimeout(r, 50));
   }, 10_000);

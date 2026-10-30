@@ -144,4 +144,18 @@ describe("POST /api/runs/:id/actions/request-human — additional branches", () 
     const eventArgs = mockEventRepo.create.mock.calls[0][0] as { payloadJson: { context: unknown } };
     expect(eventArgs.payloadJson.context).toBeNull();
   });
+
+  it("omits linearIssue.identifier (undefined) when the run has no linearIssueIdentifier", async () => {
+    const { app, sendHumanRequest } = await buildApp({ run: makeRun({ linearIssueIdentifier: null }) });
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/actions/request-human",
+      payload: { reason: "other", summary: "hi" },
+    });
+
+    expect(res.statusCode).toBe(200);
+    const payload = sendHumanRequest.mock.calls[0][0] as { linearIssue: { identifier?: string } };
+    expect(payload.linearIssue.identifier).toBeUndefined();
+  });
 });

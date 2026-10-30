@@ -358,10 +358,27 @@ describe("OrchestratorService.runRemediation", () => {
   });
 
   it("skips git operations and GitHub sync when the run has no branch or PR", async () => {
-    const { deps, gitService, githubSync } = buildDeps(
+    const { deps, artifactRepo, gitService, githubSync } = buildDeps(
       {},
       makeRun({ state: RunState.AddressingReview, branchName: null, prNumber: null }),
     );
+    artifactRepo.findLatestByType.mockImplementation((_id: string, type: string) => {
+      if (type === "Review")
+        return Promise.resolve(
+          makeArtifact({
+            type: "Review",
+            payloadJson: makeReview({
+              overallVerdict: "changes_requested",
+              findings: [
+                { id: "f1", severity: "blocker", type: "bug", file: "a.ts", title: "t", details: "d" },
+              ],
+            }),
+          }),
+        );
+      if (type === "ExecutionReport")
+        return Promise.resolve(makeArtifact({ type: "ExecutionReport", payloadJson: makeExecutionReport() }));
+      return Promise.resolve(null);
+    });
     const svc = new OrchestratorService(deps as never);
     vi.spyOn(svc, "markReady").mockResolvedValue(makeRun());
 
@@ -374,7 +391,27 @@ describe("OrchestratorService.runRemediation", () => {
   });
 
   it("defaults commentMap to an empty object when not provided", async () => {
-    const { deps, githubSync } = buildDeps({}, makeRun({ state: RunState.AddressingReview }));
+    const { deps, artifactRepo, githubSync } = buildDeps(
+      {},
+      makeRun({ state: RunState.AddressingReview }),
+    );
+    artifactRepo.findLatestByType.mockImplementation((_id: string, type: string) => {
+      if (type === "Review")
+        return Promise.resolve(
+          makeArtifact({
+            type: "Review",
+            payloadJson: makeReview({
+              overallVerdict: "changes_requested",
+              findings: [
+                { id: "f1", severity: "blocker", type: "bug", file: "a.ts", title: "t", details: "d" },
+              ],
+            }),
+          }),
+        );
+      if (type === "ExecutionReport")
+        return Promise.resolve(makeArtifact({ type: "ExecutionReport", payloadJson: makeExecutionReport() }));
+      return Promise.resolve(null);
+    });
     const svc = new OrchestratorService(deps as never);
     vi.spyOn(svc, "markReady").mockResolvedValue(makeRun());
 

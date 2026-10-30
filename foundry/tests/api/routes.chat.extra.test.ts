@@ -151,3 +151,28 @@ describe("POST /api/runs/:id/chat — workingDirectory fallback", () => {
     expect(res.statusCode).toBe(422);
   });
 });
+
+describe("POST /api/runs/:id/chat — non-Error rejection from chatRun", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it("returns 500 with a generic message when chatRun rejects with a non-Error value", async () => {
+    const realDir = mkdtempSync(join(tmpdir(), "chat-extra-nonerror-"));
+    try {
+      const run = makeRun({ workingDirectory: realDir });
+      const { app, mockRunRepo, mockClaudeCodeRunner } = await buildApp();
+      mockRunRepo.findById.mockResolvedValue(run);
+      mockClaudeCodeRunner.chatRun.mockRejectedValue("subprocess crashed");
+
+      const res = await app.inject({
+        method: "POST",
+        url: "/api/runs/run-1/chat",
+        payload: { message: "Hello" },
+      });
+
+      expect(res.statusCode).toBe(500);
+      expect(res.json()).toEqual({ error: "Chat request failed" });
+    } finally {
+      rmSync(realDir, { recursive: true, force: true });
+    }
+  });
+});

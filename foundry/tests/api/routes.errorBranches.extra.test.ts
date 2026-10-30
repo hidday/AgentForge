@@ -164,6 +164,22 @@ describe("non-Error rejection branches across action routes", () => {
     expect(res.json()).toEqual({ error: "sync failure" });
   });
 
+  it("re-review-plan: returns err.message when dispatch throws a synchronous Error instance", async () => {
+    const { app, mockOrchestrator } = await buildApp();
+    mockOrchestrator.runManualReReview.mockImplementation(() => {
+      throw new Error("sync error instance");
+    });
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/actions/re-review-plan",
+      payload: {},
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toEqual({ error: "sync error instance" });
+  });
+
   it("re-review-plan: logs with truncated message when the background call rejects with a non-Error", async () => {
     const { app, mockOrchestrator } = await buildApp();
     mockOrchestrator.runManualReReview.mockRejectedValue("background failure");
@@ -190,6 +206,22 @@ describe("non-Error rejection branches across action routes", () => {
 
     expect(res.statusCode).toBe(400);
     expect(res.json()).toEqual({ error: "sync failure" });
+  });
+
+  it("revise-plan: returns err.message when dispatch throws a synchronous Error instance", async () => {
+    const { app, mockOrchestrator } = await buildApp();
+    mockOrchestrator.runManualPlanRevision.mockImplementation(() => {
+      throw new Error("sync error instance");
+    });
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/actions/revise-plan",
+      payload: {},
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toEqual({ error: "sync error instance" });
   });
 
   it("revise-plan: logs with truncated message when the background call rejects with a non-Error", async () => {
@@ -372,5 +404,43 @@ describe("GET /api/runs/:id/skills — ?? default branches", () => {
     const body = res.json() as { distillationDecision: { name: string; description: string } };
     expect(body.distillationDecision.name).toBe("payload-provided-name");
     expect(body.distillationDecision.description).toBe("payload-provided-description");
+  });
+
+  it("defaults shouldPersist to false and reason to '' when a SKILL_DISTILLATION payload omits both", async () => {
+    const mockEventRepo = { findByRunId: vi.fn() };
+    const mockRunRepo = { findById: vi.fn().mockResolvedValue(makeRun()) };
+    const mockArtifactRepo = { findByRunId: vi.fn() };
+    const mockAgentSkillRepo = { findById: vi.fn() };
+
+    const mockOrchestrator = {
+      getRunRepo: () => mockRunRepo,
+      getArtifactRepo: () => mockArtifactRepo,
+      getEventRepo: () => mockEventRepo,
+      getAgentSkillRepo: () => mockAgentSkillRepo,
+    };
+    const mockEmitter = { on: vi.fn(), off: vi.fn() };
+    const mockProcessRunner = { getActiveProcesses: vi.fn(), getProcessOutput: vi.fn() };
+
+    const app = Fastify({ logger: false });
+    registerApiRoutes(app, mockOrchestrator as never, mockEmitter as never, mockProcessRunner as never);
+    await app.ready();
+
+    mockEventRepo.findByRunId.mockResolvedValue([
+      {
+        id: "e1",
+        runId: "run-1",
+        eventType: "SKILL_DISTILLATION",
+        source: "distillation-agent",
+        payloadJson: {},
+        createdAt: new Date(),
+      },
+    ]);
+
+    const res = await app.inject({ method: "GET", url: "/api/runs/run-1/skills" });
+
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as { distillationDecision: { shouldPersist: boolean; reason: string } };
+    expect(body.distillationDecision.shouldPersist).toBe(false);
+    expect(body.distillationDecision.reason).toBe("");
   });
 });
