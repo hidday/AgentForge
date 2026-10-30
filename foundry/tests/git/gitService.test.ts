@@ -336,6 +336,12 @@ describe("GitService", () => {
       );
     });
 
+    it("truncates the slug mid-part when the accumulated length would exceed 30 chars, even under 4 parts", () => {
+      expect(
+        buildWorktreeDirName("abcdefgh", "pry-9-firstlongwordhere-secondlongword-third"),
+      ).toBe("run-abcdefgh-pry-9-firstlongwordhere");
+    });
+
     it("falls back to run-<shortId> when no issue id is present", () => {
       expect(buildWorktreeDirName("abcdefgh", "hidday/some-branch-name")).toBe(
         "run-abcdefgh",
@@ -378,6 +384,12 @@ describe("GitService", () => {
 
     it("fetch throws GitError for a nonexistent path", async () => {
       await expect(svc.fetch("/nonexistent")).rejects.toThrow(GitError);
+    });
+
+    it("GitError stringifies a non-Error cause directly", () => {
+      const err = new GitError("fetch", "/some/path", "a plain string cause");
+      expect(err.message).toBe("git fetch failed in /some/path: a plain string cause");
+      expect(err.name).toBe("GitError");
     });
   });
 });
