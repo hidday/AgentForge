@@ -188,19 +188,35 @@ describe("POST /api/linear/ingest", () => {
 describe("GET /api/events/stream", () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it("writes the SSE headers, registers a dashboard listener, and cleans up on close", async () => {
-    vi.useFakeTimers();
+  // The handler never ends the response (it's a long-lived SSE stream), so
+  // app.inject() would hang waiting for completion. We listen on a real
+  // socket instead, read the first chunk, then abort the client connection
+  // to drive the server's 'close' cleanup path.
+  it("writes SSE headers, registers a dashboard listener, and cleans up when the client disconnects", async () => {
     const { app, mockEmitter } = await buildApp();
+    const address = await app.listen({ port: 0, host: "127.0.0.1" });
 
-    const res = await app.inject({ method: "GET", url: "/api/events/stream" });
+    try {
+      const controller = new AbortController();
+      const res = await fetch(`${address}/api/events/stream`, { signal: controller.signal });
 
-    expect(res.statusCode).toBe(200);
-    expect(res.headers["content-type"]).toBe("text/event-stream");
-    expect(mockEmitter.on).toHaveBeenCalledWith("dashboard", expect.any(Function));
+      expect(res.status).toBe(200);
+      expect(res.headers.get("content-type")).toBe("text/event-stream");
 
-    // app.inject() simulates the request lifecycle, including the 'close'
-    // event on the raw request/response, so cleanup should already have run.
-    expect(mockEmitter.off).toHaveBeenCalledWith("dashboard", expect.any(Function));
-    vi.useRealTimers();
+      const reader = res.body!.getReader();
+      await reader.read(); // consume the initial ":\n\n" comment so headers have flushed
+      expect(mockEmitter.on).toHaveBeenCalledWith("dashboard", expect.any(Function));
+
+      controller.abort();
+      await reader.cancel().catch(() => {});
+
+      // Give the server a tick to observe the aborted connection and run
+      // the request.raw 'close' cleanup handler.
+      await new Promise((resolve) => setTimeout(resolve, 50));
+
+      expect(mockEmitter.off).toHaveBeenCalledWith("dashboard", expect.any(Function));
+    } finally {
+      await app.close();
+    }
   });
 });
