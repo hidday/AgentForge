@@ -230,4 +230,40 @@ END_STRUCTURED_OUTPUT`;
     expect(logFields.outputSnippet).toContain("[TAIL_MARKER]");
     expect(logFields.outputSnippet.length).toBeLessThanOrEqual(501);
   });
+
+  it("includes a context object when input.runId is set, omits it otherwise", async () => {
+    const validBlock = `BEGIN_STRUCTURED_OUTPUT
+{"success":true,"stage":"planner","payload":{"value":"ok"}}
+END_STRUCTURED_OUTPUT`;
+    const processRunner = makeMockProcessRunner({
+      stdout: JSON.stringify({ type: "result", result: validBlock }),
+      stderr: "",
+      exitCode: 0,
+      durationMs: 10,
+      timedOut: false,
+    });
+    const runner = new CursorRunner(
+      processRunner as never,
+      "cursor",
+      [],
+      "claude-4.6-sonnet",
+      makeMockLogger() as never,
+    );
+
+    await runner.run(
+      { prompt: "x", workingDirectory: "/tmp", timeoutMs: 1000, runId: "run-42" },
+      "planner",
+      echoSchema,
+    );
+    const { context: withRunId } = processRunner.execute.mock.calls[0]![0] as {
+      context?: { runId: string; stage: string; runtime: string };
+    };
+    expect(withRunId).toEqual({ runId: "run-42", stage: "planner", runtime: "cursor" });
+
+    await runner.run({ prompt: "x", workingDirectory: "/tmp", timeoutMs: 1000 }, "planner", echoSchema);
+    const { context: withoutRunId } = processRunner.execute.mock.calls[1]![0] as {
+      context?: unknown;
+    };
+    expect(withoutRunId).toBeUndefined();
+  });
 });
