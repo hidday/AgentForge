@@ -171,6 +171,65 @@ describe("buildChatSystemPrompt", () => {
     expect(result).toContain("The plan was incomplete");
   });
 
+  it("includes plan review findings when a PlanReview artifact is present", () => {
+    const artifact = makeArtifact({
+      type: "PlanReview",
+      version: 1,
+      payloadJson: {
+        summary: "Plan looks mostly solid",
+        findings: [
+          { id: "f1", severity: "high", title: "Missing test plan", details: "Add tests" },
+        ],
+      },
+    });
+    const result = buildChatSystemPrompt(makeRun(), [artifact]);
+    expect(result).toContain("## Plan Review Findings");
+    expect(result).toContain("Plan looks mostly solid");
+    expect(result).toContain("Missing test plan");
+    expect(result).toContain("[high]");
+  });
+
+  it("omits the plan review section when summary and findings are both absent", () => {
+    const artifact = makeArtifact({ type: "PlanReview", version: 1, payloadJson: {} });
+    const result = buildChatSystemPrompt(makeRun(), [artifact]);
+    expect(result).not.toContain("## Plan Review Findings");
+  });
+
+  it("renders plan review findings with missing optional fields using blank fallbacks", () => {
+    const artifact = makeArtifact({
+      type: "PlanReview",
+      version: 1,
+      payloadJson: { findings: [{}] },
+    });
+    const result = buildChatSystemPrompt(makeRun(), [artifact]);
+    expect(result).toContain("## Plan Review Findings");
+    expect(result).toContain("**[] **");
+  });
+
+  it("includes code review findings when a Review artifact is present", () => {
+    const artifact = makeArtifact({
+      type: "Review",
+      version: 1,
+      payloadJson: {
+        summary: "Code review complete",
+        findings: [
+          { id: "r1", severity: "medium", title: "Unused import", details: "Remove it" },
+        ],
+      },
+    });
+    const result = buildChatSystemPrompt(makeRun(), [artifact]);
+    expect(result).toContain("## Code Review Findings");
+    expect(result).toContain("Code review complete");
+    expect(result).toContain("Unused import");
+    expect(result).toContain("[medium]");
+  });
+
+  it("omits the code review section when summary and findings are both absent", () => {
+    const artifact = makeArtifact({ type: "Review", version: 1, payloadJson: {} });
+    const result = buildChatSystemPrompt(makeRun(), [artifact]);
+    expect(result).not.toContain("## Code Review Findings");
+  });
+
   it("renders execution report as structured markdown with score, checks, files", () => {
     const artifact = makeArtifact({
       type: "ExecutionReport",

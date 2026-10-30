@@ -75,4 +75,62 @@ describe("DistilledSkillPanel", () => {
 
     expect(screen.getByText(/content could not be loaded/i)).toBeDefined();
   });
+
+  it("falls back to distilledSkill.taskCategory when both names are null", () => {
+    render(
+      <DistilledSkillPanel
+        distilledSkill={{ ...skill, name: null, taskCategory: "fallback-category" }}
+        distillationDecision={{ ...decision, name: null }}
+      />,
+    );
+
+    expect(screen.getAllByText("fallback-category").length).toBeGreaterThan(0);
+  });
+
+  it("falls back to the literal 'distilled-skill' name when every source is null", () => {
+    render(
+      <DistilledSkillPanel
+        distilledSkill={null}
+        distillationDecision={{ ...decision, name: null, taskCategory: null, description: null }}
+      />,
+    );
+
+    expect(screen.getByText("distilled-skill")).toBeDefined();
+  });
+
+  it("shows the displaced skill id when present", () => {
+    render(
+      <DistilledSkillPanel
+        distilledSkill={skill}
+        distillationDecision={{ ...decision, displacedSkillId: "old-skill-id-123" }}
+      />,
+    );
+
+    expect(screen.getByText(/Displaced skill:/i)).toBeDefined();
+    expect(screen.getByText(/old-skil/i)).toBeDefined();
+  });
+
+  it("shows a loading indicator when loading is true", () => {
+    render(
+      <DistilledSkillPanel
+        distilledSkill={null}
+        distillationDecision={null}
+        loading={true}
+      />,
+    );
+
+    expect(screen.getByText(/Loading distilled skill/i)).toBeDefined();
+  });
+
+  it("shows the error message when error is set", () => {
+    render(
+      <DistilledSkillPanel
+        distilledSkill={null}
+        distillationDecision={null}
+        error="Failed to fetch distilled skill"
+      />,
+    );
+
+    expect(screen.getByText("Failed to fetch distilled skill")).toBeDefined();
+  });
 });

@@ -110,6 +110,13 @@ describe("GitService", () => {
       expect(stat).toContain("gitdir:");
     });
 
+    it("createWorktree throws GitError when the start point does not exist", async () => {
+      const wtPath = join(repoPath, ".worktrees", "bad-start-point");
+      await expect(
+        svc.createWorktree(repoPath, wtPath, "feature-x", "no-such-start-point"),
+      ).rejects.toThrow(GitError);
+    });
+
     it("removeWorktree removes the worktree", async () => {
       const wtPath = join(repoPath, ".worktrees", "test-wt2");
       await svc.createWorktree(repoPath, wtPath, "branch2", "main");
@@ -181,6 +188,104 @@ describe("GitService", () => {
 
       await svc.removeWorktree(repoPath, result.worktreePath);
     });
+
+    it("removes a leftover worktree directory occupying the exact target path before recreating", async () => {
+      const runId = "11112222-3456-7890-abcd-ef1234567890";
+      const branchName = "hidday/pry-55-collision";
+      const shortId = runId.slice(0, 8);
+      const dirName = buildWorktreeDirName(shortId, branchName);
+      const worktreePath = join(repoPath, ".worktrees", dirName);
+
+      // Pre-occupy the exact computed target path with an unrelated worktree.
+      await svc.createWorktree(repoPath, worktreePath, "unrelated-branch", "main");
+      expect(existsSync(worktreePath)).toBe(true);
+
+      const result = await svc.setupRunWorktree(repoPath, runId, "main", branchName);
+
+      expect(result.worktreePath).toBe(worktreePath);
+      expect(await svc.currentBranch(result.worktreePath)).toBe(branchName);
+
+      await svc.removeWorktree(repoPath, result.worktreePath);
+    });
+
+    it("warns but still succeeds when origin/<branch> already exists", async () => {
+      const branchName = "hidday/pry-77-existing-remote";
+      git(["branch", branchName, "main"], repoPath);
+      git(["push", "origin", branchName], repoPath);
+      git(["branch", "-D", branchName], repoPath);
+      git(["fetch", "origin"], repoPath);
+
+      const runId = "33334444-3456-7890-abcd-ef1234567890";
+      const result = await svc.setupRunWorktree(repoPath, runId, "main", branchName);
+
+      expect(await svc.currentBranch(result.worktreePath)).toBe(branchName);
+
+      await svc.removeWorktree(repoPath, result.worktreePath);
+    });
+  });
+
+  describe("push / commitAndPush", () => {
+    let bareDir: string;
+
+    beforeEach(() => {
+      bareDir = mkdtempSync(join(tmpdir(), "gitservice-bare-push-"));
+      git(["clone", "--bare", repoPath, bareDir], tmpdir());
+      git(["remote", "add", "origin", bareDir], repoPath);
+    });
+
+    afterEach(() => {
+      rmSync(bareDir, { recursive: true, force: true });
+    });
+
+    it("push publishes the current branch to origin with upstream tracking", async () => {
+      git(["checkout", "-b", "feature/push-test"], repoPath);
+      writeFileSync(join(repoPath, "pushed.txt"), "content");
+      git(["add", "."], repoPath);
+      git(["commit", "-m", "add pushed file"], repoPath);
+
+      await svc.push(repoPath, "feature/push-test");
+
+      const branches = git(["branch", "-a"], bareDir);
+      expect(branches).toContain("feature/push-test");
+    });
+
+    it("push throws GitError when the branch does not exist locally", async () => {
+      await expect(svc.push(repoPath, "no-such-branch")).rejects.toThrow(GitError);
+    });
+
+    it("commitAndPush commits, verifies the branch, and pushes in sequence", async () => {
+      git(["checkout", "-b", "feature/commit-and-push"], repoPath);
+      writeFileSync(join(repoPath, "combined.txt"), "content");
+
+      await svc.commitAndPush(repoPath, "feature/commit-and-push", "combined commit");
+
+      const log = git(["log", "--oneline"], repoPath);
+      expect(log).toContain("combined commit");
+      const branches = git(["branch", "-a"], bareDir);
+      expect(branches).toContain("feature/commit-and-push");
+    });
+
+    it("commitAndPush rejects when on the wrong branch", async () => {
+      await expect(
+        svc.commitAndPush(repoPath, "some-other-branch", "msg"),
+      ).rejects.toThrow(BranchMismatchError);
+    });
+  });
+
+  describe("pruneWorktrees", () => {
+    it("prunes stale worktree admin records for directories removed from disk", async () => {
+      const wtPath = join(repoPath, ".worktrees", "to-be-pruned");
+      await svc.createWorktree(repoPath, wtPath, "prune-branch", "main");
+      rmSync(wtPath, { recursive: true, force: true });
+
+      await svc.pruneWorktrees(repoPath);
+
+      expect(await svc.findWorktreeForBranch(repoPath, "prune-branch")).toBeNull();
+    });
+
+    it("swallows the error (best-effort) when the repo path is invalid", async () => {
+      await expect(svc.pruneWorktrees("/nonexistent")).resolves.toBeUndefined();
+    });
   });
 
   describe("findWorktreeForBranch", () => {
@@ -231,6 +336,12 @@ describe("GitService", () => {
       );
     });
 
+    it("truncates the slug mid-part when the accumulated length would exceed 30 chars, even under 4 parts", () => {
+      expect(
+        buildWorktreeDirName("abcdefgh", "pry-9-firstlongwordhere-secondlongword-third"),
+      ).toBe("run-abcdefgh-pry-9-firstlongwordhere");
+    });
+
     it("falls back to run-<shortId> when no issue id is present", () => {
       expect(buildWorktreeDirName("abcdefgh", "hidday/some-branch-name")).toBe(
         "run-abcdefgh",
@@ -252,6 +363,33 @@ describe("GitService", () => {
   describe("error handling", () => {
     it("throws GitError for invalid repo path", async () => {
       await expect(svc.currentBranch("/nonexistent")).rejects.toThrow(GitError);
+    });
+
+    it("hasChanges throws GitError for a nonexistent path", async () => {
+      await expect(svc.hasChanges("/nonexistent")).rejects.toThrow(GitError);
+    });
+
+    it("commitAll throws GitError when the underlying git command fails", async () => {
+      await expect(svc.commitAll("/nonexistent", "msg")).rejects.toThrow(GitError);
+    });
+
+    it("findWorktreeForBranch throws GitError for a nonexistent path", async () => {
+      await expect(svc.findWorktreeForBranch("/nonexistent", "main")).rejects.toThrow(GitError);
+    });
+
+    it("removeWorktree swallows the error (best-effort) when the path isn't a registered worktree", async () => {
+      const notAWorktree = join(repoPath, "not-a-worktree");
+      await expect(svc.removeWorktree(repoPath, notAWorktree)).resolves.toBeUndefined();
+    });
+
+    it("fetch throws GitError for a nonexistent path", async () => {
+      await expect(svc.fetch("/nonexistent")).rejects.toThrow(GitError);
+    });
+
+    it("GitError stringifies a non-Error cause directly", () => {
+      const err = new GitError("fetch", "/some/path", "a plain string cause");
+      expect(err.message).toBe("git fetch failed in /some/path: a plain string cause");
+      expect(err.name).toBe("GitError");
     });
   });
 });
