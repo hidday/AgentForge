@@ -264,6 +264,43 @@ describe("OrchestratorService.runExecution", () => {
     expect(gitService.commitAndPush).not.toHaveBeenCalled();
   });
 
+  it("omits the files-changed section entirely when no files changed", async () => {
+    const { deps, executorAgent, linearClient } = buildDeps();
+    executorAgent.run.mockResolvedValue({
+      report: makeExecutionReport({ filesChanged: [] }),
+      prNumber: 7,
+    });
+    const svc = new OrchestratorService(deps as never);
+    vi.spyOn(svc, "runReview").mockResolvedValue(makeRun());
+
+    await svc.runExecution("run-1");
+
+    const comment = linearClient.postComment.mock.calls[0]?.[1] as string;
+    expect(comment).not.toContain("Files changed");
+  });
+
+  it("collapses the files-changed list into a <details> block when more than 8 files changed", async () => {
+    const { deps, executorAgent, linearClient } = buildDeps();
+    executorAgent.run.mockResolvedValue({
+      report: makeExecutionReport({
+        filesChanged: Array.from({ length: 9 }, (_, i) => `src/file${i}.ts`),
+        notes: ["Something worth flagging"],
+      }),
+      prNumber: 7,
+    });
+    const svc = new OrchestratorService(deps as never);
+    vi.spyOn(svc, "runReview").mockResolvedValue(makeRun());
+
+    await svc.runExecution("run-1");
+
+    const comment = linearClient.postComment.mock.calls[0]?.[1] as string;
+    expect(comment).toContain("<details>");
+    expect(comment).toContain("Files changed (9)");
+    expect(comment).toContain("</details>");
+    expect(comment).toContain("### Notes");
+    expect(comment).toContain("Something worth flagging");
+  });
+
   it("passes operatorNote to the executor agent when opts.note is given", async () => {
     const { deps, executorAgent } = buildDeps();
     const svc = new OrchestratorService(deps as never);
