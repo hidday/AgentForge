@@ -30,8 +30,8 @@ describe("MockLinearClient", () => {
     expect((await client.getIssue("i1")).title).toBe("Original");
   });
 
-  it("getIssue throws for an unknown issue id", async () => {
-    await expect(client.getIssue("missing")).rejects.toThrow(/not found/);
+  it("getIssue throws synchronously for an unknown issue id", () => {
+    expect(() => client.getIssue("missing")).toThrow(/not found/);
   });
 
   describe("searchIssues", () => {

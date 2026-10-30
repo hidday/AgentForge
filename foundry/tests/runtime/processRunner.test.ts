@@ -141,17 +141,75 @@ describe("ProcessRunner — real mode, basic spawning", () => {
     );
   });
 
-  it("rejects when the command cannot be spawned (ENOENT)", async () => {
-    const runner = new ProcessRunner("real", makeLogger() as never, undefined, spoolDir);
+  it("rejects when the command cannot be spawned (ENOENT), cleaning up the tracked process", async () => {
+    const emitter = makeEmitter();
+    const runner = new ProcessRunner("real", makeLogger() as never, emitter as never, spoolDir);
     await expect(
       runner.execute({
         command: "this-command-definitely-does-not-exist-xyz",
         args: [],
         cwd: "/tmp",
         timeoutMs: 2000,
+        context: { runId: "run-enoent", stage: "executor", runtime: "codex" },
       }),
     ).rejects.toThrow();
+
+    // cleanupProcess ran for the spawn-error path too (exitCode -1).
+    expect(emitter.emitProcessCompleted).toHaveBeenCalledWith(
+      "run-enoent",
+      expect.any(String),
+      "executor",
+      "codex",
+      -1,
+      expect.any(Number),
+    );
   });
+
+  it("defaults the spool directory to .foundry/processes under the cwd when none is given", () => {
+    const defaultDir = join(process.cwd(), ".foundry", "processes");
+    rmSync(defaultDir, { recursive: true, force: true });
+    try {
+      new ProcessRunner("real", makeLogger() as never);
+      expect(existsSync(defaultDir)).toBe(true);
+    } finally {
+      rmSync(join(process.cwd(), ".foundry"), { recursive: true, force: true });
+    }
+  });
+
+  it("exits via code ?? 1 fallback when the child is terminated by its own signal (code is null)", async () => {
+    const runner = new ProcessRunner("real", makeLogger() as never, undefined, spoolDir);
+    const result = await runner.execute({
+      command: process.execPath,
+      args: ["-e", "process.kill(process.pid, 'SIGTERM');"],
+      cwd: "/tmp",
+      timeoutMs: 5000,
+    });
+
+    // Terminated by its own signal, not by our timeout path: close fires
+    // with code === null, exercising the `code ?? 1` fallback.
+    expect(result.exitCode).toBe(1);
+    expect(result.timedOut).toBe(false);
+  });
+
+  it("escalates to SIGKILL when the process ignores SIGTERM past the grace period", async () => {
+    const logger = makeLogger();
+    const runner = new ProcessRunner("real", logger as never, undefined, spoolDir);
+
+    await expect(
+      runner.execute({
+        command: process.execPath,
+        args: ["-e", "process.on('SIGTERM', () => {}); setTimeout(() => {}, 20000);"],
+        cwd: "/tmp",
+        timeoutMs: 100,
+        context: { runId: "run-sigkill", stage: "executor", runtime: "codex" },
+      }),
+    ).rejects.toThrow(/timed out|timeout/i);
+
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.objectContaining({ timeoutMs: 100 }),
+      "Process timed out",
+    );
+  }, 15_000);
 });
 
 describe("ProcessRunner — context tracking, active processes, and output", () => {
@@ -320,7 +378,7 @@ describe("ProcessRunner — rehydrateOrphans", () => {
     );
   });
 
-  it("rehydrates a still-alive orphan into activeProcesses and emits process:started", () => {
+  it("rehydrates a still-alive orphan into activeProcesses and emits process:started", async () => {
     const emitter = makeEmitter();
     const logger = makeLogger();
     const runner = new ProcessRunner("real", logger as never, emitter as never, spoolDir);
@@ -384,6 +442,11 @@ describe("ProcessRunner — rehydrateOrphans", () => {
       killSpy.mockRestore();
       vi.useRealTimers();
     }
+
+    // fs.watch may have an already-queued native callback in flight from
+    // setup; give the real event loop a tick to flush it before afterEach
+    // deletes the spool directory, so it doesn't fire against a missing file.
+    await new Promise((r) => setTimeout(r, 50));
   });
 
   it("logs a warning and continues when a manifest file contains invalid JSON", () => {

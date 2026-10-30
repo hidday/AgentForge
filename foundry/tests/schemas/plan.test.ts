@@ -95,7 +95,7 @@ describe("PlanSchema", () => {
     }
   });
 
-  it("coerces an unrecognized assumption shape to an empty string via FlexString's fallback", () => {
+  it("coerces an unrecognized object-shaped assumption to an empty string via FlexString's fallback", () => {
     const result = PlanSchema.safeParse({
       ...validPlan(),
       assumptions: [{ somethingElse: 123 }],
@@ -103,6 +103,17 @@ describe("PlanSchema", () => {
     expect(result.success).toBe(true);
     if (result.success) {
       expect(result.data.assumptions[0]).toBe("");
+    }
+  });
+
+  it("coerces a non-string, non-object risk (e.g. a number) to an empty string via FlexString's fallback", () => {
+    const result = PlanSchema.safeParse({
+      ...validPlan(),
+      risks: [42],
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.risks[0]).toBe("");
     }
   });
 
