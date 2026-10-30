@@ -93,12 +93,11 @@ describe("ExecutionReportView", () => {
 
   it("renders 'Created' when prDraftCreated is true", () => {
     render(<ExecutionReportView report={{ prDraftCreated: true }} />);
-    expect(screen.getByText(/PR Draft:/)).toBeDefined();
-    expect(screen.getByText("Created")).toBeDefined();
+    expect(screen.getByText(/PR Draft:\s*Created/)).toBeDefined();
   });
 
   it("renders 'Not created' when prDraftCreated is false", () => {
     render(<ExecutionReportView report={{ prDraftCreated: false }} />);
-    expect(screen.getByText("Not created")).toBeDefined();
+    expect(screen.getByText(/PR Draft:\s*Not created/)).toBeDefined();
   });
 });
