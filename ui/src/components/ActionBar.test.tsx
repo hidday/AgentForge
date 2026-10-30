@@ -144,6 +144,9 @@ describe("ActionBar", () => {
       await userEvent.click(screen.getByRole("button", { name: /^reject plan$/i }));
 
       await userEvent.click(screen.getByText("Start fresh"));
+      // Switch back to "iterate" and then to "fresh" again to exercise both mode setters.
+      await userEvent.click(screen.getByText("Revise plan"));
+      await userEvent.click(screen.getByText("Start fresh"));
 
       const textarea = screen.getByPlaceholderText(/describe what should change/i);
       await userEvent.type(textarea, "  please simplify  ");

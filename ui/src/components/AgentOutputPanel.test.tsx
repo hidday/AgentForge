@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, act } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ActiveProcess } from "@/api/client.ts";
 import type { ParsedBlock } from "@/lib/parseClaudeOutput.ts";
@@ -173,7 +173,9 @@ describe("AgentOutputPanel", () => {
       render(<AgentOutputPanel processes={[makeProcess({ startedAt })]} output="" />);
       expect(screen.getByText("0s")).toBeDefined();
 
-      vi.advanceTimersByTime(5_000);
+      act(() => {
+        vi.advanceTimersByTime(5_000);
+      });
       expect(screen.getByText("5s")).toBeDefined();
     });
 

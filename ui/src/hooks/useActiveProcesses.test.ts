@@ -93,6 +93,28 @@ describe("useActiveProcesses", () => {
     expect(result.current.processes).toEqual([]);
   });
 
+  it("does not apply a late getProcessOutput result if unmounted after getActiveProcesses resolves", async () => {
+    mockApi.getActiveProcesses.mockResolvedValue({ processes: [makeProcess("p1")] });
+    let resolveOutput!: (v: { processId: string; output: string }) => void;
+    mockApi.getProcessOutput.mockReturnValue(
+      new Promise((res) => {
+        resolveOutput = res;
+      }),
+    );
+
+    const { result, unmount } = renderHook(() => useActiveProcesses("run-1"));
+    await waitFor(() => expect(mockApi.getProcessOutput).toHaveBeenCalledWith("p1"));
+
+    unmount();
+
+    await act(async () => {
+      resolveOutput({ processId: "p1", output: "late output" });
+      await Promise.resolve();
+    });
+
+    expect(result.current.output).toBe("");
+  });
+
   it("adds a new process entry and resets output on process:started", async () => {
     mockApi.getActiveProcesses.mockResolvedValue({ processes: [] });
     const { result } = renderHook(() => useActiveProcesses("run-1"));

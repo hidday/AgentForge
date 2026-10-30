@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { Artifact } from "@/api/client.ts";
-import { ArtifactTabs } from "./ArtifactTabs.tsx";
+import { ArtifactTabs, ArtifactContent } from "./ArtifactTabs.tsx";
 
 function makeArtifact(
   type: string,
@@ -226,5 +226,22 @@ describe("ArtifactTabs", () => {
     );
 
     expect(screen.getByText("No rejection feedback recorded")).toBeDefined();
+  });
+
+  it("ArtifactContent falls back to raw JSON for an unrecognized tab id (exhaustiveness guard)", () => {
+    const artifact = makeArtifact("SomethingElse", { foo: "bar", n: 1 });
+    render(
+      <ArtifactContent artifact={artifact} tabId={"unknown-tab" as never} />,
+    );
+    const pre = screen.getByText((_, el) => el?.tagName === "PRE");
+    expect(pre.textContent).toBe(JSON.stringify({ foo: "bar", n: 1 }, null, 2));
+  });
+
+  it("ArtifactContent renders nothing for tabId 'rejectionFeedback' (handled separately by the parent)", () => {
+    const artifact = makeArtifact("RejectionContext", { feedback: "x" });
+    const { container } = render(
+      <ArtifactContent artifact={artifact} tabId="rejectionFeedback" />,
+    );
+    expect(container.firstChild).toBeNull();
   });
 });

@@ -41,6 +41,11 @@ function makeArtifact(
 
 const RUN_ID = "run-1";
 
+// jsdom doesn't implement scrollIntoView; ChatPanel feature-detects it before
+// calling, so stub it once for this file rather than per-test.
+const scrollIntoViewMock = vi.fn();
+HTMLElement.prototype.scrollIntoView = scrollIntoViewMock;
+
 describe("ChatPanel", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -250,5 +255,35 @@ describe("ChatPanel", () => {
       // "New question" should NOT appear
       expect(screen.queryByText("New question")).toBeNull();
     });
+  });
+
+  it("calls scrollIntoView on the bottom marker on mount", () => {
+    render(
+      <ChatPanel
+        runId={RUN_ID}
+        artifacts={[makeArtifact("user", "Hi", "a1", "2024-01-01T00:00:01Z")]}
+      />,
+    );
+
+    expect(scrollIntoViewMock).toHaveBeenCalledWith({ behavior: "smooth" });
+  });
+
+  it("clicking the header toggles the panel between expanded and collapsed", async () => {
+    render(
+      <ChatPanel
+        runId={RUN_ID}
+        artifacts={[makeArtifact("user", "Hello", "a1", "2024-01-01T00:00:01Z")]}
+      />,
+    );
+
+    // Expanded by default — message visible.
+    expect(screen.getByText("Hello")).toBeDefined();
+
+    const header = screen.getByRole("button", { name: /chat with agent/i });
+    await userEvent.click(header);
+    expect(screen.queryByText("Hello")).toBeNull();
+
+    await userEvent.click(header);
+    expect(screen.getByText("Hello")).toBeDefined();
   });
 });

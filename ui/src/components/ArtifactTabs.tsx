@@ -95,7 +95,7 @@ export function ArtifactTabs({ artifacts }: ArtifactTabsProps) {
   );
 }
 
-function ArtifactContent({
+export function ArtifactContent({
   artifact,
   tabId,
 }: {
