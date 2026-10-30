@@ -1,5 +1,13 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync, existsSync } from "node:fs";
+import {
+  mkdtempSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  writeFileSync,
+  existsSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ProcessRunner } from "../../src/runtime/processRunner.js";
@@ -294,6 +302,32 @@ describe("ProcessRunner — context tracking, active processes, and output", () 
   it("returns null from getProcessOutput for an unknown process id with no log file", () => {
     const runner = new ProcessRunner("real", makeLogger() as never, undefined, spoolDir);
     expect(runner.getProcessOutput("does-not-exist")).toBeNull();
+  });
+
+  it("returns null from getProcessOutput when the log path exists but cannot be read as a file", () => {
+    const runner = new ProcessRunner("real", makeLogger() as never, undefined, spoolDir);
+    // A directory at the expected log path exists, but readFileSync on it
+    // throws EISDIR regardless of permissions (even for root), reliably
+    // exercising the "file not readable" catch branch.
+    const dirAsLogPath = join(spoolDir, "weird-id.log");
+    mkdirSync(dirAsLogPath);
+    expect(runner.getProcessOutput("weird-id")).toBeNull();
+  });
+
+  it("emits a truncated (<=500 char) output chunk when a single chunk exceeds the throttle size", async () => {
+    const emitter = makeEmitter();
+    const runner = new ProcessRunner("real", makeLogger() as never, emitter as never, spoolDir);
+    await runner.execute({
+      command: process.execPath,
+      args: ["-e", "process.stdout.write('Y'.repeat(2000));"],
+      cwd: "/tmp",
+      timeoutMs: 5000,
+      context: { runId: "run-throttle", stage: "executor", runtime: "codex" },
+    });
+
+    expect(emitter.emitProcessOutput).toHaveBeenCalled();
+    const [, , chunk] = emitter.emitProcessOutput.mock.calls[0]!;
+    expect((chunk as string).length).toBeLessThanOrEqual(500);
   });
 
   it("truncates the rolling buffer to the last 8KB for very large output", async () => {

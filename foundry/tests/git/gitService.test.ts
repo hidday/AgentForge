@@ -335,5 +335,13 @@ describe("GitService", () => {
     it("throws GitError for invalid repo path", async () => {
       await expect(svc.currentBranch("/nonexistent")).rejects.toThrow(GitError);
     });
+
+    it("hasChanges throws GitError for a nonexistent path", async () => {
+      await expect(svc.hasChanges("/nonexistent")).rejects.toThrow(GitError);
+    });
+
+    it("commitAll throws GitError when the underlying git command fails", async () => {
+      await expect(svc.commitAll("/nonexistent", "msg")).rejects.toThrow(GitError);
+    });
   });
 });

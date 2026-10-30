@@ -274,7 +274,12 @@ describe("OrchestratorService.runPlanReview", () => {
     runRepo.findById.mockResolvedValue(makeRun({ state: RunState.PlanReview }));
     artifactRepo.findLatestByType.mockResolvedValue(makeArtifact({ type: "Plan", payloadJson: makePlan() }));
     planReviewerAgent.run.mockResolvedValue(
-      makePlanReview({ overallVerdict: "changes_requested", findings: [{ id: "f1" } as never] }),
+      makePlanReview({
+        overallVerdict: "changes_requested",
+        findings: [
+          { id: "f1", severity: "important", type: "risk", title: "Missing rollback", details: "d" },
+        ],
+      }),
     );
 
     const svc = new OrchestratorService(deps as never);
@@ -310,7 +315,7 @@ describe("OrchestratorService.runPlanRevision", () => {
 
   it("passes an operatorNote to the reviser agent when opts.note is provided", async () => {
     const { deps, runRepo, artifactRepo, planReviserAgent } = buildDeps();
-    runRepo.findById.mockResolvedValue(makeRun());
+    runRepo.findById.mockResolvedValue(makeRun({ state: RunState.PlanRevision }));
     artifactRepo.findLatestByType.mockResolvedValue(makeArtifact({ type: "Plan", payloadJson: makePlan() }));
 
     const svc = new OrchestratorService(deps as never);
@@ -327,7 +332,7 @@ describe("OrchestratorService.runPlanRevision", () => {
 
   it("passes undefined options to the reviser agent when no note is given", async () => {
     const { deps, runRepo, artifactRepo, planReviserAgent } = buildDeps();
-    runRepo.findById.mockResolvedValue(makeRun());
+    runRepo.findById.mockResolvedValue(makeRun({ state: RunState.PlanRevision }));
     artifactRepo.findLatestByType.mockResolvedValue(makeArtifact({ type: "Plan", payloadJson: makePlan() }));
 
     const svc = new OrchestratorService(deps as never);
@@ -355,7 +360,7 @@ describe("OrchestratorService.approvePlan", () => {
 
   it("sets approvedPlanVersion and posts a plain approval comment without a note", async () => {
     const { deps, runRepo, artifactRepo, linearClient } = buildDeps();
-    runRepo.findById.mockResolvedValue(makeRun());
+    runRepo.findById.mockResolvedValue(makeRun({ state: RunState.AwaitingPlanApproval }));
     artifactRepo.findLatestByType.mockResolvedValue(
       makeArtifact({ type: "Plan", payloadJson: makePlan({ planVersion: 3 }) }),
     );
@@ -371,7 +376,7 @@ describe("OrchestratorService.approvePlan", () => {
 
   it("includes the operator note in the approval comment when provided", async () => {
     const { deps, runRepo, artifactRepo, linearClient } = buildDeps();
-    runRepo.findById.mockResolvedValue(makeRun());
+    runRepo.findById.mockResolvedValue(makeRun({ state: RunState.AwaitingPlanApproval }));
     artifactRepo.findLatestByType.mockResolvedValue(
       makeArtifact({ type: "Plan", payloadJson: makePlan({ planVersion: 3 }) }),
     );
