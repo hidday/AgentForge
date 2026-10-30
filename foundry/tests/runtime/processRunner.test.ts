@@ -635,13 +635,13 @@ describe("ProcessRunner — rehydrateOrphans", () => {
       expect(output).toContain("more-content");
     } finally {
       // Make the orphan appear dead so its watcher/interval tear down
-      // before the test ends, instead of leaking past this test.
+      // before the test ends, instead of leaking past this test. The
+      // interval was created with real timers (rehydrateOrphans ran before
+      // any fake-timer setup), so it must be let to fire for real here.
       killSpy.mockImplementation(() => {
         throw new Error("gone");
       });
-      vi.useFakeTimers();
-      vi.advanceTimersByTime(5_000);
-      vi.useRealTimers();
+      await new Promise((r) => setTimeout(r, 5_200));
       killSpy.mockRestore();
     }
     expect(runner.getActiveProcesses()).toHaveLength(0);
@@ -655,7 +655,7 @@ describe("ProcessRunner — rehydrateOrphans", () => {
     expect(runner.getActiveProcesses()).toHaveLength(0);
 
     await new Promise((r) => setTimeout(r, 50));
-  }, 10_000);
+  }, 15_000);
 
   it("logs a warning and continues when a manifest file contains invalid JSON", () => {
     writeFileSync(join(spoolDir, "broken.json"), "{not valid json");
