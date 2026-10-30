@@ -1,0 +1,400 @@
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync, existsSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { ProcessRunner } from "../../src/runtime/processRunner.js";
+import type { ProcessSpawnOptions } from "../../src/runtime/runnerTypes.js";
+
+function makeLogger() {
+  return { info: vi.fn(), error: vi.fn(), warn: vi.fn(), debug: vi.fn() };
+}
+
+function makeEmitter() {
+  return {
+    emitProcessStarted: vi.fn(),
+    emitProcessOutput: vi.fn(),
+    emitProcessCompleted: vi.fn(),
+  };
+}
+
+let spoolDir: string;
+
+beforeEach(() => {
+  spoolDir = mkdtempSync(join(tmpdir(), "processrunner-test-"));
+});
+
+afterEach(() => {
+  rmSync(spoolDir, { recursive: true, force: true });
+});
+
+describe("ProcessRunner — mock mode", () => {
+  it("throws when mock mode is enabled but no handler is configured", async () => {
+    const runner = new ProcessRunner("mock", makeLogger() as never, undefined, spoolDir);
+    await expect(
+      runner.execute({ command: "echo", args: [], cwd: "/tmp", timeoutMs: 1000 }),
+    ).rejects.toThrow(/Mock mode enabled but no mock handler configured/);
+  });
+
+  it("delegates to the configured mock handler and logs the call", async () => {
+    const logger = makeLogger();
+    const runner = new ProcessRunner("mock", logger as never, undefined, spoolDir);
+    const handler = vi.fn().mockResolvedValue({
+      stdout: "mock-out",
+      stderr: "",
+      exitCode: 0,
+      durationMs: 5,
+      timedOut: false,
+    });
+    runner.setMockHandler(handler);
+
+    const options: ProcessSpawnOptions = {
+      command: "fake",
+      args: ["--flag"],
+      cwd: "/tmp",
+      timeoutMs: 1000,
+    };
+    const result = await runner.execute(options);
+
+    expect(result.stdout).toBe("mock-out");
+    expect(handler).toHaveBeenCalledWith(options);
+    expect(logger.debug).toHaveBeenCalledWith(
+      expect.objectContaining({ command: "fake", args: ["--flag"], cwd: "/tmp" }),
+      "Executing mock process",
+    );
+  });
+});
+
+describe("ProcessRunner — real mode, basic spawning", () => {
+  it("resolves with stdout/stderr/exitCode for a successful process", async () => {
+    const runner = new ProcessRunner("real", makeLogger() as never, undefined, spoolDir);
+    const result = await runner.execute({
+      command: process.execPath,
+      args: ["-e", "process.stdout.write('hello-out'); process.stderr.write('hello-err');"],
+      cwd: "/tmp",
+      timeoutMs: 5000,
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toBe("hello-out");
+    expect(result.stderr).toBe("hello-err");
+    expect(result.timedOut).toBe(false);
+    expect(result.durationMs).toBeGreaterThanOrEqual(0);
+  });
+
+  it("resolves with a non-zero exit code when the process exits with failure", async () => {
+    const runner = new ProcessRunner("real", makeLogger() as never, undefined, spoolDir);
+    const result = await runner.execute({
+      command: process.execPath,
+      args: ["-e", "process.exit(3);"],
+      cwd: "/tmp",
+      timeoutMs: 5000,
+    });
+
+    expect(result.exitCode).toBe(3);
+  });
+
+  it("writes stdinData to the child process's stdin", async () => {
+    const runner = new ProcessRunner("real", makeLogger() as never, undefined, spoolDir);
+    const result = await runner.execute({
+      command: process.execPath,
+      args: [
+        "-e",
+        "let d=''; process.stdin.on('data',c=>d+=c); process.stdin.on('end',()=>process.stdout.write('got:'+d));",
+      ],
+      cwd: "/tmp",
+      timeoutMs: 5000,
+      stdinData: "piped-input",
+    });
+
+    expect(result.stdout).toBe("got:piped-input");
+  });
+
+  it("merges extra env vars into the spawned process environment", async () => {
+    const runner = new ProcessRunner("real", makeLogger() as never, undefined, spoolDir);
+    const result = await runner.execute({
+      command: process.execPath,
+      args: ["-e", "process.stdout.write(process.env.FOUNDRY_TEST_VAR || '')"],
+      cwd: "/tmp",
+      timeoutMs: 5000,
+      env: { FOUNDRY_TEST_VAR: "custom-value" },
+    });
+
+    expect(result.stdout).toBe("custom-value");
+  });
+
+  it("rejects with AgentTimeoutError when the process exceeds timeoutMs", async () => {
+    const logger = makeLogger();
+    const runner = new ProcessRunner("real", logger as never, undefined, spoolDir);
+
+    await expect(
+      runner.execute({
+        command: process.execPath,
+        args: ["-e", "setTimeout(() => {}, 10000);"],
+        cwd: "/tmp",
+        timeoutMs: 200,
+      }),
+    ).rejects.toThrow(/timed out|timeout/i);
+
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.objectContaining({ timeoutMs: 200 }),
+      "Process timed out",
+    );
+  });
+
+  it("rejects when the command cannot be spawned (ENOENT)", async () => {
+    const runner = new ProcessRunner("real", makeLogger() as never, undefined, spoolDir);
+    await expect(
+      runner.execute({
+        command: "this-command-definitely-does-not-exist-xyz",
+        args: [],
+        cwd: "/tmp",
+        timeoutMs: 2000,
+      }),
+    ).rejects.toThrow();
+  });
+});
+
+describe("ProcessRunner — context tracking, active processes, and output", () => {
+  it("tracks an active process while a context is provided, then clears it on completion", async () => {
+    const emitter = makeEmitter();
+    const runner = new ProcessRunner("real", makeLogger() as never, emitter as never, spoolDir);
+
+    const promise = runner.execute({
+      command: process.execPath,
+      args: ["-e", "process.stdout.write('chunk-data'); setTimeout(() => {}, 150);"],
+      cwd: "/tmp",
+      timeoutMs: 5000,
+      context: { runId: "run-1", stage: "executor", runtime: "claude-code" },
+    });
+
+    await new Promise((r) => setTimeout(r, 60));
+    const active = runner.getActiveProcesses();
+    expect(active).toHaveLength(1);
+    expect(active[0]).toMatchObject({ runId: "run-1", stage: "executor", runtime: "claude-code" });
+    expect(active[0]!.elapsedMs).toBeGreaterThanOrEqual(0);
+
+    expect(emitter.emitProcessStarted).toHaveBeenCalledWith(
+      "run-1",
+      active[0]!.id,
+      "executor",
+      "claude-code",
+      process.execPath,
+    );
+
+    await promise;
+    expect(runner.getActiveProcesses()).toHaveLength(0);
+    expect(emitter.emitProcessCompleted).toHaveBeenCalledWith(
+      "run-1",
+      active[0]!.id,
+      "executor",
+      "claude-code",
+      0,
+      expect.any(Number),
+    );
+  });
+
+  it("returns the rolling buffer for an active process via getProcessOutput", async () => {
+    const runner = new ProcessRunner("real", makeLogger() as never, undefined, spoolDir);
+
+    const promise = runner.execute({
+      command: process.execPath,
+      args: ["-e", "process.stdout.write('live-output'); setTimeout(() => {}, 150);"],
+      cwd: "/tmp",
+      timeoutMs: 5000,
+      context: { runId: "run-2", stage: "executor", runtime: "codex" },
+    });
+
+    await new Promise((r) => setTimeout(r, 60));
+    const active = runner.getActiveProcesses();
+    const output = runner.getProcessOutput(active[0]!.id);
+    expect(output).toContain("live-output");
+
+    await promise;
+  });
+
+  it("falls back to reading the spooled log file for a completed process's output", async () => {
+    const runner = new ProcessRunner("real", makeLogger() as never, undefined, spoolDir);
+
+    await runner.execute({
+      command: process.execPath,
+      args: ["-e", "process.stdout.write('finished-output');"],
+      cwd: "/tmp",
+      timeoutMs: 5000,
+      context: { runId: "run-3", stage: "executor", runtime: "cursor" },
+    });
+
+    const files = readdirSync(spoolDir).filter((f) => f.endsWith(".json"));
+    expect(files).toHaveLength(1);
+    const manifest = JSON.parse(readFileSync(join(spoolDir, files[0]!), "utf-8"));
+    expect(manifest.completedAt).toBeDefined();
+    expect(manifest.exitCode).toBe(0);
+
+    const output = runner.getProcessOutput(manifest.id);
+    expect(output).toContain("finished-output");
+  });
+
+  it("returns null from getProcessOutput for an unknown process id with no log file", () => {
+    const runner = new ProcessRunner("real", makeLogger() as never, undefined, spoolDir);
+    expect(runner.getProcessOutput("does-not-exist")).toBeNull();
+  });
+
+  it("truncates the rolling buffer to the last 8KB for very large output", async () => {
+    const runner = new ProcessRunner("real", makeLogger() as never, undefined, spoolDir);
+    await runner.execute({
+      command: process.execPath,
+      args: ["-e", "process.stdout.write('X'.repeat(10000));"],
+      cwd: "/tmp",
+      timeoutMs: 5000,
+      context: { runId: "run-4", stage: "executor", runtime: "codex" },
+    });
+
+    const files = readdirSync(spoolDir).filter((f) => f.endsWith(".json"));
+    const manifest = JSON.parse(readFileSync(join(spoolDir, files[0]!), "utf-8"));
+    const output = runner.getProcessOutput(manifest.id);
+    expect(output!.length).toBeLessThanOrEqual(8 * 1024);
+  });
+});
+
+describe("ProcessRunner — rehydrateOrphans", () => {
+  it("does nothing when the spool directory cannot be read", () => {
+    const missingDir = join(spoolDir, "does-not-exist-subdir");
+    const runner = new ProcessRunner("real", makeLogger() as never, undefined, missingDir);
+    rmSync(missingDir, { recursive: true, force: true });
+    expect(() => runner.rehydrateOrphans()).not.toThrow();
+  });
+
+  it("marks a manifest as crashed when its pid is no longer alive", () => {
+    const logger = makeLogger();
+    const runner = new ProcessRunner("real", logger as never, undefined, spoolDir);
+
+    // PID 999999 is extremely unlikely to be alive.
+    const manifest = {
+      id: "orphan-1",
+      pid: 999999,
+      command: "echo",
+      args: [],
+      runId: "run-orphan",
+      stage: "executor",
+      runtime: "codex",
+      startedAt: new Date().toISOString(),
+      logFile: join(spoolDir, "orphan-1.log"),
+    };
+    writeFileSync(join(spoolDir, "orphan-1.json"), JSON.stringify(manifest));
+
+    runner.rehydrateOrphans();
+
+    const updated = JSON.parse(readFileSync(join(spoolDir, "orphan-1.json"), "utf-8"));
+    expect(updated.crashed).toBe(true);
+    expect(updated.exitCode).toBe(-1);
+    expect(updated.completedAt).toBeDefined();
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.objectContaining({ processId: "orphan-1", pid: 999999 }),
+      "Orphaned agent process is dead, marking crashed",
+    );
+  });
+
+  it("skips manifests that already have a completedAt", () => {
+    const manifest = {
+      id: "done-1",
+      pid: 999999,
+      command: "echo",
+      args: [],
+      runId: "run-done",
+      stage: "executor",
+      runtime: "codex",
+      startedAt: new Date().toISOString(),
+      logFile: join(spoolDir, "done-1.log"),
+      completedAt: new Date().toISOString(),
+      exitCode: 0,
+    };
+    writeFileSync(join(spoolDir, "done-1.json"), JSON.stringify(manifest));
+
+    const logger = makeLogger();
+    const runner = new ProcessRunner("real", logger as never, undefined, spoolDir);
+    runner.rehydrateOrphans();
+
+    expect(logger.warn).not.toHaveBeenCalled();
+    expect(logger.info).not.toHaveBeenCalledWith(
+      expect.anything(),
+      "Rehydrating orphaned agent process",
+    );
+  });
+
+  it("rehydrates a still-alive orphan into activeProcesses and emits process:started", () => {
+    const emitter = makeEmitter();
+    const logger = makeLogger();
+    const runner = new ProcessRunner("real", logger as never, emitter as never, spoolDir);
+
+    const logPath = join(spoolDir, "alive-1.log");
+    writeFileSync(logPath, "previous output");
+
+    const manifest = {
+      id: "alive-1",
+      pid: 424242,
+      command: "echo",
+      args: [],
+      runId: "run-alive",
+      stage: "executor",
+      runtime: "codex",
+      startedAt: new Date().toISOString(),
+      logFile: logPath,
+    };
+    writeFileSync(join(spoolDir, "alive-1.json"), JSON.stringify(manifest));
+
+    // First liveness check (inside rehydrateOrphans) reports alive; every
+    // subsequent check (the background poll started for the orphan) reports
+    // dead, so we can deterministically unwind the watcher/interval the
+    // implementation starts internally, instead of leaking it past this test.
+    vi.useFakeTimers();
+    const killSpy = vi
+      .spyOn(process, "kill")
+      .mockImplementationOnce(() => true as never)
+      .mockImplementation(() => {
+        throw new Error("no such process");
+      });
+
+    try {
+      runner.rehydrateOrphans();
+
+      const active = runner.getActiveProcesses();
+      expect(active).toHaveLength(1);
+      expect(active[0]).toMatchObject({ id: "alive-1", runId: "run-alive" });
+      expect(emitter.emitProcessStarted).toHaveBeenCalledWith(
+        "run-alive",
+        "alive-1",
+        "executor",
+        "codex",
+        "echo",
+      );
+      expect(runner.getProcessOutput("alive-1")).toBe("previous output");
+
+      // Advance past the 5s poll interval so it detects the (now-mocked)
+      // dead process and tears down its watcher + interval cleanly.
+      vi.advanceTimersByTime(5_000);
+      expect(runner.getActiveProcesses()).toHaveLength(0);
+      expect(emitter.emitProcessCompleted).toHaveBeenCalledWith(
+        "run-alive",
+        "alive-1",
+        "executor",
+        "codex",
+        -1,
+        expect.any(Number),
+      );
+    } finally {
+      killSpy.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
+  it("logs a warning and continues when a manifest file contains invalid JSON", () => {
+    writeFileSync(join(spoolDir, "broken.json"), "{not valid json");
+    const logger = makeLogger();
+    const runner = new ProcessRunner("real", logger as never, undefined, spoolDir);
+
+    expect(() => runner.rehydrateOrphans()).not.toThrow();
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.objectContaining({ file: "broken.json" }),
+      "Failed to process manifest",
+    );
+  });
+});
