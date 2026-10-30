@@ -62,6 +62,15 @@ describe("RepoRegistry", () => {
     expect(registry.listRepos()).toEqual([a, b]);
   });
 
+  it("looks up repos by Linear project", () => {
+    const logger = makeLogger();
+    const a = makeEntry({ name: "a", linearProject: "Platform" });
+    const registry = new RepoRegistry("/root", makeConfig([a], "a"), logger);
+
+    expect(registry.getRepoByLinearProject("Platform")).toBe(a);
+    expect(registry.getRepoByLinearProject("Unknown")).toBeUndefined();
+  });
+
   describe("resolveForIssue", () => {
     it("resolves by exact Linear project match first", () => {
       const logger = makeLogger();

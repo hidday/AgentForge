@@ -207,6 +207,14 @@ describe("GET /api/events/stream", () => {
       await reader.read(); // consume the initial ":\n\n" comment so headers have flushed
       expect(mockEmitter.on).toHaveBeenCalledWith("dashboard", expect.any(Function));
 
+      // Drive the registered handler directly to exercise the write path
+      // for a forwarded dashboard event.
+      const handler = mockEmitter.on.mock.calls[0]![1] as (event: unknown) => void;
+      handler({ type: "run:created", runId: "run-1", issueId: "LIN-1", repo: "org/repo", timestamp: "2026-01-01T00:00:00.000Z" });
+      const chunk = await reader.read();
+      const text = Buffer.from(chunk.value!).toString("utf8");
+      expect(text).toContain('"type":"run:created"');
+
       controller.abort();
       await reader.cancel().catch(() => {});
 
@@ -216,6 +224,31 @@ describe("GET /api/events/stream", () => {
 
       expect(mockEmitter.off).toHaveBeenCalledWith("dashboard", expect.any(Function));
     } finally {
+      await app.close();
+    }
+  });
+
+  it("writes a heartbeat comment every 15s while the connection is open", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const { app } = await buildApp();
+    const address = await app.listen({ port: 0, host: "127.0.0.1" });
+
+    try {
+      const controller = new AbortController();
+      const res = await fetch(`${address}/api/events/stream`, { signal: controller.signal });
+      const reader = res.body!.getReader();
+      await reader.read(); // initial ":\n\n"
+
+      await vi.advanceTimersByTimeAsync(15_000);
+
+      const chunk = await reader.read();
+      const text = Buffer.from(chunk.value!).toString("utf8");
+      expect(text).toBe(":\n\n");
+
+      controller.abort();
+      await reader.cancel().catch(() => {});
+    } finally {
+      vi.useRealTimers();
       await app.close();
     }
   });
