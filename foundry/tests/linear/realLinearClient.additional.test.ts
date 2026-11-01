@@ -213,6 +213,20 @@ describe("RealLinearClient", () => {
     });
   });
 
+  describe("resolveStateId edge cases", () => {
+    it("handles a team states connection with no nodes field", async () => {
+      const { client, sdk } = makeClient();
+      sdk.issue = vi.fn().mockResolvedValue(makeSdkIssue());
+      sdk.team = vi.fn().mockResolvedValue({ states: () => Promise.resolve(undefined) });
+      const updateIssue = vi.fn();
+      sdk.updateIssue = updateIssue;
+
+      await client.updateIssueState("issue-1", "Done");
+
+      expect(updateIssue).not.toHaveBeenCalled();
+    });
+  });
+
   describe("addLabel", () => {
     it("adds a newly created label id when the issue does not already have it", async () => {
       const { client, sdk } = makeClient();
@@ -238,6 +252,36 @@ describe("RealLinearClient", () => {
       await client.addLabel("issue-1", "urgent");
 
       expect(updateIssue).not.toHaveBeenCalled();
+    });
+
+    it("reuses a label id already in the in-memory cache without calling issueLabels again", async () => {
+      const { client, sdk } = makeClient();
+      sdk.issue = vi.fn().mockResolvedValue(makeSdkIssue({ labelIds: [] }));
+      const issueLabelsFn = vi.fn().mockResolvedValue({ nodes: [{ id: "existing-id" }] });
+      sdk.issueLabels = issueLabelsFn;
+      sdk.updateIssue = vi.fn().mockResolvedValue({});
+
+      await client.addLabel("issue-1", "urgent");
+      await client.addLabel("issue-1", "urgent");
+
+      expect(issueLabelsFn).toHaveBeenCalledTimes(1);
+    });
+
+    it("creates a label without a teamId when the issue has no team", async () => {
+      const { client, sdk } = makeClient();
+      sdk.issue = vi.fn().mockResolvedValue(
+        makeSdkIssue({ labelIds: [], team: Promise.resolve(null) }),
+      );
+      sdk.issueLabels = vi.fn().mockResolvedValue({ nodes: [] });
+      const createIssueLabel = vi
+        .fn()
+        .mockResolvedValue({ issueLabel: Promise.resolve({ id: "new-label-id" }) });
+      sdk.createIssueLabel = createIssueLabel;
+      sdk.updateIssue = vi.fn().mockResolvedValue({});
+
+      await client.addLabel("issue-1", "urgent");
+
+      expect(createIssueLabel).toHaveBeenCalledWith({ name: "urgent" });
     });
 
     it("throws when label creation does not return a created label", async () => {
