@@ -1,10 +1,17 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, rmSync, existsSync, readFileSync, writeFileSync, appendFileSync } from "node:fs";
+import { EventEmitter } from "node:events";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { spawn } from "node:child_process";
 import { ProcessRunner } from "../../src/runtime/processRunner.js";
 import { AgentTimeoutError } from "../../src/utils/errors.js";
 import type { ProcessSpawnOptions } from "../../src/runtime/runnerTypes.js";
+
+vi.mock("node:child_process", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:child_process")>();
+  return { ...actual, spawn: vi.fn(actual.spawn) };
+});
 
 function makeMockLogger() {
   return {
@@ -433,5 +440,298 @@ describe("ProcessRunner.rehydrateOrphans", () => {
     writeFileSync(join(spoolDir, "notes.txt"), "irrelevant");
     expect(() => runner.rehydrateOrphans()).not.toThrow();
     expect(runner.getActiveProcesses()).toHaveLength(0);
+  });
+
+  it("rehydrates an alive pid even when its log file does not exist yet (no-log-file branch)", () => {
+    const emitter = makeMockEmitter();
+    const logger = makeMockLogger();
+    const runner = new ProcessRunner("real", logger as never, emitter as never, spoolDir);
+
+    const logPath = join(spoolDir, "alive-nolog.log");
+    writeFileSync(
+      join(spoolDir, "alive-nolog.json"),
+      JSON.stringify({
+        id: "alive-nolog",
+        pid: process.pid,
+        command: "some-cmd",
+        args: [],
+        runId: "r-nolog",
+        stage: "executor",
+        runtime: "claude-code",
+        startedAt: new Date().toISOString(),
+        logFile: logPath,
+      }),
+    );
+
+    // tailLogForOrphan() calls fs.watch() on a path that doesn't exist, which
+    // throws synchronously and is caught by the outer per-manifest handler —
+    // but the entry is registered as active before that happens.
+    runner.rehydrateOrphans();
+
+    expect(runner.getActiveProcesses().map((p) => p.id)).toContain("alive-nolog");
+    expect(runner.getProcessOutput("alive-nolog")).toBe("");
+    expect(emitter.emitProcessStarted).toHaveBeenCalledWith(
+      "r-nolog",
+      "alive-nolog",
+      "executor",
+      "claude-code",
+      "some-cmd",
+    );
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.objectContaining({ file: "alive-nolog.json", error: expect.any(String) }),
+      "Failed to process manifest",
+    );
+  });
+});
+
+describe("ProcessRunner — tailLogForOrphan watch-callback stale-entry branch", () => {
+  it("closes the watcher and no-ops when the entry was already removed before a watch event fires", async () => {
+    const runner = new ProcessRunner("real", makeMockLogger() as never, undefined, spoolDir);
+    const logPath = join(spoolDir, "stale.log");
+    writeFileSync(logPath, "seed");
+    writeFileSync(
+      join(spoolDir, "stale.json"),
+      JSON.stringify({
+        id: "stale",
+        pid: process.pid,
+        command: "x",
+        args: [],
+        runId: "r-stale",
+        stage: "executor",
+        runtime: "claude-code",
+        startedAt: new Date().toISOString(),
+        logFile: logPath,
+      }),
+    );
+
+    runner.rehydrateOrphans();
+    expect(runner.getActiveProcesses().map((p) => p.id)).toContain("stale");
+
+    // Simulate the entry being cleaned up elsewhere (e.g. by finalizeOrphan)
+    // while the fs.watch() callback is still attached to the log file.
+    (runner as unknown as { activeProcesses: Map<string, unknown> }).activeProcesses.delete("stale");
+
+    expect(() => appendFileSync(logPath, "-more")).not.toThrow();
+    await waitFor(() => !existsSync(join(spoolDir, "stale.json")) || true, 300, 50).catch(() => {});
+
+    // No active entry remains, and output now falls back to the log file on disk.
+    expect(runner.getActiveProcesses()).toHaveLength(0);
+    expect(runner.getProcessOutput("stale")).toContain("seed");
+  });
+});
+
+describe("ProcessRunner.finalizeOrphan (invoked directly — the only deterministic way to exercise the 5s interval's dead-process branch without a real 5s wait)", () => {
+  function castRunner(runner: ProcessRunner) {
+    return runner as unknown as {
+      activeProcesses: Map<string, {
+        id: string;
+        pid: number;
+        command: string;
+        context: { runId: string; stage: string; runtime: string };
+        startedAt: Date;
+        rollingBuffer: string;
+        logStream: { end: () => void } | null;
+        lastEmitMs: number;
+      }>;
+      finalizeOrphan(id: string): void;
+    };
+  }
+
+  it("removes the entry, finalizes the manifest, and emits process:completed with exitCode -1", () => {
+    const emitter = makeMockEmitter();
+    const logger = makeMockLogger();
+    const runner = new ProcessRunner("real", logger as never, emitter as never, spoolDir);
+    const internal = castRunner(runner);
+
+    const manifestPath = join(spoolDir, "orphan-1.json");
+    writeFileSync(
+      manifestPath,
+      JSON.stringify({
+        id: "orphan-1",
+        pid: 4242,
+        command: "x",
+        args: [],
+        runId: "r-orphan",
+        stage: "executor",
+        runtime: "claude-code",
+        startedAt: new Date().toISOString(),
+        logFile: join(spoolDir, "orphan-1.log"),
+      }),
+    );
+    internal.activeProcesses.set("orphan-1", {
+      id: "orphan-1",
+      pid: 4242,
+      command: "x",
+      context: { runId: "r-orphan", stage: "executor", runtime: "claude-code" },
+      startedAt: new Date(),
+      rollingBuffer: "",
+      logStream: null,
+      lastEmitMs: 0,
+    });
+
+    internal.finalizeOrphan("orphan-1");
+
+    expect(internal.activeProcesses.has("orphan-1")).toBe(false);
+    const manifest = JSON.parse(readFileSync(manifestPath, "utf-8"));
+    expect(manifest.completedAt).toBeDefined();
+    expect(manifest.exitCode).toBe(-1);
+    expect(emitter.emitProcessCompleted).toHaveBeenCalledWith(
+      "r-orphan",
+      "orphan-1",
+      "executor",
+      "claude-code",
+      -1,
+      expect.any(Number),
+    );
+    expect(logger.info).toHaveBeenCalledWith(
+      { processId: "orphan-1", pid: 4242 },
+      "Orphaned process has exited",
+    );
+  });
+
+  it("is a no-op when the entry is no longer tracked", () => {
+    const emitter = makeMockEmitter();
+    const runner = new ProcessRunner("real", makeMockLogger() as never, emitter as never, spoolDir);
+    const internal = castRunner(runner);
+
+    expect(() => internal.finalizeOrphan("does-not-exist")).not.toThrow();
+    expect(emitter.emitProcessCompleted).not.toHaveBeenCalled();
+  });
+
+  it("still removes the entry and emits process:completed even when the manifest file is missing on disk", () => {
+    const emitter = makeMockEmitter();
+    const logger = makeMockLogger();
+    const runner = new ProcessRunner("real", logger as never, emitter as never, spoolDir);
+    const internal = castRunner(runner);
+
+    internal.activeProcesses.set("orphan-2", {
+      id: "orphan-2",
+      pid: 4243,
+      command: "x",
+      context: { runId: "r-orphan-2", stage: "planner", runtime: "codex" },
+      startedAt: new Date(),
+      rollingBuffer: "",
+      logStream: null,
+      lastEmitMs: 0,
+    });
+
+    expect(() => internal.finalizeOrphan("orphan-2")).not.toThrow();
+    expect(internal.activeProcesses.has("orphan-2")).toBe(false);
+    expect(emitter.emitProcessCompleted).toHaveBeenCalledWith(
+      "r-orphan-2",
+      "orphan-2",
+      "planner",
+      "codex",
+      -1,
+      expect.any(Number),
+    );
+  });
+});
+
+describe("ProcessRunner real mode — double-kill safety net and best-effort manifest writes", () => {
+  it("falls back to SIGKILL when the child is not marked killed after the SIGTERM grace period", async () => {
+    vi.useFakeTimers();
+    try {
+      const stdout = new EventEmitter();
+      const stderr = new EventEmitter();
+      const fakeChild = Object.assign(new EventEmitter(), {
+        pid: 55555,
+        stdin: { write: vi.fn(), end: vi.fn() },
+        stdout,
+        stderr,
+        killed: false,
+        kill: vi.fn(),
+      });
+      (spawn as unknown as ReturnType<typeof vi.fn>).mockReturnValueOnce(fakeChild);
+
+      const runner = new ProcessRunner("real", makeMockLogger() as never, undefined, spoolDir);
+      const resultPromise = runner.execute({
+        command: "x",
+        args: [],
+        cwd: "/tmp",
+        timeoutMs: 1000,
+      });
+
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(fakeChild.kill).toHaveBeenCalledWith("SIGTERM");
+      expect(fakeChild.kill).not.toHaveBeenCalledWith("SIGKILL");
+
+      // Child never actually dies (killed stays false) — the 5s grace-period
+      // fallback should now send SIGKILL.
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(fakeChild.kill).toHaveBeenCalledWith("SIGKILL");
+
+      fakeChild.emit("close", null);
+      await expect(resultPromise).rejects.toThrow(AgentTimeoutError);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not send SIGKILL when the child is already marked killed within the grace period", async () => {
+    vi.useFakeTimers();
+    try {
+      const stdout = new EventEmitter();
+      const stderr = new EventEmitter();
+      const fakeChild = Object.assign(new EventEmitter(), {
+        pid: 55556,
+        stdin: { write: vi.fn(), end: vi.fn() },
+        stdout,
+        stderr,
+        killed: false,
+        kill: vi.fn(() => {
+          fakeChild.killed = true;
+        }),
+      });
+      (spawn as unknown as ReturnType<typeof vi.fn>).mockReturnValueOnce(fakeChild);
+
+      const runner = new ProcessRunner("real", makeMockLogger() as never, undefined, spoolDir);
+      const resultPromise = runner.execute({
+        command: "x",
+        args: [],
+        cwd: "/tmp",
+        timeoutMs: 1000,
+      });
+
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(fakeChild.kill).toHaveBeenCalledWith("SIGTERM");
+
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(fakeChild.kill).not.toHaveBeenCalledWith("SIGKILL");
+
+      fakeChild.emit("close", null);
+      await expect(resultPromise).rejects.toThrow(AgentTimeoutError);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("completes successfully even when the process manifest disappears before the child exits (best-effort write)", async () => {
+    const emitter = makeMockEmitter();
+    const runner = new ProcessRunner("real", makeMockLogger() as never, emitter as never, spoolDir);
+
+    const execPromise = runner.execute({
+      command: process.execPath,
+      args: ["-e", "setTimeout(() => process.exit(0), 150)"],
+      cwd: process.cwd(),
+      timeoutMs: 5000,
+      context: { runId: "run-vanish", stage: "executor", runtime: "claude-code" },
+    });
+
+    await waitFor(() => runner.getActiveProcesses().length > 0);
+    const id = runner.getActiveProcesses()[0]!.id;
+    rmSync(join(spoolDir, `${id}.json`), { force: true });
+
+    const result = await execPromise;
+
+    expect(result.exitCode).toBe(0);
+    expect(emitter.emitProcessCompleted).toHaveBeenCalledWith(
+      "run-vanish",
+      id,
+      "executor",
+      "claude-code",
+      0,
+      expect.any(Number),
+    );
   });
 });

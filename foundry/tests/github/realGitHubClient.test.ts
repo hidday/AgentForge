@@ -83,6 +83,13 @@ describe("RealGitHubClient", () => {
         /cannot access repo "acme\/widgets".*Not Found/,
       );
     });
+
+    it("stringifies a non-Error rejection", async () => {
+      octokit.repos.get.mockRejectedValue("rate limited");
+      await expect(client.verifyRepoAccess("acme/widgets")).rejects.toThrow(
+        /cannot access repo "acme\/widgets".*rate limited/,
+      );
+    });
   });
 
   describe("getDefaultBranch", () => {
@@ -193,6 +200,22 @@ describe("RealGitHubClient", () => {
       await expect(
         client.createDraftPR("acme/widgets", "ai/issue-1", "main", "Fix bug", "body"),
       ).rejects.toThrow(/createDraftPR failed/);
+    });
+
+    it("treats a non-Error 422 rejection as a non-field-validation error and looks up the existing PR", async () => {
+      const err = { status: 422 } as unknown as Error;
+      octokit.pulls.create.mockRejectedValue(err);
+      octokit.pulls.list.mockResolvedValue({ data: [{ number: 55 }] });
+
+      const prNumber = await client.createDraftPR(
+        "acme/widgets",
+        "ai/issue-1",
+        "main",
+        "Fix bug",
+        "body",
+      );
+
+      expect(prNumber).toBe(55);
     });
   });
 
@@ -359,6 +382,14 @@ describe("RealGitHubClient", () => {
         client.replyToReviewComment("acme/widgets", 7, 1001, "thanks"),
       ).resolves.toBeUndefined();
     });
+
+    it("swallows a non-Error rejection as well", async () => {
+      octokit.pulls.createReplyForReviewComment.mockRejectedValue("comment deleted");
+
+      await expect(
+        client.replyToReviewComment("acme/widgets", 7, 1001, "thanks"),
+      ).resolves.toBeUndefined();
+    });
   });
 
   describe("submitPRReview", () => {
@@ -388,6 +419,15 @@ describe("RealGitHubClient", () => {
 
     it("wraps other errors without falling back", async () => {
       octokit.pulls.createReview.mockRejectedValue(new Error("rate limited"));
+
+      await expect(
+        client.submitPRReview("acme/widgets", 7, "Needs work", "REQUEST_CHANGES"),
+      ).rejects.toThrow(/submitPRReview failed/);
+      expect(octokit.pulls.createReview).toHaveBeenCalledTimes(1);
+    });
+
+    it("wraps a non-Error rejection without attempting a fallback", async () => {
+      octokit.pulls.createReview.mockRejectedValue("rate limited");
 
       await expect(
         client.submitPRReview("acme/widgets", 7, "Needs work", "REQUEST_CHANGES"),

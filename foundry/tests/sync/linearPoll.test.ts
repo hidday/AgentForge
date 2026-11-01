@@ -125,4 +125,17 @@ describe("LinearPollService.startRunsForIssues", () => {
     expect(result.skipped).toEqual(["issue-1"]);
     expect(logger.error).toHaveBeenCalled();
   });
+
+  it("stringifies a non-Error thrown value when logging the failure", async () => {
+    const { service, orchestrator, runRepo, logger } = makeHarness();
+    runRepo.findActiveByIssueId.mockResolvedValue(null);
+    orchestrator.startRun.mockRejectedValue("a plain string rejection");
+
+    await service.startRunsForIssues(["issue-1"]);
+
+    expect(logger.error).toHaveBeenCalledWith(
+      expect.objectContaining({ error: "a plain string rejection" }),
+      expect.any(String),
+    );
+  });
 });

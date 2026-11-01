@@ -289,18 +289,21 @@ describe("GitHubSyncService.postRemediationResolutions", () => {
     expect(githubClient.replyToReviewComment).not.toHaveBeenCalled();
   });
 
-  it("falls back to a question-mark icon for an unrecognized status", async () => {
+  it("falls back to a question-mark icon for a status outside the known set", async () => {
     const githubClient = makeGithubClient();
     const service = new GitHubSyncService(githubClient as never, makeLogger() as never);
+    const unknownStatus = "escalated" as unknown as ResolutionItem["status"];
 
     await service.postRemediationResolutions(
       "acme/widgets",
       7,
-      [makeResolution({ findingId: "f1", status: "partially_addressed" })],
+      [makeResolution({ findingId: "f1", status: unknownStatus })],
       { f1: 1001 },
     );
 
     const replyBody = githubClient.replyToReviewComment.mock.calls[0][3] as string;
-    expect(replyBody).toContain(":warning:");
+    const summaryBody = githubClient.commentOnPR.mock.calls[0][2] as string;
+    expect(replyBody).toContain(":grey_question:");
+    expect(summaryBody).toContain(":grey_question:");
   });
 });

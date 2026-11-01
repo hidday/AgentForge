@@ -232,6 +232,45 @@ describe("OpenQuestionsPanel", () => {
     });
   });
 
+  it("excludes unanswered optional questions from the submit payload", async () => {
+    mockApi.answerQuestions.mockResolvedValue({ ok: true, run: {} });
+
+    render(
+      <OpenQuestionsPanel
+        questions={[requiredQuestion, optionalQuestion]}
+        runId="run-1"
+      />,
+    );
+
+    const textareas = screen.getAllByRole("textbox") as HTMLTextAreaElement[];
+    await userEvent.type(textareas[0], "Prod target");
+    // Leave the optional question's textarea blank.
+
+    const submitBtn = screen.getByRole("button", { name: /submit answers/i });
+    await userEvent.click(submitBtn);
+
+    await waitFor(() => {
+      expect(mockApi.answerQuestions).toHaveBeenCalledWith("run-1", [
+        { questionId: "q1", answer: "Prod target" },
+      ]);
+    });
+  });
+
+  it("shows a generic error message when submission throws a non-Error value", async () => {
+    mockApi.answerQuestions.mockRejectedValue("some string rejection");
+
+    render(<OpenQuestionsPanel questions={[requiredQuestion]} runId="run-1" />);
+
+    const textarea = screen.getAllByRole("textbox")[0] as HTMLTextAreaElement;
+    await userEvent.type(textarea, "My answer");
+
+    await userEvent.click(screen.getByRole("button", { name: /submit answers/i }));
+
+    await waitFor(() => {
+      expect(screen.getByRole("alert").textContent).toBe("Failed to submit answers");
+    });
+  });
+
   it("renders in readOnly mode without submit button", () => {
     render(
       <OpenQuestionsPanel

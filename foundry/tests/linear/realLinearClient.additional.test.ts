@@ -37,6 +37,35 @@ function makeClient() {
 }
 
 describe("RealLinearClient", () => {
+  describe("getRelatedContext blocker hydration failure", () => {
+    it("drops a blocker whose relation.issue rejects and logs a warning", async () => {
+      const { client, sdk } = makeClient();
+      const logger = (client as unknown as { logger: ReturnType<typeof makeLogger> }).logger;
+      const goodBlocker = makeSdkIssue({ id: "blocker-ok" });
+      const focus = makeSdkIssue({
+        id: "focus-id",
+        parent: Promise.resolve(null),
+        inverseRelations: () =>
+          Promise.resolve({
+            nodes: [
+              { id: "rel-1", type: "blocks", issue: Promise.reject(new Error("fetch failed")) },
+              { id: "rel-2", type: "blocks", issue: Promise.resolve(goodBlocker) },
+            ],
+          }),
+      });
+      sdk.issue = vi.fn().mockResolvedValue(focus);
+
+      const ctx = await client.getRelatedContext("focus-id");
+
+      expect(ctx.blockers).toHaveLength(1);
+      expect(ctx.blockers[0].id).toBe("blocker-ok");
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.objectContaining({ relationId: "rel-1", focusIssueId: "focus-id" }),
+        expect.any(String),
+      );
+    });
+  });
+
   describe("getIssue", () => {
     it("maps an SDK issue to a LinearIssue, defaulting missing relations", async () => {
       const { client, sdk } = makeClient();

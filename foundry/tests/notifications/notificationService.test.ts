@@ -105,6 +105,81 @@ describe("NotificationService.sendHumanRequest", () => {
     expect(logger.warn).toHaveBeenCalled();
   });
 
+  it("falls back to an empty error body when response.text() itself rejects (Slack)", async () => {
+    fetchMock.mockResolvedValue({
+      ok: false,
+      status: 503,
+      text: () => Promise.reject(new Error("stream closed")),
+    });
+    const service = new NotificationService(
+      { emailFrom: "bot@example.com", slackWebhookUrl: "https://hooks.slack.com/x" },
+      makeLogger() as never,
+    );
+
+    const result = await service.sendHumanRequest(makePayload());
+
+    expect(result.slack.ok).toBe(false);
+    expect(result.slack.error).toContain("503");
+  });
+
+  it("stringifies a non-Error value thrown while sending to Slack", async () => {
+    fetchMock.mockRejectedValue("network down");
+    const service = new NotificationService(
+      { emailFrom: "bot@example.com", slackWebhookUrl: "https://hooks.slack.com/x" },
+      makeLogger() as never,
+    );
+
+    const result = await service.sendHumanRequest(makePayload());
+
+    expect(result.slack).toEqual({ attempted: true, ok: false, error: "network down" });
+  });
+
+  it("stringifies a non-Error value thrown while sending email", async () => {
+    fetchMock.mockRejectedValue("network down");
+    const service = new NotificationService(
+      { emailFrom: "bot@example.com", emailTo: "a@example.com", resendApiKey: "key" },
+      makeLogger() as never,
+    );
+
+    const result = await service.sendHumanRequest(makePayload());
+
+    expect(result.email).toEqual({ attempted: true, ok: false, error: "network down" });
+  });
+
+  it("falls back to an empty error body when response.text() itself rejects (email)", async () => {
+    fetchMock.mockResolvedValue({
+      ok: false,
+      status: 502,
+      text: () => Promise.reject(new Error("stream closed")),
+    });
+    const service = new NotificationService(
+      { emailFrom: "bot@example.com", emailTo: "a@example.com", resendApiKey: "key" },
+      makeLogger() as never,
+    );
+
+    const result = await service.sendHumanRequest(makePayload());
+
+    expect(result.email.ok).toBe(false);
+    expect(result.email.error).toContain("502");
+  });
+
+  it("renders (untitled) in the email subject, html, and text when the issue has no title", async () => {
+    fetchMock.mockResolvedValue({ ok: true });
+    const service = new NotificationService(
+      { emailFrom: "bot@example.com", emailTo: "a@example.com", resendApiKey: "key" },
+      makeLogger() as never,
+    );
+
+    await service.sendHumanRequest(
+      makePayload({ linearIssue: { id: "lin-1", identifier: "ENG-1", title: null, url: null } }),
+    );
+
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body as string);
+    expect(body.subject).toContain("(untitled)");
+    expect(body.html).toContain("(untitled)");
+    expect(body.text).toContain("(untitled)");
+  });
+
   it("includes plan confidence, open questions, and context in the Slack payload when present", async () => {
     fetchMock.mockResolvedValue({ ok: true });
     const service = new NotificationService(
