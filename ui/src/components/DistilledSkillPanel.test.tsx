@@ -32,6 +32,29 @@ const skill: SkillDocument = {
 };
 
 describe("DistilledSkillPanel", () => {
+  it("shows a loading indicator when loading is true", () => {
+    render(
+      <DistilledSkillPanel
+        distilledSkill={null}
+        distillationDecision={null}
+        loading
+      />,
+    );
+    expect(screen.getByText("Loading distilled skill...")).toBeDefined();
+  });
+
+  it("shows the error message when error is set, without evaluating the decision", () => {
+    render(
+      <DistilledSkillPanel
+        distilledSkill={null}
+        distillationDecision={decision}
+        error="Failed to fetch skill"
+      />,
+    );
+    expect(screen.getByText("Failed to fetch skill")).toBeDefined();
+    expect(screen.queryByText("Distilled Skill")).toBeNull();
+  });
+
   it("renders nothing when distillation did not persist a skill", () => {
     const { container } = render(
       <DistilledSkillPanel

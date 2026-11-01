@@ -144,6 +144,12 @@ describe("RunRepository", () => {
     });
   });
 
+  it("findByIssueId() maps the most recent matching run when one exists", async () => {
+    prisma.aiRun.findFirst.mockResolvedValue(makeRow({ linearIssueId: "LIN-1" }));
+    const run = await repo.findByIssueId("LIN-1");
+    expect(run?.linearIssueId).toBe("LIN-1");
+  });
+
   it("findActiveByIssueId() excludes terminal states", async () => {
     prisma.aiRun.findFirst.mockResolvedValue(makeRow({ state: "Implementing" }));
     const run = await repo.findActiveByIssueId("LIN-1");
