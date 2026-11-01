@@ -98,4 +98,31 @@ describe("DistilledSkillPanel", () => {
 
     expect(screen.getByText(/content could not be loaded/i)).toBeDefined();
   });
+
+  it("falls back to the literal 'distilled-skill' name when neither side provides a name or taskCategory", () => {
+    render(
+      <DistilledSkillPanel
+        distilledSkill={null}
+        distillationDecision={{
+          shouldPersist: true,
+          reason: "ok",
+          taskCategory: null,
+          name: null,
+          description: null,
+          displacedSkillId: null,
+        }}
+      />,
+    );
+    expect(screen.getByText("distilled-skill")).toBeDefined();
+  });
+
+  it("shows the displaced skill id (truncated) when one is present", () => {
+    render(
+      <DistilledSkillPanel
+        distilledSkill={skill}
+        distillationDecision={{ ...decision, displacedSkillId: "displaced-skill-id-123" }}
+      />,
+    );
+    expect(screen.getByText(/Displaced skill: displaced/)).toBeDefined();
+  });
 });

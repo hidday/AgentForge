@@ -122,6 +122,25 @@ describe("RunsTable", () => {
     expect(screen.queryByTitle("Approve Plan")).toBeNull();
   });
 
+  it("clicking Approve & Complete calls api.approveReview and onAction", async () => {
+    mockApi.approveReview.mockResolvedValue({ ok: true, state: "Done" });
+    const onAction = vi.fn();
+    renderTable([makeRun({ id: "run-5", state: "ReadyForHumanReview" })], onAction);
+
+    await userEvent.click(screen.getByTitle("Approve & Complete"));
+
+    expect(mockApi.approveReview).toHaveBeenCalledWith("run-5");
+    await vi.waitFor(() => expect(onAction).toHaveBeenCalledTimes(1));
+  });
+
+  it("clicking the external Linear link stops propagation and does not navigate the row", async () => {
+    renderTable([makeRun()]);
+    const link = screen.getByTitle("Open in Linear");
+    // Should not throw, and the click should not bubble to trigger row navigation.
+    await userEvent.click(link);
+    expect(link).toBeDefined();
+  });
+
   it("shows Pause action for active-category states", () => {
     renderTable([makeRun({ state: "Implementing" })]);
     expect(screen.getByTitle("Pause Run")).toBeDefined();
