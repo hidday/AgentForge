@@ -513,7 +513,7 @@ describe("ProcessRunner — tailLogForOrphan watch-callback stale-entry branch",
 });
 
 describe("ProcessRunner — real setInterval wiring in tailLogForOrphan", () => {
-  it("detects a dead pid via the real 5s liveness interval, cleans up, and finalizes the orphan", () => {
+  it("detects a dead pid via the real 5s liveness interval, cleans up, and finalizes the orphan", async () => {
     const emitter = makeMockEmitter();
     const logger = makeMockLogger();
     const runner = new ProcessRunner("real", logger as never, emitter as never, spoolDir);
@@ -541,11 +541,27 @@ describe("ProcessRunner — real setInterval wiring in tailLogForOrphan", () => 
       const watcher = latestWatcher();
       expect(runner.getActiveProcesses().map((p) => p.id)).toContain("interval");
 
+      // Let the rehydrated entry's append-mode log WriteStream actually
+      // finish opening its fd before we end it below (via finalizeOrphan) —
+      // ending it while the open is still in flight, immediately followed by
+      // this test's spoolDir cleanup, races the stream's internal open()
+      // against the file's deletion and surfaces an unhandled ENOENT from
+      // the stream (it has no 'error' handler in production, since real
+      // orphans' streams are always long since open by the time they're
+      // finalized). setTimeout itself is not faked here, so this is a real
+      // short wait.
+      const internal = runner as unknown as {
+        activeProcesses: Map<
+          string,
+          { pid: number; logStream: { on: (e: string, cb: () => void) => void } | null }
+        >;
+      };
+      internal.activeProcesses.get("interval")!.logStream?.on("error", () => {});
+      await new Promise((r) => setTimeout(r, 50));
+
       // Make the tracked pid "die" so the next liveness probe fails and the
       // real setInterval callback routes into its dead-process branch.
-      (
-        runner as unknown as { activeProcesses: Map<string, { pid: number }> }
-      ).activeProcesses.get("interval")!.pid = 2_000_000_002;
+      internal.activeProcesses.get("interval")!.pid = 2_000_000_002;
 
       vi.advanceTimersByTime(5000);
 

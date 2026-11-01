@@ -295,6 +295,7 @@ describe("OrchestratorService.retryRun", () => {
       labels: [],
       priority: 0,
     });
+    deps.runRepo.update.mockResolvedValue(makeRun({ id: "run-1", state: RunState.Planning }));
     deps.runRepo.updateState
       .mockResolvedValueOnce(makeRun({ id: "run-1", state: RunState.Planning }))
       .mockResolvedValueOnce(makeRun({ id: "run-1", state: RunState.PlanReview }));
@@ -335,13 +336,18 @@ describe("OrchestratorService.retryRun", () => {
       labels: [],
       priority: 0,
     });
-    deps.runRepo.update.mockResolvedValue(
-      makeRun({ id: "run-1", state: RunState.Todo, workingDirectory: "/work/wt", branchName: "ai/new" }),
-    );
+    const retryPlan = makePlan({ openQuestions: [] });
+    deps.runRepo.update
+      .mockResolvedValueOnce(
+        makeRun({ id: "run-1", state: RunState.Todo, workingDirectory: "/work/wt", branchName: "ai/new" }),
+      )
+      .mockResolvedValueOnce(
+        makeRun({ id: "run-1", state: RunState.Planning, planVersion: retryPlan.planVersion }),
+      );
     deps.runRepo.updateState
       .mockResolvedValueOnce(makeRun({ id: "run-1", state: RunState.Planning }))
       .mockResolvedValueOnce(makeRun({ id: "run-1", state: RunState.PlanReview }));
-    deps.plannerAgent.run.mockResolvedValue(makePlan({ openQuestions: [] }));
+    deps.plannerAgent.run.mockResolvedValue(retryPlan);
 
     const svc = new OrchestratorService(deps as never);
     vi.spyOn(svc as unknown as { buildTaskBundle: (...a: unknown[]) => Promise<TaskBundle> }, "buildTaskBundle").mockResolvedValue(
@@ -415,6 +421,7 @@ describe("OrchestratorService.runPlanning", () => {
       return Promise.resolve(null);
     });
 
+    deps.runRepo.update.mockResolvedValue(makeRun({ id: "run-1", state: RunState.Planning, planVersion: 3 }));
     deps.runRepo.updateState
       .mockResolvedValueOnce(makeRun({ id: "run-1", state: RunState.PlanReview }));
     deps.plannerAgent.run.mockResolvedValue(makePlan({ planVersion: 3, openQuestions: [] }));
@@ -466,6 +473,7 @@ describe("OrchestratorService.runPlanning", () => {
       priority: 0,
     });
     deps.artifactRepo.findLatestByType.mockResolvedValue(null);
+    deps.runRepo.update.mockResolvedValue(makeRun({ id: "run-1", state: RunState.Planning, planVersion: 2 }));
     deps.runRepo.updateState.mockResolvedValueOnce(makeRun({ id: "run-1", state: RunState.PlanReview }));
     deps.plannerAgent.run.mockResolvedValue(makePlan({ planVersion: 2, openQuestions: [] }));
 
@@ -504,6 +512,7 @@ describe("OrchestratorService.runPlanning", () => {
       priority: 0,
     });
     deps.artifactRepo.findLatestByType.mockResolvedValue(null);
+    deps.runRepo.update.mockResolvedValue(makeRun({ id: "run-1", state: RunState.Planning, planVersion: 2 }));
     deps.runRepo.updateState
       .mockResolvedValueOnce(makeRun({ id: "run-1", state: RunState.PlanReview }))
       .mockResolvedValueOnce(makeRun({ id: "run-1", state: RunState.HumanClarificationNeeded }));

@@ -222,6 +222,18 @@ describe("RuntimeHealthCheck binary + auth probe branches (via runPreflight with
     expect(claude.binaryCheck.error).toBe("spawn ENOENT");
   });
 
+  it("binary check: stringifies a non-Error thrown value from processRunner.execute", async () => {
+    // eslint-disable-next-line @typescript-eslint/no-throw-literal -- exercises the `err instanceof Error` false branch
+    const execute = vi.fn().mockRejectedValue("raw string failure");
+    const check = singleRuntimeCheck("claude-code", makeConfigs()["claude-code"], execute);
+    const result = (await check.runPreflight().catch((e: PreflightError) => e.result)) as Awaited<
+      ReturnType<RuntimeHealthCheck["runPreflight"]>
+    >;
+    const claude = result.results.find((r) => r.runtime === "claude-code")!;
+    expect(claude.binaryCheck.ok).toBe(false);
+    expect(claude.binaryCheck.error).toBe("raw string failure");
+  });
+
   it("auth check: successPattern — fails with a descriptive error when the pattern doesn't match", async () => {
     const execute = vi.fn().mockImplementation(async ({ args }: { args: string[] }) => {
       if (args[0] === "--version") return resultOf({ stdout: "1.0" });
@@ -258,6 +270,20 @@ describe("RuntimeHealthCheck binary + auth probe branches (via runPreflight with
     const authCheck = failResult.results.find((r) => r.runtime === "claude-code")!.authCheck;
     expect(authCheck.ok).toBe(false);
     expect(authCheck.error).toContain("Exit code 2");
+  });
+
+  it("auth check: exitCodeOnly — falls back to stdout in the error message when stderr is empty", async () => {
+    const execute = vi.fn().mockImplementation(async ({ args }: { args: string[] }) => {
+      if (args[0] === "--version") return resultOf({ stdout: "1.0" });
+      return resultOf({ exitCode: 5, stderr: "", stdout: "stdout-explanation" });
+    });
+    const check = singleRuntimeCheck("claude-code", makeConfigs().cursor, execute);
+    const result = (await check.runPreflight().catch((e: PreflightError) => e.result)) as Awaited<
+      ReturnType<RuntimeHealthCheck["runPreflight"]>
+    >;
+    const authCheck = result.results.find((r) => r.runtime === "claude-code")!.authCheck;
+    expect(authCheck.ok).toBe(false);
+    expect(authCheck.error).toContain("stdout-explanation");
   });
 
   it("auth check: default pong pattern — passes when pong is present even with a non-zero exit code", async () => {
@@ -326,6 +352,21 @@ describe("RuntimeHealthCheck binary + auth probe branches (via runPreflight with
     const authCheck = result.results.find((r) => r.runtime === "claude-code")!.authCheck;
     expect(authCheck.ok).toBe(false);
     expect(authCheck.error).toBe("pipe broke");
+  });
+
+  it("auth check: stringifies a non-Error thrown value from processRunner.execute", async () => {
+    const execute = vi.fn().mockImplementation(async ({ args }: { args: string[] }) => {
+      if (args[0] === "--version") return resultOf({ stdout: "1.0" });
+      // eslint-disable-next-line @typescript-eslint/no-throw-literal -- exercises the `err instanceof Error` false branch
+      throw "raw auth failure";
+    });
+    const check = singleRuntimeCheck("claude-code", makeConfigs().codex, execute);
+    const result = (await check.runPreflight().catch((e: PreflightError) => e.result)) as Awaited<
+      ReturnType<RuntimeHealthCheck["runPreflight"]>
+    >;
+    const authCheck = result.results.find((r) => r.runtime === "claude-code")!.authCheck;
+    expect(authCheck.ok).toBe(false);
+    expect(authCheck.error).toBe("raw auth failure");
   });
 });
 
