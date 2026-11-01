@@ -118,6 +118,18 @@ describe("DashboardPage", () => {
     expect(screen.getByTestId("runs-table").textContent).toBe("2 runs");
   });
 
+  it("buckets a run with an unrecognized state under 'idle' for the counts", () => {
+    useRunsMock.mockReturnValue({
+      runs: [makeRun({ id: "a", state: "SomeUnmappedState" })],
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+    render(<DashboardPage />);
+    expect(screen.getByText("Total").previousSibling?.textContent).toBe("1");
+    expect(screen.getAllByText("Active")[0].previousSibling?.textContent).toBe("0");
+  });
+
   it("computes per-category counts in the stats bar", () => {
     useRunsMock.mockReturnValue({
       runs: [

@@ -123,6 +123,8 @@ describe("DistilledSkillPanel", () => {
         distillationDecision={{ ...decision, displacedSkillId: "displaced-skill-id-123" }}
       />,
     );
-    expect(screen.getByText(/Displaced skill: displaced/)).toBeDefined();
+    expect(screen.getByText(/Displaced skill:/).textContent).toBe(
+      "Displaced skill: displace",
+    );
   });
 });

@@ -160,6 +160,41 @@ describe("RunDetailPage", () => {
     expect(screen.getByText("ENG-1")).toBeDefined();
   });
 
+  it("renders a Linear issue link when linearIssueUrl is present", () => {
+    useRunMock.mockReturnValue({
+      data: {
+        run: makeRun({ linearIssueUrl: "https://linear.app/issue/ENG-1" }),
+        artifacts: [],
+        events: [],
+      },
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+    renderPage();
+    const link = screen.getByTitle("Open in Linear") as HTMLAnchorElement;
+    expect(link.href).toBe("https://linear.app/issue/ENG-1");
+  });
+
+  it("falls back to a truncated linearIssueId when title and identifier are both absent", () => {
+    useRunMock.mockReturnValue({
+      data: {
+        run: makeRun({
+          linearIssueTitle: null,
+          linearIssueIdentifier: null,
+          linearIssueId: "abcdefgh12345",
+        }),
+        artifacts: [],
+        events: [],
+      },
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+    renderPage();
+    expect(screen.getByText("abcdefgh")).toBeDefined();
+  });
+
   it("renders the PR link only when prNumber is present", () => {
     useRunMock.mockReturnValue({
       data: { run: makeRun({ prNumber: 7 }), artifacts: [], events: [] },
