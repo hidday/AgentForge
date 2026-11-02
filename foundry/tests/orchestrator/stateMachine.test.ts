@@ -2,6 +2,28 @@ import { describe, it, expect } from "vitest";
 import { transition, getValidEvents } from "../../src/orchestrator/stateMachine.js";
 import { RunState } from "../../src/domain/runState.js";
 import { RunEvent } from "../../src/domain/runEvent.js";
+import { StateTransitionError } from "../../src/utils/errors.js";
+
+describe("stateMachine - invalid transitions", () => {
+  it("throws when the current state has no outgoing transitions at all", () => {
+    expect(() => transition(RunState.Done, RunEvent.RUN_REQUESTED)).toThrow(StateTransitionError);
+    try {
+      transition(RunState.Done, RunEvent.RUN_REQUESTED);
+      expect.unreachable();
+    } catch (err) {
+      expect((err as StateTransitionError).fromState).toBe(RunState.Done);
+      expect((err as StateTransitionError).event).toBe(RunEvent.RUN_REQUESTED);
+    }
+  });
+
+  it("throws when the event is not valid for the current state", () => {
+    expect(() => transition(RunState.Todo, RunEvent.PLAN_CREATED)).toThrow(StateTransitionError);
+  });
+
+  it("getValidEvents returns an empty array for a state with no outgoing transitions", () => {
+    expect(getValidEvents(RunState.Done)).toEqual([]);
+  });
+});
 
 describe("stateMachine - clarification transitions", () => {
   it("HumanClarificationNeeded + CLARIFICATION_PROVIDED → Planning", () => {
