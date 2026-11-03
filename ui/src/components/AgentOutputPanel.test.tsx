@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, act } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { AgentOutputPanel } from "./AgentOutputPanel.tsx";
 import type { ActiveProcess } from "@/api/client.ts";
@@ -51,7 +51,9 @@ describe("AgentOutputPanel", () => {
     const proc = makeProcess({ startedAt: "2024-01-01T00:00:00Z" });
     render(<AgentOutputPanel processes={[proc]} output="" />);
     expect(screen.getByText("0s")).toBeDefined();
-    vi.advanceTimersByTime(5000);
+    act(() => {
+      vi.advanceTimersByTime(5000);
+    });
     expect(screen.getByText("5s")).toBeDefined();
   });
 
@@ -59,7 +61,9 @@ describe("AgentOutputPanel", () => {
     vi.setSystemTime(new Date("2024-01-01T00:00:00Z"));
     const proc = makeProcess({ startedAt: "2024-01-01T00:00:00Z" });
     render(<AgentOutputPanel processes={[proc]} output="" />);
-    vi.advanceTimersByTime(75_000);
+    act(() => {
+      vi.advanceTimersByTime(75_000);
+    });
     expect(screen.getByText("1m 15s")).toBeDefined();
   });
 
@@ -67,12 +71,12 @@ describe("AgentOutputPanel", () => {
     vi.useRealTimers();
     const user = userEvent.setup();
     render(<AgentOutputPanel processes={[]} output="raw output text" />);
-    expect(screen.getByText("Waiting for output...")).toBeDefined();
+    expect(screen.getByText("raw output text")).toBeDefined();
     const header = screen.getByRole("button", { name: /Agent Output \(completed\)/i });
     await user.click(header);
-    expect(screen.queryByText("Waiting for output...")).toBeNull();
+    expect(screen.queryByText("raw output text")).toBeNull();
     await user.click(header);
-    expect(screen.getByText("Waiting for output...")).toBeDefined();
+    expect(screen.getByText("raw output text")).toBeDefined();
   });
 
   it("auto-expands when a process transitions from inactive to active", async () => {

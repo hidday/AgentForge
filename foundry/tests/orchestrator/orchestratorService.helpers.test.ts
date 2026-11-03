@@ -422,6 +422,76 @@ describe("OrchestratorService.updateSkillMetrics (direct)", () => {
   });
 });
 
+describe("OrchestratorService.maybeResearchAndReplan (direct)", () => {
+  it("injects prior HumanAnswers into both the researcher call and the re-plan call when a HumanAnswers artifact exists", async () => {
+    const answerResearcherAgent = { run: vi.fn() };
+    const { deps, artifactRepo, eventRepo, runRepo, logger } = buildDeps({ answerResearcherAgent });
+    const svc = new OrchestratorService(deps as never);
+
+    const run = makeRun({ id: "run-9", planVersion: 1 });
+    const plan = {
+      planVersion: 1,
+      summary: "s",
+      requirementsTraceability: "",
+      assumptions: [],
+      openQuestions: [{ id: "q1", question: "Optional?", requiredForExecution: false }],
+      risks: [],
+      steps: [{ id: "s1", title: "t", description: "d" }],
+      testPlan: "run tests",
+      confidence: 0.8,
+    };
+
+    artifactRepo.findLatestByType.mockImplementation((_runId: string, type: string) => {
+      if (type === "ResearchedAnswers") return Promise.resolve(null);
+      if (type === "HumanAnswers") {
+        return Promise.resolve({
+          id: "ha-1",
+          runId: "run-9",
+          type: "HumanAnswers",
+          version: 1,
+          payloadJson: { answers: [{ questionId: "q1", answer: "sure, do it" }] },
+          rawText: "{}",
+          createdAt: new Date(),
+        });
+      }
+      return Promise.resolve(null);
+    });
+
+    answerResearcherAgent.run.mockResolvedValue({
+      summary: "researched",
+      answers: [{ questionId: "q1", question: "Optional?", answer: "Yes", confidence: "high", sources: [] }],
+      completedAt: "2026-01-01T00:00:00Z",
+    });
+
+    const revisedPlan = { ...plan, planVersion: 2, openQuestions: [] };
+    (deps as never as { plannerAgent: { run: ReturnType<typeof vi.fn> } }).plannerAgent.run.mockResolvedValue(revisedPlan);
+    runRepo.update.mockResolvedValue({ ...run, planVersion: 2 });
+
+    const bundle = { issue: { id: "LIN-1" } };
+    const result = await asPrivate(svc).maybeResearchAndReplan(run, plan as never, bundle as never);
+
+    expect(answerResearcherAgent.run).toHaveBeenCalledWith(plan, bundle, "run-9", {
+      humanAnswers: [{ questionId: "q1", answer: "sure, do it" }],
+    });
+    expect((deps as never as { plannerAgent: { run: ReturnType<typeof vi.fn> } }).plannerAgent.run).toHaveBeenCalledWith(
+      bundle,
+      "run-9",
+      expect.objectContaining({
+        humanAnswers: [{ questionId: "q1", answer: "sure, do it" }],
+        researchedAnswers: expect.arrayContaining([expect.objectContaining({ questionId: "q1" })]),
+      }),
+    );
+    expect(eventRepo.create).toHaveBeenCalledWith(
+      expect.objectContaining({ eventType: "RESEARCH_COMPLETED" }),
+    );
+    expect(logger.info).toHaveBeenCalledWith(
+      expect.objectContaining({ runId: "run-9" }),
+      "Re-planned after answer research",
+    );
+    expect((result.plan as { openQuestions: unknown[] }).openQuestions).toEqual([]);
+  });
+});
+
 describe("OrchestratorService.formatExecutionReportComment (direct, via public call sites' private helper)", () => {
   it("collapses the files-changed list into a <details> block above the threshold", () => {
     const { deps } = buildDeps();

@@ -164,7 +164,7 @@ describe("RunDetailPage", () => {
     expect(screen.getByTestId("chat-panel")).toBeDefined();
     expect(screen.getByTestId("distilled-skill-panel")).toBeDefined();
     expect(screen.getByTestId("state-badge").textContent).toBe("Implementing");
-    expect(screen.getByText("ENG-1")).toBeDefined();
+    expect(screen.getByText("Fix the bug")).toBeDefined();
   });
 
   it("prefers linearIssueTitle over the identifier when both are present", () => {
