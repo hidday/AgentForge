@@ -77,6 +77,11 @@ describe("parseClaudeOutput – text extraction", () => {
     });
     expect(parseClaudeOutput(line)).toEqual([]);
   });
+
+  it("ignores a content_block_delta event with no 'delta' field at all", () => {
+    const line = JSON.stringify({ type: "content_block_delta" });
+    expect(parseClaudeOutput(line)).toEqual([]);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -127,6 +132,22 @@ describe("parseClaudeOutput – tool_use extraction", () => {
     const result = parseClaudeOutput(line);
     expect(result[0].type).toBe("tool_use");
     expect(result[0].content).toContain("foo");
+  });
+
+  it("uses the 'path' field when present (and no command/file_path)", () => {
+    const line = JSON.stringify({
+      content: [{ type: "tool_use", name: "Glob", input: { path: "/some/dir" } }],
+    });
+    const result = parseClaudeOutput(line);
+    expect(result[0].content).toBe("/some/dir");
+  });
+
+  it("returns short 'content' input fields unmodified (no truncation under 200 chars)", () => {
+    const line = JSON.stringify({
+      content: [{ type: "tool_use", name: "Write", input: { content: "short text" } }],
+    });
+    const result = parseClaudeOutput(line);
+    expect(result[0].content).toBe("short text");
   });
 });
 

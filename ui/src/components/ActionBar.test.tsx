@@ -265,7 +265,8 @@ describe("ActionBar", () => {
       const onAction = vi.fn();
       render(<ActionBar runId={RUN_ID} state={state} onAction={onAction} />);
       await userEvent.click(screen.getByRole("button", { name: /Pause/i }));
-      await userEvent.click(screen.getByRole("button", { name: "Pause" }));
+      const pauseButtons = screen.getAllByRole("button", { name: "Pause" });
+      await userEvent.click(pauseButtons[pauseButtons.length - 1]);
       await waitFor(() => {
         expect(mockApi.pauseRun).toHaveBeenCalledWith(RUN_ID);
         expect(onAction).toHaveBeenCalledOnce();
@@ -280,7 +281,8 @@ describe("ActionBar", () => {
       const onAction = vi.fn();
       render(<ActionBar runId={RUN_ID} state={state} onAction={onAction} />);
       await userEvent.click(screen.getByRole("button", { name: /Resume/i }));
-      await userEvent.click(screen.getByRole("button", { name: "Resume" }));
+      const resumeButtons = screen.getAllByRole("button", { name: "Resume" });
+      await userEvent.click(resumeButtons[resumeButtons.length - 1]);
       await waitFor(() => {
         expect(mockApi.resumeRun).toHaveBeenCalledWith(RUN_ID);
         expect(onAction).toHaveBeenCalledOnce();

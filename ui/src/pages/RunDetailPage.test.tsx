@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import type { Run, Artifact, RunEventRecord } from "@/api/client.ts";
 
 vi.mock("react-router-dom", () => ({
@@ -35,7 +36,18 @@ vi.mock("@/components/EventTimeline.tsx", () => ({
   ),
 }));
 vi.mock("@/components/ActionBar.tsx", () => ({
-  ActionBar: ({ state }: { state: string }) => <div data-testid="action-bar">{state}</div>,
+  ActionBar: ({
+    state,
+    onScrollToQuestions,
+  }: {
+    state: string;
+    onScrollToQuestions: () => void;
+  }) => (
+    <div data-testid="action-bar">
+      {state}
+      <button onClick={onScrollToQuestions}>scroll-to-questions</button>
+    </div>
+  ),
 }));
 vi.mock("@/components/OpenQuestionsPanel.tsx", () => ({
   OpenQuestionsPanel: ({ questions }: { questions: unknown[] }) => (
@@ -159,7 +171,7 @@ describe("RunDetailPage", () => {
     render(<RunDetailPage />);
 
     expect(screen.getByTestId("workflow-stepper").textContent).toBe("Implementing");
-    expect(screen.getByTestId("action-bar").textContent).toBe("Implementing");
+    expect(screen.getByTestId("action-bar").textContent).toContain("Implementing");
     expect(screen.getByTestId("agent-output-panel")).toBeDefined();
     expect(screen.getByTestId("chat-panel")).toBeDefined();
     expect(screen.getByTestId("distilled-skill-panel")).toBeDefined();
@@ -269,6 +281,45 @@ describe("RunDetailPage", () => {
     setupHooks({ run: { ...BASE_RUN, state: "HumanClarificationNeeded" }, artifacts: [] });
     render(<RunDetailPage />);
     expect(screen.queryByTestId("open-questions-panel")).toBeNull();
+  });
+
+  it("scrolls the open-questions panel into view when the action bar requests it", async () => {
+    const planArtifact: Artifact = {
+      id: "a1",
+      runId: BASE_RUN.id,
+      type: "Plan",
+      version: 1,
+      payloadJson: {
+        openQuestions: [{ id: "q1", requiredForExecution: true, question: "Which env?" }],
+      },
+      rawText: "",
+      createdAt: "2026-01-01T00:00:00Z",
+    };
+    setupHooks({
+      run: { ...BASE_RUN, state: "HumanClarificationNeeded" },
+      artifacts: [planArtifact],
+    });
+
+    const scrollIntoViewMock = vi.fn();
+    Element.prototype.scrollIntoView = scrollIntoViewMock;
+
+    render(<RunDetailPage />);
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "scroll-to-questions" }));
+
+    expect(scrollIntoViewMock).toHaveBeenCalledWith({ behavior: "smooth", block: "start" });
+  });
+
+  it("does not throw when scrollToQuestions is invoked and there is no questions ref", async () => {
+    setupHooks({ run: { ...BASE_RUN, state: "Implementing" } });
+    const scrollIntoViewMock = vi.fn();
+    Element.prototype.scrollIntoView = scrollIntoViewMock;
+
+    render(<RunDetailPage />);
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "scroll-to-questions" }));
+
+    expect(scrollIntoViewMock).not.toHaveBeenCalled();
   });
 
   it("passes artifact and event counts through to ArtifactTabs and EventTimeline", () => {

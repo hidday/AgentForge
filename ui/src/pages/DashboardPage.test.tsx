@@ -31,9 +31,18 @@ vi.mock("@/components/LinearSyncDialog.tsx", () => ({
 }));
 
 vi.mock("@/components/IngestSummaryBanner.tsx", () => ({
-  IngestSummaryBanner: ({ started, skipped }: { started: number; skipped: number }) => (
+  IngestSummaryBanner: ({
+    started,
+    skipped,
+    onDismiss,
+  }: {
+    started: number;
+    skipped: number;
+    onDismiss: () => void;
+  }) => (
     <div data-testid="ingest-banner">
       started {started} skipped {skipped}
+      <button onClick={onDismiss}>dismiss-banner</button>
     </div>
   ),
 }));
@@ -159,7 +168,7 @@ describe("DashboardPage", () => {
       fireEvent.click(screen.getByRole("button", { name: "trigger-ingest-complete" }));
     });
 
-    expect(screen.getByTestId("ingest-banner").textContent).toBe("started 3 skipped 1");
+    expect(screen.getByTestId("ingest-banner").textContent).toContain("started 3 skipped 1");
 
     await act(async () => {
       vi.advanceTimersByTime(5000);
@@ -167,5 +176,16 @@ describe("DashboardPage", () => {
     expect(screen.queryByTestId("ingest-banner")).toBeNull();
 
     vi.useRealTimers();
+  });
+
+  it("dismisses the ingest summary banner immediately when onDismiss is invoked", async () => {
+    mockUseRuns.mockReturnValue({ runs: [], loading: false, error: null, refetch: vi.fn() });
+    render(<DashboardPage />);
+
+    await userEvent.click(screen.getByRole("button", { name: "trigger-ingest-complete" }));
+    expect(screen.getByTestId("ingest-banner")).toBeDefined();
+
+    await userEvent.click(screen.getByRole("button", { name: "dismiss-banner" }));
+    expect(screen.queryByTestId("ingest-banner")).toBeNull();
   });
 });

@@ -182,6 +182,10 @@ type PrivateAccess = {
     researchedAnswers?: unknown;
     planReviewFindings?: unknown;
   }>;
+  formatPlanComment(plan: unknown, statusNote?: string): string;
+  formatPlanReviewComment(planReview: unknown): string;
+  formatCodeReviewComment(review: unknown): string;
+  buildTaskBundle(issue: unknown, run: Run): Promise<unknown>;
 };
 
 function asPrivate(svc: OrchestratorService): PrivateAccess {
@@ -418,6 +422,163 @@ describe("OrchestratorService.updateSkillMetrics (direct)", () => {
     expect(logger.warn).toHaveBeenCalledWith(
       expect.objectContaining({ runId: "run-1", skillId: "skill-1", error: "db exploded" }),
       "Failed to update skill metric",
+    );
+  });
+
+  it("stringifies a non-Error throw value in the warning log", async () => {
+    const agentSkillRepo = {
+      incrementSuccess: vi.fn().mockRejectedValue("just a string failure"),
+      incrementFailure: vi.fn(),
+      archiveIfLowUtility: vi.fn(),
+    };
+    const { deps, eventRepo, logger } = buildDeps({ agentSkillRepo });
+    const svc = new OrchestratorService(deps as never);
+
+    eventRepo.findByRunId.mockResolvedValue([
+      {
+        id: "e1",
+        runId: "run-1",
+        eventType: "SKILL_INJECTION",
+        source: "orchestrator",
+        payloadJson: { skillIds: ["skill-1"] },
+        createdAt: new Date(),
+      },
+    ]);
+
+    await asPrivate(svc).updateSkillMetrics("run-1", true);
+
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.objectContaining({ error: "just a string failure" }),
+      "Failed to update skill metric",
+    );
+  });
+
+  it("falls back to an empty skillIds array when an injection event's payload omits it", async () => {
+    const agentSkillRepo = {
+      incrementSuccess: vi.fn(),
+      incrementFailure: vi.fn(),
+      archiveIfLowUtility: vi.fn(),
+    };
+    const { deps, eventRepo } = buildDeps({ agentSkillRepo });
+    const svc = new OrchestratorService(deps as never);
+
+    eventRepo.findByRunId.mockResolvedValue([
+      {
+        id: "e1",
+        runId: "run-1",
+        eventType: "SKILL_INJECTION",
+        source: "orchestrator",
+        payloadJson: {}, // no skillIds field at all
+        createdAt: new Date(),
+      },
+    ]);
+
+    await asPrivate(svc).updateSkillMetrics("run-1", true);
+
+    expect(agentSkillRepo.incrementSuccess).not.toHaveBeenCalled();
+  });
+});
+
+describe("OrchestratorService.formatPlanComment (direct)", () => {
+  it("omits the status line entirely when no statusNote is given", () => {
+    const { deps } = buildDeps();
+    const svc = new OrchestratorService(deps as never);
+    const plan = {
+      planVersion: 1,
+      summary: "Summary text",
+      requirementsTraceability: "",
+      assumptions: [],
+      openQuestions: [],
+      risks: [],
+      steps: [{ id: "s1", title: "Step", description: "Desc" }],
+      testPlan: "run tests",
+      confidence: 0.5,
+    };
+
+    const comment = asPrivate(svc).formatPlanComment(plan);
+
+    expect(comment).not.toContain("*undefined*");
+    expect(comment).toContain("Summary text");
+  });
+});
+
+describe("OrchestratorService.formatPlanReviewComment (direct)", () => {
+  it("includes the affected step id when a finding has one, and renders the approved verdict label", () => {
+    const { deps } = buildDeps();
+    const svc = new OrchestratorService(deps as never);
+
+    const comment = asPrivate(svc).formatPlanReviewComment({
+      reviewId: "rev-1",
+      overallVerdict: "approved",
+      summary: "All good",
+      findings: [
+        { id: "f1", severity: "nit", type: "style", title: "Nit", details: "d", affectedStepId: "s1" },
+      ],
+    });
+
+    expect(comment).toContain("AI Plan Review -- Approved");
+    expect(comment).toContain("(step s1)");
+  });
+});
+
+describe("OrchestratorService.formatCodeReviewComment (direct)", () => {
+  it("includes the line hint when a finding has one, and renders the approved verdict label", () => {
+    const { deps } = buildDeps();
+    const svc = new OrchestratorService(deps as never);
+
+    const comment = asPrivate(svc).formatCodeReviewComment({
+      reviewId: "rev-1",
+      overallVerdict: "approved",
+      summary: "All good",
+      findings: [
+        { id: "f1", severity: "nit", type: "style", file: "src/a.ts", lineHint: 42, title: "Nit", details: "d" },
+      ],
+    });
+
+    expect(comment).toContain("AI Code Review -- Approved");
+    expect(comment).toContain("src/a.ts:42");
+  });
+});
+
+describe("OrchestratorService.buildTaskBundle (direct) -- non-Error rejections", () => {
+  it("stringifies a non-Error rejection from githubClient.getDefaultBranch", async () => {
+    const githubClient = { getPRDiff: vi.fn(), getDefaultBranch: vi.fn().mockRejectedValue("network down") };
+    const linearClient = { getIssue: vi.fn(), getRelatedContext: vi.fn().mockRejectedValue("linear down"), postComment: vi.fn() };
+    const repoRegistry = {
+      resolveForIssue: vi.fn(),
+      resolveWorkingDirectory: vi.fn(),
+      validateWorkingDirectory: vi.fn(),
+      getRepoByName: vi.fn().mockReturnValue({
+        name: "test-repo",
+        defaultBranch: "main",
+        allowedPaths: ["src/"],
+        protectedPaths: [],
+        constraints: { requiredChecks: [], maxFilesChanged: 10, maxDiffLines: 500, forbiddenPatterns: [], mustNotTouch: [] },
+      }),
+      getDefaultRepo: vi.fn(),
+    };
+    const { deps, logger } = buildDeps({ githubClient, linearClient, repoRegistry });
+    const svc = new OrchestratorService(deps as never);
+
+    const run = makeRun();
+    const issue = {
+      id: "LIN-1",
+      title: "T",
+      description: "D",
+      branchName: "ai/lin-1",
+      labels: [],
+      priority: 0,
+    };
+
+    await asPrivate(svc).buildTaskBundle(issue, run);
+
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.objectContaining({ error: "network down" }),
+      "Failed to resolve default branch from GitHub, falling back to config value",
+    );
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.objectContaining({ error: "linear down" }),
+      "Failed to fetch related Linear context; proceeding without it",
     );
   });
 });

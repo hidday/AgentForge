@@ -382,6 +382,44 @@ describe("OrchestratorService.runManualPlanRevision", () => {
     );
     expect(result.state).toBe(RunState.AwaitingPlanApproval);
   });
+
+  it("changes_requested verdict without an operator note: chains into runPlanRevision with no note", async () => {
+    const { deps, runRepo, artifactRepo, planReviewerAgent, planReviserAgent } = buildDeps();
+    const svc = new OrchestratorService(deps as never);
+
+    const planReviewRun = makeRun({ state: RunState.PlanReview });
+    const planRevisionRun = makeRun({ state: RunState.PlanRevision });
+    const awaitingRun = makeRun({ state: RunState.AwaitingPlanApproval, planVersion: 2 });
+
+    runRepo.findById
+      .mockResolvedValueOnce(makeRun({ state: RunState.AwaitingPlanApproval }))
+      .mockResolvedValue(planRevisionRun);
+    runRepo.updateState
+      .mockResolvedValueOnce(planReviewRun)
+      .mockResolvedValueOnce(planRevisionRun)
+      .mockResolvedValueOnce(awaitingRun);
+    runRepo.update.mockResolvedValue(makeRun({ state: RunState.PlanRevision, planVersion: 2 }));
+
+    const plan = makePlan();
+    artifactRepo.findLatestByType.mockImplementation((_runId: string, type: string) => {
+      if (type === "Plan") return Promise.resolve(makeArtifact({ type: "Plan", payloadJson: plan }));
+      return Promise.resolve(null);
+    });
+    planReviewerAgent.run.mockResolvedValue({
+      reviewId: "rev-1",
+      overallVerdict: "changes_requested",
+      summary: "needs work",
+      findings: [{ id: "f1", severity: "important", type: "gap", title: "t", details: "d" }],
+    });
+    planReviserAgent.run.mockResolvedValue({
+      revision: { dispositions: [] },
+      revisedPlan: makePlan({ planVersion: 2 }),
+    });
+
+    await svc.runManualPlanRevision("run-1");
+
+    expect(planReviserAgent.run).toHaveBeenCalledWith(plan, undefined, expect.anything(), "run-1", undefined);
+  });
 });
 
 describe("OrchestratorService.approveHumanReview", () => {
@@ -423,6 +461,25 @@ describe("OrchestratorService.approveHumanReview", () => {
 
     expect(logger.warn).toHaveBeenCalledWith(
       expect.objectContaining({ runId: "run-1", error: "distillation blew up" }),
+      "Distillation agent failed (best-effort, ignoring)",
+    );
+    expect(result.state).toBe(RunState.Done);
+  });
+
+  it("stringifies a non-Error distillation failure in the warning log", async () => {
+    const { deps, runRepo, distillationAgent, logger } = buildDeps();
+    const svc = new OrchestratorService(deps as never);
+
+    const readyRun = makeRun({ state: RunState.ReadyForHumanReview });
+    const doneRun = makeRun({ state: RunState.Done });
+    runRepo.findById.mockResolvedValue(readyRun);
+    runRepo.updateState.mockResolvedValue(doneRun);
+    distillationAgent.run.mockRejectedValue("a plain string failure");
+
+    const result = await svc.approveHumanReview("run-1");
+
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.objectContaining({ runId: "run-1", error: "a plain string failure" }),
       "Distillation agent failed (best-effort, ignoring)",
     );
     expect(result.state).toBe(RunState.Done);
