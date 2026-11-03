@@ -367,4 +367,57 @@ describe("GET /api/runs/:id/skills", () => {
       expect(body.distillationDecision?.displacedSkillId).toBe("xyz");
     });
   });
+
+  it("returns 400 when the :id route param is an empty string", async () => {
+    const { app } = await buildApp();
+
+    const response = await app.inject({ method: "GET", url: "/api/runs//skills" });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json().error).toBe("runId is required");
+  });
+
+  it("defaults skillIds to [] when a SKILL_INJECTION event's payload omits the field", async () => {
+    const events = [
+      {
+        id: "event-1",
+        runId: "run-1",
+        eventType: "SKILL_INJECTION",
+        source: "orchestrator",
+        payloadJson: {},
+        createdAt: new Date(),
+      },
+    ];
+
+    const { app } = await buildApp({ events });
+
+    const response = await app.inject({ method: "GET", url: "/api/runs/run-1/skills" });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json().injectedSkills).toEqual([]);
+  });
+
+  it("defaults shouldPersist to false and reason to '' when a SKILL_DISTILLATION payload omits both", async () => {
+    const events = [
+      {
+        id: "event-1",
+        runId: "run-1",
+        eventType: "SKILL_DISTILLATION",
+        source: "distillation-agent",
+        payloadJson: {},
+        createdAt: new Date(),
+      },
+    ];
+
+    const { app } = await buildApp({ events });
+
+    const response = await app.inject({ method: "GET", url: "/api/runs/run-1/skills" });
+
+    expect(response.statusCode).toBe(200);
+    const body = response.json() as {
+      distillationDecision: { shouldPersist: boolean; reason: string } | null;
+    };
+    expect(body.distillationDecision?.shouldPersist).toBe(false);
+    expect(body.distillationDecision?.reason).toBe("");
+  });
 });

@@ -41,3 +41,32 @@ describe("stateMachine - clarification transitions", () => {
     expect(validEvents).toContain(RunEvent.RESET_TO_TODO);
   });
 });
+
+describe("stateMachine - invalid transitions", () => {
+  it("throws StateTransitionError for a state with no outgoing transitions at all", () => {
+    expect(() => transition(RunState.Done, RunEvent.RUN_REQUESTED)).toThrow(
+      'No transition from state "Done" for event "RUN_REQUESTED"',
+    );
+  });
+
+  it("getValidEvents returns an empty array for a terminal state with no transition map", () => {
+    expect(getValidEvents(RunState.Done)).toEqual([]);
+  });
+
+  it("throws StateTransitionError when the event is not valid for a known state", () => {
+    expect(() => transition(RunState.Todo, RunEvent.PLAN_APPROVED)).toThrow(
+      'No transition from state "Todo" for event "PLAN_APPROVED"',
+    );
+  });
+
+  it("thrown StateTransitionError carries the fromState and event fields", () => {
+    try {
+      transition(RunState.Todo, RunEvent.PLAN_APPROVED);
+      throw new Error("expected transition to throw");
+    } catch (err) {
+      expect(err).toBeInstanceOf(Error);
+      expect((err as { fromState: string }).fromState).toBe(RunState.Todo);
+      expect((err as { event: string }).event).toBe(RunEvent.PLAN_APPROVED);
+    }
+  });
+});

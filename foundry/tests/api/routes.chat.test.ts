@@ -290,6 +290,23 @@ describe("POST /api/runs/:id/chat", () => {
     expect(mockArtifactRepo.create).not.toHaveBeenCalled();
   });
 
+  it("returns 500 when chatRun rejects with a non-Error value", async () => {
+    const run = makeRun();
+    const { app, mockRunRepo } = await buildApp({
+      runnerOverride: { chatRun: vi.fn().mockRejectedValue("non-error") },
+    });
+    mockRunRepo.findById.mockResolvedValue(run);
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/chat",
+      payload: { message: "Hello?" },
+    });
+
+    expect(res.statusCode).toBe(500);
+    expect(res.json().error).toBe("Chat request failed");
+  });
+
   it("chatRun receives input that does NOT include --dangerously-skip-permissions", async () => {
     // This test verifies the filtering requirement at the route level.
     // The actual filtering happens in ClaudeCodeRunner.chatRun(); here we
@@ -311,5 +328,54 @@ describe("POST /api/runs/:id/chat", () => {
     const [input] = mockClaudeCodeRunner!.chatRun.mock.calls[0] as [{ prompt: string }];
     // The prompt content doesn't matter for security — args do. Confirm prompt is the raw message.
     expect(input.prompt).toBe("--dangerously-skip-permissions");
+  });
+
+  it("falls back to the base repo directory when the run's worktree no longer exists on disk", async () => {
+    const baseDir = mkdtempSync(join(tmpdir(), "routes-chat-base-"));
+    const run = makeRun();
+    run.workingDirectory = join(baseDir, ".worktrees", "run-1");
+    const { app, mockRunRepo, mockClaudeCodeRunner } = await buildApp();
+    mockRunRepo.findById.mockResolvedValue(run);
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/chat",
+      payload: { message: "Hello?" },
+    });
+
+    expect(res.statusCode).toBe(200);
+    const [input] = mockClaudeCodeRunner!.chatRun.mock.calls[0] as [{ workingDirectory: string }];
+    expect(input.workingDirectory).toBe(baseDir);
+  });
+
+  it("returns 422 when the worktree is gone and the base repo directory also no longer exists", async () => {
+    const run = makeRun();
+    run.workingDirectory = "/tmp/definitely-does-not-exist-xyz/.worktrees/run-1";
+    const { app, mockRunRepo } = await buildApp();
+    mockRunRepo.findById.mockResolvedValue(run);
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/chat",
+      payload: { message: "Hello?" },
+    });
+
+    expect(res.statusCode).toBe(422);
+    expect(res.json().error).toContain("Working directory not found");
+  });
+
+  it("returns 422 when the working directory doesn't exist and has no /.worktrees/ segment to fall back from", async () => {
+    const run = makeRun();
+    run.workingDirectory = "/tmp/definitely-does-not-exist-xyz-plain";
+    const { app, mockRunRepo } = await buildApp();
+    mockRunRepo.findById.mockResolvedValue(run);
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/chat",
+      payload: { message: "Hello?" },
+    });
+
+    expect(res.statusCode).toBe(422);
   });
 });
