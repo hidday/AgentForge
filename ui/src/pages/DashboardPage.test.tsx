@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, act } from "@testing-library/react";
+import { render, screen, act, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { Run } from "@/api/client.ts";
 
@@ -108,13 +108,17 @@ describe("DashboardPage", () => {
       makeRun("r5", "Done"), // done
     ];
     mockUseRuns.mockReturnValue({ runs, loading: false, error: null, refetch: vi.fn() });
-    render(<DashboardPage />);
+    const { container } = render(<DashboardPage />);
 
-    expect(screen.getByText("Total").previousSibling?.textContent).toBe("5");
-    expect(screen.getByText("Active").previousSibling?.textContent).toBe("2");
-    expect(screen.getByText("Awaiting").previousSibling?.textContent).toBe("1");
-    expect(screen.getByText("Blocked").previousSibling?.textContent).toBe("1");
-    expect(screen.getByText("Done").previousSibling?.textContent).toBe("1");
+    const labels = Array.from(container.querySelectorAll(".text-xs.text-text-muted.mt-0\\.5"));
+    const byLabel = Object.fromEntries(
+      labels.map((el) => [el.textContent, el.previousSibling?.textContent]),
+    );
+    expect(byLabel["Total"]).toBe("5");
+    expect(byLabel["Active"]).toBe("2");
+    expect(byLabel["Awaiting"]).toBe("1");
+    expect(byLabel["Blocked"]).toBe("1");
+    expect(byLabel["Done"]).toBe("1");
   });
 
   it("filters the displayed runs when a filter button is clicked", async () => {
@@ -149,10 +153,11 @@ describe("DashboardPage", () => {
   it("shows the ingest summary banner after onIngestComplete fires, then auto-dismisses it", async () => {
     vi.useFakeTimers();
     mockUseRuns.mockReturnValue({ runs: [], loading: false, error: null, refetch: vi.fn() });
-    const user = userEvent.setup({ delay: null, advanceTimers: vi.advanceTimersByTime });
 
     render(<DashboardPage />);
-    await user.click(screen.getByRole("button", { name: "trigger-ingest-complete" }));
+    act(() => {
+      fireEvent.click(screen.getByRole("button", { name: "trigger-ingest-complete" }));
+    });
 
     expect(screen.getByTestId("ingest-banner").textContent).toBe("started 3 skipped 1");
 

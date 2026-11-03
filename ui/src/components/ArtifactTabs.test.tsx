@@ -104,7 +104,7 @@ describe("ArtifactTabs", () => {
     expect(screen.getByText("partially incorporated")).toBeDefined();
     expect(screen.getByText("accepted")).toBeDefined();
     expect(screen.getByText("dismissed")).toBeDefined();
-    expect(screen.getByText("unknown_status")).toBeDefined();
+    expect(screen.getByText("unknown status")).toBeDefined();
   });
 
   it("shows 'No dispositions recorded' when the PlanRevision has an empty dispositions array", () => {
@@ -155,8 +155,7 @@ describe("ArtifactTabs", () => {
     expect(screen.getByText("Fixed the bug")).toBeDefined();
     expect(screen.getByText("No change")).toBeDefined();
     expect(screen.getByText("Will fix later")).toBeDefined();
-    expect(screen.getByText(/v/)).toBeDefined();
-    expect(screen.getByText(/3/).textContent).toContain("3");
+    expect(screen.getByText(/the latest Execution tab/i).textContent).toContain("v3");
   });
 
   it("defaults the execution version reference to 2 when executionReport is absent", () => {
