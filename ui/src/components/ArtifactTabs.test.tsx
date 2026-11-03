@@ -55,6 +55,38 @@ describe("ArtifactTabs", () => {
     expect(screen.queryByText("Plan summary")).toBeNull();
   });
 
+  it("renders the Plan Review tab content via ReviewView (shared with Code Review)", () => {
+    render(
+      <ArtifactTabs
+        artifacts={[
+          makeArtifact({
+            type: "PlanReview",
+            payloadJson: { summary: "Plan review summary" },
+          }),
+        ]}
+      />,
+    );
+    expect(screen.getByRole("button", { name: "Plan Review" })).toBeDefined();
+    expect(screen.getByText("Plan review summary")).toBeDefined();
+  });
+
+  it("defaults PlanRevision dispositions to an empty list when the field is absent", () => {
+    render(
+      <ArtifactTabs
+        artifacts={[makeArtifact({ type: "PlanRevision", payloadJson: {} })]}
+      />,
+    );
+    expect(screen.getByText("No dispositions recorded")).toBeDefined();
+  });
+
+  it("defaults Remediation resolution to an empty list when the field is absent", () => {
+    render(
+      <ArtifactTabs artifacts={[makeArtifact({ type: "Remediation", payloadJson: {} })]} />,
+    );
+    expect(screen.getByText("Resolutions")).toBeDefined();
+    expect(screen.getByText(/the latest Execution tab/i).textContent).toContain("v2");
+  });
+
   it("renders the Execution tab content via ExecutionReportView", async () => {
     render(
       <ArtifactTabs

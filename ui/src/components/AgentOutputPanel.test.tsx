@@ -97,6 +97,15 @@ describe("AgentOutputPanel", () => {
     expect(screen.getByText("Waiting for output...")).toBeDefined();
   });
 
+  it("shows the raw-mode placeholder when output is empty but a process is active", async () => {
+    vi.setSystemTime(new Date("2024-01-01T00:00:00Z"));
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    render(<AgentOutputPanel processes={[makeProcess()]} output="" />);
+    const toggleBtn = screen.getByRole("button", { name: /raw/i });
+    await user.click(toggleBtn);
+    expect(screen.getByText("Waiting for output...")).toBeDefined();
+  });
+
   it("toggles between parsed and raw views", async () => {
     vi.useRealTimers();
     const user = userEvent.setup();

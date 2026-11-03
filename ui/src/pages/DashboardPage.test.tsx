@@ -118,6 +118,7 @@ describe("DashboardPage", () => {
       makeRun("r3", "AwaitingPlanApproval"), // waiting
       makeRun("r4", "AIBlocked"), // blocked
       makeRun("r5", "Done"), // done
+      makeRun("r6", "SomeTotallyUnknownState"), // falls back to "idle"
     ];
     mockUseRuns.mockReturnValue({ runs, loading: false, error: null, refetch: vi.fn() });
     const { container } = render(<DashboardPage />);
@@ -126,7 +127,7 @@ describe("DashboardPage", () => {
     const byLabel = Object.fromEntries(
       labels.map((el) => [el.textContent, el.previousSibling?.textContent]),
     );
-    expect(byLabel["Total"]).toBe("5");
+    expect(byLabel["Total"]).toBe("6");
     expect(byLabel["Active"]).toBe("2");
     expect(byLabel["Awaiting"]).toBe("1");
     expect(byLabel["Blocked"]).toBe("1");

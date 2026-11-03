@@ -271,6 +271,215 @@ describe("LinearSyncDialog", () => {
     expect(onClose).not.toHaveBeenCalled();
   });
 
+  it("clears a pending min-loader-delay timer when the dialog is closed and reopened mid-delay", async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    const onClose = vi.fn();
+    const onIngestComplete = vi.fn();
+    // ingestIssues never settles — the only path to auto-close is the SSE
+    // path, which (since MIN_LOADER_MS hasn't elapsed) schedules a delayed
+    // retry via minDelayTimerRef instead of closing immediately.
+    mockApi.ingestIssues.mockReturnValue(new Promise(() => {}));
+
+    const { rerender } = render(
+      <LinearSyncDialog
+        open={true}
+        onClose={onClose}
+        onIngested={vi.fn()}
+        onIngestComplete={onIngestComplete}
+      />,
+    );
+    await waitFor(() => expect(screen.getByText(issueA.title)).toBeDefined());
+
+    await user.click(screen.getByRole("button", { name: /start 2 runs/i }));
+    fireSSE({ type: "run:created", runId: "run-a", issueId: issueA.id });
+    fireSSE({ type: "run:created", runId: "run-b", issueId: issueB.id });
+
+    // At this point a delayed-close timer has been scheduled but not fired
+    // (elapsed < MIN_LOADER_MS). Close and reopen before it fires.
+    rerender(
+      <LinearSyncDialog
+        open={false}
+        onClose={onClose}
+        onIngested={vi.fn()}
+        onIngestComplete={onIngestComplete}
+      />,
+    );
+    rerender(
+      <LinearSyncDialog
+        open={true}
+        onClose={onClose}
+        onIngested={vi.fn()}
+        onIngestComplete={onIngestComplete}
+      />,
+    );
+
+    await waitFor(() => expect(screen.getByText(issueA.title)).toBeDefined());
+
+    // Advance well past MIN_LOADER_MS — the stale timer was cleared on
+    // reopen, and the fresh cycle has no pending ids, so nothing closes.
+    await act(async () => {
+      vi.advanceTimersByTime(2000);
+    });
+    expect(onClose).not.toHaveBeenCalled();
+    expect(onIngestComplete).not.toHaveBeenCalled();
+  });
+
+  it("fires a final authoritative onIngestComplete when ingestIssues resolves after the SSE path already auto-closed", async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    const onClose = vi.fn();
+    const onIngested = vi.fn();
+    const onIngestComplete = vi.fn();
+    let resolveIngest!: (v: { ok: boolean; started: string[]; skipped: string[] }) => void;
+    mockApi.ingestIssues.mockReturnValue(
+      new Promise((res) => {
+        resolveIngest = res;
+      }),
+    );
+
+    render(
+      <LinearSyncDialog
+        open={true}
+        onClose={onClose}
+        onIngested={onIngested}
+        onIngestComplete={onIngestComplete}
+      />,
+    );
+    await waitFor(() => expect(screen.getByText(issueA.title)).toBeDefined());
+
+    await user.click(screen.getByRole("button", { name: /start 2 runs/i }));
+    fireSSE({ type: "run:created", runId: "run-a", issueId: issueA.id });
+    fireSSE({ type: "run:created", runId: "run-b", issueId: issueB.id });
+
+    // Let the scheduled min-delay close fire via SSE path.
+    await act(async () => {
+      vi.advanceTimersByTime(700);
+    });
+    await waitFor(() => {
+      expect(onClose).toHaveBeenCalledOnce();
+      expect(onIngestComplete).toHaveBeenCalledWith({ started: 2, skipped: 0 });
+    });
+
+    // Now resolve the HTTP response with the authoritative counts — this
+    // should fire a second, authoritative onIngestComplete call plus
+    // onIngested.
+    await act(async () => {
+      resolveIngest({ ok: true, started: [issueA.id], skipped: [issueB.id] });
+    });
+
+    await waitFor(() => {
+      expect(onIngested).toHaveBeenCalledOnce();
+      expect(onIngestComplete).toHaveBeenCalledTimes(2);
+      expect(onIngestComplete).toHaveBeenLastCalledWith({ started: 1, skipped: 1 });
+    });
+  });
+
+  it("clears a pending min-loader-delay timer on unmount", async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    mockApi.ingestIssues.mockReturnValue(new Promise(() => {}));
+
+    const { unmount } = render(
+      <LinearSyncDialog open={true} onClose={vi.fn()} onIngested={vi.fn()} />,
+    );
+    await waitFor(() => expect(screen.getByText(issueA.title)).toBeDefined());
+
+    await user.click(screen.getByRole("button", { name: /start 2 runs/i }));
+    fireSSE({ type: "run:created", runId: "run-a", issueId: issueA.id });
+    fireSSE({ type: "run:created", runId: "run-b", issueId: issueB.id });
+
+    // A min-delay timer is now scheduled (allSeen but elapsed < MIN_LOADER_MS).
+    // Unmounting should clear it via the cleanup effect without throwing.
+    expect(() => unmount()).not.toThrow();
+  });
+
+  it("does not auto-close when the scheduled min-delay callback fires after pendingIds has been reset by a failed ingest", async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    const onClose = vi.fn();
+    let rejectIngest!: (err: Error) => void;
+    mockApi.ingestIssues.mockReturnValue(
+      new Promise((_res, rej) => {
+        rejectIngest = rej;
+      }),
+    );
+
+    render(<LinearSyncDialog open={true} onClose={onClose} onIngested={vi.fn()} />);
+    await waitFor(() => expect(screen.getByText(issueA.title)).toBeDefined());
+
+    await user.click(screen.getByRole("button", { name: /start 2 runs/i }));
+    // SSE observes both ids before the HTTP response settles, scheduling a
+    // delayed maybeAutoClose retry (elapsed < MIN_LOADER_MS).
+    fireSSE({ type: "run:created", runId: "run-a", issueId: issueA.id });
+    fireSSE({ type: "run:created", runId: "run-b", issueId: issueB.id });
+
+    // Now the request fails, which resets pendingIdsRef to [] and surfaces
+    // the error — this happens before the scheduled timer fires.
+    await act(async () => {
+      rejectIngest(new Error("Linear unreachable"));
+    });
+    await waitFor(() => expect(screen.getByText(/Linear unreachable/i)).toBeDefined());
+
+    // When the scheduled timer finally fires, pendingIds is now empty, so
+    // maybeAutoClose must bail out without closing the dialog.
+    await act(async () => {
+      vi.advanceTimersByTime(700);
+    });
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it("does not double-schedule the min-delay timer on a repeated SSE event for an already-seen id", async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    const onClose = vi.fn();
+    mockApi.ingestIssues.mockReturnValue(new Promise(() => {}));
+
+    render(<LinearSyncDialog open={true} onClose={onClose} onIngested={vi.fn()} />);
+    await waitFor(() => expect(screen.getByText(issueA.title)).toBeDefined());
+
+    await user.click(screen.getByRole("button", { name: /start 2 runs/i }));
+    fireSSE({ type: "run:created", runId: "run-a", issueId: issueA.id });
+    fireSSE({ type: "run:created", runId: "run-b", issueId: issueB.id });
+    // Duplicate event for an id already observed — maybeAutoClose runs again
+    // while a timer is already scheduled, and must not schedule a second one.
+    fireSSE({ type: "run:created", runId: "run-a-again", issueId: issueA.id });
+
+    await act(async () => {
+      vi.advanceTimersByTime(700);
+    });
+    await waitFor(() => {
+      expect(onClose).toHaveBeenCalledOnce();
+    });
+  });
+
+  it("does not call onIngested when ingestIssues resolves with zero started runs", async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    const onIngested = vi.fn();
+    mockApi.ingestIssues.mockResolvedValue({ ok: true, started: [], skipped: [issueA.id, issueB.id] });
+
+    render(
+      <LinearSyncDialog open={true} onClose={vi.fn()} onIngested={onIngested} />,
+    );
+    await waitFor(() => expect(screen.getByText(issueA.title)).toBeDefined());
+    await user.click(screen.getByRole("button", { name: /start 2 runs/i }));
+
+    await act(async () => {
+      vi.advanceTimersByTime(700);
+    });
+    await waitFor(() => {
+      expect(onIngested).not.toHaveBeenCalled();
+    });
+  });
+
+  it("shows a generic error message when ingestIssues rejects with a non-Error value", async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    mockApi.ingestIssues.mockRejectedValue("boom");
+
+    render(<LinearSyncDialog open={true} onClose={vi.fn()} onIngested={vi.fn()} />);
+    await waitFor(() => expect(screen.getByText(issueA.title)).toBeDefined());
+    await user.click(screen.getByRole("button", { name: /start 2 runs/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText("Failed to ingest issues")).toBeDefined();
+    });
+  });
+
   it("resets ingest tracking state when the dialog is reopened", async () => {
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     mockApi.ingestIssues.mockReturnValue(new Promise(() => {}));

@@ -217,6 +217,41 @@ describe("CursorRunner — argument and stdin building", () => {
     expect(stdinData).toBe("You are a planner.\n\n---\n\nDo the task");
   });
 
+  it("builds a process context when input.runId is set, and omits it otherwise", async () => {
+    const processRunner = makeMockProcessRunner({
+      stdout: JSON.stringify({
+        type: "result",
+        result: `BEGIN_STRUCTURED_OUTPUT\n{"success":true,"stage":"planner","payload":{"value":"ok"}}\nEND_STRUCTURED_OUTPUT`,
+      }),
+      stderr: "",
+      exitCode: 0,
+      durationMs: 50,
+      timedOut: false,
+    });
+    const logger = makeMockLogger();
+    const runner = new CursorRunner(
+      processRunner as never,
+      "cursor",
+      [],
+      "claude-4.6-sonnet",
+      logger as never,
+    );
+
+    await runner.run(
+      { prompt: "x", workingDirectory: "/tmp", timeoutMs: 1000, runId: "run-3" },
+      "planner",
+      echoSchema,
+    );
+    let { context } = processRunner.execute.mock.calls[0]![0] as {
+      context?: { runId: string; stage: string; runtime: string };
+    };
+    expect(context).toEqual({ runId: "run-3", stage: "planner", runtime: "cursor" });
+
+    await runner.run({ prompt: "x", workingDirectory: "/tmp", timeoutMs: 1000 }, "planner", echoSchema);
+    ({ context } = processRunner.execute.mock.calls[1]![0] as { context?: unknown });
+    expect(context).toBeUndefined();
+  });
+
   it("uses the raw prompt as stdin when no system prompt is given", async () => {
     const processRunner = makeMockProcessRunner({
       stdout: JSON.stringify({
