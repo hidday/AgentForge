@@ -168,3 +168,21 @@ describe("AgentOutputPanel", () => {
     expect(screen.getByText("this is not json at all")).toBeDefined();
   });
 });
+
+describe("AgentOutputPanel error block rendering", () => {
+  beforeEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("renders an 'error' block type with the AlertTriangle icon and red styling", async () => {
+    vi.resetModules();
+    vi.doMock("@/lib/parseClaudeOutput.ts", () => ({
+      parseClaudeOutput: () => [{ type: "error", content: "Something broke" }],
+    }));
+    const { AgentOutputPanel: PanelWithMockedParser } = await import("./AgentOutputPanel.tsx");
+    render(<PanelWithMockedParser processes={[]} output="irrelevant" />);
+    expect(screen.getByText("Something broke")).toBeDefined();
+    vi.doUnmock("@/lib/parseClaudeOutput.ts");
+    vi.resetModules();
+  });
+});

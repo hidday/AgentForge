@@ -124,6 +124,21 @@ describe("useRuns", () => {
     expect(mockApi.getRuns).toHaveBeenCalledTimes(1);
   });
 
+  it("ignores an SSE event type that is neither 'run:created' nor 'run:state-changed'", async () => {
+    mockApi.getRuns.mockResolvedValue({ runs: [makeRun("r1", "Planning")] });
+    const { result } = renderHook(() => useRuns());
+    await waitFor(() => expect(result.current.runs).toHaveLength(1));
+
+    const handler = mockUseSSE.mock.calls[0]![0] as (e: unknown) => void;
+    act(() => {
+      handler({ type: "process:started", runId: "r1" });
+    });
+
+    // Neither branch applies — no refetch, and the runs list is unchanged.
+    expect(mockApi.getRuns).toHaveBeenCalledTimes(1);
+    expect(result.current.runs[0]!.state).toBe("Planning");
+  });
+
   it("ignores a 'run:state-changed' event for a run that is not in the current list", async () => {
     mockApi.getRuns.mockResolvedValue({ runs: [makeRun("r1", "Planning")] });
     const { result } = renderHook(() => useRuns());

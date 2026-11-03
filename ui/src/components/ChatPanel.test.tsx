@@ -46,6 +46,61 @@ describe("ChatPanel", () => {
     vi.clearAllMocks();
   });
 
+  it("collapses the message list when the header is clicked, and expands again on a second click", async () => {
+    render(<ChatPanel runId={RUN_ID} artifacts={[]} />);
+    expect(screen.getByPlaceholderText(/ask the agent/i)).toBeDefined();
+
+    const header = screen.getByRole("button", { name: /Chat with Agent/i });
+    await userEvent.click(header);
+    expect(screen.queryByPlaceholderText(/ask the agent/i)).toBeNull();
+
+    await userEvent.click(header);
+    expect(screen.getByPlaceholderText(/ask the agent/i)).toBeDefined();
+  });
+
+  it("shows a message count badge once there are messages, and none when empty", () => {
+    const { rerender } = render(<ChatPanel runId={RUN_ID} artifacts={[]} />);
+    expect(screen.queryByText("1")).toBeNull();
+
+    rerender(
+      <ChatPanel
+        runId={RUN_ID}
+        artifacts={[makeArtifact("user", "Hi", "a1", "2024-01-01T00:00:01Z")]}
+      />,
+    );
+    expect(screen.getByText("1")).toBeDefined();
+  });
+
+  it("calls scrollIntoView on the bottom anchor when available in the environment", async () => {
+    mockApi.sendChatMessage.mockResolvedValue({ reply: "ok", durationMs: 1 });
+    const scrollIntoViewMock = vi.fn();
+    const original = window.HTMLElement.prototype.scrollIntoView;
+    window.HTMLElement.prototype.scrollIntoView = scrollIntoViewMock;
+
+    try {
+      render(<ChatPanel runId={RUN_ID} artifacts={[]} />);
+      const input = screen.getByPlaceholderText(/ask the agent/i);
+      await userEvent.type(input, "Hello");
+      await userEvent.click(screen.getByRole("button", { name: /send/i }));
+
+      await waitFor(() => {
+        expect(scrollIntoViewMock).toHaveBeenCalled();
+      });
+    } finally {
+      window.HTMLElement.prototype.scrollIntoView = original;
+    }
+  });
+
+  it("does not submit when the trimmed input is only whitespace", async () => {
+    render(<ChatPanel runId={RUN_ID} artifacts={[]} />);
+    const input = screen.getByPlaceholderText(/ask the agent/i);
+    await userEvent.type(input, "   ");
+    const sendBtn = screen.getByRole("button", { name: /send/i });
+    // Button stays disabled since !inputValue.trim()
+    expect((sendBtn as HTMLButtonElement).disabled).toBe(true);
+    expect(mockApi.sendChatMessage).not.toHaveBeenCalled();
+  });
+
   it("renders 'No messages yet' empty state when artifacts array is empty", () => {
     render(<ChatPanel runId={RUN_ID} artifacts={[]} />);
     expect(screen.getByText(/No messages yet/i)).toBeDefined();

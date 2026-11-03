@@ -368,6 +368,80 @@ describe("parseClaudeOutput – partial line noise filtering", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Additional branch coverage
+// ---------------------------------------------------------------------------
+describe("parseClaudeOutput – additional branch coverage", () => {
+  it("produces no block for a line that parses to a JSON primitive (not object/array)", () => {
+    expect(parseClaudeOutput("42")).toEqual([]);
+    expect(parseClaudeOutput("true")).toEqual([]);
+    expect(parseClaudeOutput('"just a bare JSON string"')).toEqual([]);
+  });
+
+  it("produces no block for a top-level tool_use_result that is neither a string nor an object", () => {
+    const line = JSON.stringify({ tool_use_result: 42 });
+    expect(parseClaudeOutput(line)).toEqual([]);
+  });
+
+  it("produces no block for a content_block_start whose content_block is not a tool_use", () => {
+    const line = JSON.stringify({
+      type: "content_block_start",
+      content_block: { type: "text", text: "hi" },
+    });
+    expect(parseClaudeOutput(line)).toEqual([]);
+  });
+
+  it("skips a non-object item inside a content array", () => {
+    const line = JSON.stringify({
+      content: ["a plain string entry", { type: "text", text: "real text" }],
+    });
+    const result = parseClaudeOutput(line);
+    expect(result).toEqual<ParsedBlock[]>([{ type: "text", content: "real text" }]);
+  });
+
+  it("skips a content array item with an unrecognized type", () => {
+    const line = JSON.stringify({
+      content: [{ type: "image", source: "data" }],
+    });
+    expect(parseClaudeOutput(line)).toEqual([]);
+  });
+
+  it("JSON-stringifies object content on a tool_result content-array entry", () => {
+    const line = JSON.stringify([
+      { type: "tool_result", content: { foo: "bar" }, is_error: false },
+    ]);
+    const result = parseClaudeOutput(line);
+    expect(result[0]!.content).toBe(JSON.stringify({ foo: "bar" }));
+  });
+
+  it("stringifies a non-string, non-object tool_result content value", () => {
+    const line = JSON.stringify([{ type: "tool_result", content: 42, is_error: false }]);
+    const result = parseClaudeOutput(line);
+    expect(result[0]!.content).toBe("42");
+  });
+
+  it("falls back to an empty string tool_result content when content is absent", () => {
+    const line = JSON.stringify([{ type: "tool_result", is_error: false }]);
+    const result = parseClaudeOutput(line);
+    expect(result[0]!.content).toBe("");
+  });
+
+  it("returns an empty string from formatToolInput when tool_use input is not an object", () => {
+    const line = JSON.stringify([{ type: "tool_use", name: "Weird", input: "not an object" }]);
+    const result = parseClaudeOutput(line);
+    expect(result[0]!.content).toBe("");
+  });
+
+  it("truncates a long JSON summary fallback (unknown fields, serialized form over 200 chars)", () => {
+    const bigInput = { data: "x".repeat(250) };
+    const line = JSON.stringify([{ type: "tool_use", name: "Custom", input: bigInput }]);
+    const result = parseClaudeOutput(line);
+    const summary = JSON.stringify(bigInput);
+    expect(summary.length).toBeGreaterThan(200);
+    expect(result[0]!.content).toBe(summary.slice(0, 200) + "…");
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Edge cases
 // ---------------------------------------------------------------------------
 describe("parseClaudeOutput – edge cases", () => {

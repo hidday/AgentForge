@@ -156,6 +156,22 @@ describe("ActionBar", () => {
       });
     });
 
+    it("clicking 'Revise plan' keeps the default 'iterate' reject mode", async () => {
+      mockApi.rejectPlan.mockResolvedValue({});
+      render(<ActionBar runId={RUN_ID} state="AwaitingPlanApproval" onAction={vi.fn()} />);
+
+      await userEvent.click(screen.getByRole("button", { name: /Reject Plan/i }));
+      // Explicitly click the already-active "Revise plan" tab.
+      await userEvent.click(screen.getByText("Revise plan"));
+
+      const rejectButtons = screen.getAllByRole("button", { name: /Reject Plan/i });
+      await userEvent.click(rejectButtons[rejectButtons.length - 1]);
+
+      await waitFor(() => {
+        expect(mockApi.rejectPlan).toHaveBeenCalledWith(RUN_ID, undefined, "iterate");
+      });
+    });
+
     it("switches reject mode to 'fresh' when 'Start fresh' is selected", async () => {
       mockApi.rejectPlan.mockResolvedValue({});
       render(<ActionBar runId={RUN_ID} state="AwaitingPlanApproval" onAction={vi.fn()} />);

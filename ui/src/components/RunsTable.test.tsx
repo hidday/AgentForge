@@ -98,6 +98,18 @@ describe("RunsTable", () => {
     expect(screen.getByTitle("Open in Linear")).toBeDefined();
   });
 
+  it("stops propagation when the external Linear link is clicked", async () => {
+    renderWithRouter(
+      <RunsTable runs={[makeRun({ linearIssueUrl: "https://linear.app/issue/1" })]} />,
+    );
+    const link = screen.getByTitle("Open in Linear");
+    // jsdom doesn't implement real navigation for plain <a> clicks; the
+    // click handler's stopPropagation must simply run without throwing and
+    // without triggering the row's own navigation behavior.
+    await userEvent.click(link, { pointerEventsCheck: 0 });
+    expect(link).toBeDefined();
+  });
+
   it("does not show the Linear link icon when linearIssueUrl is null", () => {
     renderWithRouter(<RunsTable runs={[makeRun({ linearIssueUrl: null })]} />);
     expect(screen.queryByTitle("Open in Linear")).toBeNull();

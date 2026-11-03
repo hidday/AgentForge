@@ -55,6 +55,21 @@ describe("ArtifactTabs", () => {
     expect(screen.queryByText("Plan summary")).toBeNull();
   });
 
+  it("renders the Execution tab content via ExecutionReportView", async () => {
+    render(
+      <ArtifactTabs
+        artifacts={[
+          makeArtifact({
+            type: "ExecutionReport",
+            payloadJson: { summary: "Implemented the feature", executionVersion: 1 },
+          }),
+        ]}
+      />,
+    );
+    expect(screen.getByRole("button", { name: "Execution" })).toBeDefined();
+    expect(screen.getByText("Implemented the feature")).toBeDefined();
+  });
+
   it("renders rejection feedback entries sorted by version descending with source badge", () => {
     render(
       <ArtifactTabs

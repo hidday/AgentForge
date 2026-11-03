@@ -16,9 +16,11 @@ vi.mock("@/components/RunsTable.tsx", () => ({
 vi.mock("@/components/LinearSyncDialog.tsx", () => ({
   LinearSyncDialog: ({
     open,
+    onClose,
     onIngestComplete,
   }: {
     open: boolean;
+    onClose: () => void;
     onIngestComplete: (s: { started: number; skipped: number }) => void;
   }) => (
     <div data-testid="sync-dialog">
@@ -26,6 +28,7 @@ vi.mock("@/components/LinearSyncDialog.tsx", () => ({
       <button onClick={() => onIngestComplete({ started: 3, skipped: 1 })}>
         trigger-ingest-complete
       </button>
+      <button onClick={onClose}>close-sync-dialog</button>
     </div>
   ),
 }));
@@ -157,6 +160,9 @@ describe("DashboardPage", () => {
     expect(screen.queryByText("sync dialog open")).toBeNull();
     await userEvent.click(screen.getByRole("button", { name: /sync from linear/i }));
     expect(screen.getByText("sync dialog open")).toBeDefined();
+
+    await userEvent.click(screen.getByRole("button", { name: "close-sync-dialog" }));
+    expect(screen.queryByText("sync dialog open")).toBeNull();
   });
 
   it("shows the ingest summary banner after onIngestComplete fires, then auto-dismisses it", async () => {
