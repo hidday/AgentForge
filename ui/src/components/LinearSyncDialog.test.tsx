@@ -70,6 +70,226 @@ describe("LinearSyncDialog", () => {
     vi.useRealTimers();
   });
 
+  it("renders nothing when open is false", () => {
+    const { container } = render(
+      <LinearSyncDialog open={false} onClose={vi.fn()} onIngested={vi.fn()} />,
+    );
+    expect(container.firstChild).toBeNull();
+  });
+
+  it("shows a loading state while fetching issues", () => {
+    mockApi.fetchPendingIssues.mockReturnValue(new Promise(() => {}));
+    render(<LinearSyncDialog open={true} onClose={vi.fn()} onIngested={vi.fn()} />);
+    expect(screen.getByText(/Fetching issues from Linear/i)).toBeDefined();
+  });
+
+  it("shows an error state when fetchPendingIssues rejects", async () => {
+    mockApi.fetchPendingIssues.mockRejectedValue(new Error("Linear API down"));
+    render(<LinearSyncDialog open={true} onClose={vi.fn()} onIngested={vi.fn()} />);
+    await waitFor(() => {
+      expect(screen.getByText("Linear API down")).toBeDefined();
+    });
+  });
+
+  it("shows a generic error message when fetchPendingIssues rejects with a non-Error value", async () => {
+    mockApi.fetchPendingIssues.mockRejectedValue("oops");
+    render(<LinearSyncDialog open={true} onClose={vi.fn()} onIngested={vi.fn()} />);
+    await waitFor(() => {
+      expect(screen.getByText("Failed to fetch issues")).toBeDefined();
+    });
+  });
+
+  it("shows the empty state when there are no pending issues", async () => {
+    mockApi.fetchPendingIssues.mockResolvedValue({ issues: [] });
+    render(<LinearSyncDialog open={true} onClose={vi.fn()} onIngested={vi.fn()} />);
+    await waitFor(() => {
+      expect(screen.getByText("No pending issues found")).toBeDefined();
+    });
+    // No footer Start button when there are no issues
+    expect(screen.queryByRole("button", { name: /Start/i })).toBeNull();
+  });
+
+  it("renders issue details: id prefix, project, priority, and labels", async () => {
+    mockApi.fetchPendingIssues.mockResolvedValue({
+      issues: [
+        {
+          id: "issue-xyz-123",
+          title: "Labeled issue",
+          description: "",
+          state: "Todo",
+          labels: ["backend", "urgent-fix"],
+          priority: 1,
+          project: "Core Platform",
+        },
+      ],
+    });
+    render(<LinearSyncDialog open={true} onClose={vi.fn()} onIngested={vi.fn()} />);
+    await waitFor(() => expect(screen.getByText("Labeled issue")).toBeDefined());
+    expect(screen.getByText("issue-xy")).toBeDefined();
+    expect(screen.getByText("Core Platform")).toBeDefined();
+    expect(screen.getByText("Urgent")).toBeDefined();
+    expect(screen.getByText("backend")).toBeDefined();
+    expect(screen.getByText("urgent-fix")).toBeDefined();
+  });
+
+  it("falls back to priority 0 (None) styling when priority is unrecognized", async () => {
+    mockApi.fetchPendingIssues.mockResolvedValue({
+      issues: [
+        { id: "i1", title: "T", description: "", state: "Todo", labels: [], priority: 99 },
+      ],
+    });
+    render(<LinearSyncDialog open={true} onClose={vi.fn()} onIngested={vi.fn()} />);
+    await waitFor(() => expect(screen.getByText("None")).toBeDefined());
+  });
+
+  it("selects all issues by default and the Start button reflects the count", async () => {
+    render(<LinearSyncDialog open={true} onClose={vi.fn()} onIngested={vi.fn()} />);
+    await waitFor(() => expect(screen.getByText(issueA.title)).toBeDefined());
+    expect(screen.getByRole("button", { name: "Start 2 Runs" })).toBeDefined();
+    const selectAllCheckbox = screen.getByRole("checkbox", { name: /Select all/i });
+    expect((selectAllCheckbox as HTMLInputElement).checked).toBe(true);
+  });
+
+  it("toggleAll deselects then reselects all issues, disabling Start when none are selected", async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    render(<LinearSyncDialog open={true} onClose={vi.fn()} onIngested={vi.fn()} />);
+    await waitFor(() => expect(screen.getByText(issueA.title)).toBeDefined());
+
+    const selectAllCheckbox = screen.getByRole("checkbox", { name: /Select all/i });
+    await user.click(selectAllCheckbox);
+    expect((selectAllCheckbox as HTMLInputElement).checked).toBe(false);
+    expect((screen.getByRole("button", { name: /Start/i }) as HTMLButtonElement).disabled).toBe(
+      true,
+    );
+
+    await user.click(selectAllCheckbox);
+    expect((selectAllCheckbox as HTMLInputElement).checked).toBe(true);
+    expect(screen.getByRole("button", { name: "Start 2 Runs" })).toBeDefined();
+  });
+
+  it("toggling a single issue checkbox updates the selection and Start label (singular)", async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    render(<LinearSyncDialog open={true} onClose={vi.fn()} onIngested={vi.fn()} />);
+    await waitFor(() => expect(screen.getByText(issueA.title)).toBeDefined());
+
+    const issueBCheckbox = screen.getByRole("checkbox", { name: new RegExp(issueB.title) });
+    await user.click(issueBCheckbox);
+
+    expect(screen.getByRole("button", { name: "Start 1 Run" })).toBeDefined();
+
+    // toggling it back on restores plural count
+    await user.click(issueBCheckbox);
+    expect(screen.getByRole("button", { name: "Start 2 Runs" })).toBeDefined();
+  });
+
+  it("clicking the refresh button re-fetches issues", async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    render(<LinearSyncDialog open={true} onClose={vi.fn()} onIngested={vi.fn()} />);
+    await waitFor(() => expect(screen.getByText(issueA.title)).toBeDefined());
+    expect(mockApi.fetchPendingIssues).toHaveBeenCalledTimes(1);
+
+    await user.click(screen.getByTitle("Refresh"));
+    await waitFor(() => expect(mockApi.fetchPendingIssues).toHaveBeenCalledTimes(2));
+  });
+
+  it("calls onClose when Cancel is clicked", async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    const onClose = vi.fn();
+    render(<LinearSyncDialog open={true} onClose={onClose} onIngested={vi.fn()} />);
+    await waitFor(() => expect(screen.getByText(issueA.title)).toBeDefined());
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(onClose).toHaveBeenCalledOnce();
+  });
+
+  it("calls onClose when the backdrop is clicked", async () => {
+    const onClose = vi.fn();
+    const { container } = render(
+      <LinearSyncDialog open={true} onClose={onClose} onIngested={vi.fn()} />,
+    );
+    await waitFor(() => expect(screen.getByText(issueA.title)).toBeDefined());
+    const backdrop = container.querySelector(".absolute.inset-0") as HTMLElement;
+    await userEvent.click(backdrop, { pointerEventsCheck: 0 });
+    expect(onClose).toHaveBeenCalledOnce();
+  });
+
+  it("does nothing when handleIngest is invoked with no issues selected", async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    render(<LinearSyncDialog open={true} onClose={vi.fn()} onIngested={vi.fn()} />);
+    await waitFor(() => expect(screen.getByText(issueA.title)).toBeDefined());
+    await user.click(screen.getByRole("checkbox", { name: /Select all/i }));
+    expect((screen.getByRole("button", { name: /Start/i }) as HTMLButtonElement).disabled).toBe(
+      true,
+    );
+    expect(mockApi.ingestIssues).not.toHaveBeenCalled();
+  });
+
+  it("ignores SSE events that are not 'run:created'", async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    const onClose = vi.fn();
+    mockApi.ingestIssues.mockReturnValue(new Promise(() => {}));
+    render(<LinearSyncDialog open={true} onClose={onClose} onIngested={vi.fn()} />);
+    await waitFor(() => expect(screen.getByText(issueA.title)).toBeDefined());
+    await user.click(screen.getByRole("button", { name: /Start 2 Runs/i }));
+
+    fireSSE({ type: "run:updated", runId: "run-a" } as unknown as import("@/hooks/useSSE.ts").DashboardEvent);
+
+    await act(async () => {
+      vi.advanceTimersByTime(700);
+    });
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it("ignores run:created SSE events for an issue id that was not part of the pending selection", async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    const onClose = vi.fn();
+    mockApi.ingestIssues.mockReturnValue(new Promise(() => {}));
+    render(<LinearSyncDialog open={true} onClose={onClose} onIngested={vi.fn()} />);
+    await waitFor(() => expect(screen.getByText(issueA.title)).toBeDefined());
+    await user.click(screen.getByRole("button", { name: /Start 2 Runs/i }));
+
+    fireSSE({ type: "run:created", runId: "run-z", issueId: "not-pending" });
+
+    await act(async () => {
+      vi.advanceTimersByTime(700);
+    });
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it("ignores a run:created SSE event missing an issueId", async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    const onClose = vi.fn();
+    mockApi.ingestIssues.mockReturnValue(new Promise(() => {}));
+    render(<LinearSyncDialog open={true} onClose={onClose} onIngested={vi.fn()} />);
+    await waitFor(() => expect(screen.getByText(issueA.title)).toBeDefined());
+    await user.click(screen.getByRole("button", { name: /Start 2 Runs/i }));
+
+    fireSSE({ type: "run:created", runId: "run-z" });
+
+    await act(async () => {
+      vi.advanceTimersByTime(700);
+    });
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it("resets ingest tracking state when the dialog is reopened", async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    mockApi.ingestIssues.mockReturnValue(new Promise(() => {}));
+    const { rerender } = render(
+      <LinearSyncDialog open={true} onClose={vi.fn()} onIngested={vi.fn()} />,
+    );
+    await waitFor(() => expect(screen.getByText(issueA.title)).toBeDefined());
+    await user.click(screen.getByRole("button", { name: /Start 2 Runs/i }));
+    expect(screen.getByRole("button", { name: /starting/i })).toBeDefined();
+
+    // Close then reopen — ingesting flag should reset to false and issues
+    // should be refetched.
+    rerender(<LinearSyncDialog open={false} onClose={vi.fn()} onIngested={vi.fn()} />);
+    rerender(<LinearSyncDialog open={true} onClose={vi.fn()} onIngested={vi.fn()} />);
+
+    await waitFor(() => expect(screen.getByText(issueA.title)).toBeDefined());
+    expect(screen.getByRole("button", { name: "Start 2 Runs" })).toBeDefined();
+  });
+
   it("auto-closes after SSE delivers run:created for every selected issue (past min loader delay)", async () => {
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     const onClose = vi.fn();

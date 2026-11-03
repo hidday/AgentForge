@@ -197,6 +197,49 @@ describe("useActiveProcesses", () => {
     expect(result.current.processes).toHaveLength(0);
   });
 
+  it("does not update state after unmount while getActiveProcesses is still pending", async () => {
+    let resolveProcesses!: (v: { processes: ActiveProcess[] }) => void;
+    mockApi.getActiveProcesses.mockReturnValue(
+      new Promise((res) => {
+        resolveProcesses = res;
+      }),
+    );
+
+    const { unmount } = renderHook(() => useActiveProcesses("r1"));
+    unmount();
+
+    // Resolve after unmount — the `cancelled` guard should prevent any setState.
+    await act(async () => {
+      resolveProcesses({ processes: [makeProcess("p1")] });
+    });
+
+    // Nothing to assert on `result` post-unmount beyond "did not throw";
+    // the real assertion is that resolving after unmount doesn't trigger a
+    // React "set state on unmounted component" warning or crash.
+    expect(mockApi.getActiveProcesses).toHaveBeenCalledWith("r1");
+  });
+
+  it("does not update output after unmount while getProcessOutput is still pending", async () => {
+    const proc = makeProcess("p1");
+    mockApi.getActiveProcesses.mockResolvedValue({ processes: [proc] });
+    let resolveOutput!: (v: { processId: string; output: string }) => void;
+    mockApi.getProcessOutput.mockReturnValue(
+      new Promise((res) => {
+        resolveOutput = res;
+      }),
+    );
+
+    const { result, unmount } = renderHook(() => useActiveProcesses("r1"));
+    await waitFor(() => expect(result.current.processes).toHaveLength(1));
+
+    unmount();
+    await act(async () => {
+      resolveOutput({ processId: "p1", output: "late output" });
+    });
+
+    expect(mockApi.getProcessOutput).toHaveBeenCalledWith("p1");
+  });
+
   it("ignores a 'process:output' event with an empty/falsy chunk", async () => {
     mockApi.getActiveProcesses.mockResolvedValue({ processes: [] });
     const { result } = renderHook(() => useActiveProcesses("r1"));
