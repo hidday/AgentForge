@@ -8,6 +8,16 @@ describe("skillNaming", () => {
     );
   });
 
+  it("slugifySkillName falls back to 'distilled-skill' when nothing slug-worthy remains", () => {
+    expect(slugifySkillName("")).toBe("distilled-skill");
+    expect(slugifySkillName("!!! ??? ///")).toBe("distilled-skill");
+  });
+
+  it("slugifySkillName truncates to 64 characters", () => {
+    const long = "a".repeat(100);
+    expect(slugifySkillName(long)).toBe("a".repeat(64));
+  });
+
   it("isValidSkillName accepts kebab-case slugs", () => {
     expect(isValidSkillName("dev-env-pause-resume-footguns")).toBe(true);
     expect(isValidSkillName("Dev Env")).toBe(false);
@@ -20,5 +30,13 @@ describe("skillNaming", () => {
     expect(normalizeSkillName("Bad Name!", "dev-env pause/resume")).toBe(
       "dev-env-pause-resume",
     );
+  });
+
+  it("normalizeSkillName falls back to the slugified fallback when name is undefined", () => {
+    expect(normalizeSkillName(undefined, "dev-env pause/resume")).toBe("dev-env-pause-resume");
+  });
+
+  it("normalizeSkillName falls back to the slugified fallback when name is whitespace-only", () => {
+    expect(normalizeSkillName("   ", "dev-env pause/resume")).toBe("dev-env-pause-resume");
   });
 });

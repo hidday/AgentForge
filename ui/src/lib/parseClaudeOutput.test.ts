@@ -328,6 +328,13 @@ describe("parseClaudeOutput – partial line noise filtering", () => {
     expect(parseClaudeOutput(fragment)).toEqual([]);
   });
 
+  it("filters a partial line matching stop_reason/stop_sequence null even without other metadata markers", () => {
+    // Deliberately avoids any token in METADATA_NOISE_RE or parent_tool_use_id,
+    // so this only matches via the dedicated stop_reason/stop_sequence check.
+    const fragment = '"text":"foo"},"stop_reason":null,"stop_sequence":null';
+    expect(parseClaudeOutput(fragment)).toEqual([]);
+  });
+
   it("keeps genuine non-JSON raw lines", () => {
     const result = parseClaudeOutput("Error: command not found");
     expect(result).toEqual<ParsedBlock[]>([{ type: "raw", content: "Error: command not found" }]);

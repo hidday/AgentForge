@@ -208,4 +208,67 @@ describe("ExecutorAgent.run()", () => {
     expect(payload?.score).toBe(0.42);
     expect(payload?.executionVersion).toBe(1);
   });
+
+  it("injects the operator note section into the user prompt when provided", async () => {
+    const { agent, getUserPrompt, logger } = buildAgent();
+
+    await agent.run(makePlan(), makeTaskBundle(), "run-1", undefined, {
+      operatorNote: "Please double-check the retry edge cases.",
+    });
+
+    const userPrompt = getUserPrompt();
+    expect(userPrompt).toContain("## Operator Note");
+    expect(userPrompt).toContain("Please double-check the retry edge cases.");
+    expect(userPrompt).toContain("high-priority clarification");
+
+    const startLog = logger.info.mock.calls.find((c: unknown[]) => c[1] === "Starting executor agent");
+    const payload = startLog?.[0] as Record<string, unknown> | undefined;
+    expect(payload?.hasOperatorNote).toBe(true);
+  });
+
+  it("omits the operator note section and logs hasOperatorNote=false when no note is given", async () => {
+    const { agent, getUserPrompt, logger } = buildAgent();
+
+    await agent.run(makePlan(), makeTaskBundle(), "run-1");
+
+    const userPrompt = getUserPrompt();
+    expect(userPrompt).not.toContain("## Operator Note");
+
+    const startLog = logger.info.mock.calls.find((c: unknown[]) => c[1] === "Starting executor agent");
+    const payload = startLog?.[0] as Record<string, unknown> | undefined;
+    expect(payload?.hasOperatorNote).toBe(false);
+  });
+
+  it("logs isRetry=true when only existingPR is set (no existingBranch)", async () => {
+    const { agent, logger } = buildAgent();
+
+    await agent.run(makePlan(), makeTaskBundle(), "run-1", { existingPR: 777 });
+
+    const startLog = logger.info.mock.calls.find((c: unknown[]) => c[1] === "Starting executor agent");
+    const payload = startLog?.[0] as Record<string, unknown> | undefined;
+    expect(payload?.isRetry).toBe(true);
+  });
+
+  it("uses the existing branch and creates a new PR when retried without an existing PR", async () => {
+    const { agent, githubClient, gitService } = buildAgent();
+
+    const result = await agent.run(makePlan(), makeTaskBundle(), "run-1", {
+      existingBranch: "custom-retry-branch",
+    });
+
+    expect(gitService.commitAndPush).toHaveBeenCalledWith(
+      "/tmp",
+      "custom-retry-branch",
+      expect.stringContaining("Test issue"),
+    );
+    expect(githubClient.createDraftPR).toHaveBeenCalledTimes(1);
+    expect(githubClient.createDraftPR).toHaveBeenCalledWith(
+      "test-repo",
+      "custom-retry-branch",
+      "main",
+      expect.any(String),
+      expect.any(String),
+    );
+    expect(result.prNumber).toBe(101);
+  });
 });

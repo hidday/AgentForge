@@ -193,6 +193,36 @@ describe("POST /api/runs/:id/actions/answer-questions", () => {
     expect(body.error).toContain("Missing answers");
   });
 
+  it("returns 400 with the error message when orchestrator throws a generic Error", async () => {
+    const { app, mockOrchestrator } = await buildApp();
+    mockOrchestrator.answerQuestions.mockRejectedValue(new Error("something unexpected"));
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/actions/answer-questions",
+      payload: { answers: [{ questionId: "q1", answer: "yes" }] },
+    });
+
+    expect(response.statusCode).toBe(400);
+    const body = JSON.parse(response.body) as { error: string };
+    expect(body.error).toBe("something unexpected");
+  });
+
+  it("returns 400 with a stringified error when orchestrator rejects with a non-Error value", async () => {
+    const { app, mockOrchestrator } = await buildApp();
+    mockOrchestrator.answerQuestions.mockRejectedValue("non-error");
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/actions/answer-questions",
+      payload: { answers: [{ questionId: "q1", answer: "yes" }] },
+    });
+
+    expect(response.statusCode).toBe(400);
+    const body = JSON.parse(response.body) as { error: string };
+    expect(body.error).toBe("non-error");
+  });
+
   it("returns 409 when orchestrator throws PolicyError (wrong state)", async () => {
     const { app, mockOrchestrator } = await buildApp();
     mockOrchestrator.answerQuestions.mockRejectedValue(

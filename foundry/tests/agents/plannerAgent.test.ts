@@ -304,4 +304,178 @@ describe("PlannerAgent.run()", () => {
       expect(prompt).not.toContain("{{relatedContextSection}}");
     });
   });
+
+  describe("planReviewSection rendering", () => {
+    it("renders '## AI Plan Review Findings' with the review summary and each finding", async () => {
+      const { agent, getPrompt } = buildPlannerAgent();
+      const bundle = makeTaskBundle();
+
+      await agent.run(bundle, "run-1", {
+        planReviewFindings: {
+          summary: "Mostly solid, one gap in error handling.",
+          findings: [
+            {
+              id: "pf1",
+              severity: "important",
+              title: "Missing retry logic",
+              details: "The plan doesn't address transient network failures.",
+            },
+          ],
+        },
+      });
+
+      const prompt = getPrompt();
+      expect(prompt).toContain("## AI Plan Review Findings (from previous plan)");
+      expect(prompt).toContain("Mostly solid, one gap in error handling.");
+      expect(prompt).toContain("- **[important] Missing retry logic** (pf1): The plan doesn't address transient network failures.");
+      expect(prompt).toContain("Incorporate these findings into the revised plan");
+    });
+
+    it("omits the plan review findings section when none is provided", async () => {
+      const { agent, getPrompt } = buildPlannerAgent();
+      const bundle = makeTaskBundle();
+
+      await agent.run(bundle, "run-1");
+
+      const prompt = getPrompt();
+      expect(prompt).not.toContain("AI Plan Review Findings");
+      expect(prompt).not.toContain("{{planReviewSection}}");
+    });
+  });
+
+  describe("previousPlanSection rendering", () => {
+    it("renders the previously rejected plan with steps, risks, assumptions and mixed-requirement open questions", async () => {
+      const { agent, getPrompt } = buildPlannerAgent();
+      const bundle = makeTaskBundle();
+
+      await agent.run(bundle, "run-1", {
+        previousPlan: {
+          planVersion: 4,
+          summary: "Old approach using polling.",
+          requirementsTraceability: "",
+          assumptions: ["Assumed webhook support existed"],
+          openQuestions: [
+            { id: "q1", question: "Is webhook support available?", requiredForExecution: true },
+            { id: "q2", question: "Preferred retry backoff?", requiredForExecution: false },
+          ],
+          risks: ["Polling may hit rate limits"],
+          steps: [{ id: "s1", title: "Poll endpoint", description: "Poll every 30s" }],
+          testPlan: "Run integration tests",
+          confidence: 0.6,
+        },
+      });
+
+      const prompt = getPrompt();
+      expect(prompt).toContain("## Previously Rejected Plan (v4)");
+      expect(prompt).toContain("**Confidence:** 60%");
+      expect(prompt).toContain("1. **Poll endpoint** (s1): Poll every 30s");
+      expect(prompt).toContain("**Risks:**");
+      expect(prompt).toContain("Polling may hit rate limits");
+      expect(prompt).toContain("**Assumptions:**");
+      expect(prompt).toContain("Assumed webhook support existed");
+      expect(prompt).toContain("**Open Questions:**");
+      expect(prompt).toContain("[q1] Is webhook support available? *(blocks execution)*");
+      expect(prompt).toContain("[q2] Preferred retry backoff?");
+      expect(prompt).not.toContain("[q2] Preferred retry backoff? *(blocks execution)*");
+      expect(prompt).toContain("**Test Plan:** Run integration tests");
+      expect(prompt).toContain("Preserve the parts that are still valid");
+    });
+
+    it("omits risks, assumptions and open-questions sub-sections when the previous plan has none", async () => {
+      const { agent, getPrompt } = buildPlannerAgent();
+      const bundle = makeTaskBundle();
+
+      await agent.run(bundle, "run-1", {
+        previousPlan: {
+          planVersion: 1,
+          summary: "Minimal previous plan.",
+          requirementsTraceability: "",
+          assumptions: [],
+          openQuestions: [],
+          risks: [],
+          steps: [{ id: "s1", title: "Step one", description: "Do it" }],
+          testPlan: "Smoke test",
+          confidence: 0.5,
+        },
+      });
+
+      const prompt = getPrompt();
+      expect(prompt).toContain("## Previously Rejected Plan (v1)");
+      expect(prompt).not.toContain("**Risks:**");
+      expect(prompt).not.toContain("**Assumptions:**");
+      expect(prompt).not.toContain("**Open Questions:**");
+    });
+
+    it("omits the previously-rejected-plan section when no previousPlan is given", async () => {
+      const { agent, getPrompt } = buildPlannerAgent();
+      const bundle = makeTaskBundle();
+
+      await agent.run(bundle, "run-1");
+
+      const prompt = getPrompt();
+      expect(prompt).not.toContain("Previously Rejected Plan");
+      expect(prompt).not.toContain("{{previousPlanSection}}");
+    });
+  });
+
+  describe("priorSkillsSection rendering", () => {
+    it("renders prior skills, using the taskCategory as heading when name is absent and omitting the intro when description is absent", async () => {
+      const { agent, getPrompt } = buildPlannerAgent();
+      const bundle = makeTaskBundle();
+
+      await agent.run(bundle, "run-1", {
+        priorSkills: [
+          {
+            id: "skill-1",
+            repoSlug: "test-repo",
+            taskCategory: "bug-fix",
+            name: "Null-check guard pattern",
+            description: "How to add defensive null checks.",
+            skillMarkdown: "Always check for null before dereferencing.",
+            utilityScore: 0.9,
+            lastUsedAt: new Date("2026-01-01"),
+          },
+          {
+            id: "skill-2",
+            repoSlug: "test-repo",
+            taskCategory: "refactor",
+            name: null,
+            description: null,
+            skillMarkdown: "Extract shared logic into a helper.",
+            utilityScore: 0.5,
+            lastUsedAt: new Date("2026-01-02"),
+          },
+        ],
+      });
+
+      const prompt = getPrompt();
+      expect(prompt).toContain("## Prior Skills from Similar Tasks");
+      expect(prompt).toContain("### Null-check guard pattern (bug-fix)");
+      expect(prompt).toContain("How to add defensive null checks.");
+      expect(prompt).toContain("Always check for null before dereferencing.");
+      // Second skill has no name, so the heading falls back to the bare taskCategory.
+      expect(prompt).toContain("### refactor\n\nExtract shared logic into a helper.");
+    });
+
+    it("omits the prior skills section when priorSkills is an empty array", async () => {
+      const { agent, getPrompt } = buildPlannerAgent();
+      const bundle = makeTaskBundle();
+
+      await agent.run(bundle, "run-1", { priorSkills: [] });
+
+      const prompt = getPrompt();
+      expect(prompt).not.toContain("## Prior Skills from Similar Tasks");
+    });
+
+    it("omits the prior skills section when priorSkills is not provided", async () => {
+      const { agent, getPrompt } = buildPlannerAgent();
+      const bundle = makeTaskBundle();
+
+      await agent.run(bundle, "run-1");
+
+      const prompt = getPrompt();
+      expect(prompt).not.toContain("## Prior Skills from Similar Tasks");
+      expect(prompt).not.toContain("{{priorSkillsSection}}");
+    });
+  });
 });

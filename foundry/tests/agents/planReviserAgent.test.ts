@@ -151,3 +151,29 @@ describe("PlanReviserAgent.run() relatedContext rendering", () => {
     expect(prompt).not.toContain("{{relatedContextSection}}");
   });
 });
+
+describe("PlanReviserAgent.run() operator note", () => {
+  it("includes the operator note section, instructing not to drop either side, when a note is provided", async () => {
+    const { agent, getPrompt } = buildPlanReviserAgent();
+    const bundle = makeTaskBundle();
+
+    await agent.run(makePlan(), makePlanReview(), bundle, "run-1", {
+      operatorNote: "Keep backward compatibility with the v1 API.",
+    });
+
+    const prompt = getPrompt();
+    expect(prompt).toContain("## Operator Note");
+    expect(prompt).toContain("Keep backward compatibility with the v1 API.");
+    expect(prompt).toContain("do not drop the findings in favor of the note");
+  });
+
+  it("omits the operator note section when no note is provided", async () => {
+    const { agent, getPrompt } = buildPlanReviserAgent();
+    const bundle = makeTaskBundle();
+
+    await agent.run(makePlan(), makePlanReview(), bundle, "run-1");
+
+    const prompt = getPrompt();
+    expect(prompt).not.toContain("## Operator Note");
+  });
+});
