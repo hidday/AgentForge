@@ -209,4 +209,32 @@ describe("POST /api/runs/:id/actions/answer-questions", () => {
     const body = JSON.parse(response.body) as { error: string };
     expect(body.error).toContain("Wrong state");
   });
+
+  it("returns 400 with the Error's message for a generic (non-Policy, non-Validation) Error", async () => {
+    const { app, mockOrchestrator } = await buildApp();
+    mockOrchestrator.answerQuestions.mockRejectedValue(new Error("Database connection lost"));
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/actions/answer-questions",
+      payload: { answers: [{ questionId: "q1", answer: "yes" }] },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(JSON.parse(response.body)).toEqual({ error: "Database connection lost" });
+  });
+
+  it("returns 400 with a stringified message for a non-Error rejection", async () => {
+    const { app, mockOrchestrator } = await buildApp();
+    mockOrchestrator.answerQuestions.mockRejectedValue("not an Error instance");
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/actions/answer-questions",
+      payload: { answers: [{ questionId: "q1", answer: "yes" }] },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(JSON.parse(response.body)).toEqual({ error: "not an Error instance" });
+  });
 });

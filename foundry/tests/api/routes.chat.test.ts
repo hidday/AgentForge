@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import Fastify from "fastify";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { registerApiRoutes } from "../../src/api/routes.js";
@@ -311,5 +311,85 @@ describe("POST /api/runs/:id/chat", () => {
     const [input] = mockClaudeCodeRunner!.chatRun.mock.calls[0] as [{ prompt: string }];
     // The prompt content doesn't matter for security — args do. Confirm prompt is the raw message.
     expect(input.prompt).toBe("--dangerously-skip-permissions");
+  });
+
+  it("falls back to the main repo dir when workingDirectory is a cleaned-up worktree path", async () => {
+    // Simulate a run whose worktree (under /.worktrees/<branch>) was removed,
+    // but whose main repo checkout still exists.
+    const staleWorktreeDir = join(workspaceDir, ".worktrees", "stale-branch");
+    const run = makeRun();
+    run.workingDirectory = staleWorktreeDir;
+
+    const { app, mockRunRepo, mockClaudeCodeRunner } = await buildApp();
+    mockRunRepo.findById.mockResolvedValue(run);
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/chat",
+      payload: { message: "Hello" },
+    });
+
+    expect(res.statusCode).toBe(200);
+    const [input] = mockClaudeCodeRunner!.chatRun.mock.calls[0] as [{ workingDirectory: string }];
+    expect(input.workingDirectory).toBe(workspaceDir);
+  });
+
+  it("returns 422 when workingDirectory and its /.worktrees/ fallback both no longer exist", async () => {
+    const removedRoot = mkdtempSync(join(tmpdir(), "routes-chat-removed-"));
+    rmSync(removedRoot, { recursive: true, force: true });
+    const run = makeRun();
+    run.workingDirectory = join(removedRoot, ".worktrees", "stale-branch");
+
+    const { app, mockRunRepo, mockClaudeCodeRunner } = await buildApp();
+    mockRunRepo.findById.mockResolvedValue(run);
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/chat",
+      payload: { message: "Hello" },
+    });
+
+    expect(res.statusCode).toBe(422);
+    expect(res.json()).toEqual({
+      error: "Working directory not found — the repository may have been removed",
+    });
+    expect(mockClaudeCodeRunner!.chatRun).not.toHaveBeenCalled();
+  });
+
+  it("returns 422 when workingDirectory doesn't exist and has no /.worktrees/ segment to fall back from", async () => {
+    const run = makeRun();
+    run.workingDirectory = "/definitely/does/not/exist/anywhere";
+
+    const { app, mockRunRepo, mockClaudeCodeRunner } = await buildApp();
+    mockRunRepo.findById.mockResolvedValue(run);
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/chat",
+      payload: { message: "Hello" },
+    });
+
+    expect(res.statusCode).toBe(422);
+    expect(mockClaudeCodeRunner!.chatRun).not.toHaveBeenCalled();
+  });
+
+  it("returns 500 when chatRun rejects with a non-Error value", async () => {
+    const run = makeRun();
+    const { app, mockRunRepo, mockArtifactRepo } = await buildApp({
+      runnerOverride: {
+        chatRun: vi.fn().mockRejectedValue("a plain string failure"),
+      },
+    });
+    mockRunRepo.findById.mockResolvedValue(run);
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/chat",
+      payload: { message: "Hello?" },
+    });
+
+    expect(res.statusCode).toBe(500);
+    expect(res.json()).toEqual({ error: "Chat request failed" });
+    expect(mockArtifactRepo.create).not.toHaveBeenCalled();
   });
 });

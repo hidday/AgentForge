@@ -178,6 +178,15 @@ describe("AnswerResearcherAgent.run()", () => {
     expect(prompt).toContain("*(blocks execution)*");
   });
 
+  it("omits the Open Questions section entirely when the plan has no open questions", async () => {
+    const { agent, getUserPrompt } = buildAgent();
+
+    await agent.run({ ...makePlan(), openQuestions: [] }, makeTaskBundle(), "run-1");
+
+    const prompt = getUserPrompt();
+    expect(prompt).not.toContain("## Open Questions to Research");
+  });
+
   it("renders the Prior Human Answers section when humanAnswers are provided", async () => {
     const { agent, getUserPrompt } = buildAgent();
 

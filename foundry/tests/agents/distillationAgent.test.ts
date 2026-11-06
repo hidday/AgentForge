@@ -430,6 +430,483 @@ describe("DistillationAgent", () => {
     });
   });
 
+  describe("(j) Plan and Remediation artifacts present with valid payloads", () => {
+    it("summarizes plan (with step/assumption/risk overflow) and remediation (with resolution overflow) into the prompt", async () => {
+      const deps = buildDeps();
+      deps.agentSkillRepo.findActiveByRepo.mockResolvedValue([]);
+
+      const planPayload = {
+        planVersion: 1,
+        summary: "A".repeat(700),
+        assumptions: Array.from({ length: 10 }, (_, i) => `assumption ${i}`),
+        risks: Array.from({ length: 10 }, (_, i) => `risk ${i}`),
+        steps: Array.from({ length: 14 }, (_, i) => ({
+          id: `s${i}`,
+          title: `step ${i}`,
+          description: `desc ${i}`,
+        })),
+        testPlan: "Run the full suite.",
+        confidence: 0.75,
+        openQuestions: [],
+        requirementsTraceability: "",
+      };
+      const remediationPayload = {
+        reviewId: "rev-1",
+        readyForHumanReview: true,
+        resolution: Array.from({ length: 17 }, (_, i) => ({
+          findingId: `f${i}`,
+          status: "accepted" as const,
+          action: `fixed ${i}`,
+          rationale: `because ${i}`,
+        })),
+        executionReport: {
+          executionVersion: 2,
+          summary: "remediated",
+          filesChanged: [],
+          checks: {
+            lint: { status: "pass" as const, details: "" },
+            typecheck: { status: "pass" as const, details: "" },
+            tests: { status: "pass" as const, details: "" },
+          },
+          notes: [],
+          prDraftCreated: true,
+          score: 0.95,
+          scoreRationale: "great",
+        },
+      };
+
+      deps.artifactRepo.findLatestByType.mockImplementation((_runId: string, type: string) => {
+        if (type === "ExecutionReport") {
+          return Promise.resolve({
+            id: "artifact-1",
+            runId: "run-1",
+            type: "ExecutionReport",
+            version: 1,
+            payloadJson: remediationPayload.executionReport,
+            rawText: "",
+            createdAt: new Date(),
+          });
+        }
+        if (type === "Plan") {
+          return Promise.resolve({
+            id: "artifact-plan",
+            runId: "run-1",
+            type: "Plan",
+            version: 1,
+            payloadJson: planPayload,
+            rawText: "",
+            createdAt: new Date(),
+          });
+        }
+        if (type === "Remediation") {
+          return Promise.resolve({
+            id: "artifact-rem",
+            runId: "run-1",
+            type: "Remediation",
+            version: 1,
+            payloadJson: remediationPayload,
+            rawText: "",
+            createdAt: new Date(),
+          });
+        }
+        return Promise.resolve(null);
+      });
+
+      deps.agentRunner.run.mockImplementation((_stage, { prompt }: { prompt: string }) => {
+        // Assert the rendered prompt actually contains the summarized,
+        // truncated, overflow-capped content before returning a decision.
+        expect(prompt).toContain("…and 2 more steps");
+        expect(prompt).toContain("…and 2 more");
+        expect(prompt).toContain("…and 1 more");
+        expect(prompt).toContain("…");
+        return Promise.resolve(
+          makeDistillationOutput({ shouldPersist: false, reason: "already covered by summary" }),
+        );
+      });
+
+      const agent = buildAgent(deps);
+      await agent.run("run-1", makeRun());
+
+      expect(deps.agentRunner.run).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe("(k) Plan and Remediation artifacts present with malformed payloads", () => {
+    it("falls back to truncated JSON summaries when payloads don't match their schemas", async () => {
+      const deps = buildDeps();
+      deps.agentSkillRepo.findActiveByRepo.mockResolvedValue([]);
+
+      deps.artifactRepo.findLatestByType.mockImplementation((_runId: string, type: string) => {
+        if (type === "ExecutionReport") {
+          return Promise.resolve({
+            id: "artifact-1",
+            runId: "run-1",
+            type: "ExecutionReport",
+            version: 1,
+            payloadJson: { bogus: true },
+            rawText: "",
+            createdAt: new Date(),
+          });
+        }
+        if (type === "Plan") {
+          return Promise.resolve({
+            id: "artifact-plan",
+            runId: "run-1",
+            type: "Plan",
+            version: 1,
+            payloadJson: { bogus: "not-a-plan" },
+            rawText: "",
+            createdAt: new Date(),
+          });
+        }
+        if (type === "Remediation") {
+          return Promise.resolve({
+            id: "artifact-rem",
+            runId: "run-1",
+            type: "Remediation",
+            version: 1,
+            payloadJson: { bogus: "not-a-remediation" },
+            rawText: "",
+            createdAt: new Date(),
+          });
+        }
+        return Promise.resolve(null);
+      });
+
+      deps.agentRunner.run.mockImplementation((_stage, { prompt }: { prompt: string }) => {
+        expect(prompt).toContain("bogus");
+        return Promise.resolve(
+          makeDistillationOutput({ shouldPersist: false, reason: "malformed artifacts" }),
+        );
+      });
+
+      const agent = buildAgent(deps);
+      await agent.run("run-1", makeRun());
+
+      expect(deps.agentRunner.run).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe("(l) shouldPersist=true but required skill fields are missing/blank", () => {
+    it("skips persisting and emits missing_required_skill_fields when taskCategory is absent", async () => {
+      const deps = buildDeps();
+      deps.agentSkillRepo.findActiveByRepo.mockResolvedValue([]);
+      deps.agentRunner.run.mockResolvedValue(
+        makeDistillationOutput({
+          shouldPersist: true,
+          reason: "insight",
+          skillMarkdown: "some markdown",
+          // taskCategory intentionally omitted
+        }),
+      );
+
+      const agent = buildAgent(deps);
+      await agent.run("run-1", makeRun());
+
+      expect(deps.agentSkillRepo.create).not.toHaveBeenCalled();
+      expect(deps.agentSkillRepo.displaceAndCreate).not.toHaveBeenCalled();
+      expect(deps.eventRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          payloadJson: expect.objectContaining({
+            shouldPersist: false,
+            reason: "missing_required_skill_fields",
+          }),
+        }),
+      );
+    });
+
+    it("skips persisting when skillMarkdown is whitespace-only", async () => {
+      const deps = buildDeps();
+      deps.agentSkillRepo.findActiveByRepo.mockResolvedValue([]);
+      deps.agentRunner.run.mockResolvedValue(
+        makeDistillationOutput({
+          shouldPersist: true,
+          reason: "insight",
+          taskCategory: "auth middleware",
+          skillMarkdown: "   ",
+        }),
+      );
+
+      const agent = buildAgent(deps);
+      await agent.run("run-1", makeRun());
+
+      expect(deps.agentSkillRepo.create).not.toHaveBeenCalled();
+      expect(deps.eventRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          payloadJson: expect.objectContaining({
+            shouldPersist: false,
+            reason: "missing_required_skill_fields",
+          }),
+        }),
+      );
+    });
+
+    it("falls back to a generated description when description is whitespace-only", async () => {
+      const deps = buildDeps();
+      deps.agentSkillRepo.findActiveByRepo.mockResolvedValue([]);
+      deps.agentSkillRepo.countActiveByRepo.mockResolvedValue(0);
+      deps.agentRunner.run.mockResolvedValue(
+        makeDistillationOutput({
+          shouldPersist: true,
+          reason: "insight",
+          taskCategory: "auth middleware",
+          skillMarkdown: "Use JWT.",
+          description: "   ",
+        }),
+      );
+
+      const agent = buildAgent(deps);
+      await agent.run("run-1", makeRun({ repo: "acme/backend" }));
+
+      expect(deps.agentSkillRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          description: "Use when working on auth middleware in acme/backend.",
+        }),
+      );
+    });
+  });
+
+  describe("(m) Existing skills pool is non-empty and passes the novelty gate", () => {
+    it("includes named and unnamed skills in the existing-skills prompt section, and falls back to an empty taskCategory_hint when the run has no title", async () => {
+      const deps = buildDeps();
+      deps.agentSkillRepo.findActiveByRepo.mockResolvedValue([
+        makeSkill({ taskCategory: "database migration", skillMarkdown: "Run migrations.", name: "db-migrate" }),
+        makeSkill({ taskCategory: "api rate limiting", skillMarkdown: "Use token buckets.", name: null }),
+      ]);
+
+      deps.agentRunner.run.mockImplementation((_stage, { prompt }: { prompt: string }) => {
+        expect(prompt).toContain("- [db-migrate] database migration:");
+        expect(prompt).toContain("- [api rate limiting] api rate limiting:");
+        return Promise.resolve(
+          makeDistillationOutput({ shouldPersist: false, reason: "not novel enough per LLM" }),
+        );
+      });
+
+      const agent = buildAgent(deps);
+      await agent.run("run-1", makeRun({ linearIssueTitle: null }));
+
+      expect(deps.agentRunner.run).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe("(n) LLM call rejects with a non-Error value", () => {
+    it("emits reason='parse_error' when the agent runner rejects with a plain string", async () => {
+      const deps = buildDeps();
+      deps.agentSkillRepo.findActiveByRepo.mockResolvedValue([]);
+      deps.agentRunner.run.mockRejectedValue("not an Error instance");
+
+      const agent = buildAgent(deps);
+      await agent.run("run-1", makeRun());
+
+      expect(deps.eventRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          payloadJson: expect.objectContaining({ reason: "parse_error" }),
+        }),
+      );
+    });
+  });
+
+  describe("(o) Plan/execution/remediation summaries exercise their non-overflow and missing-field branches", () => {
+    it("renders a short (non-overflowing) steps/resolution list and handles missing description/rationale and non-pass checks", async () => {
+      const deps = buildDeps();
+      deps.agentSkillRepo.findActiveByRepo.mockResolvedValue([]);
+
+      deps.artifactRepo.findLatestByType.mockImplementation((_runId: string, type: string) => {
+        if (type === "ExecutionReport") {
+          return Promise.resolve({
+            id: "artifact-1",
+            runId: "run-1",
+            type: "ExecutionReport",
+            version: 1,
+            payloadJson: {
+              executionVersion: 1,
+              summary: "done",
+              filesChanged: ["src/a.ts", "src/b.ts"],
+              checks: {
+                lint: { status: "pass", details: "" },
+                typecheck: { status: "fail", details: "" },
+                tests: { status: "fail", details: "2 failures" },
+              },
+              notes: [],
+              prDraftCreated: false,
+              score: 0.5,
+              scoreRationale: "ok",
+            },
+            rawText: "",
+            createdAt: new Date(),
+          });
+        }
+        if (type === "Plan") {
+          return Promise.resolve({
+            id: "artifact-plan",
+            runId: "run-1",
+            type: "Plan",
+            version: 1,
+            payloadJson: {
+              planVersion: 1,
+              summary: "short plan",
+              assumptions: [],
+              risks: [],
+              steps: [{ id: "s1", title: "Only step", description: "" }],
+              testPlan: "run tests",
+              confidence: 0.6,
+              openQuestions: [],
+              requirementsTraceability: "",
+            },
+            rawText: "",
+            createdAt: new Date(),
+          });
+        }
+        if (type === "Remediation") {
+          return Promise.resolve({
+            id: "artifact-rem",
+            runId: "run-1",
+            type: "Remediation",
+            version: 1,
+            payloadJson: {
+              reviewId: "rev-1",
+              readyForHumanReview: false,
+              resolution: [
+                { findingId: "f1", status: "accepted" as const, action: "fixed it", rationale: "" },
+              ],
+              executionReport: {
+                executionVersion: 2,
+                summary: "remediated",
+                filesChanged: [],
+                checks: {
+                  lint: { status: "pass" as const, details: "" },
+                  typecheck: { status: "pass" as const, details: "" },
+                  tests: { status: "pass" as const, details: "" },
+                },
+                notes: [],
+                prDraftCreated: true,
+                score: 0.6,
+                scoreRationale: "better",
+              },
+            },
+            rawText: "",
+            createdAt: new Date(),
+          });
+        }
+        return Promise.resolve(null);
+      });
+
+      deps.agentRunner.run.mockImplementation((_stage, { prompt }: { prompt: string }) => {
+        expect(prompt).toContain("1. Only step");
+        expect(prompt).not.toContain("…and");
+        expect(prompt).toContain("- [accepted] f1: fixed it");
+        expect(prompt).toContain("typecheck: fail");
+        expect(prompt).toContain("tests: fail — 2 failures");
+        return Promise.resolve(
+          makeDistillationOutput({ shouldPersist: false, reason: "nothing novel here" }),
+        );
+      });
+
+      const agent = buildAgent(deps);
+      await agent.run("run-1", makeRun());
+
+      expect(deps.agentRunner.run).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe("(p) Plan with zero steps and remediation with zero resolutions render '_none_'", () => {
+    it("renders '_none_' for an empty (but schema-valid) steps/resolution array", async () => {
+      const deps = buildDeps();
+      deps.agentSkillRepo.findActiveByRepo.mockResolvedValue([]);
+
+      deps.artifactRepo.findLatestByType.mockImplementation((_runId: string, type: string) => {
+        if (type === "ExecutionReport") {
+          return Promise.resolve({
+            id: "artifact-1",
+            runId: "run-1",
+            type: "ExecutionReport",
+            version: 1,
+            payloadJson: {
+              executionVersion: 1,
+              summary: "done",
+              filesChanged: [],
+              checks: {
+                lint: { status: "pass" as const, details: "" },
+                typecheck: { status: "pass" as const, details: "" },
+                tests: { status: "pass" as const, details: "" },
+              },
+              notes: [],
+              prDraftCreated: false,
+              score: 0.5,
+              scoreRationale: "ok",
+            },
+            rawText: "",
+            createdAt: new Date(),
+          });
+        }
+        if (type === "Plan") {
+          return Promise.resolve({
+            id: "artifact-plan",
+            runId: "run-1",
+            type: "Plan",
+            version: 1,
+            payloadJson: {
+              planVersion: 1,
+              summary: "empty-steps plan",
+              assumptions: [],
+              risks: [],
+              steps: [],
+              testPlan: "run tests",
+              confidence: 0.6,
+              openQuestions: [],
+              requirementsTraceability: "",
+            },
+            rawText: "",
+            createdAt: new Date(),
+          });
+        }
+        if (type === "Remediation") {
+          return Promise.resolve({
+            id: "artifact-rem",
+            runId: "run-1",
+            type: "Remediation",
+            version: 1,
+            payloadJson: {
+              reviewId: "rev-1",
+              readyForHumanReview: false,
+              resolution: [],
+              executionReport: {
+                executionVersion: 2,
+                summary: "remediated",
+                filesChanged: [],
+                checks: {
+                  lint: { status: "pass" as const, details: "" },
+                  typecheck: { status: "pass" as const, details: "" },
+                  tests: { status: "pass" as const, details: "" },
+                },
+                notes: [],
+                prDraftCreated: true,
+                score: 0.6,
+                scoreRationale: "better",
+              },
+            },
+            rawText: "",
+            createdAt: new Date(),
+          });
+        }
+        return Promise.resolve(null);
+      });
+
+      deps.agentRunner.run.mockImplementation((_stage, { prompt }: { prompt: string }) => {
+        expect(prompt).toContain("**Steps**:\n_none_");
+        expect(prompt).toContain("**Resolutions**:\n_none_");
+        return Promise.resolve(
+          makeDistillationOutput({ shouldPersist: false, reason: "nothing to distill" }),
+        );
+      });
+
+      const agent = buildAgent(deps);
+      await agent.run("run-1", makeRun());
+
+      expect(deps.agentRunner.run).toHaveBeenCalledTimes(1);
+    });
+  });
+
   describe("(i) No-skill backward-compat: empty priorSkills produces same output structure", () => {
     it("plannerAgent.run called with empty priorSkills works without error", async () => {
       const { PlannerAgent } = await import("../../src/agents/plannerAgent.js");
