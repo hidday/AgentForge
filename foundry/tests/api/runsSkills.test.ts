@@ -412,4 +412,15 @@ describe("GET /api/runs/:id/skills", () => {
       expect(body.distillationDecision?.reason).toBe("");
     });
   });
+
+  describe("missing runId", () => {
+    it("returns 400 when the :id path segment is empty", async () => {
+      const { app, mockEventRepo } = await buildApp();
+      const response = await app.inject({ method: "GET", url: "/api/runs//skills" });
+
+      expect(response.statusCode).toBe(400);
+      expect(response.json()).toEqual({ error: "runId is required" });
+      expect(mockEventRepo.findByRunId).not.toHaveBeenCalled();
+    });
+  });
 });
