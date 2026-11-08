@@ -116,4 +116,101 @@ END_STRUCTURED_OUTPUT`;
     expect(out.parsed.payload.value).toBe("ok");
     expect(logger.error).not.toHaveBeenCalled();
   });
+
+  it("truncates a long stderr/outputSnippet to a tail with an ellipsis prefix in the error log", async () => {
+    const longResult = "X".repeat(900) + "[TAIL_MARKER]";
+    const longStderr = "A".repeat(700) + "[STDERR_TAIL]";
+    const envelope = JSON.stringify({ type: "result", result: longResult });
+
+    const processRunner = makeMockProcessRunner({
+      stdout: envelope,
+      stderr: longStderr,
+      exitCode: 1,
+      durationMs: 100,
+      timedOut: false,
+    });
+    const logger = makeMockLogger();
+    const runner = new CursorRunner(
+      processRunner as never,
+      "cursor",
+      [],
+      "claude-4.6-sonnet",
+      logger as never,
+    );
+
+    await expect(
+      runner.run({ prompt: "x", workingDirectory: "/tmp", timeoutMs: 1000 }, "planner", echoSchema),
+    ).rejects.toThrow();
+
+    const [logFields] = logger.error.mock.calls[0]!;
+    expect(logFields.outputSnippet.startsWith("…")).toBe(true);
+    expect(logFields.outputSnippet).toContain("[TAIL_MARKER]");
+    expect(logFields.outputSnippet.length).toBeLessThanOrEqual(501);
+    expect(logFields.stderr.startsWith("…")).toBe(true);
+    expect(logFields.stderr).toContain("[STDERR_TAIL]");
+    expect(logFields.stderr.length).toBeLessThanOrEqual(501);
+  });
+});
+
+describe("CursorRunner.buildStdinPayload() — system prompt handling", () => {
+  it("prepends the system prompt separated from the user prompt when provided", async () => {
+    const validBlock = `BEGIN_STRUCTURED_OUTPUT
+{"success":true,"stage":"planner","payload":{"value":"ok"}}
+END_STRUCTURED_OUTPUT`;
+    const processRunner = makeMockProcessRunner({
+      stdout: JSON.stringify({ type: "result", result: validBlock }),
+      stderr: "",
+      exitCode: 0,
+      durationMs: 10,
+      timedOut: false,
+    });
+    const runner = new CursorRunner(
+      processRunner as never,
+      "cursor",
+      [],
+      "claude-4.6-sonnet",
+      makeMockLogger() as never,
+    );
+
+    await runner.run(
+      {
+        prompt: "do the task",
+        systemPrompt: "You are a helpful agent.",
+        workingDirectory: "/tmp",
+        timeoutMs: 1000,
+      },
+      "planner",
+      echoSchema,
+    );
+
+    expect(processRunner.execute).toHaveBeenCalledWith(
+      expect.objectContaining({ stdinData: "You are a helpful agent.\n\n---\n\ndo the task" }),
+    );
+  });
+
+  it("uses the prompt verbatim when no system prompt is provided", async () => {
+    const validBlock = `BEGIN_STRUCTURED_OUTPUT
+{"success":true,"stage":"planner","payload":{"value":"ok"}}
+END_STRUCTURED_OUTPUT`;
+    const processRunner = makeMockProcessRunner({
+      stdout: JSON.stringify({ type: "result", result: validBlock }),
+      stderr: "",
+      exitCode: 0,
+      durationMs: 10,
+      timedOut: false,
+    });
+    const runner = new CursorRunner(
+      processRunner as never,
+      "cursor",
+      [],
+      "claude-4.6-sonnet",
+      makeMockLogger() as never,
+    );
+
+    await runner.run({ prompt: "just this", workingDirectory: "/tmp", timeoutMs: 1000 }, "planner", echoSchema);
+
+    expect(processRunner.execute).toHaveBeenCalledWith(
+      expect.objectContaining({ stdinData: "just this" }),
+    );
+  });
 });
