@@ -1,7 +1,29 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, type Stats } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+
+// Lets individual tests make statSync() lie about a specific path, to exercise
+// filesystem states that cannot be created through the real filesystem in CI
+// (e.g. a `.git` entry that is neither a file nor a directory, such as a
+// socket or device node — or, respectively, a path whose stat briefly
+// disagrees with the directory check even though its `.git` child exists).
+// All other paths fall through to the real implementation.
+const statOverrides = new Map<string, Partial<Stats>>();
+
+vi.mock("node:fs", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs")>();
+  return {
+    ...actual,
+    statSync: (path: Parameters<typeof actual.statSync>[0], ...rest: unknown[]) => {
+      const override = statOverrides.get(String(path));
+      if (override) return override as Stats;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      return (actual.statSync as any)(path, ...rest);
+    },
+  };
+});
+
 import { RepoRegistry, loadRepoRegistry, type ReposConfig } from "../../src/config/repoRegistry.js";
 
 function makeLogger() {
@@ -145,6 +167,7 @@ describe("RepoRegistry", () => {
 
     afterEach(() => {
       rmSync(tmpDir, { recursive: true, force: true });
+      statOverrides.clear();
     });
 
     it("throws when the working directory does not exist", () => {
@@ -179,6 +202,27 @@ describe("RepoRegistry", () => {
       const registry = new RepoRegistry("/repos", makeConfig(), makeLogger() as never);
       // No .git under a file path, so this hits the "not a git repository" branch first.
       expect(() => registry.validateWorkingDirectory(filePath)).toThrow();
+    });
+
+    it("throws when the .git entry exists but is neither a file nor a directory (e.g. a socket or device node)", () => {
+      mkdirSync(join(tmpDir, ".git"));
+      const gitPath = join(tmpDir, ".git");
+      statOverrides.set(gitPath, { isDirectory: () => false, isFile: () => false });
+
+      const registry = new RepoRegistry("/repos", makeConfig(), makeLogger() as never);
+      expect(() => registry.validateWorkingDirectory(tmpDir)).toThrow(
+        /Working directory has invalid \.git entry/,
+      );
+    });
+
+    it("throws when the working directory's own stat says it is not a directory, despite a valid .git entry", () => {
+      mkdirSync(join(tmpDir, ".git"));
+      statOverrides.set(tmpDir, { isDirectory: () => false });
+
+      const registry = new RepoRegistry("/repos", makeConfig(), makeLogger() as never);
+      expect(() => registry.validateWorkingDirectory(tmpDir)).toThrow(
+        /Working directory path is not a directory/,
+      );
     });
   });
 });

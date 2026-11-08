@@ -263,5 +263,58 @@ describe("NotificationService", () => {
 
       expect(result.slack.ok).toBe(true);
     });
+
+    it("falls back to issue id, '(untitled)' and no Linear link in the email subject/html/text when identifier/title/url are absent", async () => {
+      fetchMock.mockResolvedValue({ ok: true });
+      const svc = new NotificationService(
+        buildConfig({ emailTo: "a@b.com", resendApiKey: "resend-key" }),
+        makeLogger() as never,
+      );
+
+      await svc.sendHumanRequest(
+        makePayload({
+          linearIssue: { id: "issue-raw-id", title: null, url: null },
+        }),
+      );
+
+      const body = JSON.parse(fetchMock.mock.calls[0][1].body as string) as {
+        subject: string;
+        html: string;
+        text: string;
+      };
+      expect(body.subject).toContain("issue-raw-id");
+      expect(body.subject).toContain("(untitled)");
+      expect(body.html).toContain("issue-raw-id");
+      expect(body.html).toContain("(untitled)");
+      expect(body.html).not.toContain("Open Linear issue");
+      expect(body.text).toContain("issue-raw-id: (untitled)");
+      expect(body.text).not.toContain("Linear:");
+    });
+
+    it("records a Slack failure with a stringified error when fetch rejects with a non-Error value", async () => {
+      fetchMock.mockRejectedValue("DNS lookup failed");
+      const svc = new NotificationService(
+        buildConfig({ slackWebhookUrl: "https://hooks.slack.com/x" }),
+        makeLogger() as never,
+      );
+
+      const result = await svc.sendHumanRequest(makePayload());
+
+      expect(result.slack.ok).toBe(false);
+      expect(result.slack.error).toBe("DNS lookup failed");
+    });
+
+    it("records an email failure with a stringified error when fetch rejects with a non-Error value", async () => {
+      fetchMock.mockRejectedValue("connection reset");
+      const svc = new NotificationService(
+        buildConfig({ emailTo: "a@b.com", resendApiKey: "resend-key" }),
+        makeLogger() as never,
+      );
+
+      const result = await svc.sendHumanRequest(makePayload());
+
+      expect(result.email.ok).toBe(false);
+      expect(result.email.error).toBe("connection reset");
+    });
   });
 });

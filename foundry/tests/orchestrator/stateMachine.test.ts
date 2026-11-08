@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { transition, getValidEvents } from "../../src/orchestrator/stateMachine.js";
 import { RunState } from "../../src/domain/runState.js";
 import { RunEvent } from "../../src/domain/runEvent.js";
+import { StateTransitionError } from "../../src/utils/errors.js";
 
 describe("stateMachine - clarification transitions", () => {
   it("HumanClarificationNeeded + CLARIFICATION_PROVIDED → Planning", () => {
@@ -39,5 +40,30 @@ describe("stateMachine - clarification transitions", () => {
     const validEvents = getValidEvents(RunState.Failed);
     expect(validEvents).toHaveLength(1);
     expect(validEvents).toContain(RunEvent.RESET_TO_TODO);
+  });
+
+  it("throws StateTransitionError for a terminal state with no outgoing transitions at all", () => {
+    // RunState.Done has no `add()` entries in buildTransitionTable, so the
+    // state map lookup itself misses.
+    expect(() => transition(RunState.Done, RunEvent.RUN_REQUESTED)).toThrow(
+      StateTransitionError,
+    );
+    expect(() => transition(RunState.Done, RunEvent.RUN_REQUESTED)).toThrow(
+      /No transition from state "Done" for event "RUN_REQUESTED"/,
+    );
+  });
+
+  it("getValidEvents returns an empty array for a terminal state with no transitions", () => {
+    expect(getValidEvents(RunState.Done)).toEqual([]);
+  });
+
+  it("throws StateTransitionError for a known state given an event it does not accept", () => {
+    // Todo has outgoing transitions, but not for HUMAN_APPROVED.
+    expect(() => transition(RunState.Todo, RunEvent.HUMAN_APPROVED)).toThrow(
+      StateTransitionError,
+    );
+    expect(() => transition(RunState.Todo, RunEvent.HUMAN_APPROVED)).toThrow(
+      /No transition from state "Todo" for event "HUMAN_APPROVED"/,
+    );
   });
 });

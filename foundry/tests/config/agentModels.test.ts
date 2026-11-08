@@ -31,4 +31,17 @@ describe("agentModels", () => {
     expect(resolveAgentModel("plan-reviewer", env)).toBe("gpt-5.6-sol");
     expect(resolveAgentModel("reviewer", env)).toBe("gpt-5.6-sol");
   });
+
+  it("throws a descriptive error for a stage with no recognized tier (defensive exhaustive check)", () => {
+    // No real Stage value can produce an unmapped tier, but resolveAgentModel's
+    // switch has a defensive `default` branch guarding against a future Stage
+    // being added to the union without a STAGE_TIERS entry. Simulate that by
+    // casting an unknown stage past the type system.
+    const unknownStage = "unknown-future-stage" as unknown as Parameters<
+      typeof resolveAgentModel
+    >[0];
+    expect(() => resolveAgentModel(unknownStage, env)).toThrow(
+      /Unknown agent model tier/,
+    );
+  });
 });

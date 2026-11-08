@@ -105,6 +105,18 @@ describe("RealLinearClient", () => {
       expect(result.team).toBeUndefined();
       expect(result.cycle).toBeUndefined();
     });
+
+    it("falls back to an empty labels array when the labels connection itself is undefined", async () => {
+      const issue = makeFakeIssue({
+        id: "issue-1",
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        labels: () => Promise.resolve(undefined as any),
+      });
+      injectSdk(client, { issue: () => Promise.resolve(issue) });
+
+      const result = await client.getIssue("issue-1");
+      expect(result.labels).toEqual([]);
+    });
   });
 
   describe("searchIssues", () => {
@@ -150,6 +162,21 @@ describe("RealLinearClient", () => {
 
       expect(sdkIssues).toHaveBeenCalledWith({ filter: { state: { name: { eq: "Todo" } } } });
       expect(results[0]).toMatchObject({ project: undefined, team: undefined, cycle: undefined });
+    });
+
+    it("maps description, cycle and labels through when present (non-fallback branches)", async () => {
+      const issue = makeFakeIssue({
+        id: "issue-1",
+        description: null,
+        cycle: Promise.resolve({ name: "Sprint 7" }),
+        labels: () => Promise.resolve(undefined as unknown as { nodes: never[] }),
+      });
+      const sdkIssues = vi.fn().mockResolvedValue({ nodes: [issue] });
+      injectSdk(client, { issues: sdkIssues });
+
+      const results = await client.searchIssues({ state: "Todo" });
+
+      expect(results[0]).toMatchObject({ description: "", cycle: "Sprint 7", labels: [] });
     });
 
     it("returns an empty array when the SDK yields no nodes", async () => {
@@ -206,6 +233,22 @@ describe("RealLinearClient", () => {
       expect(logger.warn).toHaveBeenCalled();
     });
 
+    it("falls back to an empty states list when the team's states connection is undefined", async () => {
+      const issue = makeFakeIssue({ id: "issue-1" });
+      const team = { id: "team-1", states: () => Promise.resolve(undefined) };
+      const updateIssue = vi.fn();
+      injectSdk(client, {
+        issue: () => Promise.resolve(issue),
+        team: () => Promise.resolve(team),
+        updateIssue,
+      });
+
+      await client.updateIssueState("issue-1", "Done");
+
+      expect(updateIssue).not.toHaveBeenCalled();
+      expect(logger.warn).toHaveBeenCalled();
+    });
+
     it("resolves the state id and calls updateIssue, caching the team's states", async () => {
       const issue1 = makeFakeIssue({ id: "issue-1" });
       const issue2 = makeFakeIssue({ id: "issue-2" });
@@ -252,6 +295,25 @@ describe("RealLinearClient", () => {
 
       expect(createIssueLabel).toHaveBeenCalledWith({ name: "shiny", teamId: "team-1" });
       expect(updateIssue).toHaveBeenCalledWith("issue-1", { labelIds: ["label-new"] });
+    });
+
+    it("creates a new label without a teamId when the issue has no team", async () => {
+      const issue = makeFakeIssue({ id: "issue-1", labelIds: [], team: Promise.resolve(null) });
+      const issueLabels = vi.fn().mockResolvedValue({ nodes: [] });
+      const createIssueLabel = vi.fn().mockResolvedValue({
+        issueLabel: Promise.resolve({ id: "label-new" }),
+      });
+      const updateIssue = vi.fn().mockResolvedValue({});
+      injectSdk(client, {
+        issue: () => Promise.resolve(issue),
+        issueLabels,
+        createIssueLabel,
+        updateIssue,
+      });
+
+      await client.addLabel("issue-1", "shiny");
+
+      expect(createIssueLabel).toHaveBeenCalledWith({ name: "shiny" });
     });
 
     it("reuses an existing label by name instead of creating a new one", async () => {
@@ -383,6 +445,17 @@ describe("RealLinearClient", () => {
 
     it("returns an empty array when there are no labels", async () => {
       const issue = makeFakeIssue({ id: "issue-1", labels: () => Promise.resolve({ nodes: [] }) });
+      injectSdk(client, { issue: () => Promise.resolve(issue) });
+
+      await expect(client.listLabels("issue-1")).resolves.toEqual([]);
+    });
+
+    it("returns an empty array and skips cache population when the labels connection is undefined", async () => {
+      const issue = makeFakeIssue({
+        id: "issue-1",
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        labels: () => Promise.resolve(undefined as any),
+      });
       injectSdk(client, { issue: () => Promise.resolve(issue) });
 
       await expect(client.listLabels("issue-1")).resolves.toEqual([]);

@@ -214,3 +214,37 @@ END_STRUCTURED_OUTPUT`;
     );
   });
 });
+
+describe("CursorRunner — process context propagation", () => {
+  it("passes a context with runId/stage/runtime when input.runId is set", async () => {
+    const validBlock = `BEGIN_STRUCTURED_OUTPUT
+{"success":true,"stage":"planner","payload":{"value":"ok"}}
+END_STRUCTURED_OUTPUT`;
+    const processRunner = makeMockProcessRunner({
+      stdout: JSON.stringify({ type: "result", result: validBlock }),
+      stderr: "",
+      exitCode: 0,
+      durationMs: 10,
+      timedOut: false,
+    });
+    const runner = new CursorRunner(
+      processRunner as never,
+      "cursor",
+      [],
+      "claude-4.6-sonnet",
+      makeMockLogger() as never,
+    );
+
+    await runner.run(
+      { prompt: "x", workingDirectory: "/tmp", timeoutMs: 1000, runId: "run-abc" },
+      "planner",
+      echoSchema,
+    );
+
+    expect(processRunner.execute).toHaveBeenCalledWith(
+      expect.objectContaining({
+        context: { runId: "run-abc", stage: "planner", runtime: "cursor" },
+      }),
+    );
+  });
+});

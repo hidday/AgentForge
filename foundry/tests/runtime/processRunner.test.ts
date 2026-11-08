@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { EventEmitter } from "node:events";
 import { mkdtempSync, rmSync, writeFileSync, readFileSync, mkdirSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { AgentTimeoutError } from "../../src/utils/errors.js";
 
 const { spawnMock } = vi.hoisted(() => ({ spawnMock: vi.fn() }));
@@ -63,6 +63,20 @@ afterEach(async () => {
   // late open doesn't surface as an unhandled ENOENT in a later test.
   await new Promise((resolve) => setTimeout(resolve, 50));
   rmSync(spoolDir, { recursive: true, force: true });
+});
+
+describe("ProcessRunner — spoolDir defaulting", () => {
+  it("defaults to .foundry/processes (resolved from cwd) when no spoolDir is given", () => {
+    const defaultDir = resolve(".foundry/processes");
+    rmSync(defaultDir, { recursive: true, force: true });
+
+    const runner = new ProcessRunner("mock", makeMockLogger() as never);
+
+    expect(existsSync(defaultDir)).toBe(true);
+    expect((runner as unknown as { spoolDir: string }).spoolDir).toBe(defaultDir);
+
+    rmSync(defaultDir, { recursive: true, force: true });
+  });
 });
 
 describe("ProcessRunner — mock mode", () => {
@@ -589,6 +603,25 @@ describe("ProcessRunner.rehydrateOrphans()", () => {
     );
   });
 
+  it("stringifies a non-Error thrown value in the warning log (defensive branch)", () => {
+    const logger = makeMockLogger();
+    const runner = new ProcessRunner("real", logger as never, undefined, spoolDir);
+    writeFileSync(join(spoolDir, "weird.json"), "{}");
+    // JSON.parse always throws a SyntaxError in practice; stub it for this
+    // one manifest-processing pass to exercise the `String(err)` fallback.
+    vi.spyOn(JSON, "parse").mockImplementation(() => {
+      // eslint-disable-next-line @typescript-eslint/only-throw-error
+      throw "a plain string failure";
+    });
+
+    runner.rehydrateOrphans();
+
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.objectContaining({ file: "weird.json", error: "a plain string failure" }),
+      "Failed to process manifest",
+    );
+  });
+
   it("rehydrates an alive orphan with no pre-existing log file, resumes tailing, buffers appended growth, and finalizes it once the pid disappears", async () => {
     vi.useFakeTimers();
     const logger = makeMockLogger();
@@ -717,6 +750,56 @@ describe("ProcessRunner.rehydrateOrphans()", () => {
       "claude-code",
       -1,
       expect.any(Number),
+    );
+  });
+
+  it("falls back to pid 0 for the liveness poll, and finalizeOrphan no-ops, when the active entry was already removed concurrently", async () => {
+    vi.useFakeTimers();
+    const logger = makeMockLogger();
+    const emitter = makeMockEmitter();
+    const runner = new ProcessRunner("real", logger as never, emitter as never, spoolDir);
+
+    const manifestPath = join(spoolDir, "alive4.json");
+    const logPath = join(spoolDir, "alive4.log");
+    writeFileSync(
+      manifestPath,
+      JSON.stringify({
+        id: "alive4",
+        pid: 88888,
+        command: "run-thing",
+        args: [],
+        runId: "run-alive4",
+        stage: "planner",
+        runtime: "claude-code",
+        startedAt: new Date().toISOString(),
+        logFile: logPath,
+      }),
+    );
+    const killSpy = vi.spyOn(process, "kill").mockImplementation(() => true);
+
+    runner.rehydrateOrphans();
+    expect(runner.getActiveProcesses()).toHaveLength(1);
+
+    // Simulate the active entry being removed through some other path
+    // (e.g. a same-id cleanup elsewhere) before the next liveness poll tick.
+    (runner as unknown as { activeProcesses: Map<string, unknown> }).activeProcesses.delete(
+      "alive4",
+    );
+
+    killSpy.mockImplementation(() => {
+      throw new Error("ESRCH");
+    });
+    await vi.advanceTimersByTimeAsync(5000);
+
+    // process.kill was called with the `?? 0` fallback pid, since the entry
+    // lookup returned undefined.
+    expect(killSpy).toHaveBeenCalledWith(0, 0);
+    // finalizeOrphan's own entry lookup also misses and returns early, so no
+    // completion event is emitted and no "exited" log line is produced.
+    expect(emitter.emitProcessCompleted).not.toHaveBeenCalled();
+    expect(logger.info).not.toHaveBeenCalledWith(
+      expect.objectContaining({ processId: "alive4" }),
+      "Orphaned process has exited",
     );
   });
 

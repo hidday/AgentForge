@@ -150,4 +150,27 @@ describe("PlanReviserAgent.run() relatedContext rendering", () => {
     expect(prompt).not.toContain("Background: Related Linear Context");
     expect(prompt).not.toContain("{{relatedContextSection}}");
   });
+
+  it("includes the Operator Note section when options.operatorNote is set", async () => {
+    const { agent, getPrompt } = buildPlanReviserAgent();
+    const bundle = makeTaskBundle();
+
+    await agent.run(makePlan(), makePlanReview(), bundle, "run-1", {
+      operatorNote: "Keep backwards compatibility with the old API shape.",
+    });
+
+    const prompt = getPrompt();
+    expect(prompt).toContain("## Operator Note");
+    expect(prompt).toContain("Keep backwards compatibility with the old API shape.");
+  });
+
+  it("omits the Operator Note section when no operator note is provided", async () => {
+    const { agent, getPrompt } = buildPlanReviserAgent();
+    const bundle = makeTaskBundle();
+
+    await agent.run(makePlan(), makePlanReview(), bundle, "run-1");
+
+    const prompt = getPrompt();
+    expect(prompt).not.toContain("## Operator Note");
+  });
 });

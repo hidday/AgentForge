@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { z } from "zod";
 import { OutputParser } from "../../src/runtime/outputParser.js";
 import { OutputParseError } from "../../src/utils/errors.js";
@@ -69,6 +69,30 @@ describe("OutputParser.parseJson()", () => {
       expect(e.message).toContain("Failed to parse JSON");
       expect(e.rawOutput).toContain("{not valid json");
       expect(e.rawOutput!.length).toBeLessThanOrEqual(500);
+    }
+  });
+
+  it("coerces a non-Error thrown value to a string in the error message (defensive branch)", () => {
+    // JSON.parse always throws a SyntaxError in practice, but the catch
+    // handler defends against any thrown value. Stub JSON.parse for this one
+    // call to exercise that defensive `String(err)` fallback.
+    const originalParse = JSON.parse;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    vi.spyOn(JSON, "parse").mockImplementation(() => {
+      // eslint-disable-next-line @typescript-eslint/only-throw-error
+      throw "not an Error instance";
+    });
+    try {
+      parser.parseJson('{"a":1}');
+      expect.unreachable("should have thrown");
+    } catch (err) {
+      expect(err).toBeInstanceOf(OutputParseError);
+      expect((err as OutputParseError).message).toContain(
+        "Failed to parse JSON: not an Error instance",
+      );
+    } finally {
+      JSON.parse = originalParse;
+      vi.restoreAllMocks();
     }
   });
 });
