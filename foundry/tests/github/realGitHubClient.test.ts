@@ -86,6 +86,13 @@ describe("RealGitHubClient", () => {
         /cannot access repo "acme\/widgets".*Not Found/,
       );
     });
+
+    it("wraps a non-Error rejection by coercing it to a string", async () => {
+      octokit.repos.get.mockRejectedValue("rate limited");
+      await expect(client.verifyRepoAccess("acme/widgets")).rejects.toThrow(
+        /cannot access repo "acme\/widgets".*rate limited/,
+      );
+    });
   });
 
   describe("getDefaultBranch", () => {
@@ -213,6 +220,17 @@ describe("RealGitHubClient", () => {
       await expect(
         client.createDraftPR("acme/widgets", "ai/issue-1", "main", "Title", "Body"),
       ).rejects.toThrow(/GitHub createDraftPR failed.*server error/);
+    });
+
+    it("wraps a 422 field-validation failure rejected with a non-Error value", async () => {
+      octokit.pulls.create.mockRejectedValue({
+        status: 422,
+        toString: () => '"code":"invalid" base branch',
+      });
+
+      await expect(
+        client.createDraftPR("acme/widgets", "ai/issue-1", "main", "Title", "Body"),
+      ).rejects.toThrow(/GitHub createDraftPR failed.*"code":"invalid"/);
     });
   });
 
@@ -407,6 +425,17 @@ describe("RealGitHubClient", () => {
       ).resolves.toBeUndefined();
       expect(logger.warn).toHaveBeenCalled();
     });
+
+    it("swallows a non-Error rejection and still logs a warning with a stringified error", async () => {
+      octokit.pulls.createReplyForReviewComment.mockRejectedValue("comment deleted");
+      await expect(
+        client.replyToReviewComment("acme/widgets", 3, 900, "thanks"),
+      ).resolves.toBeUndefined();
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.objectContaining({ error: "comment deleted" }),
+        expect.any(String),
+      );
+    });
   });
 
   describe("submitPRReview", () => {
@@ -455,6 +484,14 @@ describe("RealGitHubClient", () => {
       await expect(
         client.submitPRReview("acme/widgets", 3, "lgtm", "COMMENT"),
       ).rejects.toThrow(/GitHub submitPRReview failed/);
+    });
+
+    it("wraps a non-Error rejection by coercing it to a string", async () => {
+      octokit.pulls.createReview.mockRejectedValue({ toString: () => "transient failure" });
+
+      await expect(
+        client.submitPRReview("acme/widgets", 3, "lgtm", "APPROVE"),
+      ).rejects.toThrow(/GitHub submitPRReview failed.*transient failure/);
     });
   });
 });

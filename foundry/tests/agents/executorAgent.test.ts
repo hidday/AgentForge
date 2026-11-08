@@ -195,6 +195,43 @@ describe("ExecutorAgent.run()", () => {
     expect(githubClient.createDraftPR).not.toHaveBeenCalled();
   });
 
+  it("logs isRetry=true when only existingPR is set (no existingBranch)", async () => {
+    const { agent, logger } = buildAgent();
+
+    await agent.run(makePlan(), makeTaskBundle(), "run-1", {
+      existingBranch: null,
+      existingPR: 777,
+    });
+
+    const startLog = logger.info.mock.calls.find(
+      (c: unknown[]) => c[1] === "Starting executor agent",
+    );
+    expect(startLog).toBeDefined();
+    const payload = startLog?.[0] as Record<string, unknown> | undefined;
+    expect(payload?.isRetry).toBe(true);
+  });
+
+  it("includes the operator note section in the user prompt when options.operatorNote is set", async () => {
+    const { agent, getUserPrompt } = buildAgent();
+
+    await agent.run(makePlan(), makeTaskBundle(), "run-1", undefined, {
+      operatorNote: "Please also handle the edge case with empty arrays.",
+    });
+
+    const userPrompt = getUserPrompt();
+    expect(userPrompt).toContain("## Operator Note");
+    expect(userPrompt).toContain("Please also handle the edge case with empty arrays.");
+  });
+
+  it("omits the operator note section when no operator note is provided", async () => {
+    const { agent, getUserPrompt } = buildAgent();
+
+    await agent.run(makePlan(), makeTaskBundle(), "run-1");
+
+    const userPrompt = getUserPrompt();
+    expect(userPrompt).not.toContain("## Operator Note");
+  });
+
   it("logs the score and executionVersion in the completion event", async () => {
     const { agent, logger } = buildAgent({ score: 0.42 });
 

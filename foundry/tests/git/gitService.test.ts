@@ -401,6 +401,17 @@ describe("GitService", () => {
       );
       expect(buildWorktreeDirName("abcdefgh", "")).toBe("run-abcdefgh");
     });
+
+    it("stops adding slug words once the combined length would exceed 30 characters, even under the 4-word cap", () => {
+      // Each word is 10 chars; "aaaaaaaaaa-bbbbbbbbbb" is 21 chars (<=30), but
+      // adding the third word would make it 32 (>30), so shortenSlug should
+      // stop there rather than continuing to the 4-word maxParts cap.
+      const dirName = buildWorktreeDirName(
+        "abcdefgh",
+        "pry-1-aaaaaaaaaa-bbbbbbbbbb-cccccccccc-dddddddddd",
+      );
+      expect(dirName).toBe("run-abcdefgh-pry-1-aaaaaaaaaa-bbbbbbbbbb");
+    });
   });
 
   describe("resolveMainRepoPath", () => {
@@ -423,5 +434,18 @@ describe("GitService", () => {
     it("throws GitError when there is no origin remote to fetch from", async () => {
       await expect(svc.fetch(repoPath)).rejects.toThrow(GitError);
     });
+  });
+});
+
+describe("GitError", () => {
+  it("formats its message from an Error cause's .message", () => {
+    const err = new GitError("fetch", "/repo", new Error("network unreachable"));
+    expect(err.message).toBe('git fetch failed in /repo: network unreachable');
+    expect(err.name).toBe("GitError");
+  });
+
+  it("formats its message from a non-Error cause via String() coercion", () => {
+    const err = new GitError("fetch", "/repo", "a plain string cause");
+    expect(err.message).toBe("git fetch failed in /repo: a plain string cause");
   });
 });

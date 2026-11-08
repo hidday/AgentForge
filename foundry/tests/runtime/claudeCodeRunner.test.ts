@@ -472,6 +472,43 @@ describe("ClaudeCodeRunner.unwrapClaudeEnvelope() — NDJSON stream format", () 
     expect(logger.error).not.toHaveBeenCalled();
   });
 
+  it("skips blank lines while scanning the NDJSON stream from the end", async () => {
+    const ndjson = [
+      JSON.stringify({ type: "system", subtype: "init" }),
+      JSON.stringify({
+        type: "result",
+        result: `${STRUCTURED_OUTPUT_BEGIN}\n{"success":true,"stage":"planner","payload":{"value":"ok"}}\n${STRUCTURED_OUTPUT_END}`,
+        is_error: false,
+      }),
+      "", // trailing blank line, e.g. from a final newline in the raw stdout
+      "   ", // whitespace-only line
+    ].join("\n");
+
+    const processRunner = makeMockProcessRunner({
+      stdout: ndjson,
+      stderr: "",
+      exitCode: 0,
+      durationMs: 10,
+      timedOut: false,
+    });
+    const logger = makeMockLogger();
+    const runner = new ClaudeCodeRunner(
+      processRunner as never,
+      "claude",
+      [],
+      "claude-opus-4-8",
+      logger as never,
+    );
+
+    const out = await runner.run(
+      { prompt: "x", workingDirectory: "/tmp", timeoutMs: 1000 },
+      "planner",
+      echoSchema,
+    );
+
+    expect(out.parsed.payload.value).toBe("ok");
+  });
+
   it("treats is_error:true on the last NDJSON result line as an upstream API error", async () => {
     const ndjson = [
       JSON.stringify({ type: "system", subtype: "init" }),
@@ -564,5 +601,87 @@ describe("ClaudeCodeRunner.unwrapClaudeEnvelope() — NDJSON stream format", () 
     expect(out.raw).toBe(raw);
     expect(out.parsed.payload.value).toBe("ok");
     expect(logger.error).not.toHaveBeenCalled();
+  });
+});
+
+describe("ClaudeCodeRunner — process context propagation", () => {
+  it("run() passes a context with runId/stage/runtime when input.runId is set", async () => {
+    const processRunner = makeMockProcessRunner({
+      stdout: JSON.stringify({ type: "result", result: validStructuredOutput }),
+      stderr: "",
+      exitCode: 0,
+      durationMs: 10,
+      timedOut: false,
+    });
+    const runner = new ClaudeCodeRunner(
+      processRunner as never,
+      "claude",
+      [],
+      "claude-opus-4-8",
+      makeMockLogger() as never,
+    );
+
+    await runner.run(
+      { prompt: "x", workingDirectory: "/tmp", timeoutMs: 1000, runId: "run-123" },
+      "planner",
+      echoSchema,
+    );
+
+    expect(processRunner.execute).toHaveBeenCalledWith(
+      expect.objectContaining({
+        context: { runId: "run-123", stage: "planner", runtime: "claude-code" },
+      }),
+    );
+  });
+
+  it("run() passes context: undefined when input.runId is absent", async () => {
+    const processRunner = makeMockProcessRunner({
+      stdout: JSON.stringify({ type: "result", result: validStructuredOutput }),
+      stderr: "",
+      exitCode: 0,
+      durationMs: 10,
+      timedOut: false,
+    });
+    const runner = new ClaudeCodeRunner(
+      processRunner as never,
+      "claude",
+      [],
+      "claude-opus-4-8",
+      makeMockLogger() as never,
+    );
+
+    await runner.run({ prompt: "x", workingDirectory: "/tmp", timeoutMs: 1000 }, "planner", echoSchema);
+
+    expect(processRunner.execute).toHaveBeenCalledWith(
+      expect.objectContaining({ context: undefined }),
+    );
+  });
+
+  it("chatRun() passes a context with runId/stage/runtime when input.runId is set", async () => {
+    const processRunner = makeMockProcessRunner({
+      stdout: JSON.stringify({ type: "result", result: "A plain chat answer." }),
+      stderr: "",
+      exitCode: 0,
+      durationMs: 10,
+      timedOut: false,
+    });
+    const runner = new ClaudeCodeRunner(
+      processRunner as never,
+      "claude",
+      [],
+      "claude-opus-4-8",
+      makeMockLogger() as never,
+    );
+
+    await runner.chatRun(
+      { prompt: "Hello", workingDirectory: "/tmp", timeoutMs: 1000, runId: "run-456" },
+      "chat",
+    );
+
+    expect(processRunner.execute).toHaveBeenCalledWith(
+      expect.objectContaining({
+        context: { runId: "run-456", stage: "chat", runtime: "claude-code" },
+      }),
+    );
   });
 });

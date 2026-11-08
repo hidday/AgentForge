@@ -189,3 +189,37 @@ END_STRUCTURED_OUTPUT`;
     );
   });
 });
+
+describe("CodexRunner — process context propagation", () => {
+  it("passes a context with runId/stage/runtime when input.runId is set", async () => {
+    const validOutput = `BEGIN_STRUCTURED_OUTPUT
+{"success":true,"stage":"planner","payload":{"value":"ok"}}
+END_STRUCTURED_OUTPUT`;
+    const processRunner = makeMockProcessRunner({
+      stdout: validOutput,
+      stderr: "",
+      exitCode: 0,
+      durationMs: 10,
+      timedOut: false,
+    });
+    const runner = new CodexRunner(
+      processRunner as never,
+      "codex",
+      ["exec", "-"],
+      "gpt-5.6-sol",
+      makeMockLogger() as never,
+    );
+
+    await runner.run(
+      { prompt: "x", workingDirectory: "/tmp", timeoutMs: 1000, runId: "run-789" },
+      "planner",
+      echoSchema,
+    );
+
+    expect(processRunner.execute).toHaveBeenCalledWith(
+      expect.objectContaining({
+        context: { runId: "run-789", stage: "planner", runtime: "codex" },
+      }),
+    );
+  });
+});

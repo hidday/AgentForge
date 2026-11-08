@@ -256,4 +256,39 @@ describe("RealLinearClient.getRelatedContext", () => {
 
     expect(ctx.parent?.description).toBe("");
   });
+
+  it("falls back to an empty labels array and 'Unknown' state when the parent's connections are undefined", async () => {
+    const parent = makeFakeIssue({
+      id: "parent-id",
+      identifier: "PRY-100",
+      labels: () => Promise.resolve(undefined as unknown as { nodes: never[] }),
+      state: Promise.resolve(undefined as unknown as { id: string; name: string }),
+    });
+    const focus = makeFakeIssue({
+      id: "focus-id",
+      parent: Promise.resolve(parent),
+    });
+
+    issuesById.set("focus-id", focus);
+    issuesById.set("parent-id", parent);
+
+    const ctx = await client.getRelatedContext("focus-id");
+
+    expect(ctx.parent?.labels).toEqual([]);
+    expect(ctx.parent?.state).toBe("Unknown");
+  });
+
+  it("falls back to an empty blockers array when the inverseRelations connection itself is undefined", async () => {
+    const focus = makeFakeIssue({
+      id: "focus-id",
+      parent: Promise.resolve(null),
+      inverseRelations: () => Promise.resolve(undefined as unknown as { nodes: never[] }),
+    });
+
+    issuesById.set("focus-id", focus);
+
+    const ctx = await client.getRelatedContext("focus-id");
+
+    expect(ctx.blockers).toEqual([]);
+  });
 });

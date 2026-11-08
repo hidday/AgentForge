@@ -21,4 +21,14 @@ describe("skillNaming", () => {
       "dev-env-pause-resume",
     );
   });
+
+  it("slugifySkillName falls back to 'distilled-skill' when the input has no alphanumeric characters", () => {
+    expect(slugifySkillName("!!! /// ???")).toBe("distilled-skill");
+    expect(slugifySkillName("")).toBe("distilled-skill");
+  });
+
+  it("normalizeSkillName slugifies the fallback down to 'distilled-skill' when both name and fallback are unusable", () => {
+    expect(normalizeSkillName(undefined, "!!!")).toBe("distilled-skill");
+    expect(normalizeSkillName("   ", "###")).toBe("distilled-skill");
+  });
 });
