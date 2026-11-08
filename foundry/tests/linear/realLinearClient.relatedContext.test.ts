@@ -209,6 +209,35 @@ describe("RealLinearClient.getRelatedContext", () => {
     expect(ctx.blockers[0].id).toBe("blocker-id");
   });
 
+  it("skips a blocker relation whose issue fails to hydrate, and logs a warning", async () => {
+    const blocker = makeFakeIssue({ id: "blocker-id", identifier: "PRY-101" });
+    const focus = makeFakeIssue({
+      id: "focus-id",
+      parent: Promise.resolve(null),
+      inverseRelations: () =>
+        Promise.resolve({
+          nodes: [
+            { id: "rel-broken", type: "blocks", issue: Promise.reject(new Error("fetch failed")) },
+            { id: "rel-ok", type: "blocks", issue: Promise.resolve(blocker) },
+          ],
+        }),
+    });
+
+    issuesById.set("focus-id", focus);
+    issuesById.set("blocker-id", blocker);
+
+    const logger = (client as unknown as { logger: { warn: ReturnType<typeof vi.fn> } }).logger;
+
+    const ctx = await client.getRelatedContext("focus-id");
+
+    expect(ctx.blockers).toHaveLength(1);
+    expect(ctx.blockers[0].id).toBe("blocker-id");
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.objectContaining({ relationId: "rel-broken", focusIssueId: "focus-id" }),
+      "Failed to hydrate blocker issue from relation",
+    );
+  });
+
   it("treats null description as empty string", async () => {
     const parent = makeFakeIssue({
       id: "parent-id",
