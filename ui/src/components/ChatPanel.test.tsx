@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor, act } from "@testing-library/react";
+import { render, screen, waitFor, act, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { Artifact } from "@/api/client.ts";
 
@@ -250,5 +250,89 @@ describe("ChatPanel", () => {
       // "New question" should NOT appear
       expect(screen.queryByText("New question")).toBeNull();
     });
+  });
+
+  it("defaults content to an empty string when a ChatMessage artifact's payload has no content field", () => {
+    const artifacts: Artifact[] = [
+      {
+        id: "a1",
+        runId: RUN_ID,
+        type: "ChatMessage",
+        version: 1,
+        payloadJson: { role: "user" },
+        rawText: "",
+        createdAt: "2024-01-01T00:00:01Z",
+      },
+    ];
+    const { container } = render(<ChatPanel runId={RUN_ID} artifacts={artifacts} />);
+
+    // No "No messages yet" placeholder — one message bubble was rendered,
+    // just with empty text content.
+    expect(screen.queryByText(/No messages yet/i)).toBeNull();
+    expect(container.querySelector(".whitespace-pre-wrap")?.textContent).toBe("");
+  });
+
+  it("does nothing when the form is submitted with only whitespace in the input", async () => {
+    render(<ChatPanel runId={RUN_ID} artifacts={[]} />);
+    const input = screen.getByPlaceholderText(/ask the agent/i) as HTMLInputElement;
+    await userEvent.type(input, "   ");
+
+    const form = input.closest("form") as HTMLFormElement;
+    fireEvent.submit(form);
+
+    expect(mockApi.sendChatMessage).not.toHaveBeenCalled();
+  });
+
+  it("shows a generic error message when sendChatMessage rejects with a non-Error value", async () => {
+    mockApi.sendChatMessage.mockRejectedValue("network down");
+
+    render(<ChatPanel runId={RUN_ID} artifacts={[]} />);
+    const input = screen.getByPlaceholderText(/ask the agent/i);
+    await userEvent.type(input, "Question");
+    await userEvent.click(screen.getByRole("button", { name: /send/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText("Chat request failed")).toBeDefined();
+    });
+  });
+
+  it("collapses and re-expands the panel when the header is clicked", async () => {
+    render(<ChatPanel runId={RUN_ID} artifacts={[]} />);
+
+    // Expanded by default: the message area and input are visible.
+    expect(screen.getByPlaceholderText(/ask the agent/i)).toBeDefined();
+
+    await userEvent.click(screen.getByRole("button", { name: /chat with agent/i }));
+    expect(screen.queryByPlaceholderText(/ask the agent/i)).toBeNull();
+
+    await userEvent.click(screen.getByRole("button", { name: /chat with agent/i }));
+    expect(screen.getByPlaceholderText(/ask the agent/i)).toBeDefined();
+  });
+
+  it("calls scrollIntoView on the bottom anchor when it supports that API", async () => {
+    const scrollIntoViewMock = vi.fn();
+    const originalScrollIntoView = (
+      window.HTMLElement.prototype as unknown as { scrollIntoView?: () => void }
+    ).scrollIntoView;
+    window.HTMLElement.prototype.scrollIntoView = scrollIntoViewMock;
+
+    try {
+      mockApi.sendChatMessage.mockResolvedValue({ reply: "Response", durationMs: 100 });
+      render(<ChatPanel runId={RUN_ID} artifacts={[]} />);
+
+      // Mount triggers the effect once already; reset so we isolate the
+      // effect run caused by a messages.length change.
+      scrollIntoViewMock.mockClear();
+
+      const input = screen.getByPlaceholderText(/ask the agent/i);
+      await userEvent.type(input, "Hello");
+      await userEvent.click(screen.getByRole("button", { name: /send/i }));
+
+      await waitFor(() => {
+        expect(scrollIntoViewMock).toHaveBeenCalledWith({ behavior: "smooth" });
+      });
+    } finally {
+      window.HTMLElement.prototype.scrollIntoView = originalScrollIntoView as never;
+    }
   });
 });
