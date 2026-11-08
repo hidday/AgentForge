@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from "vitest";
 import { z } from "zod";
 import { ClaudeCodeRunner } from "../../src/runtime/claudeCodeRunner.js";
 import type { ProcessResult } from "../../src/runtime/runnerTypes.js";
+import { STRUCTURED_OUTPUT_BEGIN, STRUCTURED_OUTPUT_END } from "../../src/schemas/cliProtocol.js";
 
 function makeMockProcessRunner(result: ProcessResult) {
   return {
@@ -370,5 +371,198 @@ describe("ClaudeCodeRunner.chatRun() — arg filtering and error surfacing", () 
     expect(logger.error).toHaveBeenCalledOnce();
     const [logFields] = logger.error.mock.calls[0]!;
     expect(logFields).toMatchObject({ upstreamApiError: true });
+  });
+});
+
+describe("ClaudeCodeRunner.buildArgs() — system prompt flag", () => {
+  it("passes --system-prompt when a system prompt is provided", async () => {
+    const processRunner = makeMockProcessRunner({
+      stdout: JSON.stringify({ type: "result", result: validStructuredOutput }),
+      stderr: "",
+      exitCode: 0,
+      durationMs: 10,
+      timedOut: false,
+    });
+    const runner = new ClaudeCodeRunner(
+      processRunner as never,
+      "claude",
+      [],
+      "claude-opus-4-8",
+      makeMockLogger() as never,
+    );
+
+    await runner.run(
+      {
+        prompt: "do it",
+        systemPrompt: "Be concise.",
+        workingDirectory: "/tmp",
+        timeoutMs: 1000,
+      },
+      "planner",
+      echoSchema,
+    );
+
+    const { args } = processRunner.execute.mock.calls[0]![0] as { args: string[] };
+    expect(args).toContain("--system-prompt");
+    expect(args).toContain("Be concise.");
+  });
+
+  it("omits --system-prompt when no system prompt is provided", async () => {
+    const processRunner = makeMockProcessRunner({
+      stdout: JSON.stringify({ type: "result", result: validStructuredOutput }),
+      stderr: "",
+      exitCode: 0,
+      durationMs: 10,
+      timedOut: false,
+    });
+    const runner = new ClaudeCodeRunner(
+      processRunner as never,
+      "claude",
+      [],
+      "claude-opus-4-8",
+      makeMockLogger() as never,
+    );
+
+    await runner.run(
+      { prompt: "do it", workingDirectory: "/tmp", timeoutMs: 1000 },
+      "planner",
+      echoSchema,
+    );
+
+    const { args } = processRunner.execute.mock.calls[0]![0] as { args: string[] };
+    expect(args).not.toContain("--system-prompt");
+  });
+});
+
+describe("ClaudeCodeRunner.unwrapClaudeEnvelope() — NDJSON stream format", () => {
+  it("scans an NDJSON stream from the end and extracts the last {type:'result'} line", async () => {
+    const ndjson = [
+      JSON.stringify({ type: "system", subtype: "init" }),
+      JSON.stringify({ type: "assistant", message: "thinking..." }),
+      JSON.stringify({
+        type: "result",
+        result: `${STRUCTURED_OUTPUT_BEGIN}\n{"success":true,"stage":"planner","payload":{"value":"ok"}}\n${STRUCTURED_OUTPUT_END}`,
+        is_error: false,
+      }),
+    ].join("\n");
+
+    const processRunner = makeMockProcessRunner({
+      stdout: ndjson,
+      stderr: "",
+      exitCode: 0,
+      durationMs: 10,
+      timedOut: false,
+    });
+    const logger = makeMockLogger();
+    const runner = new ClaudeCodeRunner(
+      processRunner as never,
+      "claude",
+      [],
+      "claude-opus-4-8",
+      logger as never,
+    );
+
+    const out = await runner.run(
+      { prompt: "x", workingDirectory: "/tmp", timeoutMs: 1000 },
+      "planner",
+      echoSchema,
+    );
+
+    expect(out.parsed.payload.value).toBe("ok");
+    expect(logger.error).not.toHaveBeenCalled();
+  });
+
+  it("treats is_error:true on the last NDJSON result line as an upstream API error", async () => {
+    const ndjson = [
+      JSON.stringify({ type: "system", subtype: "init" }),
+      JSON.stringify({ type: "result", result: "API Error: overloaded", is_error: true }),
+    ].join("\n");
+
+    const processRunner = makeMockProcessRunner({
+      stdout: ndjson,
+      stderr: "",
+      exitCode: 1,
+      durationMs: 10,
+      timedOut: false,
+    });
+    const logger = makeMockLogger();
+    const runner = new ClaudeCodeRunner(
+      processRunner as never,
+      "claude",
+      [],
+      "claude-opus-4-8",
+      logger as never,
+    );
+
+    await expect(
+      runner.run({ prompt: "x", workingDirectory: "/tmp", timeoutMs: 1000 }, "planner", echoSchema),
+    ).rejects.toThrow();
+
+    const [logFields] = logger.error.mock.calls[0]!;
+    expect(logFields).toMatchObject({ upstreamApiError: true });
+  });
+
+  it("skips blank lines and lines that are not valid JSON while scanning for the result line", async () => {
+    const ndjson = [
+      "",
+      "not json at all {{{",
+      "   ",
+      JSON.stringify({
+        type: "result",
+        result: `${STRUCTURED_OUTPUT_BEGIN}\n{"success":true,"stage":"planner","payload":{"value":"ok"}}\n${STRUCTURED_OUTPUT_END}`,
+      }),
+    ].join("\n");
+
+    const processRunner = makeMockProcessRunner({
+      stdout: ndjson,
+      stderr: "",
+      exitCode: 0,
+      durationMs: 10,
+      timedOut: false,
+    });
+    const runner = new ClaudeCodeRunner(
+      processRunner as never,
+      "claude",
+      [],
+      "claude-opus-4-8",
+      makeMockLogger() as never,
+    );
+
+    const out = await runner.run(
+      { prompt: "x", workingDirectory: "/tmp", timeoutMs: 1000 },
+      "planner",
+      echoSchema,
+    );
+    expect(out.parsed.payload.value).toBe("ok");
+  });
+
+  it("falls back to the raw output verbatim (isApiError:false) when neither single-JSON nor NDJSON parsing finds a result", async () => {
+    const raw = `plain text output\n${STRUCTURED_OUTPUT_BEGIN}\n{"success":true,"stage":"planner","payload":{"value":"ok"}}\n${STRUCTURED_OUTPUT_END}`;
+
+    const processRunner = makeMockProcessRunner({
+      stdout: raw,
+      stderr: "",
+      exitCode: 0,
+      durationMs: 10,
+      timedOut: false,
+    });
+    const logger = makeMockLogger();
+    const runner = new ClaudeCodeRunner(
+      processRunner as never,
+      "claude",
+      [],
+      "claude-opus-4-8",
+      logger as never,
+    );
+
+    const out = await runner.run(
+      { prompt: "x", workingDirectory: "/tmp", timeoutMs: 1000 },
+      "planner",
+      echoSchema,
+    );
+
+    expect(out.raw).toBe(raw);
+    expect(out.parsed.payload.value).toBe("ok");
+    expect(logger.error).not.toHaveBeenCalled();
   });
 });
