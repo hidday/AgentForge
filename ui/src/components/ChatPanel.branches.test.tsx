@@ -134,7 +134,7 @@ describe("ChatPanel branch coverage", () => {
       // jsdom does not implement scrollIntoView by default; this component
       // guards on `typeof ... === "function"` before calling it, so we
       // polyfill it to exercise the true branch and the call itself.
-      HTMLElement.prototype.scrollIntoView = scrollIntoViewMock;
+      HTMLElement.prototype.scrollIntoView = scrollIntoViewMock as unknown as typeof HTMLElement.prototype.scrollIntoView;
     });
 
     afterEach(() => {
