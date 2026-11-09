@@ -15,6 +15,234 @@ import {
   wireReviewerAgent,
 } from "./fixtures.js";
 
+describe("OrchestratorService -- Linear comment formatting detail branches", () => {
+  it("formatPlanComment includes the Open Questions and Risks sections when present", async () => {
+    const initialRun = makeRun({ id: "run-1", state: RunState.PlanReview, planVersion: 1 });
+    const plan = makePlan({
+      planVersion: 1,
+      openQuestions: [
+        { id: "q1", question: "Blocking one?", requiredForExecution: true },
+        { id: "q2", question: "Non-blocking one?", requiredForExecution: false },
+      ],
+      risks: ["Might break prod", "Flaky test suite"],
+    });
+    const { deps, artifactRepo, planReviewerAgent, linearClient } = buildStoreDeps(initialRun, [
+      makeArtifact({ type: "Plan", version: 1, payloadJson: plan }),
+    ]);
+    const svc = new OrchestratorService(deps as never);
+
+    wirePlanReviewerAgent(artifactRepo, planReviewerAgent, () => makePlanReview({ overallVerdict: "approved" }));
+
+    await svc.runPlanReview("run-1");
+
+    const comment = (linearClient.postComment as ReturnType<typeof vi.fn>).mock.calls[0][1] as string;
+    expect(comment).toContain("**Open Questions:**");
+    expect(comment).toContain("Blocking one? *blocks execution*");
+    expect(comment).toContain("Non-blocking one?");
+    expect(comment).not.toContain("Non-blocking one? *blocks execution*");
+    expect(comment).toContain("**Risks:**");
+    expect(comment).toContain("Might break prod");
+  });
+
+  it("formatExecutionReportComment renders the fail and skip check icons distinctly from pass", async () => {
+    const initialRun = makeRun({
+      id: "run-1",
+      state: RunState.Implementing,
+      planVersion: 1,
+      approvedPlanVersion: 1,
+      branchName: null,
+    });
+    const { deps, executorAgent, reviewerAgent, artifactRepo, linearClient } = buildStoreDeps(initialRun, [
+      makeArtifact({ type: "Plan", version: 1, payloadJson: makePlan({ planVersion: 1 }) }),
+    ]);
+    const svc = new OrchestratorService(deps as never);
+
+    wireExecutorAgent(artifactRepo, executorAgent, () =>
+      makeExecutionReport({
+        checks: {
+          lint: { status: "fail", details: "2 errors" },
+          typecheck: { status: "skip", details: "not run" },
+          tests: { status: "pass", details: "all green" },
+        },
+      }),
+    );
+    wireReviewerAgent(artifactRepo, reviewerAgent, () => ({
+      reviewId: "rev-1",
+      summary: "fine",
+      findings: [],
+      overallVerdict: "approved",
+    }));
+
+    // The executor's report has failing lint, which the subsequent markReady
+    // call (reached via the approved code review) rejects -- irrelevant to
+    // what this test checks (the comment text posted along the way).
+    await expect(svc.runExecution("run-1")).rejects.toThrow(/failing checks/);
+
+    const comment = (linearClient.postComment as ReturnType<typeof vi.fn>).mock.calls.find((c) =>
+      String(c[1]).includes("Execution Report"),
+    )![1] as string;
+    expect(comment).toContain(":x: **Lint**");
+    expect(comment).toContain(":heavy_minus_sign: **Typecheck**");
+    expect(comment).toContain(":white_check_mark: **Tests**");
+  });
+
+  it("formatPlanReviewComment includes the affected step id when a finding references one", async () => {
+    const initialRun = makeRun({ id: "run-1", state: RunState.PlanReview, planVersion: 1 });
+    const { deps, artifactRepo, planReviewerAgent, planReviserAgent, linearClient } = buildStoreDeps(initialRun, [
+      makeArtifact({ type: "Plan", version: 1, payloadJson: makePlan({ planVersion: 1 }) }),
+    ]);
+    const svc = new OrchestratorService(deps as never);
+
+    wirePlanReviewerAgent(artifactRepo, planReviewerAgent, () =>
+      makePlanReview({
+        overallVerdict: "changes_requested",
+        findings: [
+          { id: "f1", severity: "important", type: "gap", affectedStepId: "s1", title: "Missing validation", details: "x" },
+        ],
+      }),
+    );
+    planReviserAgent.run.mockResolvedValue({
+      revision: { dispositions: [] },
+      revisedPlan: makePlan({ planVersion: 2 }),
+    });
+
+    await svc.runPlanReview("run-1");
+
+    const comment = (linearClient.postComment as ReturnType<typeof vi.fn>).mock.calls.find((c) =>
+      String(c[1]).includes("AI Plan Review"),
+    )![1] as string;
+    expect(comment).toContain("(step s1)");
+  });
+
+  it("formatCodeReviewComment includes the line hint when a finding specifies one", async () => {
+    const initialRun = makeRun({ id: "run-1", state: RunState.AIReview, prNumber: 10, planVersion: 1 });
+    const { deps, reviewerAgent, artifactRepo, linearClient } = buildStoreDeps(initialRun, [
+      makeArtifact({ type: "Plan", version: 1, payloadJson: makePlan({ planVersion: 1 }) }),
+      makeArtifact({ type: "ExecutionReport", version: 1, payloadJson: makeExecutionReport() }),
+    ]);
+    const svc = new OrchestratorService(deps as never);
+
+    wireReviewerAgent(artifactRepo, reviewerAgent, () => ({
+      reviewId: "rev-1",
+      summary: "found issues",
+      findings: [
+        { id: "f1", severity: "important", type: "bug", file: "a.ts", lineHint: 42, title: "Off by one", details: "x" },
+      ],
+      overallVerdict: "changes_requested",
+    }));
+
+    let caught: unknown;
+    try {
+      await svc.runReview("run-1");
+    } catch (err) {
+      caught = err;
+    }
+    // (remediation's trailing markReady call throws -- see the NOTE in
+    // orchestratorService.review.test.ts; irrelevant to what this test checks.)
+    expect(caught).toBeDefined();
+
+    const comment = (linearClient.postComment as ReturnType<typeof vi.fn>).mock.calls.find((c) =>
+      String(c[1]).includes("AI Code Review"),
+    )![1] as string;
+    expect(comment).toContain("(a.ts:42)");
+  });
+});
+
+describe("OrchestratorService.retryRun -- repo fallback", () => {
+  it("falls back to the default repo when getRepoByName returns null", async () => {
+    const initialRun = makeRun({
+      id: "run-1",
+      state: RunState.Todo,
+      planVersion: 1,
+      branchName: null,
+      repo: "unknown-repo",
+    });
+    const { deps, plannerAgent, artifactRepo, planReviewerAgent, repoRegistry, gitService } =
+      buildStoreDeps(initialRun);
+    repoRegistry.getRepoByName.mockReturnValue(null);
+    const svc = new OrchestratorService(deps as never);
+
+    wirePlannerAgent(artifactRepo, plannerAgent, () => makePlan({ planVersion: 1, openQuestions: [] }));
+    wirePlanReviewerAgent(artifactRepo, planReviewerAgent, () => makePlanReview({ overallVerdict: "approved" }));
+
+    await svc.retryRun("run-1");
+
+    expect(repoRegistry.getDefaultRepo).toHaveBeenCalled();
+    expect(gitService.setupRunWorktree).toHaveBeenCalledWith("/tmp", "run-1", "main", expect.any(String));
+  });
+});
+
+describe("OrchestratorService.runExecution -- operator note", () => {
+  it("passes the operator note through to the executor agent", async () => {
+    const initialRun = makeRun({
+      id: "run-1",
+      state: RunState.Implementing,
+      planVersion: 1,
+      approvedPlanVersion: 1,
+      branchName: null,
+    });
+    const { deps, executorAgent, reviewerAgent, artifactRepo } = buildStoreDeps(initialRun, [
+      makeArtifact({ type: "Plan", version: 1, payloadJson: makePlan({ planVersion: 1 }) }),
+    ]);
+    const svc = new OrchestratorService(deps as never);
+
+    wireExecutorAgent(artifactRepo, executorAgent, () => makeExecutionReport());
+    wireReviewerAgent(artifactRepo, reviewerAgent, () => ({
+      reviewId: "rev-1",
+      summary: "fine",
+      findings: [],
+      overallVerdict: "approved",
+    }));
+
+    await svc.runExecution("run-1", { note: "focus on the auth module" });
+
+    expect(executorAgent.run).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      "run-1",
+      expect.anything(),
+      { operatorNote: "focus on the auth module" },
+    );
+  });
+});
+
+describe("OrchestratorService.answerQuestions -- prior researched answers are preserved on re-plan", () => {
+  it("includes priorResearched.answers when a ResearchedAnswers artifact already exists", async () => {
+    const initialRun = makeRun({ id: "run-1", state: RunState.HumanClarificationNeeded, planVersion: 1 });
+    const { deps, plannerAgent, artifactRepo, planReviewerAgent } = buildStoreDeps(initialRun, [
+      makeArtifact({
+        type: "Plan",
+        version: 1,
+        payloadJson: makePlan({ openQuestions: [{ id: "q1", question: "Required?", requiredForExecution: true }] }),
+      }),
+      makeArtifact({ type: "TaskBundle", version: 1, payloadJson: { issue: { id: "LIN-1" } } }),
+      makeArtifact({
+        type: "ResearchedAnswers",
+        version: 1,
+        payloadJson: {
+          summary: "s",
+          answers: [{ questionId: "q2", question: "q", answer: "a", confidence: "medium" }],
+          completedAt: new Date().toISOString(),
+        },
+      }),
+    ]);
+    const svc = new OrchestratorService(deps as never);
+
+    wirePlannerAgent(artifactRepo, plannerAgent, () => makePlan({ planVersion: 2, openQuestions: [] }));
+    wirePlanReviewerAgent(artifactRepo, planReviewerAgent, () => makePlanReview({ overallVerdict: "approved" }));
+
+    await svc.answerQuestions("run-1", [{ questionId: "q1", answer: "yes" }]);
+
+    expect(plannerAgent.run).toHaveBeenCalledWith(
+      expect.anything(),
+      "run-1",
+      expect.objectContaining({
+        researchedAnswers: [expect.objectContaining({ questionId: "q2" })],
+      }),
+    );
+  });
+});
+
 describe("OrchestratorService simple getters", () => {
   it("expose the injected repositories and clients", () => {
     const { deps, runRepo, artifactRepo, eventRepo, linearClient } = buildStoreDeps(makeRun());
