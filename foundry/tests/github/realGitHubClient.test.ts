@@ -22,6 +22,7 @@ vi.mock("@octokit/rest", () => {
 });
 
 import { RealGitHubClient } from "../../src/github/realGitHubClient.js";
+import { MOCK_DIFF, MOCK_REPO_CONFIG } from "../../src/mocks/mockGitHubData.js";
 import * as octokitModule from "@octokit/rest";
 
 const mockOctokit = (octokitModule as unknown as { __mockOctokit: typeof octokit }).__mockOctokit;
@@ -220,12 +221,12 @@ describe("RealGitHubClient", () => {
 
   describe("getPRDiff", () => {
     it("returns the diff text", async () => {
-      mockOctokit.pulls.get.mockResolvedValue({ data: "diff --git a/f b/f\n+line\n" });
-      const diff = await client.getPRDiff("acme/widgets", 10);
-      expect(diff).toBe("diff --git a/f b/f\n+line\n");
+      mockOctokit.pulls.get.mockResolvedValue({ data: MOCK_DIFF });
+      const diff = await client.getPRDiff(MOCK_REPO_CONFIG.name, 10);
+      expect(diff).toBe(MOCK_DIFF);
       expect(mockOctokit.pulls.get).toHaveBeenCalledWith({
         owner: "acme",
-        repo: "widgets",
+        repo: "backend-api",
         pull_number: 10,
         mediaType: { format: "diff" },
       });
