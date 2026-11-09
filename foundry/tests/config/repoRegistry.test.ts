@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, writeFileSync, rmSync, mkdirSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
@@ -52,6 +53,16 @@ describe("RepoRegistry", () => {
     const registry = new RepoRegistry("/root", config, makeLogger());
     expect(registry.getRepoByName("repo-a")?.name).toBe("repo-a");
     expect(registry.getRepoByName("nope")).toBeUndefined();
+  });
+
+  it("getRepoByLinearProject returns the matching entry or undefined", () => {
+    const config = makeConfig(
+      [makeRepoEntry({ name: "repo-a", linearProject: "Project A" }), makeRepoEntry({ name: "repo-b" })],
+      "repo-a",
+    );
+    const registry = new RepoRegistry("/root", config, makeLogger());
+    expect(registry.getRepoByLinearProject("Project A")?.name).toBe("repo-a");
+    expect(registry.getRepoByLinearProject("Unknown Project")).toBeUndefined();
   });
 
   it("getDefaultRepo returns the configured default entry", () => {
@@ -206,6 +217,23 @@ describe("RepoRegistry", () => {
       mkdirSync(repoDir, { recursive: true });
       writeFileSync(join(repoDir, ".git"), "gitdir: /somewhere/.git/worktrees/x");
       expect(() => registry.validateWorkingDirectory(repoDir)).not.toThrow();
+    });
+
+    it("throws when .git exists but is neither a directory nor a regular file", () => {
+      const registry = new RepoRegistry(
+        "/root",
+        makeConfig([makeRepoEntry({ name: "repo-a" })], "repo-a"),
+        makeLogger(),
+      );
+      const repoDir = join(tmpRoot, "fifo-git-entry");
+      mkdirSync(repoDir, { recursive: true });
+      const gitDir = join(repoDir, ".git");
+      // A FIFO (named pipe) is neither a directory nor a regular file, exercising
+      // the defensive "invalid .git entry" branch.
+      execFileSync("mkfifo", [gitDir]);
+      expect(() => registry.validateWorkingDirectory(repoDir)).toThrow(
+        /Working directory has invalid \.git entry/,
+      );
     });
   });
 });

@@ -91,6 +91,28 @@ function buildAgent() {
   return { agent, logger, getUserPrompt: () => capturedUserPrompt };
 }
 
+describe("ExecutorAgent.run() isRetry logging branch", () => {
+  it("treats a retry with only existingBranch set (no existingPR) as isRetry=true", async () => {
+    const { agent, logger } = buildAgent();
+
+    await agent.run(makePlan(), makeTaskBundle(), "run-1", { existingBranch: "ai/lin-1" });
+
+    const startLog = logger.info.mock.calls.find((c: unknown[]) => c[1] === "Starting executor agent");
+    const payload = startLog?.[0] as Record<string, unknown> | undefined;
+    expect(payload?.isRetry).toBe(true);
+  });
+
+  it("treats a retry with only existingPR set (no existingBranch) as isRetry=true", async () => {
+    const { agent, logger } = buildAgent();
+
+    await agent.run(makePlan(), makeTaskBundle(), "run-1", { existingPR: 555 });
+
+    const startLog = logger.info.mock.calls.find((c: unknown[]) => c[1] === "Starting executor agent");
+    const payload = startLog?.[0] as Record<string, unknown> | undefined;
+    expect(payload?.isRetry).toBe(true);
+  });
+});
+
 describe("ExecutorAgent.run() operator note branch", () => {
   it("injects the Operator Note section into the user prompt when provided", async () => {
     const { agent, getUserPrompt, logger } = buildAgent();

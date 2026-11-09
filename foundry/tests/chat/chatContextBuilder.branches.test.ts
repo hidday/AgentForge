@@ -210,6 +210,77 @@ describe("buildChatSystemPrompt edge cases", () => {
     expect(result).toContain("**Plan v?** (, ): ");
   });
 
+  it("renders a plain-string open question as-is (not JSON-stringified)", () => {
+    const planArtifact = makeArtifact({
+      type: "Plan",
+      version: 1,
+      payloadJson: { openQuestions: ["Is this a plain string question?"] },
+    });
+    const result = buildChatSystemPrompt(makeRun(), [planArtifact]);
+    expect(result).toContain("  - Is this a plain string question?");
+  });
+
+  it("renders PlanReview findings with their severity/title/id/details when present", () => {
+    const artifact = makeArtifact({
+      type: "PlanReview",
+      version: 1,
+      payloadJson: {
+        summary: "One blocker found.",
+        findings: [
+          { id: "pf1", severity: "blocker", title: "Missing validation", details: "Needs a null check" },
+        ],
+      },
+    });
+    const result = buildChatSystemPrompt(makeRun(), [artifact]);
+    expect(result).toContain("## Plan Review Findings");
+    expect(result).toContain("  - **[blocker] Missing validation** (pf1): Needs a null check");
+  });
+
+  it("falls back to empty strings for a PlanReview finding missing severity/title/id/details", () => {
+    const artifact = makeArtifact({
+      type: "PlanReview",
+      version: 1,
+      payloadJson: { findings: [{}] },
+    });
+    const result = buildChatSystemPrompt(makeRun(), [artifact]);
+    expect(result).toContain("## Plan Review Findings");
+    expect(result).toContain("  - **[] ** (): ");
+  });
+
+  it("includes a Review (code review) summary line when present", () => {
+    const artifact = makeArtifact({
+      type: "Review",
+      version: 1,
+      payloadJson: { summary: "Overall looks solid." },
+    });
+    const result = buildChatSystemPrompt(makeRun(), [artifact]);
+    expect(result).toContain("## Code Review Findings");
+    expect(result).toContain("**Summary:** Overall looks solid.");
+  });
+
+  it("omits the Plan Review Findings section when findings is an empty array and there is no summary", () => {
+    const artifact = makeArtifact({ type: "PlanReview", version: 1, payloadJson: { findings: [] } });
+    const result = buildChatSystemPrompt(makeRun(), [artifact]);
+    expect(result).not.toContain("## Plan Review Findings");
+  });
+
+  it("omits the Code Review Findings section when findings is an empty array and there is no summary", () => {
+    const artifact = makeArtifact({ type: "Review", version: 1, payloadJson: { findings: [] } });
+    const result = buildChatSystemPrompt(makeRun(), [artifact]);
+    expect(result).not.toContain("## Code Review Findings");
+  });
+
+  it("falls back to empty strings for a researched answer missing questionId, confidence, and answer", () => {
+    const artifact = makeArtifact({
+      type: "ResearchedAnswers",
+      version: 1,
+      payloadJson: { answers: [{}] },
+    });
+    const result = buildChatSystemPrompt(makeRun(), [artifact]);
+    expect(result).toContain("## Researched Answers");
+    expect(result).toContain("  - **[] ():** ");
+  });
+
   it("keeps the earlier artifact as 'best' when a later same-type artifact has a lower version", () => {
     const planV3 = makeArtifact({ type: "Plan", version: 3, payloadJson: { summary: "Newest" } });
     const planV1 = makeArtifact({ type: "Plan", version: 1, payloadJson: { summary: "Oldest" } });
