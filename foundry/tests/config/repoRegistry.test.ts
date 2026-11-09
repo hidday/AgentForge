@@ -1,6 +1,23 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, writeFileSync, rmSync, mkdirSync } from "node:fs";
 import { execFileSync } from "node:child_process";
+
+// Lets a single test override statSync's return for one specific path, while
+// every other call (including this file's own fixture setup via mkdtempSync,
+// writeFileSync, mkdirSync) passes through to the real implementation.
+let statSyncOverride: ((path: unknown) => { isDirectory(): boolean; isFile(): boolean } | undefined) | null =
+  null;
+vi.mock("node:fs", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs")>();
+  return {
+    ...actual,
+    statSync: (...args: Parameters<typeof actual.statSync>) => {
+      const override = statSyncOverride?.(args[0]);
+      if (override) return override;
+      return actual.statSync(...args);
+    },
+  };
+});
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
@@ -234,6 +251,33 @@ describe("RepoRegistry", () => {
       expect(() => registry.validateWorkingDirectory(repoDir)).toThrow(
         /Working directory has invalid \.git entry/,
       );
+    });
+
+    it("throws when the working directory path itself is not a directory", () => {
+      // A real filesystem fixture can't produce this: if workingDirectory isn't a
+      // directory it can't contain a ".git" child, so the earlier checks would
+      // throw first. Override statSync to make the final `stat.isDirectory()`
+      // check see a non-directory for the root path while the rest of the real
+      // filesystem (including a genuine ".git" directory) still backs the ".git"
+      // checks above it.
+      const registry = new RepoRegistry(
+        "/root",
+        makeConfig([makeRepoEntry({ name: "repo-a" })], "repo-a"),
+        makeLogger(),
+      );
+      const repoDir = join(tmpRoot, "not-actually-a-directory");
+      mkdirSync(join(repoDir, ".git"), { recursive: true });
+
+      statSyncOverride = (path) =>
+        path === repoDir ? { isDirectory: () => false, isFile: () => false } : undefined;
+
+      try {
+        expect(() => registry.validateWorkingDirectory(repoDir)).toThrow(
+          /Working directory path is not a directory/,
+        );
+      } finally {
+        statSyncOverride = null;
+      }
     });
   });
 });

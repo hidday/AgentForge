@@ -229,6 +229,89 @@ describe("DistillationAgent branches", () => {
       expect(prompt).toContain("1. Step 0");
     });
 
+    it("renders '_none_' for an empty steps array and truncates an overly long summary", async () => {
+      const deps = buildDeps();
+      const longSummary = "x".repeat(650);
+      deps.artifactRepo.findLatestByType.mockImplementation((_runId: string, type: string) => {
+        if (type === "ExecutionReport") return Promise.resolve(makeExecutionArtifact());
+        if (type === "Plan") {
+          return Promise.resolve({
+            id: "artifact-plan",
+            runId: "run-1",
+            type: "Plan" as const,
+            version: 1,
+            payloadJson: {
+              planVersion: 1,
+              summary: longSummary,
+              assumptions: [],
+              openQuestions: [],
+              risks: [],
+              steps: [],
+              testPlan: "none",
+              confidence: 0.5,
+            },
+            rawText: "{}",
+            createdAt: new Date(),
+          });
+        }
+        return Promise.resolve(null);
+      });
+      deps.agentRunner.run.mockResolvedValue(
+        makeDistillationOutput({ shouldPersist: false, reason: "n/a" }),
+      );
+
+      const agent = buildAgent(deps);
+      await agent.run("run-1", makeRun());
+
+      const prompt = capturedPrompt(deps);
+      expect(prompt).toContain("**Steps**:\n_none_");
+      // Truncated to 600 chars plus an ellipsis, so the full 650-char string must not appear.
+      expect(prompt).not.toContain(longSummary);
+      expect(prompt).toContain("x".repeat(600) + "…");
+    });
+
+    it("omits the '…and N more steps' suffix at or under the 12-step cap, and omits a falsy step description", async () => {
+      const deps = buildDeps();
+      deps.artifactRepo.findLatestByType.mockImplementation((_runId: string, type: string) => {
+        if (type === "ExecutionReport") return Promise.resolve(makeExecutionArtifact());
+        if (type === "Plan") {
+          return Promise.resolve({
+            id: "artifact-plan",
+            runId: "run-1",
+            type: "Plan" as const,
+            version: 1,
+            payloadJson: {
+              planVersion: 1,
+              summary: "Short summary",
+              assumptions: [],
+              openQuestions: [],
+              risks: [],
+              steps: [
+                { id: "s1", title: "Step with a description", description: "Has detail" },
+                { id: "s2", title: "Step with no description", description: "" },
+              ],
+              testPlan: "none",
+              confidence: 0.5,
+            },
+            rawText: "{}",
+            createdAt: new Date(),
+          });
+        }
+        return Promise.resolve(null);
+      });
+      deps.agentRunner.run.mockResolvedValue(
+        makeDistillationOutput({ shouldPersist: false, reason: "n/a" }),
+      );
+
+      const agent = buildAgent(deps);
+      await agent.run("run-1", makeRun());
+
+      const prompt = capturedPrompt(deps);
+      expect(prompt).not.toContain("more steps");
+      expect(prompt).toContain("1. Step with a description — Has detail");
+      expect(prompt).toContain("2. Step with no description\n");
+    });
+
     it("falls back to truncated JSON when the Plan artifact payload doesn't match the schema", async () => {
       const deps = buildDeps();
       deps.artifactRepo.findLatestByType.mockImplementation((_runId: string, type: string) => {
@@ -329,6 +412,33 @@ describe("DistillationAgent branches", () => {
       expect(prompt).toContain("- tests: fail\n");
     });
 
+    it("falls back to truncated JSON when the ExecutionReport payload doesn't match the schema", async () => {
+      const deps = buildDeps();
+      deps.artifactRepo.findLatestByType.mockImplementation((_runId: string, type: string) => {
+        if (type === "ExecutionReport") {
+          return Promise.resolve({
+            id: "artifact-exec",
+            runId: "run-1",
+            type: "ExecutionReport" as const,
+            version: 1,
+            payloadJson: { malformed: true },
+            rawText: "{}",
+            createdAt: new Date(),
+          });
+        }
+        return Promise.resolve(null);
+      });
+      deps.agentRunner.run.mockResolvedValue(
+        makeDistillationOutput({ shouldPersist: false, reason: "n/a" }),
+      );
+
+      const agent = buildAgent(deps);
+      await agent.run("run-1", makeRun());
+
+      const prompt = capturedPrompt(deps);
+      expect(prompt).toContain('{"malformed":true}');
+    });
+
     it("caps notes display at 15 entries", async () => {
       const deps = buildDeps();
       const manyNotes = Array.from({ length: 18 }, (_, i) => `note ${i}`);
@@ -392,6 +502,81 @@ describe("DistillationAgent branches", () => {
       expect(prompt).toContain("- [accepted] F0: Fixed finding 0");
       expect(prompt).toContain("*why*: Because 0");
       expect(prompt).toContain("…and 2 more");
+    });
+
+    it("renders '_none_' for an empty resolution list", async () => {
+      const deps = buildDeps();
+      deps.artifactRepo.findLatestByType.mockImplementation((_runId: string, type: string) => {
+        if (type === "ExecutionReport") return Promise.resolve(makeExecutionArtifact());
+        if (type === "Remediation") {
+          return Promise.resolve({
+            id: "artifact-remediation",
+            runId: "run-1",
+            type: "Remediation" as const,
+            version: 1,
+            payloadJson: {
+              reviewId: "review-1",
+              resolution: [],
+              readyForHumanReview: false,
+              executionReport: makeExecutionArtifact().payloadJson,
+            },
+            rawText: "{}",
+            createdAt: new Date(),
+          });
+        }
+        return Promise.resolve(null);
+      });
+      deps.agentRunner.run.mockResolvedValue(
+        makeDistillationOutput({ shouldPersist: false, reason: "n/a" }),
+      );
+
+      const agent = buildAgent(deps);
+      await agent.run("run-1", makeRun());
+
+      const prompt = capturedPrompt(deps);
+      expect(prompt).toContain("**Resolutions**:\n_none_");
+    });
+
+    it("omits the '…and N more' suffix at or under the 15-item cap, and omits a falsy rationale", async () => {
+      const deps = buildDeps();
+      deps.artifactRepo.findLatestByType.mockImplementation((_runId: string, type: string) => {
+        if (type === "ExecutionReport") return Promise.resolve(makeExecutionArtifact());
+        if (type === "Remediation") {
+          return Promise.resolve({
+            id: "artifact-remediation",
+            runId: "run-1",
+            type: "Remediation" as const,
+            version: 1,
+            payloadJson: {
+              reviewId: "review-1",
+              resolution: [
+                {
+                  findingId: "F0",
+                  status: "rejected",
+                  action: "Declined to change this",
+                  rationale: "",
+                },
+              ],
+              readyForHumanReview: false,
+              executionReport: makeExecutionArtifact().payloadJson,
+            },
+            rawText: "{}",
+            createdAt: new Date(),
+          });
+        }
+        return Promise.resolve(null);
+      });
+      deps.agentRunner.run.mockResolvedValue(
+        makeDistillationOutput({ shouldPersist: false, reason: "n/a" }),
+      );
+
+      const agent = buildAgent(deps);
+      await agent.run("run-1", makeRun());
+
+      const prompt = capturedPrompt(deps);
+      expect(prompt).not.toContain("…and");
+      expect(prompt).toContain("- [rejected] F0: Declined to change this");
+      expect(prompt).not.toContain("*why*");
     });
 
     it("falls back to truncated JSON when the Remediation payload doesn't match the schema", async () => {
