@@ -149,6 +149,17 @@ describe("api client", () => {
         expect.objectContaining({ body: JSON.stringify({ note: "note" }) }),
       );
     });
+
+    it("sends undefined for an empty-string note", async () => {
+      (fetch as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(
+        jsonResponse({ ok: true, runId: "r1" }),
+      );
+      await api.reReviewPlan("r1", "");
+      expect(fetch).toHaveBeenCalledWith(
+        "/api/runs/r1/actions/re-review-plan",
+        expect.objectContaining({ body: JSON.stringify({ note: undefined }) }),
+      );
+    });
   });
 
   describe("revisePlan", () => {

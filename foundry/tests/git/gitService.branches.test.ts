@@ -3,7 +3,7 @@ import { mkdtempSync, writeFileSync, rmSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { execFileSync } from "node:child_process";
-import { GitService } from "../../src/git/gitService.js";
+import { GitService, GitError, BranchMismatchError } from "../../src/git/gitService.js";
 
 // Covers two setupRunWorktree branches that the primary gitService.test.ts
 // (22 tests) does not exercise: the deterministic worktree path already
@@ -94,5 +94,101 @@ describe("GitService.setupRunWorktree additional branches", () => {
     ).toBe(true);
 
     await svc.removeWorktree(repoPath, result.worktreePath);
+  });
+});
+
+// Covers GitService.push and GitService.commitAndPush, which neither
+// gitService.test.ts nor the describe block above exercises at all.
+describe("GitService.push / commitAndPush", () => {
+  let repoPath: string;
+  let bareDir: string;
+  let svc: GitService;
+
+  function git(args: string[], cwd: string): string {
+    return execFileSync("git", args, { cwd, encoding: "utf-8" }).trim();
+  }
+
+  function createTestRepo(): string {
+    const dir = mkdtempSync(join(tmpdir(), "gitservice-push-test-"));
+    git(["init", "--initial-branch", "main"], dir);
+    git(["config", "user.email", "test@test.com"], dir);
+    git(["config", "user.name", "Test"], dir);
+    writeFileSync(join(dir, "README.md"), "# Test\n");
+    git(["add", "."], dir);
+    git(["commit", "-m", "initial"], dir);
+    return dir;
+  }
+
+  const noopLogger = {
+    info: () => {},
+    warn: () => {},
+    error: () => {},
+    debug: () => {},
+    fatal: () => {},
+    child: () => noopLogger,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  } as any;
+
+  beforeEach(() => {
+    repoPath = createTestRepo();
+    bareDir = mkdtempSync(join(tmpdir(), "gitservice-push-bare-"));
+    git(["clone", "--bare", repoPath, bareDir], tmpdir());
+    git(["remote", "add", "origin", bareDir], repoPath);
+    git(["fetch", "origin"], repoPath);
+    svc = new GitService(noopLogger);
+  });
+
+  afterEach(() => {
+    rmSync(repoPath, { recursive: true, force: true });
+    rmSync(bareDir, { recursive: true, force: true });
+  });
+
+  it("push sets up tracking and uploads the branch to origin", async () => {
+    const branchName = "hidday/pry-3-push-branch";
+    git(["checkout", "-b", branchName], repoPath);
+    writeFileSync(join(repoPath, "pushed.txt"), "content");
+    git(["add", "."], repoPath);
+    git(["commit", "-m", "local change"], repoPath);
+
+    await svc.push(repoPath, branchName);
+
+    const remoteBranches = git(["ls-remote", "--heads", bareDir], tmpdir());
+    expect(remoteBranches).toContain(`refs/heads/${branchName}`);
+
+    const tracking = git(["rev-parse", "--abbrev-ref", `${branchName}@{upstream}`], repoPath);
+    expect(tracking).toBe(`origin/${branchName}`);
+  });
+
+  it("push wraps a git failure in a GitError", async () => {
+    // No such branch exists locally, so `git push -u origin <branch>` fails.
+    await expect(svc.push(repoPath, "no-such-local-branch")).rejects.toThrow(GitError);
+  });
+
+  it("commitAndPush asserts the branch, commits pending changes, and pushes", async () => {
+    const branchName = "hidday/pry-4-commit-and-push";
+    git(["checkout", "-b", branchName], repoPath);
+    writeFileSync(join(repoPath, "feature.txt"), "feature content");
+
+    await svc.commitAndPush(repoPath, branchName, "feature commit");
+
+    const log = git(["log", "--oneline"], repoPath);
+    expect(log).toContain("feature commit");
+    expect(await svc.hasChanges(repoPath)).toBe(false);
+
+    const remoteBranches = git(["ls-remote", "--heads", bareDir], tmpdir());
+    expect(remoteBranches).toContain(`refs/heads/${branchName}`);
+  });
+
+  it("commitAndPush rejects with BranchMismatchError before attempting any commit or push", async () => {
+    const branchName = "hidday/pry-5-wrong-branch";
+    git(["checkout", "-b", "some-other-branch"], repoPath);
+    writeFileSync(join(repoPath, "should-not-be-committed.txt"), "x");
+
+    await expect(svc.commitAndPush(repoPath, branchName, "msg")).rejects.toThrow(
+      BranchMismatchError,
+    );
+
+    // The working tree change was never committed since assertBranch failed first.
+    expect(await svc.hasChanges(repoPath)).toBe(true);
   });
 });

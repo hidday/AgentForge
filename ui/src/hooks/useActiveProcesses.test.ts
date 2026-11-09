@@ -220,6 +220,22 @@ describe("useActiveProcesses", () => {
     expect(result.current.output).toBe("");
   });
 
+  it("ignores a getProcessOutput resolution that arrives after unmount", async () => {
+    mockApi.getActiveProcesses.mockResolvedValue({ processes: [process1] });
+    let resolveOutput: ((v: { processId: string; output: string }) => void) | undefined;
+    mockApi.getProcessOutput.mockReturnValue(
+      new Promise((resolve) => {
+        resolveOutput = resolve;
+      }),
+    );
+
+    const { unmount } = renderHook(() => useActiveProcesses("r1"));
+    await waitFor(() => expect(mockApi.getProcessOutput).toHaveBeenCalled());
+
+    unmount();
+    expect(() => resolveOutput!({ processId: "p1", output: "late output" })).not.toThrow();
+  });
+
   it("cancels the init effect's state updates if the component unmounts before it resolves", async () => {
     let resolveFn: ((v: { processes: typeof process1[] }) => void) | undefined;
     mockApi.getActiveProcesses.mockReturnValue(
