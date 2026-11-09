@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, waitFor, act } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { LinearSyncDialog } from "./LinearSyncDialog.tsx";
@@ -521,6 +521,41 @@ describe("LinearSyncDialog branch coverage", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("a stale ingest promise resolving after the dialog was closed and reopened is a no-op (pendingIds reset to empty)", async () => {
+    mockApi.fetchPendingIssues.mockResolvedValue({ issues: [issueA, issueB] });
+    let resolveIngest!: (v: { ok: boolean; started: string[]; skipped: string[] }) => void;
+    mockApi.ingestIssues.mockReturnValue(
+      new Promise((res) => {
+        resolveIngest = res;
+      }),
+    );
+    const onClose = vi.fn();
+
+    const { rerender } = render(
+      <LinearSyncDialog open={true} onClose={onClose} onIngested={vi.fn()} />,
+    );
+    await waitFor(() => expect(screen.getByText(issueA.title)).toBeDefined());
+
+    await userEvent.click(screen.getByRole("button", { name: /start 2 runs/i }));
+    await waitFor(() => expect(mockApi.ingestIssues).toHaveBeenCalledTimes(1));
+
+    // Close and reopen the dialog while the ingest request is still in
+    // flight. Reopening resets pendingIdsRef/closedRef to their initial
+    // (empty/false) values.
+    rerender(<LinearSyncDialog open={false} onClose={onClose} onIngested={vi.fn()} />);
+    rerender(<LinearSyncDialog open={true} onClose={onClose} onIngested={vi.fn()} />);
+    await waitFor(() => expect(mockApi.fetchPendingIssues).toHaveBeenCalledTimes(2));
+
+    // Now the stale request resolves: maybeAutoClose() runs against the
+    // reset refs and must bail out via the `pendingIds.length === 0` guard
+    // instead of incorrectly auto-closing the (reopened) dialog.
+    await act(async () => {
+      resolveIngest({ ok: true, started: [issueA.id, issueB.id], skipped: [] });
+    });
+
+    expect(onClose).not.toHaveBeenCalled();
   });
 
   it("clears a pending min-delay timer on unmount without throwing", async () => {
