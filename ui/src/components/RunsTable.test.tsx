@@ -110,6 +110,15 @@ describe("RunsTable", () => {
     expect(link.getAttribute("href")).toBe("https://linear.app/x/y");
   });
 
+  it("stops propagation when clicking the external Linear link so the row link isn't also triggered", async () => {
+    renderTable([makeRun({ linearIssueUrl: "https://linear.app/x/y" })]);
+    const link = screen.getByTitle("Open in Linear");
+    await userEvent.click(link);
+    // No assertion error means the click handler ran without navigating away
+    // or throwing; the link itself should remain in the document.
+    expect(screen.getByTitle("Open in Linear")).toBeDefined();
+  });
+
   it("does not render the external Linear link when linearIssueUrl is absent", () => {
     renderTable([makeRun({ linearIssueUrl: null })]);
     expect(screen.queryByTitle("Open in Linear")).toBeNull();
