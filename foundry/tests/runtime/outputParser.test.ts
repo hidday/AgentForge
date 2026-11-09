@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { z } from "zod";
 import { OutputParser } from "../../src/runtime/outputParser.js";
 import { OutputParseError } from "../../src/utils/errors.js";
@@ -108,6 +108,27 @@ describe("OutputParser.parseJson()", () => {
     } catch (err) {
       const parseErr = err as OutputParseError;
       expect(parseErr.rawOutput?.length).toBe(500);
+    }
+  });
+
+  it("stringifies a non-Error value thrown while parsing", () => {
+    // JSON.parse itself always throws a real SyntaxError, so to exercise the
+    // defensive `String(err)` fallback we have to make the underlying parse
+    // throw something else.
+    const parser = new OutputParser();
+    const spy = vi.spyOn(JSON, "parse").mockImplementation(() => {
+      throw "a non-Error parse failure";
+    });
+
+    try {
+      expect(() => parser.parseJson('{"a":1}')).toThrow(OutputParseError);
+      try {
+        parser.parseJson('{"a":1}');
+      } catch (err) {
+        expect((err as OutputParseError).message).toContain("a non-Error parse failure");
+      }
+    } finally {
+      spy.mockRestore();
     }
   });
 });

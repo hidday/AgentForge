@@ -142,3 +142,33 @@ describe("CodexRunner — buildStdinPayload() systemPrompt handling", () => {
     expect(stdinData).toBe("the task");
   });
 });
+
+describe("CodexRunner — process context propagation", () => {
+  it("includes a runId-tagged context on execute() when input.runId is set", async () => {
+    const processRunner = makeMockProcessRunner({
+      stdout: validStructuredOutput,
+      stderr: "",
+      exitCode: 0,
+      durationMs: 10,
+      timedOut: false,
+    });
+    const runner = new CodexRunner(
+      processRunner as never,
+      "codex",
+      ["exec", "-"],
+      "gpt-5.6-sol",
+      makeMockLogger() as never,
+    );
+
+    await runner.run(
+      { prompt: "x", workingDirectory: "/tmp", timeoutMs: 1000, runId: "run-7" },
+      "planner",
+      echoSchema,
+    );
+
+    const { context } = processRunner.execute.mock.calls[0]![0] as {
+      context?: { runId: string; stage: string; runtime: string };
+    };
+    expect(context).toEqual({ runId: "run-7", stage: "planner", runtime: "codex" });
+  });
+});

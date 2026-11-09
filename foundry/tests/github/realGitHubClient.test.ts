@@ -90,6 +90,13 @@ describe("RealGitHubClient", () => {
         /cannot access repo "acme\/widgets".*Not Found/,
       );
     });
+
+    it("stringifies a non-Error rejection in the wrapped message", async () => {
+      mockOctokit.repos.get.mockRejectedValue("rate limit exceeded");
+      await expect(client.verifyRepoAccess("acme/widgets")).rejects.toThrow(
+        /cannot access repo "acme\/widgets".*rate limit exceeded/,
+      );
+    });
   });
 
   describe("getDefaultBranch", () => {
@@ -102,6 +109,13 @@ describe("RealGitHubClient", () => {
       mockOctokit.repos.get.mockRejectedValue(new Error("boom"));
       await expect(client.getDefaultBranch("acme/widgets")).rejects.toThrow(
         /GitHub getDefaultBranch failed for "acme\/widgets": boom/,
+      );
+    });
+
+    it("stringifies a non-Error rejection when wrapping", async () => {
+      mockOctokit.repos.get.mockRejectedValue({ toString: () => "weird rejection shape" });
+      await expect(client.getDefaultBranch("acme/widgets")).rejects.toThrow(
+        /GitHub getDefaultBranch failed for "acme\/widgets": weird rejection shape/,
       );
     });
   });
@@ -196,6 +210,24 @@ describe("RealGitHubClient", () => {
       await expect(
         client.createDraftPR("acme/widgets", "head", "main", "Title", "Body"),
       ).rejects.toThrow(/GitHub createDraftPR failed/);
+    });
+
+    it("stringifies a non-Error 422 rejection to detect a field-validation failure", async () => {
+      // A 422 shape that isn't an Error instance: the `status` check still
+      // fires, but `message` must come from String(err) rather than err.message.
+      mockOctokit.pulls.create.mockRejectedValue({
+        status: 422,
+        toString: () => 'Validation Failed: {"code":"invalid","field":"base"}',
+      });
+
+      await expect(
+        client.createDraftPR("acme/widgets", "head", "bad-base", "Title", "Body"),
+      ).rejects.toThrow(/GitHub createDraftPR failed/);
+      expect(mockOctokit.pulls.list).not.toHaveBeenCalled();
+      expect(logger.error).toHaveBeenCalledWith(
+        expect.objectContaining({ detail: expect.stringContaining('"code":"invalid"') }),
+        "PR creation failed: invalid field (base branch may not exist)",
+      );
     });
   });
 
@@ -425,6 +457,17 @@ describe("RealGitHubClient", () => {
         "Failed to reply to PR review comment, skipping",
       );
     });
+
+    it("stringifies a non-Error rejection in the logged warning", async () => {
+      mockOctokit.pulls.createReplyForReviewComment.mockRejectedValue("comment thread locked");
+      await expect(
+        client.replyToReviewComment("acme/widgets", 10, 500, "thanks"),
+      ).resolves.toBeUndefined();
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.objectContaining({ error: "comment thread locked" }),
+        "Failed to reply to PR review comment, skipping",
+      );
+    });
   });
 
   describe("submitPRReview", () => {
@@ -456,6 +499,19 @@ describe("RealGitHubClient", () => {
         event: "COMMENT",
       });
       expect(logger.info).toHaveBeenCalled();
+    });
+
+    it("stringifies a non-Error rejection when deciding whether to fall back", async () => {
+      // Not an Error instance, and its message text doesn't match the
+      // "request changes on own PR" pattern, so it must be rethrown wrapped
+      // rather than falling back to a COMMENT retry.
+      mockOctokit.pulls.createReview.mockRejectedValue({
+        toString: () => "some other non-Error rejection shape",
+      });
+      await expect(
+        client.submitPRReview("acme/widgets", 10, "Needs work", "REQUEST_CHANGES"),
+      ).rejects.toThrow(/GitHub submitPRReview failed.*some other non-Error rejection shape/);
+      expect(mockOctokit.pulls.createReview).toHaveBeenCalledTimes(1);
     });
 
     it("does not fall back when the event is already COMMENT", async () => {

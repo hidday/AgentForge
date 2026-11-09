@@ -169,6 +169,22 @@ describe("RealLinearClient", () => {
       expect(issue.state).toBe("Unknown");
       expect(issue.team).toBeUndefined();
     });
+
+    it("defaults labels to an empty array when the labels connection itself is nullish", async () => {
+      const fake = makeFakeIssue({
+        id: "focus-id",
+        // The SDK can resolve the connection itself to undefined (not just an
+        // empty `nodes` array), which only the `labelsConn?.nodes?.map(...) ?? []`
+        // fallback (rather than mapping over an empty array) actually guards.
+        labels: () => Promise.resolve(undefined as unknown as { nodes: never[] }),
+      });
+      const sdk = makeSdk({ issue: vi.fn().mockResolvedValue(fake) });
+      injectSdk(client, sdk);
+
+      const issue = await client.getIssue("focus-id");
+
+      expect(issue.labels).toEqual([]);
+    });
   });
 
   describe("searchIssues", () => {
@@ -226,6 +242,42 @@ describe("RealLinearClient", () => {
       injectSdk(client, sdk);
       const results = await client.searchIssues({ state: "Todo" });
       expect(results).toEqual([]);
+    });
+
+    it("maps a matched issue's cycle name through when present", async () => {
+      const fake = makeFakeIssue({ id: "c", cycle: Promise.resolve({ name: "Sprint 7" }) });
+      const sdk = makeSdk({ issues: vi.fn().mockResolvedValue({ nodes: [fake] }) });
+      injectSdk(client, sdk);
+
+      const results = await client.searchIssues({ state: "Todo" });
+
+      expect(results[0].cycle).toBe("Sprint 7");
+    });
+
+    it("defaults labels/description/project/team/cycle when all are nullish on a matched issue", async () => {
+      const fake = makeFakeIssue({
+        id: "b",
+        description: null,
+        labels: () => Promise.resolve(undefined as unknown as { nodes: never[] }),
+        project: Promise.resolve(null),
+        team: Promise.resolve(undefined),
+        cycle: Promise.resolve(null),
+      });
+      const sdk = makeSdk({ issues: vi.fn().mockResolvedValue({ nodes: [fake] }) });
+      injectSdk(client, sdk);
+
+      const results = await client.searchIssues({ state: "Todo" });
+
+      expect(results).toEqual([
+        expect.objectContaining({
+          id: "b",
+          description: "",
+          labels: [],
+          project: undefined,
+          team: undefined,
+          cycle: undefined,
+        }),
+      ]);
     });
   });
 
@@ -440,6 +492,64 @@ describe("RealLinearClient", () => {
       injectSdk(client, sdk);
 
       expect(await client.listLabels("a")).toEqual([]);
+    });
+
+    it("returns an empty array and populates no cache entries when the connection itself is nullish", async () => {
+      const fake = makeFakeIssue({
+        id: "a",
+        labels: () => Promise.resolve(undefined as unknown as { nodes: never[] }),
+      });
+      const sdk = makeSdk({ issue: vi.fn().mockResolvedValue(fake) });
+      injectSdk(client, sdk);
+
+      expect(await client.listLabels("a")).toEqual([]);
+    });
+  });
+
+  describe("updateIssueState additional branches", () => {
+    it("treats a nullish states connection as having no workflow states", async () => {
+      const team: FakeTeam = {
+        id: "team-1",
+        key: "PRY",
+        states: () => Promise.resolve(undefined as unknown as { nodes: never[] }),
+      };
+      const fake = makeFakeIssue({ id: "a", team: Promise.resolve(team) });
+      const sdk = makeSdk({ issue: vi.fn().mockResolvedValue(fake), team: vi.fn().mockResolvedValue(team) });
+      injectSdk(client, sdk);
+
+      await client.updateIssueState("a", "Done");
+
+      expect(logger.warn).toHaveBeenCalledWith(
+        { issueId: "a", stateName: "Done", teamId: "team-1" },
+        "Could not find workflow state by name",
+      );
+      expect(sdk.updateIssue).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("getRelatedContext additional branches", () => {
+    it("treats a nullish inverseRelations connection as having no blockers, and defaults a parent's nullish labels/state", async () => {
+      const parent = makeFakeIssue({
+        id: "parent-id",
+        identifier: "PRY-0",
+        state: Promise.resolve(null),
+        labels: () => Promise.resolve(undefined as unknown as { nodes: never[] }),
+      });
+      const focus = makeFakeIssue({ id: "focus-id" });
+      (focus as unknown as { parent: Promise<FakeIssue> }).parent = Promise.resolve(parent);
+      (focus as unknown as {
+        inverseRelations: () => Promise<undefined>;
+      }).inverseRelations = () => Promise.resolve(undefined);
+
+      const sdk = makeSdk({ issue: vi.fn().mockResolvedValue(focus) });
+      injectSdk(client, sdk);
+
+      const ctx = await client.getRelatedContext("focus-id");
+
+      expect(ctx.blockers).toEqual([]);
+      expect(ctx.parent).toEqual(
+        expect.objectContaining({ id: "parent-id", state: "Unknown", labels: [] }),
+      );
     });
   });
 });

@@ -342,4 +342,45 @@ describe("RuntimeHealthCheck.runPreflight() — failure modes", () => {
     expect(authResult.ok).toBe(false);
     expect(authResult.error).toBe("network down");
   });
+
+  it("checkBinary stringifies a non-Error value thrown by execute()", async () => {
+    const configs = makeConfigs();
+    const execute = vi.fn().mockRejectedValue("spawn failed: EACCES");
+    const check = new RuntimeHealthCheck({ execute } as never, configs, makeMockLogger() as never);
+
+    const binaryResult = await (check as unknown as {
+      checkBinary: (c: typeof configs.codex) => Promise<{ ok: boolean; error?: string }>;
+    }).checkBinary(configs.codex);
+
+    expect(binaryResult.ok).toBe(false);
+    expect(binaryResult.error).toBe("spawn failed: EACCES");
+  });
+
+  it("checkAuth stringifies a non-Error value thrown by execute()", async () => {
+    const configs = makeConfigs();
+    const execute = vi.fn().mockRejectedValue("socket hang up");
+    const check = new RuntimeHealthCheck({ execute } as never, configs, makeMockLogger() as never);
+
+    const authResult = await (check as unknown as {
+      checkAuth: (c: typeof configs.codex) => Promise<{ ok: boolean; error?: string }>;
+    }).checkAuth(configs.codex);
+
+    expect(authResult.ok).toBe(false);
+    expect(authResult.error).toBe("socket hang up");
+  });
+
+  it("exitCodeOnly auth failure falls back to stdout in the error message when stderr is empty", async () => {
+    const configs = makeConfigs();
+    const execute = vi
+      .fn()
+      .mockResolvedValue(processResult({ exitCode: 1, stderr: "", stdout: "denied: no session" }));
+    const check = new RuntimeHealthCheck({ execute } as never, configs, makeMockLogger() as never);
+
+    const authResult = await (check as unknown as {
+      checkAuth: (c: typeof configs.cursor) => Promise<{ ok: boolean; error?: string }>;
+    }).checkAuth(configs.cursor);
+
+    expect(authResult.ok).toBe(false);
+    expect(authResult.error).toContain("denied: no session");
+  });
 });

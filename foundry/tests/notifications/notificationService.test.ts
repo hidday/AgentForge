@@ -207,6 +207,42 @@ describe("NotificationService", () => {
       expect(result.slack.error).toBe("network unreachable");
     });
 
+    it("stringifies a non-Error Slack rejection", async () => {
+      fetchMock.mockRejectedValue("DNS lookup failed");
+      const svc = new NotificationService(
+        { emailFrom: "bot@example.com", slackWebhookUrl: "https://hooks.slack.com/services/x" },
+        logger as never,
+      );
+
+      const result = await svc.sendHumanRequest(makePayload());
+
+      expect(result.slack.ok).toBe(false);
+      expect(result.slack.error).toBe("DNS lookup failed");
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.objectContaining({ error: "DNS lookup failed" }),
+        "Slack notification failed",
+      );
+    });
+
+    it("stringifies a non-Error email rejection", async () => {
+      fetchMock.mockImplementation((url: string) => {
+        if (url === "https://api.resend.com/emails") {
+          return Promise.reject("resend unreachable");
+        }
+        return Promise.resolve(okResponse());
+      });
+      const svc = new NotificationService(configFull(), logger as never);
+
+      const result = await svc.sendHumanRequest(makePayload());
+
+      expect(result.email.ok).toBe(false);
+      expect(result.email.error).toBe("resend unreachable");
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.objectContaining({ error: "resend unreachable" }),
+        "Email notification failed",
+      );
+    });
+
     it("sends an email via the Resend API with the expected URL, headers, body and recipients", async () => {
       fetchMock.mockResolvedValue(okResponse());
       const svc = new NotificationService(configFull(), logger as never);
@@ -302,6 +338,34 @@ describe("NotificationService", () => {
       expect(body.html).not.toContain("<script>alert");
       expect(body.html).toContain("&lt;script&gt;");
       expect(body.html).toContain("&amp;");
+    });
+
+    it("falls back to '(untitled)' in the subject/html/text and truncates very long context", async () => {
+      fetchMock.mockResolvedValue(okResponse());
+      const svc = new NotificationService(configFull(), logger as never);
+      const longContext = "x".repeat(2100);
+
+      await svc.sendHumanRequest(
+        makePayload({
+          linearIssue: { id: "lin-1", identifier: "PRY-42", title: null, url: null },
+          context: longContext,
+        }),
+      );
+
+      const emailCall = fetchMock.mock.calls.find(
+        (c) => c[0] === "https://api.resend.com/emails",
+      ) as [string, RequestInit];
+      const body = JSON.parse(emailCall[1].body as string);
+
+      expect(body.subject).toContain("(untitled)");
+      expect(body.html).toContain("(untitled)");
+      expect(body.text).toContain("(untitled)");
+
+      // Truncated to max-1 (1999) chars plus an ellipsis in both renderings.
+      expect(body.html).not.toContain(longContext);
+      expect(body.html).toContain("x".repeat(1999) + "…");
+      expect(body.text).not.toContain(longContext);
+      expect(body.text).toContain("x".repeat(1999) + "…");
     });
 
     it("records an email failure (non-2xx response) without throwing, independent of Slack", async () => {
