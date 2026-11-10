@@ -280,6 +280,27 @@ describe("OrchestratorService -- retrieveSkillsForPlanning (via startRun)", () =
     expect(payload.skillIds).toEqual(["skill-1", "skill-2"]);
   });
 
+  it("builds the skill query gracefully when the issue has no title or description", async () => {
+    const agentSkillRepo = { findTopKByRelevance: vi.fn().mockResolvedValue([]) };
+    const built = buildDeps(makeRun(), { agentSkillRepo });
+    built.deps.linearClient.getIssue = vi.fn().mockResolvedValue({
+      id: "LIN-1",
+      identifier: "ENG-1",
+      title: undefined,
+      description: undefined,
+      branchName: "ai/lin-1",
+      state: "Todo",
+      labels: [],
+      priority: 0,
+    });
+    const svc = new OrchestratorService(built.deps as never);
+    vi.spyOn(svc, "runPlanReview").mockResolvedValue(makeRun());
+
+    await svc.startRun("LIN-1");
+
+    expect(agentSkillRepo.findTopKByRelevance).toHaveBeenCalledWith("test-repo", " ", expect.any(Number));
+  });
+
   it("does not emit SKILL_INJECTION when the skill query returns zero results", async () => {
     const agentSkillRepo = { findTopKByRelevance: vi.fn().mockResolvedValue([]) };
     const built = buildDeps(makeRun(), { agentSkillRepo });
@@ -413,6 +434,61 @@ describe("OrchestratorService -- updateSkillMetrics (via transitions to Done/Fai
 
     expect(result.state).toBe(RunState.Failed);
     expect(agentSkillRepo.incrementFailure).toHaveBeenCalledWith("skill-1");
+  });
+
+  it("does nothing when agentSkillRepo is configured but no SKILL_INJECTION events were recorded", async () => {
+    const agentSkillRepo = {
+      incrementSuccess: vi.fn(),
+      incrementFailure: vi.fn(),
+      archiveIfLowUtility: vi.fn(),
+    };
+    const built = buildDeps(makeRun({ state: RunState.ReadyForHumanReview }), {
+      agentSkillRepo,
+      events: [],
+    });
+    const svc = new OrchestratorService(built.deps as never);
+
+    await svc.approveHumanReview("run-1");
+
+    expect(agentSkillRepo.incrementSuccess).not.toHaveBeenCalled();
+    expect(agentSkillRepo.incrementFailure).not.toHaveBeenCalled();
+  });
+
+  it("treats a SKILL_INJECTION event with no skillIds field as contributing no skills", async () => {
+    const agentSkillRepo = {
+      incrementSuccess: vi.fn(),
+      incrementFailure: vi.fn(),
+      archiveIfLowUtility: vi.fn(),
+    };
+    const built = buildDeps(makeRun({ state: RunState.ReadyForHumanReview }), {
+      agentSkillRepo,
+      events: [makeEvent({ eventType: "SKILL_INJECTION", payloadJson: {} })],
+    });
+    const svc = new OrchestratorService(built.deps as never);
+
+    await svc.approveHumanReview("run-1");
+
+    expect(agentSkillRepo.incrementSuccess).not.toHaveBeenCalled();
+  });
+
+  it("logs a warning (stringifying a non-Error rejection) when updating one skill's metric throws", async () => {
+    const agentSkillRepo = {
+      incrementSuccess: vi.fn().mockRejectedValue("db down"),
+      incrementFailure: vi.fn(),
+      archiveIfLowUtility: vi.fn(),
+    };
+    const built = buildDeps(makeRun({ state: RunState.ReadyForHumanReview }), {
+      agentSkillRepo,
+      events: [makeEvent({ eventType: "SKILL_INJECTION", payloadJson: { skillIds: ["skill-1"] } })],
+    });
+    const svc = new OrchestratorService(built.deps as never);
+
+    await svc.approveHumanReview("run-1");
+
+    expect(built.logger.warn).toHaveBeenCalledWith(
+      expect.objectContaining({ runId: "run-1", skillId: "skill-1", error: "db down" }),
+      "Failed to update skill metric",
+    );
   });
 
   it("logs a warning and continues when updating one skill's metric throws", async () => {

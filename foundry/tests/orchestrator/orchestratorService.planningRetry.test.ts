@@ -234,6 +234,24 @@ describe("OrchestratorService.runPlanning", () => {
     expect(taskBundleCalls).toHaveLength(0);
   });
 
+  it("injects the previous Plan artifact into the planner call when one exists", async () => {
+    const built = buildDeps(makeRun({ state: RunState.Planning, planVersion: 1 }));
+    const priorPlan = makePlan({ planVersion: 1, summary: "Old plan" });
+    built.artifactRepo.findLatestByType.mockImplementation((_id: string, type: string) =>
+      type === "Plan" ? Promise.resolve({ payloadJson: priorPlan }) : Promise.resolve(null),
+    );
+    const svc = new OrchestratorService(built.deps as never);
+    vi.spyOn(svc, "runPlanReview").mockResolvedValue(makeRun());
+
+    await svc.runPlanning("run-1");
+
+    expect(built.plannerAgent.run).toHaveBeenCalledWith(
+      expect.anything(),
+      "run-1",
+      expect.objectContaining({ previousPlan: priorPlan }),
+    );
+  });
+
   it("injects prior HumanAnswers, ResearchedAnswers, and PlanReview findings artifacts into the planner call", async () => {
     const built = buildDeps(makeRun({ state: RunState.Planning, planVersion: 1 }));
     built.artifactRepo.findLatestByType.mockImplementation((_id: string, type: string) => {
@@ -354,5 +372,36 @@ describe("OrchestratorService.retryRun", () => {
 
     expect(runPlanReviewSpy).not.toHaveBeenCalled();
     expect(result.state).toBe(RunState.HumanClarificationNeeded);
+  });
+
+  it("falls back to the default repo when the run's repo is not found in the registry", async () => {
+    const built = buildDeps(makeRun({ state: RunState.Todo, branchName: null }));
+    (built.deps.repoRegistry.getRepoByName as ReturnType<typeof vi.fn>).mockReturnValue(null);
+    const defaultRepo = {
+      name: "default-repo",
+      defaultBranch: "main",
+      allowedPaths: [],
+      protectedPaths: [],
+      constraints: {
+        requiredChecks: [],
+        maxFilesChanged: 10,
+        maxDiffLines: 500,
+        forbiddenPatterns: [],
+        mustNotTouch: [],
+      },
+    };
+    (built.deps.repoRegistry.getDefaultRepo as ReturnType<typeof vi.fn>).mockReturnValue(defaultRepo);
+    const svc = new OrchestratorService(built.deps as never);
+    vi.spyOn(svc, "runPlanReview").mockResolvedValue(makeRun());
+
+    await svc.retryRun("run-1");
+
+    expect(built.deps.repoRegistry.getDefaultRepo).toHaveBeenCalled();
+    expect(built.gitService.setupRunWorktree).toHaveBeenCalledWith(
+      "/tmp/main",
+      "run-1",
+      "main",
+      "ai/lin-1",
+    );
   });
 });

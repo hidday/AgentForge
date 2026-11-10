@@ -240,6 +240,34 @@ describe("OrchestratorService.startRun", () => {
       "Config defaultBranch differs from GitHub, using remote value",
     );
   });
+
+  it("falls back to the config default branch (stringifying a non-Error rejection) when GitHub lookup fails", async () => {
+    const built = buildDeps(makeRun({ id: "run-1", state: RunState.Todo }));
+    built.githubClient.getDefaultBranch.mockRejectedValue("network down");
+    const svc = new OrchestratorService(built.deps as never);
+    vi.spyOn(svc, "runPlanReview").mockResolvedValue(makeRun());
+
+    await svc.startRun("LIN-1");
+
+    expect(built.logger.warn).toHaveBeenCalledWith(
+      expect.objectContaining({ repo: "test-repo", error: "network down" }),
+      "Failed to resolve default branch from GitHub, falling back to config value",
+    );
+  });
+
+  it("proceeds without relatedContext (stringifying a non-Error rejection) when getRelatedContext fails", async () => {
+    const built = buildDeps(makeRun({ id: "run-1", state: RunState.Todo }));
+    built.deps.linearClient.getRelatedContext = vi.fn().mockRejectedValue("linear outage");
+    const svc = new OrchestratorService(built.deps as never);
+    vi.spyOn(svc, "runPlanReview").mockResolvedValue(makeRun());
+
+    await svc.startRun("LIN-1");
+
+    expect(built.logger.warn).toHaveBeenCalledWith(
+      expect.objectContaining({ issueId: "LIN-1", error: "linear outage" }),
+      "Failed to fetch related Linear context; proceeding without it",
+    );
+  });
 });
 
 describe("OrchestratorService.rejectPlan", () => {
@@ -377,6 +405,35 @@ describe("OrchestratorService.answerQuestions -- additional branches", () => {
     )!;
     const payload = (clarificationCall[0] as { payloadJson: { iteration: number } }).payloadJson;
     expect(payload.iteration).toBe(2);
+  });
+
+  it("forwards a prior ResearchedAnswers artifact into the planner re-plan call alongside the new human answers", async () => {
+    const plan = makePlan({
+      openQuestions: [{ id: "q1", question: "Which env?", requiredForExecution: true }],
+    });
+    const built = buildDeps(makeRun({ state: RunState.HumanClarificationNeeded }), {
+      artifacts: {
+        Plan: { payloadJson: plan },
+        TaskBundle: { payloadJson: { issue: {}, repo: {} } },
+        ResearchedAnswers: {
+          payloadJson: {
+            answers: [{ questionId: "q0", question: "x", answer: "y", confidence: "high" }],
+          },
+        },
+      },
+    });
+    const svc = new OrchestratorService(built.deps as never);
+    vi.spyOn(svc, "runPlanReview").mockResolvedValue(makeRun());
+
+    await svc.answerQuestions("run-1", [{ questionId: "q1", answer: "staging" }]);
+
+    expect(built.plannerAgent.run).toHaveBeenCalledWith(
+      expect.anything(),
+      "run-1",
+      expect.objectContaining({
+        researchedAnswers: [{ questionId: "q0", question: "x", answer: "y", confidence: "high" }],
+      }),
+    );
   });
 
   it("rejects with a ValidationError (not silently) when a required question is missing an answer", async () => {

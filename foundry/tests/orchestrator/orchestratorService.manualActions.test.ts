@@ -337,6 +337,20 @@ describe("OrchestratorService.approveHumanReview", () => {
     expect(distillationAgent.run).toHaveBeenCalledWith("run-1", expect.objectContaining({ id: "run-1" }));
   });
 
+  it("swallows a non-Error distillation rejection (stringifies it) and still completes the run", async () => {
+    const distillationAgent = { run: vi.fn().mockRejectedValue("llm down") };
+    const built = buildDeps(makeRun({ state: RunState.ReadyForHumanReview }), { distillationAgent });
+    const svc = new OrchestratorService(built.deps as never);
+
+    const result = await svc.approveHumanReview("run-1");
+
+    expect(result.state).toBe(RunState.Done);
+    expect(built.logger.warn).toHaveBeenCalledWith(
+      expect.objectContaining({ runId: "run-1", error: "llm down" }),
+      "Distillation agent failed (best-effort, ignoring)",
+    );
+  });
+
   it("swallows distillation agent errors (best-effort) and still completes the run", async () => {
     const distillationAgent = { run: vi.fn().mockRejectedValue(new Error("llm down")) };
     const built = buildDeps(makeRun({ state: RunState.ReadyForHumanReview }), { distillationAgent });

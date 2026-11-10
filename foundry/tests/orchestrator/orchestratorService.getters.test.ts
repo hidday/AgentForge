@@ -124,6 +124,16 @@ describe("OrchestratorService -- simple getters", () => {
   });
 });
 
+describe("OrchestratorService -- requireRun", () => {
+  it("throws 'Run not found' when the run does not exist, via any method that requires it", async () => {
+    const { deps, runRepo } = buildDeps();
+    runRepo.findById.mockResolvedValue(null);
+    const svc = new OrchestratorService(deps as never);
+
+    await expect(svc.runPlanning("missing-run")).rejects.toThrow("Run not found: missing-run");
+  });
+});
+
 describe("OrchestratorService.handleLinearWebhook", () => {
   it("dispatches to handleCommand when action is 'comment.command' and a command is present", async () => {
     const { deps } = buildDeps();

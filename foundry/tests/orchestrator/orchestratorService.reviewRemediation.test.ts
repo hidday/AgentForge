@@ -208,7 +208,10 @@ describe("OrchestratorService.runReview", () => {
   });
 
   it("changes_requested with a PR: posts review findings to GitHub, transitions to AddressingReview, and delegates to runRemediation with the comment map", async () => {
-    const built = buildDeps(makeRun(), { ExecutionReport: { payloadJson: makeExecutionReport() } });
+    const built = buildDeps(makeRun(), {
+      ExecutionReport: { payloadJson: makeExecutionReport() },
+      Plan: { payloadJson: { planVersion: 1, steps: [] } },
+    });
     const svc = new OrchestratorService(built.deps as never);
     const runRemediationSpy = vi
       .spyOn(svc, "runRemediation")
