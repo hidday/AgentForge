@@ -295,6 +295,48 @@ describe("OrchestratorService -- retrieveSkillsForPlanning (via startRun)", () =
   });
 });
 
+describe("OrchestratorService -- maybeResearchAndReplan (via startRun)", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it("forwards a prior HumanAnswers artifact into both the researcher and the post-research re-plan call", async () => {
+    const answerResearcherAgent = {
+      run: vi.fn().mockResolvedValue({
+        summary: "Researched",
+        answers: [{ questionId: "q1", question: "x", answer: "y", confidence: "high" }],
+      }),
+    };
+    const built = buildDeps(makeRun(), {
+      artifacts: {
+        HumanAnswers: { payloadJson: { answers: [{ questionId: "q1", answer: "staging" }] } },
+      },
+    });
+    built.plannerAgent.run
+      .mockResolvedValueOnce(
+        makePlan({
+          openQuestions: [{ id: "q1", question: "Non-blocking?", requiredForExecution: false }],
+        }),
+      )
+      .mockResolvedValue(makePlan());
+    const svc = new OrchestratorService({ ...built.deps, answerResearcherAgent } as never);
+    vi.spyOn(svc, "runPlanReview").mockResolvedValue(makeRun());
+
+    await svc.startRun("LIN-1");
+
+    expect(answerResearcherAgent.run).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      "run-1",
+      { humanAnswers: [{ questionId: "q1", answer: "staging" }] },
+    );
+    expect(built.plannerAgent.run).toHaveBeenNthCalledWith(
+      2,
+      expect.anything(),
+      "run-1",
+      expect.objectContaining({ humanAnswers: [{ questionId: "q1", answer: "staging" }] }),
+    );
+  });
+});
+
 describe("OrchestratorService -- updateSkillMetrics (via transitions to Done/Failed)", () => {
   beforeEach(() => vi.clearAllMocks());
 

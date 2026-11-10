@@ -234,6 +234,46 @@ describe("OrchestratorService.runPlanning", () => {
     expect(taskBundleCalls).toHaveLength(0);
   });
 
+  it("injects prior HumanAnswers, ResearchedAnswers, and PlanReview findings artifacts into the planner call", async () => {
+    const built = buildDeps(makeRun({ state: RunState.Planning, planVersion: 1 }));
+    built.artifactRepo.findLatestByType.mockImplementation((_id: string, type: string) => {
+      if (type === "HumanAnswers") {
+        return Promise.resolve({
+          payloadJson: { answers: [{ questionId: "q1", answer: "staging" }] },
+        });
+      }
+      if (type === "ResearchedAnswers") {
+        return Promise.resolve({
+          payloadJson: {
+            answers: [
+              { questionId: "q2", question: "x", answer: "y", confidence: "high" },
+            ],
+          },
+        });
+      }
+      if (type === "PlanReview") {
+        return Promise.resolve({
+          payloadJson: { summary: "Needs tweaks", findings: [{ id: "f1" }] },
+        });
+      }
+      return Promise.resolve(null);
+    });
+    const svc = new OrchestratorService(built.deps as never);
+    vi.spyOn(svc, "runPlanReview").mockResolvedValue(makeRun());
+
+    await svc.runPlanning("run-1");
+
+    expect(built.plannerAgent.run).toHaveBeenCalledWith(
+      expect.anything(),
+      "run-1",
+      expect.objectContaining({
+        humanAnswers: [{ questionId: "q1", answer: "staging" }],
+        researchedAnswers: [{ questionId: "q2", question: "x", answer: "y", confidence: "high" }],
+        planReviewFindings: { summary: "Needs tweaks", findings: [{ id: "f1" }] },
+      }),
+    );
+  });
+
   it("injects humanFeedback from the latest RejectionContext artifact into the planner call", async () => {
     const built = buildDeps(makeRun({ state: RunState.Planning, planVersion: 1 }));
     built.artifactRepo.findLatestByType.mockImplementation((_id: string, type: string) => {
