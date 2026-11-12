@@ -318,6 +318,31 @@ describe("ProcessRunner.execute() in real mode -- process tracking (context)", (
     );
   });
 
+  it("still completes and emits process:completed when the manifest file is missing at cleanup time", async () => {
+    const emitter = makeEmitter();
+    const runner = new ProcessRunner("real", makeLogger() as never, emitter as never, spoolDir);
+    const child = makeFakeChild();
+    mockedSpawn.mockReturnValue(child);
+
+    const promise = runner.execute(contextOptions());
+    const { id } = runner.getActiveProcesses()[0]!;
+    // Remove the manifest out from under cleanupProcess's best-effort update.
+    rmSync(join(spoolDir, `${id}.json`), { force: true });
+
+    child.emit("close", 0);
+    const result = await promise;
+
+    expect(result.exitCode).toBe(0);
+    expect(emitter.emitProcessCompleted).toHaveBeenCalledWith(
+      "run-1",
+      id,
+      "planner",
+      "claude-code",
+      0,
+      expect.any(Number),
+    );
+  });
+
   it("does not register a process entry when context is omitted", async () => {
     const runner = new ProcessRunner("real", makeLogger() as never, undefined, spoolDir);
     const child = makeFakeChild();
@@ -742,11 +767,81 @@ describe("ProcessRunner.rehydrateOrphans()", () => {
     expect(finalManifest.completedAt).toBeDefined();
   });
 
+  it("still finalizes and emits process:completed when the orphan's manifest file is missing", async () => {
+    vi.useFakeTimers();
+    const logger = makeLogger();
+    const emitter = makeEmitter();
+    const runner = new ProcessRunner("real", logger as never, emitter as never, spoolDir);
+    const manifest = writeManifest("alive-6", { pid: process.pid });
+    writeFileSync(manifest.logFile, "start");
+
+    runner.rehydrateOrphans();
+    expect(runner.getActiveProcesses()).toHaveLength(1);
+
+    (
+      runner as unknown as { activeProcesses: Map<string, { pid: number }> }
+    ).activeProcesses.get("alive-6")!.pid = DEAD_PID;
+    // Remove the manifest out from under finalizeOrphan's best-effort update.
+    rmSync(manifestPathFor("alive-6"), { force: true });
+
+    await vi.advanceTimersByTimeAsync(5_000);
+
+    expect(runner.getActiveProcesses()).toHaveLength(0);
+    expect(emitter.emitProcessCompleted).toHaveBeenCalledWith(
+      "run-x",
+      "alive-6",
+      "planner",
+      "claude-code",
+      -1,
+      expect.any(Number),
+    );
+    expect(logger.info).toHaveBeenCalledWith(
+      expect.objectContaining({ processId: "alive-6" }),
+      "Orphaned process has exited",
+    );
+  });
+
   it("finalizeOrphan is a no-op when the processId is not tracked", () => {
     const emitter = makeEmitter();
     const runner = new ProcessRunner("real", makeLogger() as never, emitter as never, spoolDir);
 
     (runner as unknown as { finalizeOrphan: (id: string) => void }).finalizeOrphan("nope");
+
+    expect(emitter.emitProcessCompleted).not.toHaveBeenCalled();
+  });
+
+  it("falls back to signaling the process group (pid 0) when the entry is gone before a poll tick, so it is never finalized", async () => {
+    vi.useFakeTimers();
+    const emitter = makeEmitter();
+    const runner = new ProcessRunner("real", makeLogger() as never, emitter as never, spoolDir);
+    const manifest = writeManifest("alive-7", { pid: process.pid });
+    writeFileSync(manifest.logFile, "start");
+
+    runner.rehydrateOrphans();
+    // Remove the entry directly so `activeProcesses.get(id)?.pid` resolves to
+    // the `?? 0` fallback on the next poll tick. process.kill(0, 0) signals
+    // this process's whole group and succeeds rather than throwing, so the
+    // poll loop does not treat this as a dead process.
+    (runner as unknown as { activeProcesses: Map<string, unknown> }).activeProcesses.delete(
+      "alive-7",
+    );
+
+    await vi.advanceTimersByTimeAsync(5_000);
+
+    expect(emitter.emitProcessCompleted).not.toHaveBeenCalled();
+  });
+});
+
+describe("ProcessRunner internals -- cleanupProcess (white-box)", () => {
+  it("is a no-op when the processId is not tracked", () => {
+    const emitter = makeEmitter();
+    const runner = new ProcessRunner("real", makeLogger() as never, emitter as never, spoolDir);
+
+    (
+      runner as unknown as {
+        cleanupProcess: (id: string, exitCode: number, durationMs: number) => void;
+      }
+    ).cleanupProcess("bogus-id", 0, 10);
 
     expect(emitter.emitProcessCompleted).not.toHaveBeenCalled();
   });

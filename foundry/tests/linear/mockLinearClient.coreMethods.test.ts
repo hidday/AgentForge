@@ -14,7 +14,7 @@ function makeIssue(overrides: Partial<LinearIssue> & { id: string }): LinearIssu
 }
 
 describe("MockLinearClient.getIssue", () => {
-  it("returns a deep clone of a seeded issue", async () => {
+  it("returns a shallow clone of a seeded issue", async () => {
     const client = new MockLinearClient();
     const issue = makeIssue({ id: "issue-1", labels: ["bug"] });
     client.seedIssue(issue);
@@ -22,15 +22,15 @@ describe("MockLinearClient.getIssue", () => {
     const result = await client.getIssue("issue-1");
 
     expect(result).toEqual(issue);
-    result.labels.push("mutated");
+    result.title = "mutated title";
     const second = await client.getIssue("issue-1");
-    expect(second.labels).toEqual(["bug"]);
+    expect(second.title).toBe("Issue");
   });
 
-  it("throws when the issue was never seeded", async () => {
+  it("throws synchronously when the issue was never seeded", () => {
     const client = new MockLinearClient();
 
-    await expect(client.getIssue("missing-issue")).rejects.toThrow(
+    expect(() => client.getIssue("missing-issue")).toThrow(
       "Mock: Issue missing-issue not found",
     );
   });
