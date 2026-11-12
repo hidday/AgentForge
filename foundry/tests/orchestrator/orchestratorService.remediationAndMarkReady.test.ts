@@ -315,6 +315,48 @@ describe("OrchestratorService.runRemediation", () => {
       commentMap,
     );
   });
+
+  it("completes the full happy path through markReady when the latest Review is already approved by the time it re-checks", async () => {
+    // assertCanRemediate (at the top of runRemediation) requires the latest
+    // Review to be "changes_requested"; markReady (at the tail) requires it
+    // to be "approved". In this fake, a human/process has already superseded
+    // the Review with an approved one between those two reads (e.g. a
+    // concurrent re-review), so both checks pass and the run actually reaches
+    // ReadyForHumanReview end-to-end.
+    const initialRun = makeRun({ state: RunState.AddressingReview, prNumber: 7 });
+    const store: TestStore = { runState: RunState.AddressingReview };
+    const { deps, artifactRepo, remediationAgent } = buildDeps(initialRun, store);
+    const svc = new OrchestratorService(deps as never);
+
+    const changesRequestedReview = makeReview({ overallVerdict: "changes_requested" });
+    const approvedReview = makeReview({ overallVerdict: "approved", findings: [] });
+    let reviewReadCount = 0;
+    const execReport = makeExecutionReport();
+    const newExecReport = makeExecutionReport({ executionVersion: 2, score: 0.9 });
+
+    artifactRepo.findLatestByType.mockImplementation((_runId: string, type: string) => {
+      if (type === "Review") {
+        reviewReadCount += 1;
+        return Promise.resolve(
+          asArtifact("Review", 1, reviewReadCount === 1 ? changesRequestedReview : approvedReview),
+        );
+      }
+      if (type === "ExecutionReport") {
+        return Promise.resolve(asArtifact("ExecutionReport", reviewReadCount, execReport));
+      }
+      return Promise.resolve(null);
+    });
+    remediationAgent.run.mockResolvedValue({
+      reviewId: "rev-1",
+      resolution: [{ findingId: "f1", status: "accepted", action: "Fixed", rationale: "r" }],
+      readyForHumanReview: true,
+      executionReport: newExecReport,
+    });
+
+    const result = await svc.runRemediation("run-1");
+
+    expect(result.state).toBe(RunState.ReadyForHumanReview);
+  });
 });
 
 describe("OrchestratorService.markReady", () => {
