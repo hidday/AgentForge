@@ -129,6 +129,36 @@ describe("POST /api/runs/:id/actions/approve-plan", () => {
     expect(response.statusCode).toBe(400);
     expect(response.json()).toEqual({ error: "Cannot approve in this state" });
   });
+
+  it("falls back to String(err) when approvePlan rejects with a non-Error value", async () => {
+    const { app, mockOrchestrator } = await buildApp();
+    mockOrchestrator.approvePlan.mockRejectedValue("plain string failure");
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/actions/approve-plan",
+      payload: {},
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toEqual({ error: "plain string failure" });
+  });
+
+  it("sanitizes a whitespace-only note down to undefined", async () => {
+    const run = makeRun(RunState.Implementing);
+    const { app, mockOrchestrator } = await buildApp();
+    mockOrchestrator.approvePlan.mockResolvedValue(run);
+    mockOrchestrator.runExecution.mockResolvedValue(undefined);
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/actions/approve-plan",
+      payload: { note: "   " },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(mockOrchestrator.approvePlan).toHaveBeenCalledWith("run-1", { note: undefined });
+  });
 });
 
 describe("POST /api/runs/:id/actions/re-review-plan", () => {
@@ -181,6 +211,22 @@ describe("POST /api/runs/:id/actions/re-review-plan", () => {
 
     expect(response.statusCode).toBe(400);
     expect(response.json()).toEqual({ error: "sync failure" });
+  });
+
+  it("falls back to String(err) when runManualReReview throws a non-Error value synchronously", async () => {
+    const { app, mockOrchestrator } = await buildApp();
+    mockOrchestrator.runManualReReview.mockImplementation(() => {
+      throw "sync non-error failure";
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/actions/re-review-plan",
+      payload: {},
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toEqual({ error: "sync non-error failure" });
   });
 });
 
@@ -235,6 +281,22 @@ describe("POST /api/runs/:id/actions/revise-plan", () => {
     expect(response.statusCode).toBe(400);
     expect(response.json()).toEqual({ error: "sync failure" });
   });
+
+  it("falls back to String(err) when runManualPlanRevision throws a non-Error value synchronously", async () => {
+    const { app, mockOrchestrator } = await buildApp();
+    mockOrchestrator.runManualPlanRevision.mockImplementation(() => {
+      throw "sync non-error failure";
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/actions/revise-plan",
+      payload: {},
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toEqual({ error: "sync non-error failure" });
+  });
 });
 
 describe("POST /api/runs/:id/actions/approve-review", () => {
@@ -268,6 +330,19 @@ describe("POST /api/runs/:id/actions/approve-review", () => {
 
     expect(response.statusCode).toBe(400);
     expect(response.json()).toEqual({ error: "Not ready for review" });
+  });
+
+  it("falls back to String(err) when approveHumanReview rejects with a non-Error value", async () => {
+    const { app, mockOrchestrator } = await buildApp();
+    mockOrchestrator.approveHumanReview.mockRejectedValue("plain string failure");
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/actions/approve-review",
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toEqual({ error: "plain string failure" });
   });
 });
 
@@ -321,6 +396,21 @@ describe("POST /api/runs/:id/actions/pause", () => {
     expect(response.statusCode).toBe(400);
     expect(response.json()).toEqual({ error: "Cannot pause" });
   });
+
+  it("falls back to String(err) when handleCommand rejects with a non-Error value", async () => {
+    const run = makeRun();
+    const { app, mockRunRepo, mockOrchestrator } = await buildApp();
+    mockRunRepo.findById.mockResolvedValue(run);
+    mockOrchestrator.handleCommand.mockRejectedValue("plain string failure");
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/actions/pause",
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toEqual({ error: "plain string failure" });
+  });
 });
 
 describe("POST /api/runs/:id/actions/resume", () => {
@@ -372,6 +462,21 @@ describe("POST /api/runs/:id/actions/resume", () => {
 
     expect(response.statusCode).toBe(400);
     expect(response.json()).toEqual({ error: "Cannot resume" });
+  });
+
+  it("falls back to String(err) when handleCommand rejects with a non-Error value", async () => {
+    const run = makeRun();
+    const { app, mockRunRepo, mockOrchestrator } = await buildApp();
+    mockRunRepo.findById.mockResolvedValue(run);
+    mockOrchestrator.handleCommand.mockRejectedValue("plain string failure");
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/actions/resume",
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toEqual({ error: "plain string failure" });
   });
 });
 
@@ -495,5 +600,41 @@ describe("POST /api/runs/:id/actions/reject-plan — mode validation", () => {
 
     expect(response.statusCode).toBe(200);
     expect(mockOrchestrator.rejectPlan).toHaveBeenCalledWith("run-1", undefined, "api", "fresh");
+  });
+
+  it("falls back to String(err) when rejectPlan rejects with a non-Error value", async () => {
+    const { app, mockOrchestrator } = await buildApp();
+    mockOrchestrator.rejectPlan.mockRejectedValue("plain string failure");
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/actions/reject-plan",
+      payload: {},
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toEqual({ error: "plain string failure" });
+  });
+});
+
+describe("POST /api/runs/:id/actions/answer-questions — generic error fallback", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("falls back to String(err) when answerQuestions rejects with a non-Error, non-Policy/Validation value", async () => {
+    const { app, mockOrchestrator } = await buildApp();
+    (mockOrchestrator.answerQuestions as ReturnType<typeof vi.fn>).mockRejectedValue(
+      "plain string failure",
+    );
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/actions/answer-questions",
+      payload: { answers: [{ questionId: "q1", answer: "yes" }] },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toEqual({ error: "plain string failure" });
   });
 });

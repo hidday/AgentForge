@@ -143,6 +143,16 @@ describe("GET /api/linear/pending", () => {
     expect(response.statusCode).toBe(500);
     expect(response.json()).toEqual({ error: "Linear API down" });
   });
+
+  it("falls back to String(err) when discoverPendingIssues rejects with a non-Error value", async () => {
+    const { app, mockLinearPollService } = await buildApp({ withLinearPollService: true });
+    mockLinearPollService!.discoverPendingIssues.mockRejectedValue("plain string failure");
+
+    const response = await app.inject({ method: "GET", url: "/api/linear/pending" });
+
+    expect(response.statusCode).toBe(500);
+    expect(response.json()).toEqual({ error: "plain string failure" });
+  });
 });
 
 describe("POST /api/linear/ingest", () => {
@@ -223,5 +233,19 @@ describe("POST /api/linear/ingest", () => {
 
     expect(response.statusCode).toBe(500);
     expect(response.json()).toEqual({ error: "DB write failed" });
+  });
+
+  it("falls back to String(err) when startRunsForIssues rejects with a non-Error value", async () => {
+    const { app, mockLinearPollService } = await buildApp({ withLinearPollService: true });
+    mockLinearPollService!.startRunsForIssues.mockRejectedValue("plain string failure");
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/linear/ingest",
+      payload: { issueIds: ["issue-1"] },
+    });
+
+    expect(response.statusCode).toBe(500);
+    expect(response.json()).toEqual({ error: "plain string failure" });
   });
 });
