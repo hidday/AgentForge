@@ -1,5 +1,6 @@
 import { describe, it, expect, afterEach, vi } from "vitest";
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
@@ -209,6 +210,17 @@ describe("RepoRegistry", () => {
       const config: ReposConfig = { repos: [makeEntry()], defaultRepo: "main-repo" };
       const registry = new RepoRegistry(reposRoot, config, makeMockLogger() as never);
       expect(() => registry.validateWorkingDirectory(dir)).not.toThrow();
+    });
+
+    it("throws when .git exists but is neither a directory nor a regular file", () => {
+      dir = mkdtempSync(join(tmpdir(), "repo-registry-test-"));
+      // Create a FIFO at .git -- statSync reports it as neither isDirectory() nor isFile().
+      execFileSync("mkfifo", [join(dir, ".git")]);
+      const config: ReposConfig = { repos: [makeEntry()], defaultRepo: "main-repo" };
+      const registry = new RepoRegistry(reposRoot, config, makeMockLogger() as never);
+      expect(() => registry.validateWorkingDirectory(dir)).toThrow(
+        /has invalid \.git entry/,
+      );
     });
   });
 });

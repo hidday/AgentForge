@@ -462,3 +462,38 @@ describe("POST /api/runs/:id/actions/retry", () => {
     await flush();
   });
 });
+
+describe("POST /api/runs/:id/actions/reject-plan — mode validation", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("returns 400 when mode is not one of the valid modes", async () => {
+    const { app, mockOrchestrator } = await buildApp();
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/actions/reject-plan",
+      payload: { mode: "bogus-mode" },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toEqual({ error: "mode must be one of: iterate, fresh" });
+    expect(mockOrchestrator.rejectPlan).not.toHaveBeenCalled();
+  });
+
+  it("passes mode='fresh' through to rejectPlan when explicitly provided", async () => {
+    const run = makeRun();
+    const { app, mockOrchestrator } = await buildApp();
+    mockOrchestrator.rejectPlan.mockResolvedValue(run);
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/actions/reject-plan",
+      payload: { mode: "fresh" },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(mockOrchestrator.rejectPlan).toHaveBeenCalledWith("run-1", undefined, "api", "fresh");
+  });
+});

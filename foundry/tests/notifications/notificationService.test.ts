@@ -268,6 +268,73 @@ describe("NotificationService.sendHumanRequest", () => {
     expect(body.html).toContain("&#39;and&#39;");
   });
 
+  it("renders the maximal email content (confidence, open questions, Linear link, context)", async () => {
+    fetchMock.mockResolvedValue(okResponse());
+    const svc = new NotificationService(
+      { emailFrom: "bot@example.com", emailTo: "a@example.com", resendApiKey: "resend-key" },
+      makeMockLogger() as never,
+    );
+    await svc.sendHumanRequest(
+      makePayload({
+        planConfidence: 0.55,
+        openQuestions: [
+          { id: "q1", question: "Which provider?", requiredForExecution: true },
+          { id: "q2", question: "Which region?", requiredForExecution: false },
+        ],
+        context: "Some helpful context",
+      }),
+    );
+    const [, init] = fetchMock.mock.calls[0];
+    const body = JSON.parse(init.body);
+    expect(body.html).toContain("Plan confidence:</strong> 0.55");
+    expect(body.html).toContain("Open questions:");
+    expect(body.html).toContain("[required]</strong> Which provider?");
+    expect(body.html).toContain("Which region?");
+    expect(body.html).toContain("Open Linear issue");
+    expect(body.html).toContain("Context:");
+    expect(body.text).toContain("Plan confidence: 0.55");
+    expect(body.text).toContain("Open questions:");
+    expect(body.text).toContain("[required] Which provider?");
+    expect(body.text).toContain("- Which region?");
+    expect(body.text).toContain("Linear: https://linear.app/team/issue/LIN-42");
+  });
+
+  it("renders the minimal email content when optional fields are absent (untitled, no identifier, no url)", async () => {
+    fetchMock.mockResolvedValue(okResponse());
+    const svc = new NotificationService(
+      { emailFrom: "bot@example.com", emailTo: "a@example.com", resendApiKey: "resend-key" },
+      makeMockLogger() as never,
+    );
+    await svc.sendHumanRequest(
+      makePayload({
+        linearIssue: { id: "issue-77", title: null, url: null },
+      }),
+    );
+    const [, init] = fetchMock.mock.calls[0];
+    const body = JSON.parse(init.body);
+    expect(body.subject).toContain("issue-77");
+    expect(body.subject).toContain("(untitled)");
+    expect(body.html).toContain("issue-77");
+    expect(body.html).toContain("(untitled)");
+    expect(body.html).not.toContain("Open Linear issue");
+    expect(body.html).not.toContain("Plan confidence:");
+    expect(body.html).not.toContain("Open questions:");
+    expect(body.text).not.toContain("Linear:");
+    expect(body.text).not.toContain("Plan confidence:");
+    expect(body.text).not.toContain("Open questions:");
+  });
+
+  it("records an email failure with a generic message when the rejection is not an Error", async () => {
+    fetchMock.mockRejectedValue({ reason: "boom" });
+    const svc = new NotificationService(
+      { emailFrom: "bot@example.com", emailTo: "a@example.com", resendApiKey: "resend-key" },
+      makeMockLogger() as never,
+    );
+    const result = await svc.sendHumanRequest(makePayload());
+    expect(result.email.ok).toBe(false);
+    expect(result.email.error).toBe("[object Object]");
+  });
+
   it("records an email failure when resend responds with a non-ok status", async () => {
     fetchMock.mockResolvedValue(failResponse(422, "invalid recipient"));
     const logger = makeMockLogger();

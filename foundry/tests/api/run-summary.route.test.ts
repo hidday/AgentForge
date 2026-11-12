@@ -208,6 +208,28 @@ describe("GET /api/runs/:id/summary", () => {
     expect(body.plan.risks).toEqual([JSON.stringify({ severity: "high" })]);
   });
 
+  it("falls back to String() for a risk object that JSON.stringify cannot serialize", async () => {
+    const run = makeRun();
+    const { app, mockRunRepo, mockArtifactRepo } = await buildApp();
+    mockRunRepo.findById.mockResolvedValue(run);
+
+    const circular: Record<string, unknown> = { severity: "high" };
+    circular.self = circular; // circular reference makes JSON.stringify throw
+
+    mockArtifactRepo.findLatestByType.mockImplementation((_runId: string, type: string) => {
+      if (type === "Plan") {
+        return Promise.resolve(makeArtifact("Plan", 1, { risks: [circular] }));
+      }
+      return Promise.resolve(null);
+    });
+
+    const response = await app.inject({ method: "GET", url: "/api/runs/run-1/summary" });
+
+    expect(response.statusCode).toBe(200);
+    const body = response.json() as { plan: { risks: string[] } };
+    expect(body.plan.risks).toEqual([String(circular)]);
+  });
+
   it("includes planReview and review payloads when present", async () => {
     const run = makeRun();
     const { app, mockRunRepo, mockArtifactRepo } = await buildApp();

@@ -155,7 +155,7 @@ describe("ReviewerAgent.run()", () => {
     expect(prompt).toContain("Test plan");
     expect(prompt).toContain("Implemented things.");
     expect(prompt).toContain("diff --git a/foo b/foo");
-    expect(prompt).toContain("test-repo");
+    expect(prompt).toContain("Test issue");
   });
 
   it("persists a ReviewerTranscript artifact (version 3) with the raw LLM output", async () => {
