@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, fireEvent } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import type { Run, Artifact, RunEventRecord } from "@/api/client.ts";
 
@@ -39,7 +39,18 @@ vi.mock("@/components/EventTimeline.tsx", () => ({
   ),
 }));
 vi.mock("@/components/ActionBar.tsx", () => ({
-  ActionBar: ({ state }: { state: string }) => <div data-testid="action-bar">{state}</div>,
+  ActionBar: ({
+    state,
+    onScrollToQuestions,
+  }: {
+    state: string;
+    onScrollToQuestions?: () => void;
+  }) => (
+    <div data-testid="action-bar">
+      {state}
+      <button onClick={onScrollToQuestions}>scroll-to-questions</button>
+    </div>
+  ),
 }));
 vi.mock("@/components/OpenQuestionsPanel.tsx", () => ({
   OpenQuestionsPanel: ({ questions }: { questions: unknown[] }) => (
@@ -170,7 +181,7 @@ describe("RunDetailPage", () => {
     expect(screen.getByText("acme/repo")).toBeDefined();
     expect(screen.getByTestId("state-badge").textContent).toBe("Implementing");
     expect(screen.getByTestId("workflow-stepper").textContent).toBe("Implementing");
-    expect(screen.getByTestId("action-bar").textContent).toBe("Implementing");
+    expect(screen.getByTestId("action-bar").textContent).toContain("Implementing");
     expect(screen.getByTestId("chat-panel")).toBeDefined();
     expect(screen.getByTestId("distilled-skill-panel")).toBeDefined();
   });
@@ -186,6 +197,23 @@ describe("RunDetailPage", () => {
 
     renderAt(run.id);
     expect(screen.getByText("ENG-99")).toBeDefined();
+  });
+
+  it("falls back to a truncated linearIssueId when title and identifier are both absent", () => {
+    const run = makeRun({
+      linearIssueTitle: null,
+      linearIssueIdentifier: null,
+      linearIssueId: "issue-12345678",
+    });
+    useRunMock.mockReturnValue({
+      data: { run, artifacts: [], events: [] },
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+
+    renderAt(run.id);
+    expect(screen.getByText("issue-12")).toBeDefined();
   });
 
   it("renders the Linear link when linearIssueUrl is present", () => {
@@ -346,5 +374,70 @@ describe("RunDetailPage", () => {
 
     expect(screen.getByTestId("artifact-tabs").textContent).toBe("1");
     expect(screen.getByTestId("event-timeline").textContent).toBe("1");
+  });
+
+  it("scrolls the open questions panel into view when the ActionBar requests it", () => {
+    const scrollIntoViewMock = vi.fn();
+    const originalScrollIntoView = (
+      HTMLElement.prototype as unknown as { scrollIntoView?: () => void }
+    ).scrollIntoView;
+    (HTMLElement.prototype as unknown as { scrollIntoView: () => void }).scrollIntoView =
+      scrollIntoViewMock;
+
+    const run = makeRun({ state: "HumanClarificationNeeded" });
+    const planArtifact: Artifact = {
+      id: "a1",
+      runId: run.id,
+      type: "Plan",
+      version: 1,
+      payloadJson: {
+        openQuestions: [{ id: "q1", question: "Q1?", requiredForExecution: true }],
+      },
+      rawText: "",
+      createdAt: "2024-01-01T00:00:00Z",
+    };
+    useRunMock.mockReturnValue({
+      data: { run, artifacts: [planArtifact], events: [] },
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+
+    renderAt(run.id);
+
+    fireEvent.click(screen.getByRole("button", { name: "scroll-to-questions" }));
+
+    expect(scrollIntoViewMock).toHaveBeenCalledWith({ behavior: "smooth", block: "start" });
+
+    (HTMLElement.prototype as unknown as { scrollIntoView?: () => void }).scrollIntoView =
+      originalScrollIntoView;
+  });
+
+  it("does nothing when the ActionBar requests a scroll and there is no questions panel ref", () => {
+    const scrollIntoViewMock = vi.fn();
+    const originalScrollIntoView = (
+      HTMLElement.prototype as unknown as { scrollIntoView?: () => void }
+    ).scrollIntoView;
+    (HTMLElement.prototype as unknown as { scrollIntoView: () => void }).scrollIntoView =
+      scrollIntoViewMock;
+
+    // No Plan artifact / no open questions -> questionsRef never attached to a DOM node.
+    const run = makeRun({ state: "Implementing" });
+    useRunMock.mockReturnValue({
+      data: { run, artifacts: [], events: [] },
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+
+    renderAt(run.id);
+
+    expect(() =>
+      fireEvent.click(screen.getByRole("button", { name: "scroll-to-questions" })),
+    ).not.toThrow();
+    expect(scrollIntoViewMock).not.toHaveBeenCalled();
+
+    (HTMLElement.prototype as unknown as { scrollIntoView?: () => void }).scrollIntoView =
+      originalScrollIntoView;
   });
 });

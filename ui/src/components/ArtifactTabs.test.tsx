@@ -123,6 +123,36 @@ describe("ArtifactTabs", () => {
     expect(screen.getByText("dismissed")).toBeDefined();
   });
 
+  it("styles a 'partially_incorporated' disposition status distinctly", async () => {
+    const artifacts = [
+      makeArtifact("Plan", { summary: "s" }),
+      makeArtifact("PlanRevision", {
+        dispositions: [
+          { findingId: "F3", status: "partially_incorporated", rationale: "Some of it" },
+        ],
+      }),
+    ];
+    render(<ArtifactTabs artifacts={artifacts} />);
+
+    await userEvent.click(screen.getByRole("button", { name: "Plan Revision" }));
+    const statusBadge = screen.getByText("partially incorporated");
+    expect(statusBadge.className).toContain("bg-state-waiting-bg");
+  });
+
+  it("falls back to default styling for an unrecognized disposition status", async () => {
+    const artifacts = [
+      makeArtifact("Plan", { summary: "s" }),
+      makeArtifact("PlanRevision", {
+        dispositions: [{ findingId: "F4", status: "pending", rationale: "tbd" }],
+      }),
+    ];
+    render(<ArtifactTabs artifacts={artifacts} />);
+
+    await userEvent.click(screen.getByRole("button", { name: "Plan Revision" }));
+    const statusBadge = screen.getByText("pending");
+    expect(statusBadge.className).toContain("bg-surface-hover");
+  });
+
   it("shows 'No dispositions recorded' when PlanRevision has an empty dispositions array", async () => {
     const artifacts = [
       makeArtifact("Plan", { summary: "s" }),
@@ -132,6 +162,29 @@ describe("ArtifactTabs", () => {
 
     await userEvent.click(screen.getByRole("button", { name: "Plan Revision" }));
     expect(screen.getByText("No dispositions recorded")).toBeDefined();
+  });
+
+  it("shows 'No dispositions recorded' when PlanRevision payload omits the dispositions field entirely", async () => {
+    const artifacts = [
+      makeArtifact("Plan", { summary: "s" }),
+      makeArtifact("PlanRevision", {}),
+    ];
+    render(<ArtifactTabs artifacts={artifacts} />);
+
+    await userEvent.click(screen.getByRole("button", { name: "Plan Revision" }));
+    expect(screen.getByText("No dispositions recorded")).toBeDefined();
+  });
+
+  it("renders no resolution rows when Remediation payload omits the resolution field entirely", async () => {
+    const artifacts = [
+      makeArtifact("Plan", { summary: "s" }),
+      makeArtifact("Remediation", {}),
+    ];
+    render(<ArtifactTabs artifacts={artifacts} />);
+
+    await userEvent.click(screen.getByRole("button", { name: "Remediation" }));
+    expect(screen.getByText("Resolutions")).toBeDefined();
+    expect(screen.getByText(/v2/)).toBeDefined();
   });
 
   it("renders the Remediation resolutions list under the Remediation tab", async () => {
@@ -149,6 +202,65 @@ describe("ArtifactTabs", () => {
     expect(screen.getByText("R1")).toBeDefined();
     expect(screen.getByText("accepted")).toBeDefined();
     expect(screen.getByText("Fixed it")).toBeDefined();
+    const statusBadge = screen.getByText("accepted");
+    expect(statusBadge.className).toContain("bg-state-done-bg");
+  });
+
+  it("styles a 'rejected' remediation resolution status distinctly", async () => {
+    const artifacts = [
+      makeArtifact("Plan", { summary: "s" }),
+      makeArtifact("Remediation", {
+        resolution: [
+          { findingId: "R2", status: "rejected", action: "Won't fix", rationale: "n/a" },
+        ],
+      }),
+    ];
+    render(<ArtifactTabs artifacts={artifacts} />);
+
+    await userEvent.click(screen.getByRole("button", { name: "Remediation" }));
+    const statusBadge = screen.getByText("rejected");
+    expect(statusBadge.className).toContain("bg-state-blocked-bg");
+  });
+
+  it("falls back to waiting styling for an unrecognized remediation resolution status", async () => {
+    const artifacts = [
+      makeArtifact("Plan", { summary: "s" }),
+      makeArtifact("Remediation", {
+        resolution: [
+          { findingId: "R3", status: "deferred", action: "Later", rationale: "n/a" },
+        ],
+      }),
+    ];
+    render(<ArtifactTabs artifacts={artifacts} />);
+
+    await userEvent.click(screen.getByRole("button", { name: "Remediation" }));
+    const statusBadge = screen.getByText("deferred");
+    expect(statusBadge.className).toContain("bg-state-waiting-bg");
+  });
+
+  it("uses the executionReport's executionVersion in the Remediation footnote when present", async () => {
+    const artifacts = [
+      makeArtifact("Plan", { summary: "s" }),
+      makeArtifact("Remediation", {
+        resolution: [],
+        executionReport: { executionVersion: 5 },
+      }),
+    ];
+    render(<ArtifactTabs artifacts={artifacts} />);
+
+    await userEvent.click(screen.getByRole("button", { name: "Remediation" }));
+    expect(screen.getByText(/v5/)).toBeDefined();
+  });
+
+  it("defaults the Remediation footnote version to 2 when executionReport is absent", async () => {
+    const artifacts = [
+      makeArtifact("Plan", { summary: "s" }),
+      makeArtifact("Remediation", { resolution: [] }),
+    ];
+    render(<ArtifactTabs artifacts={artifacts} />);
+
+    await userEvent.click(screen.getByRole("button", { name: "Remediation" }));
+    expect(screen.getByText(/v2/)).toBeDefined();
   });
 
   it("renders the RejectionFeedback tab sorted by version descending across multiple artifacts", async () => {

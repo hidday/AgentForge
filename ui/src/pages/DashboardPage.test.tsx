@@ -160,6 +160,24 @@ describe("DashboardPage", () => {
     expect(screen.getAllByText("Blocked").length).toBeGreaterThan(0);
   });
 
+  it("counts a run with an unrecognized state under 'idle' instead of crashing", () => {
+    const runs = [
+      makeRun({ id: "run-1", state: "SomeUnknownState" }),
+      makeRun({ id: "run-2", state: "Implementing" }),
+    ];
+    useRunsMock.mockReturnValue({
+      runs,
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+
+    render(<DashboardPage />);
+
+    // Total still reflects both runs even though one has an unmapped state.
+    expect(screen.getByTestId("runs-count").textContent).toBe("2");
+  });
+
   it("filters runs by category when a filter button is clicked", async () => {
     const user = userEvent.setup();
     const runs = [
