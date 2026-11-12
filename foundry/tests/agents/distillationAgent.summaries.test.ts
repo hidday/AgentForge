@@ -263,6 +263,44 @@ describe("DistillationAgent — summarizePlan is exercised with a real Plan arti
     expect(prompt).not.toContain("13. Step title 13");
   });
 
+  it("renders '_none_' for the Steps section when the plan has zero steps", async () => {
+    const deps = buildDeps();
+    deps.artifactRepo.findLatestByType.mockImplementation((_runId: string, type: string) => {
+      if (type === "Plan") {
+        return Promise.resolve({
+          id: "plan-1",
+          runId: "run-1",
+          type: "Plan",
+          version: 1,
+          payloadJson: validPlanPayload(0, 1, 1),
+          rawText: "",
+          createdAt: new Date(),
+        });
+      }
+      if (type === "ExecutionReport") {
+        return Promise.resolve({
+          id: "artifact-1",
+          runId: "run-1",
+          type: "ExecutionReport",
+          version: 1,
+          payloadJson: validExecutionPayload(),
+          rawText: "",
+          createdAt: new Date(),
+        });
+      }
+      return Promise.resolve(null);
+    });
+    deps.agentRunner.run.mockResolvedValue(
+      makeDistillationOutput({ shouldPersist: false, reason: "not generalizable" }),
+    );
+
+    const agent = buildAgent(deps);
+    await agent.run("run-1", makeRun());
+
+    const prompt = capturedPrompt(deps);
+    expect(prompt).toContain("**Steps**:\n_none_");
+  });
+
   it("falls back to truncated JSON when the Plan artifact payload does not match PlanSchema", async () => {
     const deps = buildDeps();
     deps.artifactRepo.findLatestByType.mockImplementation((_runId: string, type: string) => {
@@ -350,6 +388,44 @@ describe("DistillationAgent — summarizeRemediation is exercised with a real Re
     expect(prompt).toContain("- [accepted] f1: Action taken for finding 1");
     expect(prompt).toContain("*why*: Rationale for finding 1");
     expect(prompt).not.toContain("…and");
+  });
+
+  it("renders '_none_' for the Resolutions section when there are zero resolution items", async () => {
+    const deps = buildDeps();
+    deps.artifactRepo.findLatestByType.mockImplementation((_runId: string, type: string) => {
+      if (type === "Remediation") {
+        return Promise.resolve({
+          id: "rem-1",
+          runId: "run-1",
+          type: "Remediation",
+          version: 1,
+          payloadJson: validRemediationPayload(0),
+          rawText: "",
+          createdAt: new Date(),
+        });
+      }
+      if (type === "ExecutionReport") {
+        return Promise.resolve({
+          id: "artifact-1",
+          runId: "run-1",
+          type: "ExecutionReport",
+          version: 1,
+          payloadJson: validExecutionPayload(),
+          rawText: "",
+          createdAt: new Date(),
+        });
+      }
+      return Promise.resolve(null);
+    });
+    deps.agentRunner.run.mockResolvedValue(
+      makeDistillationOutput({ shouldPersist: false, reason: "not generalizable" }),
+    );
+
+    const agent = buildAgent(deps);
+    await agent.run("run-1", makeRun());
+
+    const prompt = capturedPrompt(deps);
+    expect(prompt).toContain("**Resolutions**:\n_none_");
   });
 
   it("truncates resolutions beyond the cap of 15 with an '…and N more' marker", async () => {
