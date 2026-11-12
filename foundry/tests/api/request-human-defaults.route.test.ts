@@ -170,6 +170,30 @@ describe("POST /api/runs/:id/actions/request-human — additional branches", () 
     expect(mockEventRepo.create).toHaveBeenCalledTimes(1);
   });
 
+  it("does not debounce when the matching prior event is older than the debounce window", async () => {
+    const staleTs = new Date(Date.now() - 7 * 60 * 60 * 1000); // 7h ago, outside the 6h window
+    const { app, mockEventRepo } = await buildApp({
+      events: [
+        {
+          eventType: RunEvent.HUMAN_REQUESTED,
+          createdAt: staleTs,
+          payloadJson: { reason: "other" },
+        },
+      ],
+      registerOptions: { debounceHours: 6, uiBaseUrl: "http://localhost:5173" },
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/actions/request-human",
+      payload: { reason: "other", summary: "Stale prior event" },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(JSON.parse(response.body).debounced).toBe(false);
+    expect(mockEventRepo.create).toHaveBeenCalledTimes(1);
+  });
+
   it("falls back to undefined linearIssue.identifier when the run has none", async () => {
     const sendHumanRequest = vi.fn().mockResolvedValue({
       slack: { attempted: true, ok: true },

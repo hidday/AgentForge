@@ -129,6 +129,22 @@ describe("POST /api/runs/:id/chat — working directory fallback", () => {
     expect(input.workingDirectory).toBe(repoRoot);
   });
 
+  it("returns 500 with a generic message when chatRun rejects with a non-Error value", async () => {
+    const run = makeRun(mkdtempSync(join(tmpdir(), "routes-chat-nonerror-")));
+    const { app, mockRunRepo, mockClaudeCodeRunner } = await buildApp();
+    mockRunRepo.findById.mockResolvedValue(run);
+    mockClaudeCodeRunner.chatRun.mockRejectedValue("plain string failure");
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/chat",
+      payload: { message: "Hello" },
+    });
+
+    expect(response.statusCode).toBe(500);
+    expect(response.json()).toEqual({ error: "Chat request failed" });
+  });
+
   it("returns 422 when both the worktree path and the derived repo root are missing", async () => {
     const worktreePath = "/nonexistent/repo-root-xyz/.worktrees/run-1";
     const run = makeRun(worktreePath);

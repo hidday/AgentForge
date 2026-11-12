@@ -116,6 +116,22 @@ describe("POST /api/runs/:id/actions/approve-plan", () => {
     await flush();
   });
 
+  it("logs but does not reject the response when runExecution rejects with a non-Error value", async () => {
+    const run = makeRun(RunState.Implementing);
+    const { app, mockOrchestrator } = await buildApp();
+    mockOrchestrator.approvePlan.mockResolvedValue(run);
+    mockOrchestrator.runExecution.mockRejectedValue("non-error boom");
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/actions/approve-plan",
+      payload: {},
+    });
+
+    expect(response.statusCode).toBe(200);
+    await flush();
+  });
+
   it("returns 400 when approvePlan throws", async () => {
     const { app, mockOrchestrator } = await buildApp();
     mockOrchestrator.approvePlan.mockRejectedValue(new Error("Cannot approve in this state"));
@@ -197,6 +213,20 @@ describe("POST /api/runs/:id/actions/re-review-plan", () => {
     await flush();
   });
 
+  it("does not fail the response when runManualReReview rejects asynchronously with a non-Error value", async () => {
+    const { app, mockOrchestrator } = await buildApp();
+    mockOrchestrator.runManualReReview.mockRejectedValue("non-error async failure");
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/actions/re-review-plan",
+      payload: {},
+    });
+
+    expect(response.statusCode).toBe(200);
+    await flush();
+  });
+
   it("returns 400 when runManualReReview throws synchronously", async () => {
     const { app, mockOrchestrator } = await buildApp();
     mockOrchestrator.runManualReReview.mockImplementation(() => {
@@ -255,6 +285,20 @@ describe("POST /api/runs/:id/actions/revise-plan", () => {
   it("does not fail the response when runManualPlanRevision rejects asynchronously", async () => {
     const { app, mockOrchestrator } = await buildApp();
     mockOrchestrator.runManualPlanRevision.mockRejectedValue(new Error("async failure"));
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/actions/revise-plan",
+      payload: {},
+    });
+
+    expect(response.statusCode).toBe(200);
+    await flush();
+  });
+
+  it("does not fail the response when runManualPlanRevision rejects asynchronously with a non-Error value", async () => {
+    const { app, mockOrchestrator } = await buildApp();
+    mockOrchestrator.runManualPlanRevision.mockRejectedValue("non-error async failure");
 
     const response = await app.inject({
       method: "POST",
@@ -566,6 +610,21 @@ describe("POST /api/runs/:id/actions/retry", () => {
     expect(response.statusCode).toBe(200);
     await flush();
   });
+
+  it("logs but does not crash when the fire-and-forget retry trigger rejects with a non-Error value", async () => {
+    const run = makeRun(RunState.Todo);
+    const { app, mockRunRepo, mockOrchestrator } = await buildApp();
+    mockRunRepo.findById.mockResolvedValue(run);
+    mockOrchestrator.retryRun.mockRejectedValue("non-error retry failure");
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/actions/retry",
+    });
+
+    expect(response.statusCode).toBe(200);
+    await flush();
+  });
 });
 
 describe("POST /api/runs/:id/actions/reject-plan — mode validation", () => {
@@ -636,5 +695,21 @@ describe("POST /api/runs/:id/actions/answer-questions — generic error fallback
 
     expect(response.statusCode).toBe(400);
     expect(response.json()).toEqual({ error: "plain string failure" });
+  });
+
+  it("returns 400 with the error's own message when answerQuestions rejects with a generic Error", async () => {
+    const { app, mockOrchestrator } = await buildApp();
+    (mockOrchestrator.answerQuestions as ReturnType<typeof vi.fn>).mockRejectedValue(
+      new Error("generic failure"),
+    );
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/actions/answer-questions",
+      payload: { answers: [{ questionId: "q1", answer: "yes" }] },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toEqual({ error: "generic failure" });
   });
 });

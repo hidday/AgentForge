@@ -341,4 +341,12 @@ describe("RuntimeHealthCheck internals -- checkAuth (white-box)", () => {
     expect(result.ok).toBe(false);
     expect(result.error).toBe("socket hang up");
   });
+
+  it("stringifies a non-Error throw from execute()", async () => {
+    const execute = vi.fn().mockRejectedValue("raw string failure");
+    const rhc = makeRhc(execute);
+    const result = await checkAuth(rhc, { command: "codex", probeArgs: [] });
+    expect(result.ok).toBe(false);
+    expect(result.error).toBe("raw string failure");
+  });
 });
