@@ -143,6 +143,52 @@ describe("api client", () => {
     expect(fetchMock).toHaveBeenCalledWith("/api/linear/pending", expect.anything());
   });
 
+  it("reReviewPlan POSTs an optional note to the re-review-plan endpoint", async () => {
+    const fetchMock = mockFetchOnce(200, { ok: true, runId: "r1" });
+    await api.reReviewPlan("r1", "please re-check");
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/runs/r1/actions/re-review-plan",
+      expect.objectContaining({ method: "POST", body: JSON.stringify({ note: "please re-check" }) }),
+    );
+  });
+
+  it("revisePlan POSTs an optional note to the revise-plan endpoint", async () => {
+    const fetchMock = mockFetchOnce(200, { ok: true, runId: "r1" });
+    await api.revisePlan("r1");
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/runs/r1/actions/revise-plan",
+      expect.objectContaining({ method: "POST", body: JSON.stringify({}) }),
+    );
+  });
+
+  it("approveReview issues a bare POST with no body to the approve-review endpoint", async () => {
+    const fetchMock = mockFetchOnce(200, { ok: true, state: "Done" });
+    await api.approveReview("r1");
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/runs/r1/actions/approve-review",
+      expect.objectContaining({ method: "POST", headers: {} }),
+    );
+  });
+
+  it("resumeRun POSTs to the resume endpoint", async () => {
+    const fetchMock = mockFetchOnce(200, { ok: true });
+    await api.resumeRun("r1");
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/runs/r1/actions/resume",
+      expect.objectContaining({ method: "POST" }),
+    );
+  });
+
+  it("retryStage POSTs to the retry endpoint", async () => {
+    const fetchMock = mockFetchOnce(200, { ok: true, state: "Implementing", retrying: true });
+    const result = await api.retryStage("r1");
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/runs/r1/actions/retry",
+      expect.objectContaining({ method: "POST" }),
+    );
+    expect(result).toEqual({ ok: true, state: "Implementing", retrying: true });
+  });
+
   it("getProcessOutput fetches the process output path", async () => {
     mockFetchOnce(200, { processId: "p1", output: "log" });
     const result = await api.getProcessOutput("p1");

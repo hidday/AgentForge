@@ -334,13 +334,22 @@ describe("RuntimeHealthCheck.checkAuth (via probeRuntime)", () => {
       expect(authCheck).toEqual({ ok: true, durationMs: expect.any(Number) });
     });
 
-    it("fails with the exit-code error when exit code is non-zero", async () => {
+    it("fails with the exit-code error (from stderr) when exit code is non-zero", async () => {
       const execute = vi.fn(async (): Promise<ProcessResult> => ok("", "not logged in", 3));
       const check = new RuntimeHealthCheck({ execute } as never, configs, logger as never);
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const authCheck = await (check as any).checkAuth(configs.cursor);
       expect(authCheck.ok).toBe(false);
       expect(authCheck.error).toContain("Exit code 3: not logged in");
+    });
+
+    it("falls back to stdout for the exit-code error message when stderr is empty", async () => {
+      const execute = vi.fn(async (): Promise<ProcessResult> => ok("fallback output", "", 3));
+      const check = new RuntimeHealthCheck({ execute } as never, configs, logger as never);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const authCheck = await (check as any).checkAuth(configs.cursor);
+      expect(authCheck.ok).toBe(false);
+      expect(authCheck.error).toContain("Exit code 3: fallback output");
     });
   });
 });

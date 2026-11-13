@@ -167,4 +167,19 @@ describe("useRuns", () => {
 
     expect(result.current.runs[0]!.state).toBe("Todo");
   });
+
+  it("ignores SSE event types that are neither run:created nor run:state-changed", async () => {
+    const run = makeRun({ id: "r1", state: "Todo" });
+    mockApi.getRuns.mockResolvedValue({ runs: [run] });
+    const { result } = renderHook(() => useRuns());
+    await waitFor(() => expect(result.current.runs).toHaveLength(1));
+
+    mockApi.getRuns.mockClear();
+    act(() => {
+      MockEventSource.instances[0]!.emit({ type: "process:completed", runId: "r1" });
+    });
+
+    expect(mockApi.getRuns).not.toHaveBeenCalled();
+    expect(result.current.runs[0]!.state).toBe("Todo");
+  });
 });

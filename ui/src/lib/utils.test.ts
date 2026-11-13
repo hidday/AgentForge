@@ -9,7 +9,8 @@ describe("cn", () => {
   });
 
   it("drops falsy values", () => {
-    expect(cn("a", false && "b", undefined, null, "c")).toBe("a c");
+    const shouldInclude = false;
+    expect(cn("a", shouldInclude && "b", undefined, null, "c")).toBe("a c");
   });
 });
 

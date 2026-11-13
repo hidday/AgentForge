@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, fireEvent } from "@testing-library/react";
 import { MemoryRouter, Routes, Route } from "react-router-dom";
 import type { Run, Artifact, RunEventRecord } from "@/api/client.ts";
 
@@ -33,8 +33,16 @@ vi.mock("@/components/EventTimeline.tsx", () => ({
   EventTimeline: () => <div data-testid="event-timeline" />,
 }));
 vi.mock("@/components/ActionBar.tsx", () => ({
-  ActionBar: ({ hasOptionalQuestions }: { hasOptionalQuestions?: boolean }) => (
-    <div data-testid="action-bar" data-has-optional={String(!!hasOptionalQuestions)} />
+  ActionBar: ({
+    hasOptionalQuestions,
+    onScrollToQuestions,
+  }: {
+    hasOptionalQuestions?: boolean;
+    onScrollToQuestions?: () => void;
+  }) => (
+    <div data-testid="action-bar" data-has-optional={String(!!hasOptionalQuestions)}>
+      <button onClick={onScrollToQuestions}>scroll-to-questions</button>
+    </div>
   ),
 }));
 vi.mock("@/components/OpenQuestionsPanel.tsx", () => ({
@@ -265,6 +273,39 @@ describe("RunDetailPage", () => {
     });
     renderPage();
     expect(screen.getByTestId("artifact-tabs").textContent).toBe("1");
+  });
+
+  it("scrolls the questions panel into view when the action bar requests it", () => {
+    // The ref the page scrolls to is only attached to the DOM while the
+    // open-questions panel itself is rendered, so put the run in a state
+    // (with a required open question) that renders it.
+    const run = makeRun({ state: "HumanClarificationNeeded" });
+    const planArtifact: Artifact = {
+      id: "a1",
+      runId: run.id,
+      type: "Plan",
+      version: 1,
+      payloadJson: {
+        openQuestions: [{ id: "q1", question: "Deploy target?", requiredForExecution: true }],
+      },
+      rawText: "",
+      createdAt: "2024-01-01T00:00:00Z",
+    };
+    mockUseRun.mockReturnValue({
+      data: { run, artifacts: [planArtifact], events: EVENTS },
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+    renderPage();
+
+    const scrollIntoViewMock = vi.fn();
+    // jsdom does not implement scrollIntoView; stub it on every element so
+    // the ref lookup inside scrollToQuestions resolves to a real function.
+    window.HTMLElement.prototype.scrollIntoView = scrollIntoViewMock;
+
+    fireEvent.click(screen.getByText("scroll-to-questions"));
+    expect(scrollIntoViewMock).toHaveBeenCalledWith({ behavior: "smooth", block: "start" });
   });
 
   it("shows the Linear link only when the run has a linearIssueUrl", () => {

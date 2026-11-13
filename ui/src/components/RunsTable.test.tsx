@@ -99,6 +99,19 @@ describe("RunsTable", () => {
     expect(screen.queryByTitle("Open in Linear")).toBeNull();
   });
 
+  it("calls stopPropagation when the external Linear link is clicked", () => {
+    renderTable([
+      makeRun({ id: "r1", state: "Todo", linearIssueUrl: "https://linear.app/x" }),
+    ]);
+    const link = screen.getByTitle("Open in Linear");
+    const event = new MouseEvent("click", { bubbles: true, cancelable: true });
+    const stopPropagationSpy = vi.spyOn(event, "stopPropagation");
+
+    link.dispatchEvent(event);
+
+    expect(stopPropagationSpy).toHaveBeenCalledOnce();
+  });
+
   it("renders the PR number when present, and an em dash otherwise", () => {
     const { rerender } = renderTable([
       makeRun({ id: "r1", state: "Todo", prNumber: 42 }),

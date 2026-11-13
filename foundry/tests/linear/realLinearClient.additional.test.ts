@@ -179,6 +179,44 @@ describe("RealLinearClient", () => {
         "Failed to hydrate blocker issue from relation",
       );
     });
+
+    it("treats inverseRelations() resolving with no nodes field as having no blockers", async () => {
+      const focus = {
+        id: "focus-id",
+        parent: Promise.resolve(null),
+        inverseRelations: () => Promise.resolve(undefined),
+      };
+      sdk.issue.mockResolvedValue(focus);
+
+      const ctx = await client.getRelatedContext("focus-id");
+
+      expect(ctx.blockers).toEqual([]);
+    });
+
+    it("defaults a related issue's labels/state when their connections are absent", async () => {
+      const parent = {
+        id: "parent-id",
+        identifier: "PRY-100",
+        title: "Parent",
+        description: "desc",
+        priority: 0,
+        url: "https://linear.app/team/issue/PRY-100",
+        labels: () => Promise.resolve(undefined),
+        state: Promise.resolve(undefined),
+      };
+      const focus = {
+        id: "focus-id",
+        parent: Promise.resolve(parent),
+        inverseRelations: () => Promise.resolve({ nodes: [] }),
+      };
+      sdk.issue.mockResolvedValue(focus);
+
+      const ctx = await client.getRelatedContext("focus-id");
+
+      expect(ctx.parent).toEqual(
+        expect.objectContaining({ id: "parent-id", labels: [], state: "Unknown" }),
+      );
+    });
   });
 
   describe("searchIssues", () => {
@@ -259,6 +297,42 @@ describe("RealLinearClient", () => {
       const results = await client.searchIssues({ state: "Todo" });
 
       expect(results).toEqual([]);
+    });
+
+    it("defaults a null description to an empty string", async () => {
+      sdk.issues.mockResolvedValue({ nodes: [makeResultIssue({ description: null })] });
+
+      const results = await client.searchIssues({ state: "Todo" });
+
+      expect(results[0].description).toBe("");
+    });
+
+    it("carries through a present project name, a present cycle name and an absent team", async () => {
+      sdk.issues.mockResolvedValue({
+        nodes: [
+          makeResultIssue({
+            project: Promise.resolve({ name: "Project A" }),
+            cycle: Promise.resolve({ name: "Cycle 5" }),
+            team: Promise.resolve(undefined),
+          }),
+        ],
+      });
+
+      const results = await client.searchIssues({ state: "Todo" });
+
+      expect(results[0].project).toBe("Project A");
+      expect(results[0].cycle).toBe("Cycle 5");
+      expect(results[0].team).toBeUndefined();
+    });
+
+    it("defaults labels to an empty array when labels() resolves with no nodes field", async () => {
+      sdk.issues.mockResolvedValue({
+        nodes: [makeResultIssue({ labels: () => Promise.resolve(undefined) })],
+      });
+
+      const results = await client.searchIssues({ state: "Todo" });
+
+      expect(results[0].labels).toEqual([]);
     });
   });
 

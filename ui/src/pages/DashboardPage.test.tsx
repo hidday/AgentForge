@@ -138,6 +138,19 @@ describe("DashboardPage", () => {
     expect(statValue("Done")).toBe("1");
   });
 
+  it("accumulates the stat count correctly when multiple runs share the same category", () => {
+    const runs = [
+      makeRun({ id: "r1", state: "Planning" }), // active
+      makeRun({ id: "r2", state: "Implementing" }), // also active
+      makeRun({ id: "r3", state: "AIReview" }), // also active
+    ];
+    mockUseRuns.mockReturnValue({ runs, loading: false, error: null, refetch: vi.fn() });
+    const { container } = render(<DashboardPage />);
+
+    const statsBar = container.querySelector(".grid-cols-5") as HTMLElement;
+    expect(within(statsBar).getByText("Active").previousSibling?.textContent).toBe("3");
+  });
+
   it("filters the runs passed to the table when a category filter is clicked", async () => {
     const runs = [
       makeRun({ id: "r1", state: "Planning" }), // active
