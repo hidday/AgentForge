@@ -114,6 +114,22 @@ describe("OpenQuestionsPanel", () => {
     });
   });
 
+  it("omits an unanswered optional question from the submitted payload", async () => {
+    mockApi.answerQuestions.mockResolvedValue({ ok: true, run: {} });
+
+    render(<OpenQuestionsPanel questions={[requiredQuestion, optionalQuestion]} runId="run-1" />);
+
+    const textarea = screen.getAllByRole("textbox")[0] as HTMLTextAreaElement;
+    await userEvent.type(textarea, "Prod target");
+    await userEvent.click(screen.getByRole("button", { name: /submit answers/i }));
+
+    await waitFor(() => {
+      expect(mockApi.answerQuestions).toHaveBeenCalledWith("run-1", [
+        { questionId: "q1", answer: "Prod target" },
+      ]);
+    });
+  });
+
   it("calls onSubmitted callback on successful submission", async () => {
     mockApi.answerQuestions.mockResolvedValue({ ok: true, run: {} });
     const onSubmitted = vi.fn();
@@ -229,6 +245,21 @@ describe("OpenQuestionsPanel", () => {
     await waitFor(() => {
       const alert = screen.getByRole("alert");
       expect(alert.textContent).toContain("Unrecognised questionId");
+    });
+  });
+
+  it("falls back to a generic error message when the API rejects with a non-Error value", async () => {
+    mockApi.answerQuestions.mockRejectedValue("not an Error instance");
+
+    render(<OpenQuestionsPanel questions={[requiredQuestion]} runId="run-1" />);
+
+    const textarea = screen.getAllByRole("textbox")[0] as HTMLTextAreaElement;
+    await userEvent.type(textarea, "My answer");
+    await userEvent.click(screen.getByRole("button", { name: /submit answers/i }));
+
+    await waitFor(() => {
+      const alert = screen.getByRole("alert");
+      expect(alert.textContent).toContain("Failed to submit answers");
     });
   });
 
