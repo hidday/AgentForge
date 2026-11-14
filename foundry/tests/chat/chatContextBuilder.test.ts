@@ -247,4 +247,46 @@ describe("buildChatSystemPrompt", () => {
     expect(result).toContain("New summary");
     expect(result).not.toContain("Old summary");
   });
+
+  it("includes Plan Review Findings with summary and findings when present", () => {
+    const artifact = makeArtifact({
+      type: "PlanReview",
+      payloadJson: {
+        summary: "Mostly solid",
+        findings: [{ id: "f1", severity: "important", title: "Gap", details: "Add rollback" }],
+      },
+    });
+    const result = buildChatSystemPrompt(makeRun(), [artifact]);
+    expect(result).toContain("## Plan Review Findings");
+    expect(result).toContain("**Summary:** Mostly solid");
+    expect(result).toContain("[important] Gap");
+    expect(result).toContain("Add rollback");
+  });
+
+  it("omits the Plan Review Findings section when there is no summary or findings", () => {
+    const artifact = makeArtifact({ type: "PlanReview", payloadJson: {} });
+    const result = buildChatSystemPrompt(makeRun(), [artifact]);
+    expect(result).not.toContain("## Plan Review Findings");
+  });
+
+  it("includes Code Review Findings with summary and findings when present", () => {
+    const artifact = makeArtifact({
+      type: "Review",
+      payloadJson: {
+        summary: "Looks mostly good",
+        findings: [{ id: "f2", severity: "blocker", title: "Null check", details: "Add a guard" }],
+      },
+    });
+    const result = buildChatSystemPrompt(makeRun(), [artifact]);
+    expect(result).toContain("## Code Review Findings");
+    expect(result).toContain("**Summary:** Looks mostly good");
+    expect(result).toContain("[blocker] Null check");
+    expect(result).toContain("Add a guard");
+  });
+
+  it("omits the Code Review Findings section when there is no summary or findings", () => {
+    const artifact = makeArtifact({ type: "Review", payloadJson: {} });
+    const result = buildChatSystemPrompt(makeRun(), [artifact]);
+    expect(result).not.toContain("## Code Review Findings");
+  });
 });
