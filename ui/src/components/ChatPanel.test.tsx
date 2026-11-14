@@ -214,6 +214,74 @@ describe("ChatPanel", () => {
     expect(screen.queryByText("Failing question")).toBeNull();
   });
 
+  it("falls back to a generic error message when the API rejects with a non-Error value", async () => {
+    mockApi.sendChatMessage.mockRejectedValue("not an Error instance");
+
+    render(<ChatPanel runId={RUN_ID} artifacts={[]} />);
+    const input = screen.getByPlaceholderText(/ask the agent/i);
+    await userEvent.type(input, "Hello");
+    await userEvent.click(screen.getByRole("button", { name: /send/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText("Chat request failed")).toBeDefined();
+    });
+  });
+
+  it("defaults a ChatMessage artifact's content to an empty string when absent", () => {
+    const artifact: Artifact = {
+      id: "a1",
+      runId: RUN_ID,
+      type: "ChatMessage",
+      version: 1,
+      payloadJson: { role: "user" },
+      rawText: "",
+      createdAt: "2026-01-01T00:00:00Z",
+    };
+
+    expect(() => render(<ChatPanel runId={RUN_ID} artifacts={[artifact]} />)).not.toThrow();
+  });
+
+  it("does not call the API when the form is submitted with only whitespace input", async () => {
+    const { container } = render(<ChatPanel runId={RUN_ID} artifacts={[]} />);
+
+    await userEvent.type(screen.getByPlaceholderText(/ask the agent/i), "   ");
+    const form = container.querySelector("form")!;
+    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+
+    expect(mockApi.sendChatMessage).not.toHaveBeenCalled();
+  });
+
+  it("collapses and re-expands the panel when the header is clicked", async () => {
+    render(<ChatPanel runId={RUN_ID} artifacts={[]} />);
+
+    expect(screen.getByPlaceholderText(/ask the agent/i)).toBeDefined();
+
+    await userEvent.click(screen.getByText("Chat with Agent"));
+    expect(screen.queryByPlaceholderText(/ask the agent/i)).toBeNull();
+
+    await userEvent.click(screen.getByText("Chat with Agent"));
+    expect(screen.getByPlaceholderText(/ask the agent/i)).toBeDefined();
+  });
+
+  it("auto-scrolls the message list when scrollIntoView is available", async () => {
+    const scrollIntoView = vi.fn();
+    Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
+      value: scrollIntoView,
+      writable: true,
+      configurable: true,
+    });
+
+    mockApi.sendChatMessage.mockResolvedValue({ reply: "ok", durationMs: 1 });
+    render(<ChatPanel runId={RUN_ID} artifacts={[]} />);
+
+    await userEvent.type(screen.getByPlaceholderText(/ask the agent/i), "hi");
+    await userEvent.click(screen.getByRole("button", { name: /send/i }));
+
+    await waitFor(() => expect(scrollIntoView).toHaveBeenCalled());
+
+    Reflect.deleteProperty(HTMLElement.prototype, "scrollIntoView");
+  });
+
   it("message list does not change from artifact-derived count when only local state changes", async () => {
     let resolveRequest!: (v: { reply: string; durationMs: number }) => void;
     mockApi.sendChatMessage.mockReturnValue(
