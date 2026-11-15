@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, writeFileSync, rmSync, existsSync, readFileSync } from "node:fs";
+import { mkdtempSync, writeFileSync, rmSync, existsSync, readFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { execFileSync } from "node:child_process";
@@ -178,6 +178,43 @@ describe("GitService", () => {
       expect(await svc.currentBranch(result.worktreePath)).toBe(branchName);
       expect(result.worktreePath).not.toBe(stalePath);
       expect(existsSync(stalePath)).toBe(false);
+
+      await svc.removeWorktree(repoPath, result.worktreePath);
+    });
+
+    it("removes a pre-existing (non-worktree) directory at the deterministic path before creating", async () => {
+      const runId = "fadedcab-3456-7890-abcd-ef1234567890";
+      const branchName = "hidday/pry-101-preexisting-dir";
+      const shortId = runId.slice(0, 8);
+      const dirName = buildWorktreeDirName(shortId, branchName);
+      const worktreePath = join(repoPath, ".worktrees", dirName);
+      mkdirSync(worktreePath, { recursive: true });
+      expect(existsSync(worktreePath)).toBe(true);
+
+      const result = await svc.setupRunWorktree(repoPath, runId, "main", branchName);
+
+      expect(result.worktreePath).toBe(worktreePath);
+      expect(existsSync(result.worktreePath)).toBe(true);
+      expect(await svc.currentBranch(result.worktreePath)).toBe(branchName);
+
+      await svc.removeWorktree(repoPath, result.worktreePath);
+    });
+
+    it("warns but proceeds when origin already has the branch (resets local branch to startPoint)", async () => {
+      const branchName = "hidday/pry-102-remote-exists";
+      // Push the branch to the bare "origin" so remoteBranchExists() is true.
+      git(["branch", branchName, "main"], repoPath);
+      git(["push", "origin", branchName], repoPath);
+      git(["branch", "-D", branchName], repoPath);
+
+      const runId = "cafefeed-3456-7890-abcd-ef1234567890";
+      const result = await svc.setupRunWorktree(repoPath, runId, "main", branchName);
+
+      expect(await svc.currentBranch(result.worktreePath)).toBe(branchName);
+      // Local branch was reset (-B) to startPoint, not left tracking origin's divergent history.
+      const headSha = git(["rev-parse", "HEAD"], result.worktreePath);
+      const mainSha = git(["rev-parse", "main"], repoPath);
+      expect(headSha).toBe(mainSha);
 
       await svc.removeWorktree(repoPath, result.worktreePath);
     });

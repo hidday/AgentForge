@@ -1,6 +1,8 @@
 import { describe, it, expect, vi } from "vitest";
 import { PlannerAgent } from "../../src/agents/plannerAgent.js";
 import type { TaskBundle } from "../../src/schemas/taskBundle.js";
+import type { Plan } from "../../src/schemas/plan.js";
+import type { SkillDocument } from "../../src/domain/types.js";
 
 function makeTaskBundle(): TaskBundle {
   return {
@@ -302,6 +304,124 @@ describe("PlannerAgent.run()", () => {
       expect(prompt).not.toContain("BEGIN BACKGROUND CONTEXT");
       expect(prompt).not.toContain("Background: Related Linear Context");
       expect(prompt).not.toContain("{{relatedContextSection}}");
+    });
+  });
+
+  describe("previousPlan rendering", () => {
+    function makePreviousPlan(): Plan {
+      return {
+        planVersion: 3,
+        summary: "Rejected plan summary",
+        requirementsTraceability: "",
+        assumptions: ["We can touch the auth module"],
+        openQuestions: [
+          { id: "q1", question: "Blocking question?", requiredForExecution: true },
+          { id: "q2", question: "Non-blocking question?", requiredForExecution: false },
+        ],
+        risks: ["Migration could fail"],
+        steps: [{ id: "s1", title: "Refactor auth", description: "Switch to OAuth2" }],
+        testPlan: "Run the auth test suite",
+        confidence: 0.75,
+      };
+    }
+
+    it("renders the previously rejected plan with steps, risks, assumptions, and open questions", async () => {
+      const { agent, getPrompt } = buildPlannerAgent();
+      const bundle = makeTaskBundle();
+
+      await agent.run(bundle, "run-1", { previousPlan: makePreviousPlan() });
+
+      const prompt = getPrompt();
+      expect(prompt).toContain("## Previously Rejected Plan (v3)");
+      expect(prompt).toContain("Rejected plan summary");
+      expect(prompt).toContain("**Confidence:** 75%");
+      expect(prompt).toContain("1. **Refactor auth** (s1): Switch to OAuth2");
+      expect(prompt).toContain("**Risks:**\n- Migration could fail");
+      expect(prompt).toContain("**Assumptions:**\n- We can touch the auth module");
+      expect(prompt).toContain("**Open Questions:**");
+      expect(prompt).toContain("[q1] Blocking question? *(blocks execution)*");
+      expect(prompt).toContain("[q2] Non-blocking question?");
+      expect(prompt).not.toContain("Non-blocking question? *(blocks execution)*");
+      expect(prompt).toContain("**Test Plan:** Run the auth test suite");
+      expect(prompt).toContain("Preserve the parts that are still valid");
+    });
+
+    it("omits risks, assumptions, and open-questions lines when those arrays are empty", async () => {
+      const { agent, getPrompt } = buildPlannerAgent();
+      const bundle = makeTaskBundle();
+      const plan = makePreviousPlan();
+      plan.risks = [];
+      plan.assumptions = [];
+      plan.openQuestions = [];
+
+      await agent.run(bundle, "run-1", { previousPlan: plan });
+
+      const prompt = getPrompt();
+      expect(prompt).toContain("## Previously Rejected Plan (v3)");
+      expect(prompt).not.toContain("**Risks:**");
+      expect(prompt).not.toContain("**Assumptions:**");
+      expect(prompt).not.toContain("**Open Questions:**");
+    });
+
+    it("omits the previously-rejected-plan section when previousPlan is absent", async () => {
+      const { agent, getPrompt } = buildPlannerAgent();
+      const bundle = makeTaskBundle();
+
+      await agent.run(bundle, "run-1");
+
+      const prompt = getPrompt();
+      expect(prompt).not.toContain("## Previously Rejected Plan");
+    });
+  });
+
+  describe("priorSkills rendering", () => {
+    function makeSkill(overrides: Partial<SkillDocument> = {}): SkillDocument {
+      return {
+        id: "skill-1",
+        repoSlug: "acme/widgets",
+        name: "OAuth2 Setup",
+        description: "How to wire up OAuth2 in this repo.",
+        taskCategory: "auth",
+        skillMarkdown: "Use the `oauth2-client` package and register callbacks in `auth.ts`.",
+        utilityScore: 0.9,
+        lastUsedAt: new Date("2024-01-01"),
+        ...overrides,
+      };
+    }
+
+    it("renders prior skills with their name, category, description, and markdown", async () => {
+      const { agent, getPrompt } = buildPlannerAgent();
+      const bundle = makeTaskBundle();
+
+      await agent.run(bundle, "run-1", { priorSkills: [makeSkill()] });
+
+      const prompt = getPrompt();
+      expect(prompt).toContain("## Prior Skills from Similar Tasks");
+      expect(prompt).toContain("### OAuth2 Setup (auth)");
+      expect(prompt).toContain("How to wire up OAuth2 in this repo.");
+      expect(prompt).toContain("Use the `oauth2-client` package");
+    });
+
+    it("falls back to the task category heading when a skill has no name", async () => {
+      const { agent, getPrompt } = buildPlannerAgent();
+      const bundle = makeTaskBundle();
+
+      await agent.run(bundle, "run-1", {
+        priorSkills: [makeSkill({ name: null, description: null })],
+      });
+
+      const prompt = getPrompt();
+      expect(prompt).toContain("### auth\n");
+    });
+
+    it("omits the prior-skills section when priorSkills is empty or absent", async () => {
+      const { agent, getPrompt } = buildPlannerAgent();
+      const bundle = makeTaskBundle();
+
+      await agent.run(bundle, "run-1", { priorSkills: [] });
+
+      const prompt = getPrompt();
+      expect(prompt).not.toContain("## Prior Skills from Similar Tasks");
     });
   });
 });

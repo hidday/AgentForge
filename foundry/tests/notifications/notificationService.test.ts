@@ -146,6 +146,55 @@ describe("NotificationService.sendHumanRequest", () => {
     expect(result.email).toEqual({ attempted: true, ok: true });
   });
 
+  it("renders open questions in both the HTML and text email bodies, marking required ones", async () => {
+    fetchMock.mockResolvedValue({ ok: true });
+    const config: NotificationConfig = {
+      emailFrom: "from@b.com",
+      emailTo: "to@b.com",
+      resendApiKey: "key-123",
+    };
+    const service = new NotificationService(config, makeLogger());
+
+    await service.sendHumanRequest(
+      makePayload({
+        context: "Some extra context for the reviewer.",
+        openQuestions: [
+          { id: "q1", question: "What about X?", requiredForExecution: true },
+          { id: "q2", question: "And Y?", requiredForExecution: false },
+        ],
+      }),
+    );
+
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(body.html).toContain("Open questions:");
+    expect(body.html).toContain("<strong>[required]</strong>");
+    expect(body.html).toContain("What about X?");
+    expect(body.html).toContain("And Y?");
+    expect(body.html).toContain("Some extra context for the reviewer.");
+
+    expect(body.text).toContain("Open questions:");
+    expect(body.text).toContain("- [required] What about X?");
+    expect(body.text).toContain("- And Y?");
+    expect(body.text).toContain("Context:");
+  });
+
+  it("omits the open-questions and context sections entirely when neither is provided", async () => {
+    fetchMock.mockResolvedValue({ ok: true });
+    const config: NotificationConfig = {
+      emailFrom: "from@b.com",
+      emailTo: "to@b.com",
+      resendApiKey: "key-123",
+    };
+    const service = new NotificationService(config, makeLogger());
+
+    await service.sendHumanRequest(makePayload());
+
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(body.html).not.toContain("Open questions:");
+    expect(body.text).not.toContain("Open questions:");
+    expect(body.text).not.toContain("Context:");
+  });
+
   it("records an email failure without throwing, and logs a warning", async () => {
     fetchMock.mockResolvedValue({ ok: false, status: 401, text: () => Promise.resolve("unauthorized") });
     const logger = makeLogger();

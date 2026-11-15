@@ -208,4 +208,26 @@ describe("ExecutorAgent.run()", () => {
     expect(payload?.score).toBe(0.42);
     expect(payload?.executionVersion).toBe(1);
   });
+
+  it("injects the operator note as a high-priority clarification when provided", async () => {
+    const { agent, getUserPrompt } = buildAgent();
+
+    await agent.run(makePlan(), makeTaskBundle(), "run-1", undefined, {
+      operatorNote: "Please also update the changelog.",
+    });
+
+    const userPrompt = getUserPrompt();
+    expect(userPrompt).toContain("## Operator Note");
+    expect(userPrompt).toContain("high-priority clarification");
+    expect(userPrompt).toContain("Please also update the changelog.");
+  });
+
+  it("omits the operator note section when no operatorNote is provided", async () => {
+    const { agent, getUserPrompt } = buildAgent();
+
+    await agent.run(makePlan(), makeTaskBundle(), "run-1");
+
+    const userPrompt = getUserPrompt();
+    expect(userPrompt).not.toContain("## Operator Note");
+  });
 });

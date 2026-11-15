@@ -185,6 +185,16 @@ describe("RunRepository", () => {
     });
   });
 
+  it("findActiveByIssueId() returns null when no active run matches", async () => {
+    const prisma = makePrisma();
+    prisma.aiRun.findFirst.mockResolvedValue(null);
+    const repo = new RunRepository(prisma);
+
+    const result = await repo.findActiveByIssueId("issue-1");
+
+    expect(result).toBeNull();
+  });
+
   it("updateState() updates state and maps the returned row", async () => {
     const prisma = makePrisma();
     prisma.aiRun.update.mockResolvedValue(makeRow({ state: "Done" }));

@@ -150,4 +150,26 @@ describe("PlanReviserAgent.run() relatedContext rendering", () => {
     expect(prompt).not.toContain("Background: Related Linear Context");
     expect(prompt).not.toContain("{{relatedContextSection}}");
   });
+
+  it("renders the operator note section, instructing the reviser to apply it alongside findings", async () => {
+    const { agent, getPrompt } = buildPlanReviserAgent();
+
+    await agent.run(makePlan(), makePlanReview(), makeTaskBundle(), "run-1", {
+      operatorNote: "Keep the migration backwards compatible.",
+    });
+
+    const prompt = getPrompt();
+    expect(prompt).toContain("## Operator Note");
+    expect(prompt).toContain("do not drop the findings in favor of the note");
+    expect(prompt).toContain("Keep the migration backwards compatible.");
+  });
+
+  it("omits the operator note section when no operatorNote is provided", async () => {
+    const { agent, getPrompt } = buildPlanReviserAgent();
+
+    await agent.run(makePlan(), makePlanReview(), makeTaskBundle(), "run-1");
+
+    const prompt = getPrompt();
+    expect(prompt).not.toContain("## Operator Note");
+  });
 });

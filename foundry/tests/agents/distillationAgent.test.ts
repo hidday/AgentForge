@@ -375,6 +375,151 @@ describe("DistillationAgent", () => {
     });
   });
 
+  describe("existing-skills summary injection into the LLM prompt", () => {
+    it("includes each active skill's name/category/snippet when the skill pool is non-empty", async () => {
+      const deps = buildDeps();
+      let capturedPrompt = "";
+      deps.agentSkillRepo.findActiveByRepo.mockResolvedValue([
+        makeSkill({
+          name: "db-migrations",
+          taskCategory: "database migration",
+          skillMarkdown: "Run migrations with the alembic CLI, never edit history by hand.",
+        }),
+      ]);
+      deps.agentRunner.run.mockImplementation(async (_runtime: unknown, opts: { prompt: string }) => {
+        capturedPrompt = opts.prompt;
+        return makeDistillationOutput({ shouldPersist: false, reason: "not novel enough" });
+      });
+
+      const agent = buildAgent(deps);
+      await agent.run("run-1", makeRun());
+
+      expect(capturedPrompt).toContain("[db-migrations] database migration:");
+      expect(capturedPrompt).toContain("Run migrations with the alembic CLI");
+    });
+
+    it("falls back to 'No existing skills.' text in the prompt when the skill pool is empty", async () => {
+      const deps = buildDeps();
+      let capturedPrompt = "";
+      deps.agentSkillRepo.findActiveByRepo.mockResolvedValue([]);
+      deps.agentRunner.run.mockImplementation(async (_runtime: unknown, opts: { prompt: string }) => {
+        capturedPrompt = opts.prompt;
+        return makeDistillationOutput({ shouldPersist: false, reason: "not novel enough" });
+      });
+
+      const agent = buildAgent(deps);
+      await agent.run("run-1", makeRun());
+
+      expect(capturedPrompt).toContain("No existing skills.");
+    });
+  });
+
+  describe("(j) shouldPersist=true but required fields missing", () => {
+    it("skips persistence and emits reason='missing_required_skill_fields' when taskCategory is missing", async () => {
+      const deps = buildDeps();
+      deps.agentSkillRepo.findActiveByRepo.mockResolvedValue([]);
+      deps.agentRunner.run.mockResolvedValue(
+        makeDistillationOutput({
+          shouldPersist: true,
+          reason: "insight found",
+          skillMarkdown: "Some markdown",
+          // taskCategory intentionally omitted
+        }),
+      );
+
+      const agent = buildAgent(deps);
+      await agent.run("run-1", makeRun());
+
+      expect(deps.agentSkillRepo.create).not.toHaveBeenCalled();
+      expect(deps.agentSkillRepo.displaceAndCreate).not.toHaveBeenCalled();
+      expect(deps.eventRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          payloadJson: expect.objectContaining({
+            shouldPersist: false,
+            reason: "missing_required_skill_fields",
+            displacedSkillId: null,
+          }),
+        }),
+      );
+    });
+
+    it("skips persistence when skillMarkdown is only whitespace", async () => {
+      const deps = buildDeps();
+      deps.agentSkillRepo.findActiveByRepo.mockResolvedValue([]);
+      deps.agentRunner.run.mockResolvedValue(
+        makeDistillationOutput({
+          shouldPersist: true,
+          reason: "insight found",
+          taskCategory: "auth middleware",
+          skillMarkdown: "   ",
+        }),
+      );
+
+      const agent = buildAgent(deps);
+      await agent.run("run-1", makeRun());
+
+      expect(deps.agentSkillRepo.create).not.toHaveBeenCalled();
+      expect(deps.eventRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          payloadJson: expect.objectContaining({
+            shouldPersist: false,
+            reason: "missing_required_skill_fields",
+          }),
+        }),
+      );
+    });
+  });
+
+  describe("(k) description fallback when the LLM omits or blanks it", () => {
+    it("falls back to a generated description when description is absent", async () => {
+      const deps = buildDeps();
+      deps.agentSkillRepo.findActiveByRepo.mockResolvedValue([]);
+      deps.agentSkillRepo.countActiveByRepo.mockResolvedValue(0);
+      deps.agentRunner.run.mockResolvedValue(
+        makeDistillationOutput({
+          shouldPersist: true,
+          reason: "insight found",
+          taskCategory: "auth middleware",
+          skillMarkdown: "Use JWT.",
+          // description intentionally omitted
+        }),
+      );
+
+      const agent = buildAgent(deps);
+      await agent.run("run-1", makeRun({ repo: "acme/widgets" }));
+
+      expect(deps.agentSkillRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          description: "Use when working on auth middleware in acme/widgets.",
+        }),
+      );
+    });
+
+    it("falls back to a generated description when description is whitespace-only", async () => {
+      const deps = buildDeps();
+      deps.agentSkillRepo.findActiveByRepo.mockResolvedValue([]);
+      deps.agentSkillRepo.countActiveByRepo.mockResolvedValue(0);
+      deps.agentRunner.run.mockResolvedValue(
+        makeDistillationOutput({
+          shouldPersist: true,
+          reason: "insight found",
+          taskCategory: "auth middleware",
+          skillMarkdown: "Use JWT.",
+          description: "   ",
+        }),
+      );
+
+      const agent = buildAgent(deps);
+      await agent.run("run-1", makeRun({ repo: "acme/widgets" }));
+
+      expect(deps.agentSkillRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          description: "Use when working on auth middleware in acme/widgets.",
+        }),
+      );
+    });
+  });
+
   describe("(g) Trigram retrieval ranking and MAX_SKILLS_INJECTED ceiling", () => {
     it("findTopKByRelevance respects the ceiling when pool > K", async () => {
       // This tests the AgentSkillRepository.findTopKByRelevance behavior

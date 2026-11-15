@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { transition, getValidEvents } from "../../src/orchestrator/stateMachine.js";
 import { RunState } from "../../src/domain/runState.js";
 import { RunEvent } from "../../src/domain/runEvent.js";
+import { StateTransitionError } from "../../src/utils/errors.js";
 
 describe("stateMachine - clarification transitions", () => {
   it("HumanClarificationNeeded + CLARIFICATION_PROVIDED → Planning", () => {
@@ -39,5 +40,33 @@ describe("stateMachine - clarification transitions", () => {
     const validEvents = getValidEvents(RunState.Failed);
     expect(validEvents).toHaveLength(1);
     expect(validEvents).toContain(RunEvent.RESET_TO_TODO);
+  });
+
+  it("throws StateTransitionError when the current state has no entry in the table at all", () => {
+    expect(() => transition(RunState.Done, RunEvent.PLAN_APPROVED)).toThrow(StateTransitionError);
+    try {
+      transition(RunState.Done, RunEvent.PLAN_APPROVED);
+      expect.unreachable("should have thrown");
+    } catch (err) {
+      expect(err).toBeInstanceOf(StateTransitionError);
+      expect((err as StateTransitionError).fromState).toBe(RunState.Done);
+      expect((err as StateTransitionError).event).toBe(RunEvent.PLAN_APPROVED);
+    }
+  });
+
+  it("getValidEvents returns an empty array for a state with no entry in the table", () => {
+    expect(getValidEvents(RunState.Done)).toEqual([]);
+  });
+
+  it("throws StateTransitionError when the event is not valid for a state that does have other transitions", () => {
+    expect(() => transition(RunState.Todo, RunEvent.PLAN_APPROVED)).toThrow(StateTransitionError);
+    try {
+      transition(RunState.Todo, RunEvent.PLAN_APPROVED);
+      expect.unreachable("should have thrown");
+    } catch (err) {
+      expect(err).toBeInstanceOf(StateTransitionError);
+      expect((err as StateTransitionError).fromState).toBe(RunState.Todo);
+      expect((err as StateTransitionError).event).toBe(RunEvent.PLAN_APPROVED);
+    }
   });
 });
