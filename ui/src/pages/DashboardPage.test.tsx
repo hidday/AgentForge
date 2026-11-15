@@ -134,6 +134,34 @@ describe("DashboardPage", () => {
     expect(doneCard.textContent).toContain("1");
   });
 
+  it("counts a run with an unrecognized state toward the Total only, not any category tile", () => {
+    mockUseRuns = {
+      runs: [
+        makeRun({ id: "r1", state: "Implementing" }), // active
+        makeRun({ id: "r2", state: "SomeUnknownState" }), // unmapped -> falls back to idle
+      ],
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    };
+    renderPage();
+
+    const stats = screen.getByText("Total").closest("div")!.parentElement!;
+    expect(stats.textContent).toContain("2");
+
+    const activeCard = screen.getByText("Active", { selector: "div" }).parentElement!;
+    expect(activeCard.textContent).toContain("1");
+
+    const awaitingCard = screen.getByText("Awaiting", { selector: "div" }).parentElement!;
+    expect(awaitingCard.textContent).toContain("0");
+
+    const blockedCard = screen.getByText("Blocked", { selector: "div" }).parentElement!;
+    expect(blockedCard.textContent).toContain("0");
+
+    const doneCard = screen.getByText("Done", { selector: "div" }).parentElement!;
+    expect(doneCard.textContent).toContain("0");
+  });
+
   it("filters the visible runs by category when a filter button is clicked", async () => {
     mockUseRuns = {
       runs: [

@@ -100,6 +100,22 @@ describe("ArtifactTabs", () => {
     expect(screen.queryByText("v2")).toBeNull();
   });
 
+  it("renders the Execution tab content via ExecutionReportView", () => {
+    render(
+      <ArtifactTabs
+        artifacts={[
+          makeArtifact({
+            type: "ExecutionReport",
+            payloadJson: { executionVersion: 4, summary: "All checks passed" },
+          }),
+        ]}
+      />,
+    );
+
+    expect(screen.getByText("v4")).toBeDefined();
+    expect(screen.getByText("All checks passed")).toBeDefined();
+  });
+
   it("renders PlanRevision dispositions with status-specific styling", () => {
     render(
       <ArtifactTabs

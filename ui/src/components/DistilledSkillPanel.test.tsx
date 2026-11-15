@@ -88,6 +88,58 @@ describe("DistilledSkillPanel", () => {
     expect(screen.getByText(/loading distilled skill/i)).toBeDefined();
   });
 
+  it("falls back to the distilled skill's taskCategory when neither side has a name", () => {
+    render(
+      <DistilledSkillPanel
+        distilledSkill={{ ...skill, name: null, taskCategory: "fallback-category" }}
+        distillationDecision={{ ...decision, name: null, taskCategory: "fallback-category" }}
+      />,
+    );
+    // Appears twice: once as the name, once as the taskCategory subtitle.
+    expect(screen.getAllByText("fallback-category").length).toBeGreaterThan(0);
+  });
+
+  it("falls back to the decision's taskCategory when distilledSkill is null and no name is available", () => {
+    render(
+      <DistilledSkillPanel
+        distilledSkill={null}
+        distillationDecision={{ ...decision, name: null, taskCategory: "decision-category" }}
+      />,
+    );
+    expect(screen.getAllByText("decision-category").length).toBeGreaterThan(0);
+  });
+
+  it("falls all the way back to the literal 'distilled-skill' name when nothing else is available", () => {
+    render(
+      <DistilledSkillPanel
+        distilledSkill={null}
+        distillationDecision={{ ...decision, name: null, taskCategory: null }}
+      />,
+    );
+    expect(screen.getByText("distilled-skill")).toBeDefined();
+  });
+
+  it("shows the displaced-skill id badge when a skill was displaced", () => {
+    render(
+      <DistilledSkillPanel
+        distilledSkill={skill}
+        distillationDecision={{ ...decision, displacedSkillId: "skill-displaced-123" }}
+      />,
+    );
+    expect(screen.getByText(/Displaced skill:/i).textContent).toBe("Displaced skill: skill-di");
+  });
+
+  it("renders no description paragraph when neither side provides one", () => {
+    render(
+      <DistilledSkillPanel
+        distilledSkill={{ ...skill, description: null }}
+        distillationDecision={{ ...decision, description: null }}
+      />,
+    );
+    // The markdown skill body still renders; only the standalone description line is absent.
+    expect(screen.queryByText(/Use when changing prysmic/i)).toBeNull();
+  });
+
   it("shows the error message when error is set, taking priority over loading/decision", () => {
     render(
       <DistilledSkillPanel

@@ -152,6 +152,14 @@ describe("AgentOutputPanel", () => {
     expect(screen.getByText("fatal failure")).toBeDefined();
   });
 
+  it("shows the waiting placeholder in the raw view when output is empty", () => {
+    render(<AgentOutputPanel processes={[makeProcess()]} output="" />);
+
+    fireEvent.click(screen.getByText("raw"));
+
+    expect(screen.getByText("Waiting for output...")).toBeDefined();
+  });
+
   it("renders a raw fallback block", () => {
     parseClaudeOutput.mockReturnValue([{ type: "raw", content: "unrecognized line" }]);
     render(<AgentOutputPanel processes={[]} output="x" />);

@@ -85,6 +85,18 @@ describe("api client", () => {
     });
   });
 
+  it("omits context from the body when rejectPlan is called with an empty context", async () => {
+    (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValue(
+      jsonResponse({ ok: true, state: "Planning" }),
+    );
+    await api.rejectPlan("run-1");
+    const [, options] = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0]!;
+    expect(JSON.parse(options.body as string)).toEqual({
+      context: undefined,
+      mode: "iterate",
+    });
+  });
+
   it("passes through an explicit rejectPlan mode", async () => {
     (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValue(
       jsonResponse({ ok: true, state: "Planning" }),
@@ -227,6 +239,15 @@ describe("api client", () => {
     const [url, options] = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0]!;
     expect(url).toBe("/api/runs/run-1/actions/revise-plan");
     expect(JSON.parse(options.body as string)).toEqual({ note: "revise this" });
+  });
+
+  it("omits the note from the body when revisePlan is called without one", async () => {
+    (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValue(
+      jsonResponse({ ok: true, runId: "run-1" }),
+    );
+    await api.revisePlan("run-1");
+    const [, options] = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0]!;
+    expect(JSON.parse(options.body as string)).toEqual({ note: undefined });
   });
 
   it("posts to approveReview with no body", async () => {

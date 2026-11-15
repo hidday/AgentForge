@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor, act } from "@testing-library/react";
+import { render, screen, waitFor, act, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { Artifact } from "@/api/client.ts";
 
@@ -214,6 +214,19 @@ describe("ChatPanel", () => {
     expect(screen.queryByText("Failing question")).toBeNull();
   });
 
+  it("falls back to a generic error message for a non-Error rejection", async () => {
+    mockApi.sendChatMessage.mockRejectedValue("boom");
+
+    render(<ChatPanel runId={RUN_ID} artifacts={[]} />);
+    const input = screen.getByPlaceholderText(/ask the agent/i);
+    await userEvent.type(input, "Failing question");
+    await userEvent.click(screen.getByRole("button", { name: /send/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText("Chat request failed")).toBeDefined();
+    });
+  });
+
   it("message list does not change from artifact-derived count when only local state changes", async () => {
     let resolveRequest!: (v: { reply: string; durationMs: number }) => void;
     mockApi.sendChatMessage.mockReturnValue(
@@ -250,6 +263,66 @@ describe("ChatPanel", () => {
       // "New question" should NOT appear
       expect(screen.queryByText("New question")).toBeNull();
     });
+  });
+
+  it("scrolls the message list into view when a scrollIntoView implementation is available", async () => {
+    const scrollSpy = vi.fn();
+    window.HTMLElement.prototype.scrollIntoView = scrollSpy;
+
+    const { rerender } = render(<ChatPanel runId={RUN_ID} artifacts={[]} />);
+    expect(scrollSpy).toHaveBeenCalledWith({ behavior: "smooth" });
+
+    scrollSpy.mockClear();
+    const artifacts: Artifact[] = [
+      makeArtifact("user", "New message", "a1", "2024-01-01T00:00:01Z"),
+    ];
+    rerender(<ChatPanel runId={RUN_ID} artifacts={artifacts} />);
+
+    expect(scrollSpy).toHaveBeenCalledWith({ behavior: "smooth" });
+
+    // @ts-expect-error -- restore jsdom's default (no scrollIntoView implementation)
+    delete window.HTMLElement.prototype.scrollIntoView;
+  });
+
+  it("falls back to an empty string for a ChatMessage artifact with no content field", () => {
+    const artifacts: Artifact[] = [
+      {
+        id: "a1",
+        runId: RUN_ID,
+        type: "ChatMessage",
+        version: 1,
+        payloadJson: { role: "user" },
+        rawText: "",
+        createdAt: "2024-01-01T00:00:01Z",
+      },
+    ];
+    render(<ChatPanel runId={RUN_ID} artifacts={artifacts} />);
+    // One message bubble is rendered, with empty content, and no crash.
+    expect(screen.queryByText(/No messages yet/i)).toBeNull();
+  });
+
+  it("ignores a direct form submit when the trimmed input is empty", () => {
+    render(<ChatPanel runId={RUN_ID} artifacts={[]} />);
+    const input = screen.getByPlaceholderText(/ask the agent/i);
+    fireEvent.change(input, { target: { value: "   " } });
+    fireEvent.submit(input.closest("form")!);
+
+    expect(mockApi.sendChatMessage).not.toHaveBeenCalled();
+  });
+
+  it("ignores a direct form submit while a request is already in flight", async () => {
+    mockApi.sendChatMessage.mockReturnValue(new Promise(() => {}));
+    render(<ChatPanel runId={RUN_ID} artifacts={[]} />);
+    const input = screen.getByPlaceholderText(/ask the agent/i);
+    const form = input.closest("form")!;
+
+    fireEvent.change(input, { target: { value: "first" } });
+    fireEvent.submit(form);
+    await waitFor(() => expect(mockApi.sendChatMessage).toHaveBeenCalledTimes(1));
+
+    // A second direct submit while the first request is still pending must be a no-op.
+    fireEvent.submit(form);
+    expect(mockApi.sendChatMessage).toHaveBeenCalledTimes(1);
   });
 
   it("collapses and re-expands the message list when the header is clicked", async () => {

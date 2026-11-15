@@ -159,6 +159,64 @@ describe("useActiveProcesses", () => {
     expect(result.current.output).toBe("");
   });
 
+  it("adds a process with fallback empty-string fields when the started event omits them", async () => {
+    mockApi.getActiveProcesses.mockResolvedValue({ processes: [] });
+    const { result } = renderHook(() => useActiveProcesses("run-1"));
+    await waitFor(() => expect(mockApi.getActiveProcesses).toHaveBeenCalled());
+
+    act(() => {
+      capturedHandler!({ type: "process:started", runId: "run-1" });
+    });
+
+    expect(result.current.hasActive).toBe(true);
+    expect(result.current.processes[0]).toMatchObject({
+      id: "",
+      command: "",
+      stage: "",
+      runtime: "",
+    });
+  });
+
+  it("ignores the init fetch result if the hook unmounts before getActiveProcesses resolves", async () => {
+    let resolveProcesses!: (value: { processes: typeof PROCESS[] }) => void;
+    mockApi.getActiveProcesses.mockReturnValue(
+      new Promise((resolve) => {
+        resolveProcesses = resolve;
+      }),
+    );
+
+    const { result, unmount } = renderHook(() => useActiveProcesses("run-1"));
+    unmount();
+
+    await act(async () => {
+      resolveProcesses({ processes: [PROCESS] });
+      await Promise.resolve();
+    });
+
+    expect(result.current.hasActive).toBe(false);
+  });
+
+  it("ignores the output fetch result if the hook unmounts before getProcessOutput resolves", async () => {
+    mockApi.getActiveProcesses.mockResolvedValue({ processes: [PROCESS] });
+    let resolveOutput!: (value: { processId: string; output: string }) => void;
+    mockApi.getProcessOutput.mockReturnValue(
+      new Promise((resolve) => {
+        resolveOutput = resolve;
+      }),
+    );
+
+    const { result, unmount } = renderHook(() => useActiveProcesses("run-1"));
+    await waitFor(() => expect(mockApi.getProcessOutput).toHaveBeenCalled());
+    unmount();
+
+    await act(async () => {
+      resolveOutput({ processId: "proc-1", output: "too late" });
+      await Promise.resolve();
+    });
+
+    expect(result.current.output).toBe("");
+  });
+
   it("truncates accumulated output to the last 8192 characters", async () => {
     mockApi.getActiveProcesses.mockResolvedValue({ processes: [] });
     const { result } = renderHook(() => useActiveProcesses("run-1"));

@@ -128,6 +128,41 @@ describe("parseClaudeOutput – tool_use extraction", () => {
     expect(result[0].type).toBe("tool_use");
     expect(result[0].content).toContain("foo");
   });
+
+  it("truncates a long JSON-summary fallback with an ellipsis", () => {
+    const line = JSON.stringify({
+      content: [
+        { type: "tool_use", name: "Custom", input: { foo: "x".repeat(300) } },
+      ],
+    });
+    const result = parseClaudeOutput(line);
+    expect(result[0].content).toHaveLength(201);
+    expect(result[0].content.endsWith("…")).toBe(true);
+  });
+
+  it("uses short 'content' field input without truncation", () => {
+    const line = JSON.stringify({
+      content: [{ type: "tool_use", name: "Write", input: { content: "short text" } }],
+    });
+    const result = parseClaudeOutput(line);
+    expect(result[0].content).toBe("short text");
+  });
+
+  it("uses the 'path' field when present", () => {
+    const line = JSON.stringify({
+      content: [{ type: "tool_use", name: "Glob", input: { path: "/src/components" } }],
+    });
+    const result = parseClaudeOutput(line);
+    expect(result[0].content).toBe("/src/components");
+  });
+
+  it("returns an empty string for tool input that isn't an object (e.g. null)", () => {
+    const line = JSON.stringify({
+      content: [{ type: "tool_use", name: "NoInput", input: null }],
+    });
+    const result = parseClaudeOutput(line);
+    expect(result[0].content).toBe("");
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -181,6 +216,35 @@ describe("parseClaudeOutput – tool_result extraction", () => {
   it("marks is_error:true tool_result correctly", () => {
     const line = JSON.stringify([{ type: "tool_result", content: "boom", is_error: true }]);
     expect(parseClaudeOutput(line)[0].isError).toBe(true);
+  });
+
+  it("stringifies an object tool_result content", () => {
+    const line = JSON.stringify([
+      { type: "tool_result", content: { ok: true, count: 3 }, is_error: false },
+    ]);
+    const result = parseClaudeOutput(line);
+    expect(result[0].content).toBe(JSON.stringify({ ok: true, count: 3 }));
+  });
+
+  it("coerces a non-string, non-object tool_result content to a string", () => {
+    const line = JSON.stringify([{ type: "tool_result", content: 42, is_error: false }]);
+    expect(parseClaudeOutput(line)[0].content).toBe("42");
+  });
+
+  it("falls back to an empty string when tool_result has no content field", () => {
+    const line = JSON.stringify([{ type: "tool_result", is_error: false }]);
+    expect(parseClaudeOutput(line)[0].content).toBe("");
+  });
+
+  it("skips non-object entries in a content array without throwing", () => {
+    const line = JSON.stringify([
+      "a stray string entry",
+      { type: "tool_use", name: "Bash", input: { command: "ls" } },
+    ]);
+    const result = parseClaudeOutput(line);
+    expect(result).toEqual<ParsedBlock[]>([
+      { type: "tool_use", content: "ls", toolName: "Bash" },
+    ]);
   });
 });
 
@@ -325,6 +389,14 @@ describe("parseClaudeOutput – partial line noise filtering", () => {
   it("filters partial lines with stop_reason:null + stop_sequence:null", () => {
     const fragment =
       'parser"},"caller":{"type":"direct"}}],"stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":2}}';
+    expect(parseClaudeOutput(fragment)).toEqual([]);
+  });
+
+  it("filters a partial line with only stop_reason:null + stop_sequence:null and no other metadata markers", () => {
+    // Deliberately excludes every METADATA_NOISE_RE keyword (input_tokens,
+    // output_tokens, etc.) and parent_tool_use_id/session_id, so this only
+    // passes through the dedicated stop_reason/stop_sequence check.
+    const fragment = '"id":"msg_1"}],"stop_reason":null,"stop_sequence":null}';
     expect(parseClaudeOutput(fragment)).toEqual([]);
   });
 

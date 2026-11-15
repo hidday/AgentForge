@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, within, fireEvent } from "@testing-library/react";
 import { MemoryRouter, Routes, Route } from "react-router-dom";
 import { RunDetailPage } from "./RunDetailPage.tsx";
 import type { Run, Artifact, RunEventRecord } from "@/api/client.ts";
@@ -113,6 +113,36 @@ describe("RunDetailPage", () => {
     expect(screen.getByText("Done", { selector: "span" })).toBeDefined();
   });
 
+  it("falls back to the Linear issue identifier when there is no title", () => {
+    const run = makeRun({ linearIssueTitle: null, linearIssueIdentifier: "ENG-7" });
+    mockUseRun = {
+      data: { run, artifacts: [], events: [] },
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    };
+    renderPage();
+
+    expect(screen.getByText("ENG-7")).toBeDefined();
+  });
+
+  it("falls back to a truncated linearIssueId when there is no title or identifier", () => {
+    const run = makeRun({
+      linearIssueTitle: null,
+      linearIssueIdentifier: null,
+      linearIssueId: "abcdefgh12345",
+    });
+    mockUseRun = {
+      data: { run, artifacts: [], events: [] },
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    };
+    renderPage();
+
+    expect(screen.getByText("abcdefgh")).toBeDefined();
+  });
+
   it("shows the Linear link only when linearIssueUrl is set", () => {
     const withUrl = makeRun({ linearIssueUrl: "https://linear.app/issue/ENG-1" });
     mockUseRun = {
@@ -207,6 +237,37 @@ describe("RunDetailPage", () => {
     expect(within(panel).getByText("Any perf concerns?")).toBeDefined();
     // ActionBar shows the "Answer Questions" shortcut for this state
     expect(screen.getByRole("button", { name: "Answer Questions" })).toBeDefined();
+  });
+
+  it("scrolls the open-questions panel into view when the Answer Questions shortcut is clicked", () => {
+    const run = makeRun({ state: "HumanClarificationNeeded" });
+    const artifacts: Artifact[] = [
+      {
+        id: "art-1",
+        runId: run.id,
+        type: "Plan",
+        version: 1,
+        payloadJson: {
+          openQuestions: [{ id: "q1", question: "Which env?", requiredForExecution: true }],
+        },
+        rawText: "",
+        createdAt: run.createdAt,
+      },
+    ];
+    mockUseRun = {
+      data: { run, artifacts, events: [] },
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    };
+    renderPage();
+
+    const scrollSpy = vi.fn();
+    window.HTMLElement.prototype.scrollIntoView = scrollSpy;
+
+    fireEvent.click(screen.getByRole("button", { name: "Answer Questions" }));
+
+    expect(scrollSpy).toHaveBeenCalledWith({ behavior: "smooth", block: "start" });
   });
 
   it("shows only optional questions in a secondary panel for AwaitingPlanApproval, and the optional-questions action", () => {

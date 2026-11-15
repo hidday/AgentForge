@@ -114,4 +114,18 @@ describe("useRuns", () => {
     expect(result.current.runs.find((r) => r.id === "run-1")!.state).toBe("Done");
     expect(result.current.runs.find((r) => r.id === "run-2")!.state).toBe("Todo");
   });
+
+  it("ignores SSE event types it doesn't handle, without refetching or mutating runs", async () => {
+    mockApi.getRuns.mockResolvedValue({ runs: [{ id: "run-1", state: "Todo" }] });
+
+    const { result } = renderHook(() => useRuns());
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    act(() => {
+      capturedHandler!({ type: "process:started", runId: "run-1" });
+    });
+
+    expect(result.current.runs).toEqual([{ id: "run-1", state: "Todo" }]);
+    expect(mockApi.getRuns).toHaveBeenCalledTimes(1);
+  });
 });
