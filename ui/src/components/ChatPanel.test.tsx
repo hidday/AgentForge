@@ -251,4 +251,19 @@ describe("ChatPanel", () => {
       expect(screen.queryByText("New question")).toBeNull();
     });
   });
+
+  it("collapses and re-expands the message list when the header is clicked", async () => {
+    const artifacts: Artifact[] = [
+      makeArtifact("user", "Hello there", "a1", "2024-01-01T00:00:01Z"),
+    ];
+    render(<ChatPanel runId={RUN_ID} artifacts={artifacts} />);
+
+    expect(screen.getByText("Hello there")).toBeDefined();
+
+    await userEvent.click(screen.getByRole("button", { name: /chat with agent/i }));
+    expect(screen.queryByText("Hello there")).toBeNull();
+
+    await userEvent.click(screen.getByRole("button", { name: /chat with agent/i }));
+    expect(screen.getByText("Hello there")).toBeDefined();
+  });
 });

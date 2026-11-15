@@ -75,4 +75,29 @@ describe("DistilledSkillPanel", () => {
 
     expect(screen.getByText(/content could not be loaded/i)).toBeDefined();
   });
+
+  it("shows a loading indicator when loading is true", () => {
+    render(
+      <DistilledSkillPanel
+        distilledSkill={null}
+        distillationDecision={null}
+        loading={true}
+      />,
+    );
+
+    expect(screen.getByText(/loading distilled skill/i)).toBeDefined();
+  });
+
+  it("shows the error message when error is set, taking priority over loading/decision", () => {
+    render(
+      <DistilledSkillPanel
+        distilledSkill={null}
+        distillationDecision={decision}
+        error="Failed to fetch skills"
+      />,
+    );
+
+    expect(screen.getByText("Failed to fetch skills")).toBeDefined();
+    expect(screen.queryByText(/loading distilled skill/i)).toBeNull();
+  });
 });
