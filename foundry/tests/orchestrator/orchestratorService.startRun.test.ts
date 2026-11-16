@@ -80,6 +80,14 @@ function buildDeps(overrides: Record<string, unknown> = {}) {
     branchName: "ai/run-1",
     workingDirectory: "/tmp/worktree",
   });
+  // Reflects the run after the RUN_REQUESTED transition (state: Planning) plus
+  // the planVersion/plannerRuntime fields written post-plannerAgent.run().
+  const runAfterPlannerUpdate = makeRun({
+    state: RunState.Planning,
+    branchName: "ai/run-1",
+    workingDirectory: "/tmp/worktree",
+    plannerRuntime: "claude-code",
+  });
 
   const plan = makePlan();
   const planArtifact = makeArtifact({ type: "Plan", version: 1, payloadJson: plan });
@@ -90,7 +98,10 @@ function buildDeps(overrides: Record<string, unknown> = {}) {
     findAll: vi.fn(),
     findByIssueId: vi.fn(),
     create: vi.fn().mockResolvedValue(createdRun),
-    update: vi.fn().mockResolvedValue(runAfterWorktree),
+    update: vi
+      .fn()
+      .mockResolvedValueOnce(runAfterWorktree) // after setupRunWorktree
+      .mockResolvedValueOnce(runAfterPlannerUpdate), // after plannerAgent.run
     updateState: vi
       .fn()
       .mockResolvedValueOnce(runAfterRequested) // RUN_REQUESTED

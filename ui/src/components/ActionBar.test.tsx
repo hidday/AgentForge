@@ -38,7 +38,7 @@ describe("ActionBar", () => {
 
   it("renders nothing for a state with no available actions", () => {
     const { container } = render(
-      <ActionBar runId={RUN_ID} state="Planning" onAction={vi.fn()} />,
+      <ActionBar runId={RUN_ID} state="Done" onAction={vi.fn()} />,
     );
     expect(container.firstChild).toBeNull();
   });
@@ -341,7 +341,8 @@ describe("ActionBar", () => {
     render(<ActionBar runId={RUN_ID} state="Implementing" onAction={onAction} />);
 
     await userEvent.click(screen.getByRole("button", { name: /pause/i }));
-    await userEvent.click(screen.getByRole("button", { name: /^pause$/i }));
+    const pauseButtons2 = screen.getAllByRole("button", { name: /^pause$/i });
+    await userEvent.click(pauseButtons2[pauseButtons2.length - 1]);
 
     await waitFor(() => {
       expect(screen.queryByText(/This will pause the run/i)).toBeNull();
