@@ -198,6 +198,45 @@ describe("NotificationService.sendHumanRequest", () => {
     );
   });
 
+  it("includes a context section in the slack body when payload.context is set", async () => {
+    fetchMock.mockResolvedValueOnce(okResponse());
+    const logger = makeMockLogger();
+    const config: NotificationConfig = {
+      emailFrom: "from@example.com",
+      slackWebhookUrl: "https://hooks.slack.test/webhook",
+    };
+    const svc = new NotificationService(config, logger as never);
+    await svc.sendHumanRequest(makePayload({ context: "stack trace goes here" }));
+
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body as string);
+    const contextSection = body.blocks.find(
+      (b: { text?: { text: string } }) => b.text?.text?.includes("*Context:*"),
+    );
+    expect(contextSection).toBeDefined();
+    expect(contextSection.text.text).toContain("stack trace goes here");
+  });
+
+  it.each([
+    ["plan_ambiguous", "Plan needs review (ambiguous)"],
+    ["impl_rejected", "Implementation needs review (rejected by agent)"],
+    ["impl_uncertain", "Implementation needs review (uncertain)"],
+    ["other", "Human intervention requested"],
+  ] as const)("renders the correct reason label for reason=%s", async (reason, expectedLabel) => {
+    fetchMock.mockResolvedValueOnce(okResponse());
+    const logger = makeMockLogger();
+    const config: NotificationConfig = {
+      emailFrom: "from@example.com",
+      emailTo: "to@example.com",
+      resendApiKey: "re_123",
+    };
+    const svc = new NotificationService(config, logger as never);
+    await svc.sendHumanRequest(makePayload({ reason }));
+
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body as string);
+    expect(body.html).toContain(expectedLabel);
+    expect(body.text).toContain(expectedLabel);
+  });
+
   it("includes planConfidence and openQuestions fields in the slack body only when present", async () => {
     fetchMock.mockResolvedValueOnce(okResponse());
     const logger = makeMockLogger();
