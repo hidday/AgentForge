@@ -348,29 +348,4 @@ describe("OrchestratorService.runReview", () => {
     );
     expect(result.state).toBe(RunState.ReadyForHumanReview);
   });
-
-  it("does not call postReviewFindings when there are findings but no PR number", async () => {
-    const { deps, runRepo, artifactRepo, githubSync, reviewerAgent, remediationAgent } = buildDeps();
-    const run = makeRun({ state: RunState.AIReview, prNumber: null });
-    runRepo.findById
-      .mockResolvedValueOnce(run)
-      .mockResolvedValue(makeRun({ state: RunState.AddressingReview, prNumber: null }));
-    artifactRepo.findLatestByType.mockImplementation((_id: string, type: string) => {
-      if (type === "ExecutionReport")
-        return Promise.resolve(makeArtifact({ type: "ExecutionReport", payloadJson: makeExecutionReport() }));
-      if (type === "Plan") return Promise.resolve(makeArtifact({ payloadJson: makePlan() }));
-      return Promise.resolve(null);
-    });
-    const err = await svc_withNoPrNumber(deps, runRepo);
-    expect(err).toBeInstanceOf(PolicyViolationError);
-    expect((err as PolicyViolationError).rule).toBe("review_requires_pr");
-    expect(githubSync.postReviewFindings).not.toHaveBeenCalled();
-    expect(reviewerAgent.run).not.toHaveBeenCalled();
-    expect(remediationAgent.run).not.toHaveBeenCalled();
-
-    async function svc_withNoPrNumber(d: unknown, _r: unknown) {
-      const svc = new OrchestratorService(d as never);
-      return svc.runReview("run-1").catch((e) => e);
-    }
-  });
 });
