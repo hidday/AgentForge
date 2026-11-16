@@ -198,7 +198,7 @@ describe("NotificationService.sendHumanRequest", () => {
     );
   });
 
-  it("includes a context section in the slack body when payload.context is set", async () => {
+  it("includes a truncated context section in the slack body when payload.context exceeds the limit", async () => {
     fetchMock.mockResolvedValueOnce(okResponse());
     const logger = makeMockLogger();
     const config: NotificationConfig = {
@@ -206,7 +206,13 @@ describe("NotificationService.sendHumanRequest", () => {
       slackWebhookUrl: "https://hooks.slack.test/webhook",
     };
     const svc = new NotificationService(config, logger as never);
-    await svc.sendHumanRequest(makePayload({ context: "stack trace goes here" }));
+    const longContext = `stack trace goes here ${"x".repeat(2000)}`;
+    await svc.sendHumanRequest(
+      makePayload({
+        context: longContext,
+        linearIssue: { id: "issue-no-identifier", title: null, url: null },
+      }),
+    );
 
     const body = JSON.parse(fetchMock.mock.calls[0][1].body as string);
     const contextSection = body.blocks.find(
@@ -214,6 +220,30 @@ describe("NotificationService.sendHumanRequest", () => {
     );
     expect(contextSection).toBeDefined();
     expect(contextSection.text.text).toContain("stack trace goes here");
+    expect(contextSection.text.text).toContain("…");
+    expect(contextSection.text.text.length).toBeLessThan(longContext.length);
+    expect(body.text).toContain("issue-no-identifier");
+    expect(body.text).toContain("(untitled)");
+  });
+
+  it("falls back to String(err) for the error message when a non-Error is thrown", async () => {
+    fetchMock
+      .mockRejectedValueOnce("slack boom")
+      .mockRejectedValueOnce("email boom");
+    const logger = makeMockLogger();
+    const config: NotificationConfig = {
+      emailFrom: "from@example.com",
+      slackWebhookUrl: "https://hooks.slack.test/webhook",
+      emailTo: "to@example.com",
+      resendApiKey: "re_123",
+    };
+    const svc = new NotificationService(config, logger as never);
+    const result = await svc.sendHumanRequest(makePayload());
+
+    expect(result.slack.ok).toBe(false);
+    expect(result.slack.error).toBe("slack boom");
+    expect(result.email.ok).toBe(false);
+    expect(result.email.error).toBe("email boom");
   });
 
   it.each([
