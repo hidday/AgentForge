@@ -276,7 +276,16 @@ describe("OrchestratorService.runPlanning", () => {
     runRepo.findById
       .mockResolvedValueOnce(makeRun({ state: RunState.Planning, planVersion: 1 }))
       .mockResolvedValue(makeRun({ state: RunState.PlanReview, planVersion: 2 }));
-    artifactRepo.findLatestByType.mockResolvedValue(null);
+    let planLookups = 0;
+    artifactRepo.findLatestByType.mockImplementation((_id: string, type: string) => {
+      if (type !== "Plan") return Promise.resolve(null);
+      planLookups += 1;
+      // 1st call: runPlanning's own "previousPlan" lookup (none exists yet).
+      // 2nd+ call: runPlanReview's lookup, after the planner "persisted" the new plan.
+      return Promise.resolve(
+        planLookups === 1 ? null : makeArtifact({ payloadJson: makePlan({ planVersion: 2 }) }),
+      );
+    });
     plannerAgent.run.mockResolvedValue(makePlan({ planVersion: 2 }));
     runRepo.update.mockResolvedValue(makeRun({ state: RunState.Planning, planVersion: 2 }));
     runRepo.updateState
