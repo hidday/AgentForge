@@ -96,12 +96,58 @@ describe("ArtifactTabs", () => {
     expect(screen.getByText("dismissed")).toBeDefined();
   });
 
+  it("applies the partially_incorporated status style to a disposition", () => {
+    const artifacts = [
+      makeArtifact({
+        id: "a1",
+        type: "PlanRevision",
+        payloadJson: {
+          dispositions: [
+            {
+              findingId: "f3",
+              status: "partially_incorporated",
+              rationale: "Partly addressed",
+            },
+          ],
+        },
+      }),
+    ];
+    render(<ArtifactTabs artifacts={artifacts} />);
+    const badge = screen.getByText("partially incorporated");
+    expect(badge.className).toContain("state-waiting");
+  });
+
   it("shows 'No dispositions recorded' for an empty PlanRevision", () => {
     const artifacts = [
       makeArtifact({ id: "a1", type: "PlanRevision", payloadJson: { dispositions: [] } }),
     ];
     render(<ArtifactTabs artifacts={artifacts} />);
     expect(screen.getByText("No dispositions recorded")).toBeDefined();
+  });
+
+  it("shows 'No dispositions recorded' when the dispositions field is entirely absent", () => {
+    const artifacts = [
+      makeArtifact({ id: "a1", type: "PlanRevision", payloadJson: {} }),
+    ];
+    render(<ArtifactTabs artifacts={artifacts} />);
+    expect(screen.getByText("No dispositions recorded")).toBeDefined();
+  });
+
+  it("applies the default disposition style for an unrecognized status", () => {
+    const artifacts = [
+      makeArtifact({
+        id: "a1",
+        type: "PlanRevision",
+        payloadJson: {
+          dispositions: [
+            { findingId: "f9", status: "pending_review", rationale: "tbd" },
+          ],
+        },
+      }),
+    ];
+    render(<ArtifactTabs artifacts={artifacts} />);
+    const badge = screen.getByText("pending review");
+    expect(badge.className).toContain("bg-surface-hover");
   });
 
   it("renders Remediation resolutions with the executionVersion note", () => {
@@ -117,6 +163,12 @@ describe("ArtifactTabs", () => {
               action: "Added null check",
               rationale: "Prevents crash",
             },
+            {
+              findingId: "f2",
+              status: "rejected",
+              action: "Declined suggestion",
+              rationale: "Not applicable here",
+            },
           ],
           executionReport: { executionVersion: 4 },
         },
@@ -126,7 +178,28 @@ describe("ArtifactTabs", () => {
     expect(screen.getByText("Resolutions")).toBeDefined();
     expect(screen.getByText("f1")).toBeDefined();
     expect(screen.getByText("Added null check")).toBeDefined();
+    expect(screen.getByText("rejected")).toBeDefined();
     expect(screen.getByText(/v\s*4\s*report\./)).toBeDefined();
+  });
+
+  it("defaults to v2 in the Remediation note when executionReport/executionVersion is absent", () => {
+    const artifacts = [
+      makeArtifact({
+        id: "a1",
+        type: "Remediation",
+        payloadJson: { resolution: [] },
+      }),
+    ];
+    render(<ArtifactTabs artifacts={artifacts} />);
+    expect(screen.getByText(/v\s*2\s*report\./)).toBeDefined();
+  });
+
+  it("renders an empty Resolutions section when the resolution field is absent", () => {
+    const artifacts = [
+      makeArtifact({ id: "a1", type: "Remediation", payloadJson: {} }),
+    ];
+    render(<ArtifactTabs artifacts={artifacts} />);
+    expect(screen.getByText("Resolutions")).toBeDefined();
   });
 
   it("renders multiple RejectionContext artifacts sorted by version descending", () => {
@@ -154,14 +227,28 @@ describe("ArtifactTabs", () => {
     expect(screen.getByText("Second rejection")).toBeDefined();
   });
 
-  it("shows 'No data available' when the active tab's artifact type is missing from the array mid-switch", async () => {
-    // Only Plan and Review are present; switching tabs manually isn't possible for a
-    // non-rendered tab button, so we verify the Plan tab renders fine as a baseline
-    // and that its artifact-driven fallback path triggers for an artifact with an
-    // unrecognized shape (empty payload still renders the component without content).
-    const artifacts = [makeArtifact({ id: "a1", type: "Plan", payloadJson: {} })];
-    render(<ArtifactTabs artifacts={artifacts} />);
-    expect(screen.getByRole("button", { name: "Plan" })).toBeDefined();
+  it("shows 'No data available' when the active tab's artifact disappears after a prop update", async () => {
+    const withExecution = [
+      makeArtifact({ id: "a1", type: "Plan", payloadJson: { summary: "Plan summary" } }),
+      makeArtifact({
+        id: "a2",
+        type: "ExecutionReport",
+        payloadJson: { summary: "Execution summary" },
+      }),
+    ];
+    const { rerender } = render(<ArtifactTabs artifacts={withExecution} />);
+
+    // Switch to the Execution tab, then update props so that artifact is removed
+    // while the Plan artifact remains (keeping availableTabs non-empty).
+    await userEvent.click(screen.getByRole("button", { name: "Execution" }));
+    expect(screen.getByText("Execution summary")).toBeDefined();
+
+    const withoutExecution = [
+      makeArtifact({ id: "a1", type: "Plan", payloadJson: { summary: "Plan summary" } }),
+    ];
+    rerender(<ArtifactTabs artifacts={withoutExecution} />);
+
+    expect(screen.getByText("No data available")).toBeDefined();
   });
 
   it("shows 'No rejection feedback recorded' only when the rejectionFeedback tab is active with no matching artifacts", async () => {

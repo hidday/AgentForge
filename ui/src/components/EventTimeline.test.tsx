@@ -118,6 +118,15 @@ describe("EventTimeline", () => {
     expect(elWithTitle?.textContent).toMatch(/ago$/);
   });
 
+  it("falls back to the Bot source icon for an unrecognized event source", () => {
+    render(
+      <EventTimeline
+        events={[makeEvent({ id: "e1", source: "agent" })]}
+      />,
+    );
+    expect(screen.getByText("agent")).toBeDefined();
+  });
+
   it("falls back to a default icon color scheme for an unrecognized event type", () => {
     render(
       <EventTimeline

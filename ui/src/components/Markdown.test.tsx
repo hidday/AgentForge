@@ -74,6 +74,34 @@ describe("Markdown", () => {
     );
   });
 
+  it("renders h2, h3, and h4 headings", () => {
+    render(
+      <Markdown>
+        {"## Section Heading\n\n### Sub Heading\n\n#### Minor Heading"}
+      </Markdown>,
+    );
+    expect(screen.getByRole("heading", { level: 2 }).textContent).toBe(
+      "Section Heading",
+    );
+    expect(screen.getByRole("heading", { level: 3 }).textContent).toBe(
+      "Sub Heading",
+    );
+    expect(screen.getByRole("heading", { level: 4 }).textContent).toBe(
+      "Minor Heading",
+    );
+  });
+
+  it("renders a blockquote", () => {
+    render(<Markdown>{"> A quoted insight"}</Markdown>);
+    const quote = screen.getByText("A quoted insight");
+    expect(quote.closest("blockquote")).not.toBeNull();
+  });
+
+  it("renders a horizontal rule", () => {
+    const { container } = render(<Markdown>{"above\n\n---\n\nbelow"}</Markdown>);
+    expect(container.querySelector("hr")).not.toBeNull();
+  });
+
   it("renders GFM table syntax as a table with th/td cells", () => {
     render(
       <Markdown>

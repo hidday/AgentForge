@@ -46,6 +46,17 @@ describe("AgentOutputPanel", () => {
     expect(screen.getByText("5s")).toBeDefined();
   });
 
+  it("formats the elapsed timer in minutes and seconds once more than a minute has passed", () => {
+    vi.setSystemTime(new Date("2024-01-01T00:01:30Z"));
+    render(
+      <AgentOutputPanel
+        processes={[makeProcess({ startedAt: "2024-01-01T00:00:00Z" })]}
+        output=""
+      />,
+    );
+    expect(screen.getByText("1m 30s")).toBeDefined();
+  });
+
   it("shows 'Agent Output (completed)' label when output exists but no process is active", () => {
     render(<AgentOutputPanel processes={[]} output="some output text" />);
     expect(screen.getByText("Agent Output (completed)")).toBeDefined();

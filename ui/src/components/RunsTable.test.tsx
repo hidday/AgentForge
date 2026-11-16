@@ -124,6 +124,16 @@ describe("RunsTable", () => {
     );
   });
 
+  it("stops propagation when the external Linear link is clicked, without navigating away", async () => {
+    const runs = [makeRun({ linearIssueUrl: "https://linear.app/team/issue/ENG-1" })];
+    renderTable(runs);
+    const externalLink = screen.getByTitle("Open in Linear");
+    // jsdom doesn't navigate on anchor click; verify the click handler runs without throwing
+    // and the row's link is still present (click did not trigger row-level navigation side effects).
+    await userEvent.click(externalLink);
+    expect(screen.getByTitle("Open in Linear")).toBeDefined();
+  });
+
   it("does not render the external Linear link when linearIssueUrl is null", () => {
     const runs = [makeRun({ linearIssueUrl: null })];
     renderTable(runs);

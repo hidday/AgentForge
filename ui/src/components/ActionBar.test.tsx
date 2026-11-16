@@ -95,7 +95,9 @@ describe("ActionBar", () => {
 
       await userEvent.click(screen.getByRole("button", { name: /approve plan/i }));
 
-      expect(screen.getByText("Approve Plan")).toBeDefined();
+      expect(
+        screen.getByRole("heading", { name: "Approve Plan" }),
+      ).toBeDefined();
       expect(
         screen.getByText(/This will approve the current plan/i),
       ).toBeDefined();
@@ -127,7 +129,9 @@ describe("ActionBar", () => {
         screen.getByText(/This will reject the current plan/i),
       ).toBeDefined();
 
-      // default mode is "iterate"; switch to "fresh"
+      // default mode is "iterate"; switch to "fresh" and back to "iterate"
+      await userEvent.click(screen.getByText("Start fresh"));
+      await userEvent.click(screen.getByText("Revise plan"));
       await userEvent.click(screen.getByText("Start fresh"));
 
       const textarea = screen.getByPlaceholderText(/describe what should change/i);
@@ -145,6 +149,21 @@ describe("ActionBar", () => {
           "fresh",
         );
         expect(onAction).toHaveBeenCalledOnce();
+      });
+    });
+
+    it("calls api.rejectPlan with undefined feedback when the textarea is left empty", async () => {
+      mockApi.rejectPlan.mockResolvedValue({});
+      render(
+        <ActionBar runId={RUN_ID} state="AwaitingPlanApproval" onAction={vi.fn()} />,
+      );
+
+      await userEvent.click(screen.getByRole("button", { name: /reject plan/i }));
+      const rejectButtons = screen.getAllByRole("button", { name: /reject plan/i });
+      await userEvent.click(rejectButtons[rejectButtons.length - 1]);
+
+      await waitFor(() => {
+        expect(mockApi.rejectPlan).toHaveBeenCalledWith(RUN_ID, undefined, "iterate");
       });
     });
 
