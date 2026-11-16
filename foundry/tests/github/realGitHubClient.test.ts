@@ -97,6 +97,14 @@ describe("RealGitHubClient", () => {
         /GitHub getDefaultBranch failed for "acme\/widgets".*boom/,
       );
     });
+
+    it("stringifies a non-Error rejection via wrapError", async () => {
+      mockOctokit.repos.get.mockRejectedValueOnce("plain string failure");
+
+      await expect(client.getDefaultBranch("acme/widgets")).rejects.toThrow(
+        /GitHub getDefaultBranch failed for "acme\/widgets".*plain string failure/,
+      );
+    });
   });
 
   describe("createBranch", () => {
@@ -174,6 +182,18 @@ describe("RealGitHubClient", () => {
       mockOctokit.pulls.create.mockRejectedValueOnce(
         makeHttpError(422, 'Validation failed: {"code":"invalid"}'),
       );
+
+      await expect(
+        client.createDraftPR("acme/widgets", "feature/x", "main", "T", "B"),
+      ).rejects.toThrow(/GitHub createDraftPR failed for "acme\/widgets"/);
+      expect(logger.error).toHaveBeenCalled();
+    });
+
+    it("handles a non-Error 422 field-validation rejection by stringifying it", async () => {
+      mockOctokit.pulls.create.mockRejectedValueOnce({
+        status: 422,
+        toString: () => 'Validation failed: {"code":"invalid"}',
+      });
 
       await expect(
         client.createDraftPR("acme/widgets", "feature/x", "main", "T", "B"),
@@ -465,6 +485,19 @@ describe("RealGitHubClient", () => {
         "Failed to reply to PR review comment, skipping",
       );
     });
+
+    it("stringifies a non-Error rejection in the warning log", async () => {
+      mockOctokit.pulls.createReplyForReviewComment.mockRejectedValueOnce("comment vanished");
+
+      await expect(
+        client.replyToReviewComment("acme/widgets", 10, 500, "thanks"),
+      ).resolves.toBeUndefined();
+
+      expect(logger.warn).toHaveBeenCalledWith(
+        { repo: "acme/widgets", prNumber: 10, commentId: 500, error: "comment vanished" },
+        "Failed to reply to PR review comment, skipping",
+      );
+    });
   });
 
   describe("submitPRReview", () => {
@@ -523,6 +556,14 @@ describe("RealGitHubClient", () => {
         client.submitPRReview("acme/widgets", 10, "needs work", "COMMENT"),
       ).rejects.toThrow(/GitHub submitPRReview failed for "acme\/widgets"/);
       expect(mockOctokit.pulls.createReview).toHaveBeenCalledTimes(1);
+    });
+
+    it("stringifies a non-Error rejection when throwing the wrapped error", async () => {
+      mockOctokit.pulls.createReview.mockRejectedValueOnce("plain string failure");
+
+      await expect(
+        client.submitPRReview("acme/widgets", 10, "needs work", "REQUEST_CHANGES"),
+      ).rejects.toThrow(/GitHub submitPRReview failed for "acme\/widgets".*plain string failure/);
     });
   });
 });

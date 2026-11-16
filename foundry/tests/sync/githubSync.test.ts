@@ -262,6 +262,21 @@ describe("GitHubSyncService", () => {
       expect(body).toContain(":white_check_mark: **Lint**");
       expect(body).toContain(":x: **Tests**");
     });
+
+    it("renders the neutral icon for a check status that is neither pass nor fail", async () => {
+      const report = makeExecutionReport({
+        checks: {
+          lint: { status: "skip", details: "Skipped." },
+          typecheck: { status: "pass", details: "No issues." },
+          tests: { status: "pass", details: "All good." },
+        },
+      });
+
+      await service.postExecutionReportUpdate("acme/widgets", 42, report);
+
+      const [, , body] = githubClient.commentOnPR.mock.calls[0] as [string, number, string];
+      expect(body).toContain(":heavy_minus_sign: **Lint**");
+    });
   });
 
   describe("postRemediationResolutions", () => {
