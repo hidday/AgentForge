@@ -68,8 +68,11 @@ describe("ProcessRunner", () => {
     mockSpawn.mockReset();
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     vi.useRealTimers();
+    // Let any pending async log-stream writes settle before the directory
+    // they target is removed, to avoid stray ENOENT write errors.
+    await new Promise((resolve) => setTimeout(resolve, 50));
     rmSync(tmpDir, { recursive: true, force: true });
   });
 

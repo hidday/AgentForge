@@ -267,4 +267,61 @@ describe("NotificationService.sendHumanRequest", () => {
     expect(body.text).toContain("AWAITING_HUMAN");
     expect(body.text).toContain("Needs a human look");
   });
+
+  it("renders email context, open questions, and plan confidence when present", async () => {
+    fetchMock.mockResolvedValueOnce(okResponse());
+    const logger = makeMockLogger();
+    const config: NotificationConfig = {
+      emailFrom: "from@example.com",
+      emailTo: "to@example.com",
+      resendApiKey: "re_123",
+    };
+    const svc = new NotificationService(config, logger as never);
+    await svc.sendHumanRequest(
+      makePayload({
+        context: "some extra context about the failure",
+        planConfidence: 0.75,
+        openQuestions: [
+          { id: "q1", question: "Which env?", requiredForExecution: true },
+          { id: "q2", question: "Which branch?", requiredForExecution: false },
+          { id: "q3", question: "Which repo?", requiredForExecution: true },
+          { id: "q4", question: "Which runner?", requiredForExecution: false },
+          { id: "q5", question: "Which token?", requiredForExecution: false },
+          { id: "q6", question: "Which cluster? (should be sliced out)", requiredForExecution: false },
+        ],
+      }),
+    );
+
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body as string);
+    expect(body.html).toContain("some extra context about the failure");
+    expect(body.html).toContain("Plan confidence:");
+    expect(body.html).toContain("Which env?");
+    expect(body.html).not.toContain("should be sliced out");
+    expect(body.text).toContain("some extra context about the failure");
+    expect(body.text).toContain("Plan confidence: 0.75");
+    expect(body.text).toContain("[required] Which env?");
+    expect(body.text).not.toContain("should be sliced out");
+  });
+
+  it("renders email fallbacks when identifier, title, and linear url are absent", async () => {
+    fetchMock.mockResolvedValueOnce(okResponse());
+    const logger = makeMockLogger();
+    const config: NotificationConfig = {
+      emailFrom: "from@example.com",
+      emailTo: "to@example.com",
+      resendApiKey: "re_123",
+    };
+    const svc = new NotificationService(config, logger as never);
+    await svc.sendHumanRequest(
+      makePayload({
+        linearIssue: { id: "issue-9", title: null, url: null },
+      }),
+    );
+
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body as string);
+    expect(body.html).toContain("issue-9");
+    expect(body.html).toContain("(untitled)");
+    expect(body.text).toContain("issue-9");
+    expect(body.text).toContain("(untitled)");
+  });
 });

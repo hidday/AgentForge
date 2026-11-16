@@ -142,6 +142,25 @@ describe("useRuns", () => {
     expect(result.current.runs.find((r) => r.id === "run-2")?.state).toBe("Done");
   });
 
+  it("ignores SSE event types it does not understand", async () => {
+    mockApi.getRuns.mockResolvedValue(runsPayload);
+    const { result } = renderHook(() => useRuns());
+    await waitFor(() => expect(mockApi.getRuns).toHaveBeenCalledTimes(1));
+
+    const source = FakeEventSource.instances[0]!;
+    act(() => {
+      source.onmessage?.({
+        data: JSON.stringify({ type: "process:started", runId: "run-1" }),
+      });
+    });
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(mockApi.getRuns).toHaveBeenCalledTimes(1);
+    expect(result.current.runs).toEqual(runsPayload.runs);
+  });
+
   it("closes the SSE connection when the hook unmounts", async () => {
     mockApi.getRuns.mockResolvedValue(runsPayload);
     const { unmount } = renderHook(() => useRuns());

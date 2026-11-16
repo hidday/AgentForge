@@ -305,6 +305,22 @@ describe("GitHubSyncService", () => {
       );
     });
 
+    it("falls back to :grey_question: in the reply body for an unrecognized status", async () => {
+      const resolution = makeResolution({
+        findingId: "f1",
+        status: "weird_unknown_status" as ResolutionItem["status"],
+      });
+
+      await service.postRemediationResolutions("acme/widgets", 42, [resolution], { f1: 900 });
+
+      expect(githubClient.replyToReviewComment).toHaveBeenCalledWith(
+        "acme/widgets",
+        42,
+        900,
+        expect.stringContaining(":grey_question: **weird unknown_status**"),
+      );
+    });
+
     it("does not reply for a resolution whose findingId is not in commentMap", async () => {
       const resolution = makeResolution({ findingId: "f-missing" });
 

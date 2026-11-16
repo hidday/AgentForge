@@ -209,6 +209,69 @@ describe("useActiveProcesses", () => {
     expect(result.current.output.endsWith("a")).toBe(true);
   });
 
+  it("fills in fallback values when a process:started event omits optional fields", async () => {
+    mockApi.getActiveProcesses.mockResolvedValue({ processes: [] });
+    const { result } = renderHook(() => useActiveProcesses("run-1"));
+    await waitFor(() => expect(mockApi.getActiveProcesses).toHaveBeenCalled());
+
+    const source = FakeEventSource.instances[0]!;
+    act(() => {
+      source.onmessage?.({
+        data: JSON.stringify({ type: "process:started", runId: "run-1" }),
+      });
+    });
+
+    await waitFor(() => expect(result.current.processes).toHaveLength(1));
+    const [proc] = result.current.processes;
+    expect(proc!.id).toBe("");
+    expect(proc!.command).toBe("");
+    expect(proc!.stage).toBe("");
+    expect(proc!.runtime).toBe("");
+    expect(typeof proc!.startedAt).toBe("string");
+    expect(proc!.startedAt.length).toBeGreaterThan(0);
+  });
+
+  it("discards the initial fetch result if the hook unmounts before it resolves", async () => {
+    let resolveProcesses: (v: { processes: typeof process1[] }) => void;
+    mockApi.getActiveProcesses.mockReturnValue(
+      new Promise((res) => {
+        resolveProcesses = res;
+      }),
+    );
+
+    const { result, unmount } = renderHook(() => useActiveProcesses("run-1"));
+    unmount();
+
+    await act(async () => {
+      resolveProcesses!({ processes: [process1] });
+      await Promise.resolve();
+    });
+
+    // State updates after unmount are discarded by the `cancelled` guard.
+    expect(result.current.processes).toEqual([]);
+  });
+
+  it("discards the process-output fetch result if the hook unmounts before it resolves", async () => {
+    mockApi.getActiveProcesses.mockResolvedValue({ processes: [process1] });
+    let resolveOutput: (v: { processId: string; output: string }) => void;
+    mockApi.getProcessOutput.mockReturnValue(
+      new Promise((res) => {
+        resolveOutput = res;
+      }),
+    );
+
+    const { result, unmount } = renderHook(() => useActiveProcesses("run-1"));
+    await waitFor(() => expect(mockApi.getProcessOutput).toHaveBeenCalled());
+    unmount();
+
+    await act(async () => {
+      resolveOutput!({ processId: "proc-1", output: "late output" });
+      await Promise.resolve();
+    });
+
+    expect(result.current.output).toBe("");
+  });
+
   it("ignores SSE events for a different run", async () => {
     mockApi.getActiveProcesses.mockResolvedValue({ processes: [] });
     const { result } = renderHook(() => useActiveProcesses("run-1"));
