@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { renderHook, act, waitFor } from "@testing-library/react";
 import { useRunSkills } from "./useRunSkills.ts";
+import type { RunSkillsResponse } from "@/api/client.ts";
 
 vi.mock("@/api/client.ts", () => ({
   api: {
@@ -14,10 +15,12 @@ const mockApi = api as unknown as { getRunSkills: ReturnType<typeof vi.fn> };
 
 class FakeEventSource {
   static instances: FakeEventSource[] = [];
+  url: string;
   onmessage: ((ev: { data: string }) => void) | null = null;
   onerror: ((ev: Event) => void) | null = null;
   closed = false;
-  constructor(public url: string) {
+  constructor(url: string) {
+    this.url = url;
     FakeEventSource.instances.push(this);
   }
   close() {
@@ -29,7 +32,7 @@ const skillsResponse = {
   injectedSkills: [{ id: "skill-1" }],
   distillationDecision: null,
   distilledSkill: null,
-} as any;
+} as unknown as RunSkillsResponse;
 
 describe("useRunSkills", () => {
   beforeEach(() => {

@@ -7,7 +7,8 @@ describe("cn", () => {
   });
 
   it("drops falsy values", () => {
-    expect(cn("a", false && "b", undefined, null, "c")).toBe("a c");
+    const isActive: boolean = false;
+    expect(cn("a", isActive && "b", undefined, null, "c")).toBe("a c");
   });
 
   it("merges conflicting tailwind utility classes, keeping the last", () => {

@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { renderHook, act, waitFor } from "@testing-library/react";
 import { useRun } from "./useRun.ts";
+import type { Run, Artifact, RunEventRecord } from "@/api/client.ts";
 
 vi.mock("@/api/client.ts", () => ({
   api: {
@@ -14,10 +15,12 @@ const mockApi = api as unknown as { getRun: ReturnType<typeof vi.fn> };
 
 class FakeEventSource {
   static instances: FakeEventSource[] = [];
+  url: string;
   onmessage: ((ev: { data: string }) => void) | null = null;
   onerror: ((ev: Event) => void) | null = null;
   closed = false;
-  constructor(public url: string) {
+  constructor(url: string) {
+    this.url = url;
     FakeEventSource.instances.push(this);
   }
   close() {
@@ -26,10 +29,10 @@ class FakeEventSource {
 }
 
 const runDetail = {
-  run: { id: "run-1", state: "Implementing" },
-  artifacts: [{ id: "artifact-1" }],
-  events: [{ id: "event-1" }],
-} as any;
+  run: { id: "run-1", state: "Implementing" } as unknown as Run,
+  artifacts: [{ id: "artifact-1" }] as unknown as Artifact[],
+  events: [{ id: "event-1" }] as unknown as RunEventRecord[],
+};
 
 describe("useRun", () => {
   beforeEach(() => {

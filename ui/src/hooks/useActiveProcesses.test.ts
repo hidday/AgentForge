@@ -18,10 +18,12 @@ const mockApi = api as unknown as {
 
 class FakeEventSource {
   static instances: FakeEventSource[] = [];
+  url: string;
   onmessage: ((ev: { data: string }) => void) | null = null;
   onerror: ((ev: Event) => void) | null = null;
   closed = false;
-  constructor(public url: string) {
+  constructor(url: string) {
+    this.url = url;
     FakeEventSource.instances.push(this);
   }
   close() {
