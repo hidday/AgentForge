@@ -82,7 +82,6 @@ describe("ArtifactTabs", () => {
   });
 
   it("routes Execution artifacts through ExecutionReportView", async () => {
-    const user = userEvent.setup();
     const artifacts = [
       makeArtifact({ id: "a1", type: "ExecutionReport", payloadJson: { executionVersion: 1 } }),
     ];

@@ -58,10 +58,13 @@ function makeArtifact(overrides: Partial<Artifact> = {}): Artifact {
   };
 }
 
+/**
+ * `initialRun` seeds `trackedRun`, which the updateState/update mocks merge
+ * onto. This keeps a run's shape (branchName, workingDirectory, etc.)
+ * consistent across the multiple chained transitionAndRecord/update calls
+ * that these orchestrator methods make, instead of resetting to defaults.
+ */
 function buildDeps(overrides: Record<string, unknown> = {}, initialRun: Run = makeRun()) {
-  // `trackedRun` lets the updateState/update mocks merge onto the run's
-  // actual current shape (preserving state across chained transitions)
-  // instead of resetting to makeRun()'s Todo-state defaults on every call.
   let trackedRun: Run = initialRun;
 
   const runRepo = {
@@ -214,18 +217,12 @@ function buildDeps(overrides: Record<string, unknown> = {}, initialRun: Run = ma
 
 describe("OrchestratorService.retryRun", () => {
   it("sets up a fresh worktree when the run has no branchName", async () => {
-    const { deps, runRepo, gitService, plannerAgent } = buildDeps();
+    const run = makeRun({ state: RunState.Todo, branchName: null, workingDirectory: "/repo/main" });
+    const { deps, runRepo, gitService, plannerAgent } = buildDeps({}, run);
     const svc = new OrchestratorService(deps as never);
 
-    const run = makeRun({ state: RunState.Todo, branchName: null, workingDirectory: "/repo/main" });
-    runRepo.findById.mockResolvedValue(run);
     gitService.setupRunWorktree.mockResolvedValue({
       worktreePath: "/repo/worktrees/run-1",
-      branchName: "ai/run-1",
-    });
-    runRepo.update.mockResolvedValue({
-      ...run,
-      workingDirectory: "/repo/worktrees/run-1",
       branchName: "ai/run-1",
     });
     plannerAgent.run.mockResolvedValue(makePlan());
@@ -237,7 +234,7 @@ describe("OrchestratorService.retryRun", () => {
     expect(gitService.setupRunWorktree).toHaveBeenCalledWith(
       "/tmp",
       "run-1",
-      "default-repo" === "default-repo" ? "main" : "main",
+      "main",
       "ai/lin-1",
     );
     expect(runRepo.update).toHaveBeenCalledWith(
@@ -248,11 +245,10 @@ describe("OrchestratorService.retryRun", () => {
   });
 
   it("skips worktree setup when the run already has a branchName", async () => {
-    const { deps, runRepo, gitService, plannerAgent } = buildDeps();
+    const run = makeRun({ state: RunState.Todo, branchName: "ai/run-1" });
+    const { deps, gitService, plannerAgent } = buildDeps({}, run);
     const svc = new OrchestratorService(deps as never);
 
-    const run = makeRun({ state: RunState.Todo, branchName: "ai/run-1" });
-    runRepo.findById.mockResolvedValue(run);
     plannerAgent.run.mockResolvedValue(makePlan());
     vi.spyOn(svc, "runPlanReview").mockResolvedValue(run);
 
@@ -262,17 +258,10 @@ describe("OrchestratorService.retryRun", () => {
   });
 
   it("pauses for human clarification when the re-plan has blocking open questions", async () => {
-    const { deps, runRepo, plannerAgent, eventRepo } = buildDeps();
+    const run = makeRun({ state: RunState.Todo, branchName: "ai/run-1" });
+    const { deps, plannerAgent, eventRepo } = buildDeps({}, run);
     const svc = new OrchestratorService(deps as never);
 
-    const run = makeRun({ state: RunState.Todo, branchName: "ai/run-1" });
-    runRepo.findById.mockResolvedValue(run);
-    runRepo.updateState
-      .mockResolvedValueOnce(makeRun({ state: RunState.Planning }))
-      .mockResolvedValueOnce(makeRun({ state: RunState.PlanReview }))
-      .mockResolvedValueOnce(
-        makeRun({ state: RunState.HumanClarificationNeeded }),
-      );
     plannerAgent.run.mockResolvedValue(
       makePlan({ openQuestions: [{ id: "q1", question: "Blocker?", requiredForExecution: true }] }),
     );
@@ -291,11 +280,10 @@ describe("OrchestratorService.retryRun", () => {
 
 describe("OrchestratorService.runManualReReview", () => {
   it("returns to AwaitingPlanApproval when the plan reviewer approves", async () => {
-    const { deps, runRepo, artifactRepo, planReviewerAgent } = buildDeps();
+    const run = makeRun({ state: RunState.AwaitingPlanApproval });
+    const { deps, artifactRepo, planReviewerAgent } = buildDeps({}, run);
     const svc = new OrchestratorService(deps as never);
 
-    const run = makeRun({ state: RunState.AwaitingPlanApproval });
-    runRepo.findById.mockResolvedValue(run);
     artifactRepo.findLatestByType.mockImplementation((_: string, type: string) =>
       type === "Plan" ? Promise.resolve(makeArtifact({ type: "Plan", payloadJson: makePlan() })) : Promise.resolve(null),
     );
@@ -307,11 +295,10 @@ describe("OrchestratorService.runManualReReview", () => {
   });
 
   it("still returns to AwaitingPlanApproval (not auto-chaining to revision) when changes are requested", async () => {
-    const { deps, runRepo, artifactRepo, planReviewerAgent } = buildDeps();
+    const run = makeRun({ state: RunState.AwaitingPlanApproval });
+    const { deps, artifactRepo, planReviewerAgent } = buildDeps({}, run);
     const svc = new OrchestratorService(deps as never);
 
-    const run = makeRun({ state: RunState.AwaitingPlanApproval });
-    runRepo.findById.mockResolvedValue(run);
     artifactRepo.findLatestByType.mockImplementation((_: string, type: string) =>
       type === "Plan" ? Promise.resolve(makeArtifact({ type: "Plan", payloadJson: makePlan() })) : Promise.resolve(null),
     );
@@ -329,10 +316,10 @@ describe("OrchestratorService.runManualReReview", () => {
   });
 
   it("throws when no plan artifact exists", async () => {
-    const { deps, runRepo, artifactRepo } = buildDeps();
+    const run = makeRun({ state: RunState.AwaitingPlanApproval });
+    const { deps, artifactRepo } = buildDeps({}, run);
     const svc = new OrchestratorService(deps as never);
 
-    runRepo.findById.mockResolvedValue(makeRun({ state: RunState.AwaitingPlanApproval }));
     artifactRepo.findLatestByType.mockResolvedValue(null);
 
     await expect(svc.runManualReReview("run-1")).rejects.toThrow(/No plan artifact/);
@@ -341,11 +328,10 @@ describe("OrchestratorService.runManualReReview", () => {
 
 describe("OrchestratorService.runManualPlanRevision", () => {
   it("stays at AwaitingPlanApproval with no revision when the reviewer approves", async () => {
-    const { deps, runRepo, artifactRepo, planReviewerAgent } = buildDeps();
+    const run = makeRun({ state: RunState.AwaitingPlanApproval });
+    const { deps, artifactRepo, planReviewerAgent } = buildDeps({}, run);
     const svc = new OrchestratorService(deps as never);
 
-    const run = makeRun({ state: RunState.AwaitingPlanApproval });
-    runRepo.findById.mockResolvedValue(run);
     artifactRepo.findLatestByType.mockImplementation((_: string, type: string) =>
       type === "Plan" ? Promise.resolve(makeArtifact({ type: "Plan", payloadJson: makePlan() })) : Promise.resolve(null),
     );
@@ -359,11 +345,10 @@ describe("OrchestratorService.runManualPlanRevision", () => {
   });
 
   it("delegates to runPlanRevision (passing the operator note through) when changes are requested", async () => {
-    const { deps, runRepo, artifactRepo, planReviewerAgent } = buildDeps();
+    const run = makeRun({ state: RunState.AwaitingPlanApproval });
+    const { deps, artifactRepo, planReviewerAgent } = buildDeps({}, run);
     const svc = new OrchestratorService(deps as never);
 
-    const run = makeRun({ state: RunState.AwaitingPlanApproval });
-    runRepo.findById.mockResolvedValue(run);
     artifactRepo.findLatestByType.mockImplementation((_: string, type: string) =>
       type === "Plan" ? Promise.resolve(makeArtifact({ type: "Plan", payloadJson: makePlan() })) : Promise.resolve(null),
     );
@@ -384,12 +369,9 @@ describe("OrchestratorService.runManualPlanRevision", () => {
 
 describe("OrchestratorService.approveHumanReview", () => {
   it("runs distillation, transitions to Done, and posts a completion comment", async () => {
-    const { deps, runRepo, linearClient, distillationAgent } = buildDeps();
-    const svc = new OrchestratorService(deps as never);
-
     const run = makeRun({ state: RunState.ReadyForHumanReview });
-    runRepo.findById.mockResolvedValue(run);
-    runRepo.updateState.mockResolvedValue(makeRun({ state: RunState.Done }));
+    const { deps, linearClient, distillationAgent } = buildDeps({}, run);
+    const svc = new OrchestratorService(deps as never);
 
     const result = await svc.approveHumanReview("run-1");
 
@@ -402,12 +384,10 @@ describe("OrchestratorService.approveHumanReview", () => {
   });
 
   it("swallows distillation failures (best-effort) and still completes the run", async () => {
-    const { deps, runRepo, distillationAgent, logger } = buildDeps();
+    const run = makeRun({ state: RunState.ReadyForHumanReview });
+    const { deps, distillationAgent, logger } = buildDeps({}, run);
     const svc = new OrchestratorService(deps as never);
 
-    const run = makeRun({ state: RunState.ReadyForHumanReview });
-    runRepo.findById.mockResolvedValue(run);
-    runRepo.updateState.mockResolvedValue(makeRun({ state: RunState.Done }));
     distillationAgent.run.mockRejectedValue(new Error("distillation exploded"));
 
     const result = await svc.approveHumanReview("run-1");
@@ -422,12 +402,10 @@ describe("OrchestratorService.approveHumanReview", () => {
 
 describe("OrchestratorService skill metrics (via transitionAndRecord reaching a terminal state)", () => {
   it("updates skill success metrics and archives low-utility skills when a run completes successfully", async () => {
-    const { deps, runRepo, eventRepo, agentSkillRepo } = buildDeps();
+    const run = makeRun({ state: RunState.ReadyForHumanReview });
+    const { deps, eventRepo, agentSkillRepo } = buildDeps({}, run);
     const svc = new OrchestratorService(deps as never);
 
-    const run = makeRun({ state: RunState.ReadyForHumanReview });
-    runRepo.findById.mockResolvedValue(run);
-    runRepo.updateState.mockResolvedValue(makeRun({ state: RunState.Done }));
     eventRepo.findByRunId.mockResolvedValue([
       {
         id: "e1",
@@ -461,7 +439,8 @@ describe("OrchestratorService skill metrics (via transitionAndRecord reaching a 
   });
 
   it("increments failure metrics when the run transitions to Failed", async () => {
-    const { deps, runRepo, eventRepo, artifactRepo, plannerAgent, agentSkillRepo } = buildDeps();
+    const run = makeRun({ state: RunState.HumanClarificationNeeded, planVersion: 1 });
+    const { deps, eventRepo, artifactRepo, plannerAgent, agentSkillRepo } = buildDeps({}, run);
     const svc = new OrchestratorService(deps as never);
 
     plannerAgent.run.mockResolvedValue(
@@ -470,9 +449,6 @@ describe("OrchestratorService skill metrics (via transitionAndRecord reaching a 
         openQuestions: [{ id: "q1", question: "Still required?", requiredForExecution: true }],
       }),
     );
-
-    const run = makeRun({ state: RunState.HumanClarificationNeeded, planVersion: 1 });
-    runRepo.findById.mockResolvedValue(run);
     artifactRepo.findLatestByType.mockImplementation((_: string, type: string) => {
       if (type === "Plan")
         return Promise.resolve(
@@ -536,23 +512,18 @@ describe("OrchestratorService skill metrics (via transitionAndRecord reaching a 
   });
 
   it("does not touch skill metrics when no agentSkillRepo dependency is provided", async () => {
-    const { deps, runRepo } = buildDeps({ agentSkillRepo: undefined });
-    const svc = new OrchestratorService(deps as never);
-
     const run = makeRun({ state: RunState.ReadyForHumanReview });
-    runRepo.findById.mockResolvedValue(run);
-    runRepo.updateState.mockResolvedValue(makeRun({ state: RunState.Done }));
+    const { deps } = buildDeps({ agentSkillRepo: undefined }, run);
+    const svc = new OrchestratorService(deps as never);
 
     await expect(svc.approveHumanReview("run-1")).resolves.toBeDefined();
   });
 
   it("logs a warning and continues when updating a single skill's metric throws", async () => {
-    const { deps, runRepo, eventRepo, agentSkillRepo, logger } = buildDeps();
+    const run = makeRun({ state: RunState.ReadyForHumanReview });
+    const { deps, eventRepo, agentSkillRepo, logger } = buildDeps({}, run);
     const svc = new OrchestratorService(deps as never);
 
-    const run = makeRun({ state: RunState.ReadyForHumanReview });
-    runRepo.findById.mockResolvedValue(run);
-    runRepo.updateState.mockResolvedValue(makeRun({ state: RunState.Done }));
     eventRepo.findByRunId.mockResolvedValue([
       {
         id: "e1",
