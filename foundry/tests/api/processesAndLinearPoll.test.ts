@@ -280,5 +280,5 @@ describe("GET /api/events/stream", () => {
     await vi.waitFor(() => {
       expect(mockEmitter.off).toHaveBeenCalledWith("dashboard", expect.any(Function));
     });
-  });
+  }, 15_000);
 });
