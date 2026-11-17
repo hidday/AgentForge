@@ -120,10 +120,9 @@ describe("RealGitHubClient", () => {
   });
 
   it("createDraftPR throws when a 422 is a field-validation error (invalid base branch)", async () => {
-    mockOctokit.pulls.create.mockRejectedValue({
-      status: 422,
-      message: '{"code":"invalid","field":"base"}',
-    });
+    mockOctokit.pulls.create.mockRejectedValue(
+      Object.assign(new Error('{"code":"invalid","field":"base"}'), { status: 422 }),
+    );
     const client = new RealGitHubClient("token", makeLogger());
 
     await expect(

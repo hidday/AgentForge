@@ -15,7 +15,7 @@ describe("ConfirmDialog", () => {
         onCancel={vi.fn()}
       />,
     );
-    expect(container).toBeEmptyDOMElement();
+    expect(container.innerHTML).toBe("");
   });
 
   it("renders title, description and confirm label when open", () => {
@@ -29,9 +29,9 @@ describe("ConfirmDialog", () => {
         onCancel={vi.fn()}
       />,
     );
-    expect(screen.getByText("Approve Plan")).toBeInTheDocument();
-    expect(screen.getByText("This will approve the plan")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Approve & Start" })).toBeInTheDocument();
+    expect(screen.getByText("Approve Plan")).toBeDefined();
+    expect(screen.getByText("This will approve the plan")).toBeDefined();
+    expect(screen.getByRole("button", { name: "Approve & Start" })).toBeDefined();
   });
 
   it("calls onConfirm with undefined when no notes prop is given", async () => {
@@ -49,7 +49,7 @@ describe("ConfirmDialog", () => {
     );
     await user.click(screen.getByRole("button", { name: "Go" }));
     expect(onConfirm).toHaveBeenCalledWith(undefined);
-    expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+    expect(screen.queryByRole("textbox")).toBeNull();
   });
 
   it("renders a notes textarea with custom label/placeholder and forwards trimmed text to onConfirm", async () => {
@@ -66,7 +66,7 @@ describe("ConfirmDialog", () => {
         onCancel={vi.fn()}
       />,
     );
-    expect(screen.getByText("Notes label")).toBeInTheDocument();
+    expect(screen.getByText("Notes label")).toBeDefined();
     const textarea = screen.getByPlaceholderText("Type here...");
     await user.type(textarea, "  hello world  ");
     await user.click(screen.getByRole("button", { name: "Go" }));
@@ -91,7 +91,7 @@ describe("ConfirmDialog", () => {
     await user.type(textarea, "   ");
     await user.click(screen.getByRole("button", { name: "Go" }));
     expect(onConfirm).toHaveBeenCalledWith(undefined);
-    expect(screen.getByText("Notes for the next agent (optional)")).toBeInTheDocument();
+    expect(screen.getByText("Notes for the next agent (optional)")).toBeDefined();
   });
 
   it("resets the note field after confirming so a reopen starts blank", async () => {
@@ -108,7 +108,7 @@ describe("ConfirmDialog", () => {
         onCancel={vi.fn()}
       />,
     );
-    const textarea = screen.getByRole("textbox");
+    const textarea = screen.getByRole("textbox") as HTMLTextAreaElement;
     await user.type(textarea, "note text");
     await user.click(screen.getByRole("button", { name: "Go" }));
 
@@ -134,7 +134,7 @@ describe("ConfirmDialog", () => {
         onCancel={vi.fn()}
       />,
     );
-    expect(screen.getByRole("textbox")).toHaveValue("");
+    expect((screen.getByRole("textbox") as HTMLTextAreaElement).value).toBe("");
   });
 
   it("calls onCancel and clears the note when Cancel is clicked", async () => {
@@ -186,9 +186,9 @@ describe("ConfirmDialog", () => {
         onCancel={vi.fn()}
       />,
     );
-    expect(screen.getByRole("button", { name: "Cancel" })).toBeDisabled();
-    expect(screen.getByText("Working...")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Go" })).not.toBeInTheDocument();
+    expect((screen.getByRole("button", { name: "Cancel" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByText("Working...")).toBeDefined();
+    expect(screen.queryByRole("button", { name: "Go" })).toBeNull();
   });
 
   it("applies destructive styling when variant is destructive", () => {
@@ -235,6 +235,6 @@ describe("ConfirmDialog", () => {
         onCancel={vi.fn()}
       />,
     );
-    expect(screen.getByRole("textbox")).toBeDisabled();
+    expect((screen.getByRole("textbox") as HTMLTextAreaElement).disabled).toBe(true);
   });
 });

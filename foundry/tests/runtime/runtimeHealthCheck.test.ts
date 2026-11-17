@@ -251,6 +251,9 @@ describe("RuntimeHealthCheck", () => {
         if (opts.args.includes("--version")) {
           return makeResult({ stdout: "v1" });
         }
+        if (opts.args.includes("status") && opts.args.includes("auth")) {
+          return makeResult({ stdout: '{"loggedIn": true}' });
+        }
         return makeResult({ stdout: "pong\n", exitCode: 0 });
       });
 

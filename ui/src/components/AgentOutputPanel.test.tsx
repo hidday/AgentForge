@@ -28,27 +28,27 @@ describe("AgentOutputPanel", () => {
 
   it("renders nothing when there is no output and no active process", () => {
     const { container } = render(<AgentOutputPanel processes={[]} output="" />);
-    expect(container).toBeEmptyDOMElement();
+    expect(container.innerHTML).toBe("");
   });
 
   it("shows the completed label when output exists but there is no active process", () => {
     render(<AgentOutputPanel processes={[]} output="hello" />);
-    expect(screen.getByText("Agent Output (completed)")).toBeInTheDocument();
+    expect(screen.getByText("Agent Output (completed)")).toBeDefined();
   });
 
   it("shows the running process's runtime, stage, and an elapsed timer when active", () => {
     const proc = makeProcess({ runtime: "codex", stage: "reviewer" });
     render(<AgentOutputPanel processes={[proc]} output="" />);
-    expect(screen.getByText("codex")).toBeInTheDocument();
-    expect(screen.getByText("reviewer")).toBeInTheDocument();
-    expect(screen.getByText(/^\d+s$/)).toBeInTheDocument();
+    expect(screen.getByText("codex")).toBeDefined();
+    expect(screen.getByText("reviewer")).toBeDefined();
+    expect(screen.getByText(/^\d+s$/)).toBeDefined();
   });
 
   it("formats elapsed time in minutes and seconds once over a minute has passed", () => {
     const startedAt = new Date(Date.now() - 65_000).toISOString();
     const proc = makeProcess({ startedAt });
     render(<AgentOutputPanel processes={[proc]} output="" />);
-    expect(screen.getByText(/^1m \d+s$/)).toBeInTheDocument();
+    expect(screen.getByText(/^1m \d+s$/)).toBeDefined();
   });
 
   it("toggles collapsed state when the header is clicked", async () => {
@@ -56,17 +56,17 @@ describe("AgentOutputPanel", () => {
     render(<AgentOutputPanel processes={[]} output="some output text" />);
     const header = screen.getByText("Agent Output (completed)");
     // panel starts expanded: raw/parsed toggle visible
-    expect(screen.getByText("raw")).toBeInTheDocument();
+    expect(screen.getByText("raw")).toBeDefined();
     await user.click(header);
-    expect(screen.queryByText("raw")).not.toBeInTheDocument();
+    expect(screen.queryByText("raw")).toBeNull();
     await user.click(header);
-    expect(screen.getByText("raw")).toBeInTheDocument();
+    expect(screen.getByText("raw")).toBeDefined();
   });
 
   it("shows waiting placeholder in parsed mode when an active process has produced no output yet", () => {
     const proc = makeProcess();
     render(<AgentOutputPanel processes={[proc]} output="" />);
-    expect(screen.getByText("Waiting for output...")).toBeInTheDocument();
+    expect(screen.getByText("Waiting for output...")).toBeDefined();
   });
 
   it("renders parsed text, tool_use, tool_result, and error blocks from stream-json output", async () => {
@@ -85,15 +85,15 @@ describe("AgentOutputPanel", () => {
 
     render(<AgentOutputPanel processes={[]} output={lines} />);
 
-    expect(screen.getByText("Thinking...")).toBeInTheDocument();
-    expect(screen.getByText("Bash")).toBeInTheDocument();
+    expect(screen.getByText("Thinking...")).toBeDefined();
+    expect(screen.getByText("Bash")).toBeDefined();
 
     // tool_use block starts expanded; its content should be visible
-    expect(screen.getByText("ls -la")).toBeInTheDocument();
+    expect(screen.getByText("ls -la")).toBeDefined();
 
     // Collapse the tool_use block
     await user.click(screen.getByText("Bash"));
-    expect(screen.queryByText("ls -la")).not.toBeInTheDocument();
+    expect(screen.queryByText("ls -la")).toBeNull();
   });
 
   it("renders raw output verbatim when the raw toggle is active", async () => {
@@ -102,25 +102,25 @@ describe("AgentOutputPanel", () => {
     render(<AgentOutputPanel processes={[]} output={raw} />);
 
     await user.click(screen.getByText("raw"));
-    expect(screen.getByText("parsed")).toBeInTheDocument();
-    expect(screen.getByText(raw)).toBeInTheDocument();
+    expect(screen.getByText("parsed")).toBeDefined();
+    expect(screen.getByText(raw)).toBeDefined();
   });
 
   it("marks tool_result blocks as errors with the Error label when isError is true", () => {
     const lines = [JSON.stringify({ tool_use_result: "Error: boom" })].join("\n");
     render(<AgentOutputPanel processes={[]} output={lines} />);
-    expect(screen.getByText("Error")).toBeInTheDocument();
-    expect(screen.getByText("boom", { exact: false })).toBeInTheDocument();
+    expect(screen.getByText("Error")).toBeDefined();
+    expect(screen.getByText("boom", { exact: false })).toBeDefined();
   });
 
   it("re-expands the panel automatically when a process transitions from inactive to active", async () => {
     const { rerender } = render(<AgentOutputPanel processes={[]} output="done output" />);
     const header = screen.getByText("Agent Output (completed)");
     await userEvent.setup({ advanceTimers: vi.advanceTimersByTime }).click(header);
-    expect(screen.queryByText("raw")).not.toBeInTheDocument();
+    expect(screen.queryByText("raw")).toBeNull();
 
     const proc = makeProcess();
     rerender(<AgentOutputPanel processes={[proc]} output="done output" />);
-    expect(screen.getByText("raw")).toBeInTheDocument();
+    expect(screen.getByText("raw")).toBeDefined();
   });
 });

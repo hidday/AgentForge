@@ -34,7 +34,7 @@ describe("ActionBar", () => {
     const { container } = render(
       <ActionBar runId={RUN_ID} state="Done" onAction={vi.fn()} />,
     );
-    expect(container).toBeEmptyDOMElement();
+    expect(container.innerHTML).toBe("");
   });
 
   it("shows Approve Plan and Reject Plan for AwaitingPlanApproval, and calls approvePlan + onAction on confirm", async () => {
@@ -42,13 +42,13 @@ describe("ActionBar", () => {
     const onAction = vi.fn();
     render(<ActionBar runId={RUN_ID} state="AwaitingPlanApproval" onAction={onAction} />);
 
-    expect(screen.getByRole("button", { name: /Approve Plan/ })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Reject Plan/ })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Re-review Plan/ })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Revise Plan/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Approve Plan/ })).toBeDefined();
+    expect(screen.getByRole("button", { name: /Reject Plan/ })).toBeDefined();
+    expect(screen.getByRole("button", { name: /Re-review Plan/ })).toBeDefined();
+    expect(screen.getByRole("button", { name: /Revise Plan/ })).toBeDefined();
 
     await user.click(screen.getByRole("button", { name: /Approve Plan/ }));
-    expect(screen.getByText("Approve & Start")).toBeInTheDocument();
+    expect(screen.getByText("Approve & Start")).toBeDefined();
 
     const noteField = screen.getByPlaceholderText(/extra context/);
     await user.type(noteField, "watch out for X");
@@ -80,7 +80,7 @@ describe("ActionBar", () => {
     render(
       <ActionBar runId={RUN_ID} state="AwaitingPlanApproval" onAction={vi.fn()} />,
     );
-    expect(screen.queryByText(/Answer Optional Questions/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Answer Optional Questions/)).toBeNull();
   });
 
   it("opens the reject dialog, supports switching modes, and calls rejectPlan with trimmed context and selected mode", async () => {
@@ -89,7 +89,7 @@ describe("ActionBar", () => {
     render(<ActionBar runId={RUN_ID} state="AwaitingPlanApproval" onAction={onAction} />);
 
     await user.click(screen.getByRole("button", { name: /Reject Plan/ }));
-    expect(screen.getByText("This will reject the current plan and send it back for re-planning.")).toBeInTheDocument();
+    expect(screen.getByText("This will reject the current plan and send it back for re-planning.")).toBeDefined();
 
     await user.click(screen.getByText("Start fresh"));
     const textarea = screen.getByPlaceholderText(/describe what should change/);
@@ -126,10 +126,12 @@ describe("ActionBar", () => {
     await user.type(textarea, "draft feedback");
 
     await user.click(screen.getByRole("button", { name: "Cancel" }));
-    expect(screen.queryByPlaceholderText(/describe what should change/)).not.toBeInTheDocument();
+    expect(screen.queryByPlaceholderText(/describe what should change/)).toBeNull();
 
     await user.click(screen.getByRole("button", { name: /Reject Plan/ }));
-    expect(screen.getByPlaceholderText(/describe what should change/)).toHaveValue("");
+    expect(
+      (screen.getByPlaceholderText(/describe what should change/) as HTMLTextAreaElement).value,
+    ).toBe("");
   });
 
   it("shows Approve & Complete for ReadyForHumanReview and calls approveReview on confirm", async () => {
@@ -149,7 +151,8 @@ describe("ActionBar", () => {
     render(<ActionBar runId={RUN_ID} state="Implementing" onAction={vi.fn()} />);
 
     await user.click(screen.getByRole("button", { name: /Pause/ }));
-    await user.click(screen.getByRole("button", { name: "Pause" }));
+    const pauseButtons = screen.getAllByRole("button", { name: "Pause" });
+    await user.click(pauseButtons[pauseButtons.length - 1]);
 
     await waitFor(() => expect(mockApi.pauseRun).toHaveBeenCalledWith(RUN_ID));
   });
@@ -166,8 +169,8 @@ describe("ActionBar", () => {
 
   it("does not show a Retry button for AIBlocked since it is not in RETRY_LABELS", () => {
     render(<ActionBar runId={RUN_ID} state="AIBlocked" onAction={vi.fn()} />);
-    expect(screen.queryByRole("button", { name: /Retry/ })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Resume/ })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Retry/ })).toBeNull();
+    expect(screen.getByRole("button", { name: /Resume/ })).toBeDefined();
   });
 
   it("shows Resume for AIBlocked, HumanClarificationNeeded, and Failed states and calls resumeRun", async () => {
@@ -176,7 +179,8 @@ describe("ActionBar", () => {
       mockApi.resumeRun.mockClear();
       const { unmount } = render(<ActionBar runId={RUN_ID} state={state} onAction={vi.fn()} />);
       await user.click(screen.getByRole("button", { name: /Resume/ }));
-      await user.click(screen.getByRole("button", { name: "Resume" }));
+      const resumeButtons = screen.getAllByRole("button", { name: "Resume" });
+      await user.click(resumeButtons[resumeButtons.length - 1]);
       await waitFor(() => expect(mockApi.resumeRun).toHaveBeenCalledWith(RUN_ID));
       unmount();
     }
@@ -232,6 +236,6 @@ describe("ActionBar", () => {
 
     await waitFor(() => expect(mockApi.approvePlan).toHaveBeenCalled());
     expect(onAction).not.toHaveBeenCalled();
-    expect(screen.queryByText("Approve & Start")).not.toBeInTheDocument();
+    expect(screen.queryByText("Approve & Start")).toBeNull();
   });
 });

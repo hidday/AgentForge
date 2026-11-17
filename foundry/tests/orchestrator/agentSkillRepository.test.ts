@@ -22,6 +22,7 @@ function makeSkill(overrides: Partial<AgentSkill> = {}): AgentSkill {
     lastUsedAt: new Date("2024-01-01T00:00:00Z"),
     createdAt: new Date("2024-01-01T00:00:00Z"),
     archivedAt: null,
+    ...overrides,
   } as AgentSkill;
 }
 
