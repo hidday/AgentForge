@@ -58,24 +58,26 @@ function makeArtifact(overrides: Partial<Artifact> = {}): Artifact {
   };
 }
 
-function buildDeps(overrides: Record<string, unknown> = {}) {
+function buildDeps(overrides: Record<string, unknown> = {}, initialRun: Run = makeRun()) {
+  // `trackedRun` lets the updateState/update mocks merge onto the run's
+  // actual current shape (preserving state across chained transitions)
+  // instead of resetting to makeRun()'s Todo-state defaults on every call.
+  let trackedRun: Run = initialRun;
+
   const runRepo = {
-    findById: vi.fn(),
+    findById: vi.fn().mockImplementation(() => Promise.resolve(trackedRun)),
     findActiveByIssueId: vi.fn(),
     findAll: vi.fn(),
     create: vi.fn(),
     findByIssueId: vi.fn(),
-    // Generic defaults so transitionAndRecord's current-state tracking stays
-    // consistent with the real state machine even when a test doesn't
-    // explicitly queue a mockResolvedValueOnce for a given call.
-    updateState: vi
-      .fn()
-      .mockImplementation((id: string, state: RunState) => Promise.resolve(makeRun({ id, state }))),
-    update: vi
-      .fn()
-      .mockImplementation((id: string, data: Record<string, unknown>) =>
-        Promise.resolve(makeRun({ id, ...data })),
-      ),
+    updateState: vi.fn().mockImplementation((id: string, state: RunState) => {
+      trackedRun = { ...trackedRun, id, state };
+      return Promise.resolve(trackedRun);
+    }),
+    update: vi.fn().mockImplementation((id: string, data: Record<string, unknown>) => {
+      trackedRun = { ...trackedRun, id, ...data };
+      return Promise.resolve(trackedRun);
+    }),
   };
 
   const artifactRepo = {
@@ -459,8 +461,15 @@ describe("OrchestratorService skill metrics (via transitionAndRecord reaching a 
   });
 
   it("increments failure metrics when the run transitions to Failed", async () => {
-    const { deps, runRepo, eventRepo, artifactRepo, agentSkillRepo } = buildDeps();
+    const { deps, runRepo, eventRepo, artifactRepo, plannerAgent, agentSkillRepo } = buildDeps();
     const svc = new OrchestratorService(deps as never);
+
+    plannerAgent.run.mockResolvedValue(
+      makePlan({
+        planVersion: 2,
+        openQuestions: [{ id: "q1", question: "Still required?", requiredForExecution: true }],
+      }),
+    );
 
     const run = makeRun({ state: RunState.HumanClarificationNeeded, planVersion: 1 });
     runRepo.findById.mockResolvedValue(run);
