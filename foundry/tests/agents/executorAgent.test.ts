@@ -195,6 +195,54 @@ describe("ExecutorAgent.run()", () => {
     expect(githubClient.createDraftPR).not.toHaveBeenCalled();
   });
 
+  it("logs isRetry=true when only existingPR is set (no existingBranch)", async () => {
+    const { agent, logger, githubClient } = buildAgent();
+
+    const result = await agent.run(makePlan(), makeTaskBundle(), "run-1", {
+      existingPR: 777,
+    });
+
+    expect(result.prNumber).toBe(777);
+    expect(githubClient.createDraftPR).not.toHaveBeenCalled();
+    const startLog = logger.info.mock.calls.find(
+      (c: unknown[]) => c[1] === "Starting executor agent",
+    );
+    expect((startLog?.[0] as Record<string, unknown> | undefined)?.isRetry).toBe(true);
+  });
+
+  it("logs isRetry=false and creates a new draft PR when no retry context is given", async () => {
+    const { agent, logger, githubClient } = buildAgent();
+
+    await agent.run(makePlan(), makeTaskBundle(), "run-1");
+
+    expect(githubClient.createDraftPR).toHaveBeenCalledTimes(1);
+    const startLog = logger.info.mock.calls.find(
+      (c: unknown[]) => c[1] === "Starting executor agent",
+    );
+    expect((startLog?.[0] as Record<string, unknown> | undefined)?.isRetry).toBe(false);
+  });
+
+  it("injects the operator note section into the user prompt when an operator note is provided", async () => {
+    const { agent, getUserPrompt } = buildAgent();
+
+    await agent.run(makePlan(), makeTaskBundle(), "run-1", undefined, {
+      operatorNote: "Please double-check the auth flow before merging.",
+    });
+
+    const userPrompt = getUserPrompt();
+    expect(userPrompt).toContain("## Operator Note");
+    expect(userPrompt).toContain("Please double-check the auth flow before merging.");
+  });
+
+  it("omits the operator note section when no operator note is provided", async () => {
+    const { agent, getUserPrompt } = buildAgent();
+
+    await agent.run(makePlan(), makeTaskBundle(), "run-1");
+
+    const userPrompt = getUserPrompt();
+    expect(userPrompt).not.toContain("## Operator Note");
+  });
+
   it("logs the score and executionVersion in the completion event", async () => {
     const { agent, logger } = buildAgent({ score: 0.42 });
 

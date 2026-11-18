@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { mkdtempSync, writeFileSync, rmSync, existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -34,6 +34,19 @@ const noopLogger = {
   child: () => noopLogger,
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
 } as any;
+
+function spyLogger() {
+  const logger = {
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+    debug: vi.fn(),
+    fatal: vi.fn(),
+    child: () => logger,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  } as any;
+  return logger;
+}
 
 describe("GitService", () => {
   let repoPath: string;
@@ -180,6 +193,130 @@ describe("GitService", () => {
       expect(existsSync(stalePath)).toBe(false);
 
       await svc.removeWorktree(repoPath, result.worktreePath);
+    });
+
+    it("removes and recreates the worktree when the deterministic path already exists", async () => {
+      const branchName = "hidday/pry-200-rerun";
+      const runId = "11112222-3456-7890-abcd-ef1234567890";
+      const logger = spyLogger();
+      const svcWithSpy = new GitService(logger);
+
+      // First call creates the worktree at the deterministic path.
+      const first = await svcWithSpy.setupRunWorktree(repoPath, runId, "main", branchName);
+      expect(existsSync(first.worktreePath)).toBe(true);
+
+      // Leave a marker file (uncommitted) so we can prove the worktree was
+      // actually torn down and recreated, not merely reused in place.
+      writeFileSync(join(first.worktreePath, "marker-from-first-run.txt"), "leftover");
+      expect(existsSync(join(first.worktreePath, "marker-from-first-run.txt"))).toBe(true);
+
+      // Second call with the SAME runId + branchName resolves to the SAME
+      // deterministic worktreePath, which now already exists on disk.
+      const second = await svcWithSpy.setupRunWorktree(repoPath, runId, "main", branchName);
+
+      expect(second.worktreePath).toBe(first.worktreePath);
+      expect(existsSync(second.worktreePath)).toBe(true);
+      // The leftover marker from the first worktree must be gone: this proves
+      // the "path already exists" branch actually removed the old worktree
+      // before recreating it, rather than silently reusing stale contents.
+      expect(existsSync(join(second.worktreePath, "marker-from-first-run.txt"))).toBe(false);
+      expect(await svcWithSpy.currentBranch(second.worktreePath)).toBe(branchName);
+
+      const warnCall = logger.warn.mock.calls.find(
+        (c: unknown[]) => c[1] === "Worktree path already exists, removing first",
+      );
+      expect(warnCall).toBeDefined();
+
+      await svcWithSpy.removeWorktree(repoPath, second.worktreePath);
+    });
+
+    it("warns but still succeeds when origin already has the branch (local branch reset to startPoint)", async () => {
+      const branchName = "hidday/pry-201-remote-exists";
+      const runId = "33334444-3456-7890-abcd-ef1234567890";
+      const logger = spyLogger();
+      const svcWithSpy = new GitService(logger);
+
+      // Simulate the branch already existing on the remote (e.g. pushed by a
+      // previous attempt), with no corresponding local branch or worktree.
+      git(["branch", branchName, "main"], repoPath);
+      git(["push", "origin", branchName], repoPath);
+      git(["branch", "-D", branchName], repoPath);
+
+      const result = await svcWithSpy.setupRunWorktree(repoPath, runId, "main", branchName);
+
+      expect(existsSync(result.worktreePath)).toBe(true);
+      expect(await svcWithSpy.currentBranch(result.worktreePath)).toBe(branchName);
+
+      const warnCall = logger.warn.mock.calls.find(
+        (c: unknown[]) =>
+          typeof c[1] === "string" &&
+          (c[1] as string).includes("origin/<branch> already exists"),
+      );
+      expect(warnCall).toBeDefined();
+      expect(warnCall?.[0]).toMatchObject({ repoPath, branchName });
+
+      await svcWithSpy.removeWorktree(repoPath, result.worktreePath);
+    });
+  });
+
+  describe("push / commitAndPush", () => {
+    let bareDir: string;
+
+    beforeEach(() => {
+      bareDir = mkdtempSync(join(tmpdir(), "gitservice-bare-"));
+      git(["clone", "--bare", repoPath, bareDir], tmpdir());
+      git(["remote", "add", "origin", bareDir], repoPath);
+    });
+
+    afterEach(() => {
+      rmSync(bareDir, { recursive: true, force: true });
+    });
+
+    it("push() pushes the current branch to origin with -u", async () => {
+      git(["checkout", "-b", "feature/push-test"], repoPath);
+      writeFileSync(join(repoPath, "pushed.txt"), "content");
+      git(["add", "."], repoPath);
+      git(["commit", "-m", "add pushed.txt"], repoPath);
+
+      await svc.push(repoPath, "feature/push-test");
+
+      const branchesOnOrigin = git(["branch", "--list", "feature/push-test"], bareDir);
+      expect(branchesOnOrigin).toContain("feature/push-test");
+    });
+
+    it("push() throws GitError when the push fails (e.g. unknown remote branch target)", async () => {
+      // No "origin" remote configured on this repo, so pushing must fail.
+      const isolatedRepo = createTestRepo();
+      try {
+        await expect(svc.push(isolatedRepo, "main")).rejects.toThrow(GitError);
+      } finally {
+        rmSync(isolatedRepo, { recursive: true, force: true });
+      }
+    });
+
+    it("commitAndPush() asserts the branch, commits all changes, and pushes to origin", async () => {
+      git(["checkout", "-b", "feature/commit-and-push"], repoPath);
+      writeFileSync(join(repoPath, "new-feature.txt"), "feature content");
+
+      await svc.commitAndPush(repoPath, "feature/commit-and-push", "[AI] add feature");
+
+      expect(await svc.hasChanges(repoPath)).toBe(false);
+      const log = git(["log", "--oneline"], repoPath);
+      expect(log).toContain("[AI] add feature");
+      const branchesOnOrigin = git(["branch", "--list", "feature/commit-and-push"], bareDir);
+      expect(branchesOnOrigin).toContain("feature/commit-and-push");
+    });
+
+    it("commitAndPush() throws BranchMismatchError without pushing when on the wrong branch", async () => {
+      git(["checkout", "-b", "feature/wrong-branch"], repoPath);
+
+      await expect(
+        svc.commitAndPush(repoPath, "feature/some-other-branch", "[AI] should not land"),
+      ).rejects.toThrow(BranchMismatchError);
+
+      // Nothing should have reached origin for a branch that was never pushed.
+      const branchesOnOrigin = git(["branch", "--list", "feature/some-other-branch"], bareDir);
+      expect(branchesOnOrigin).toBe("");
     });
   });
 

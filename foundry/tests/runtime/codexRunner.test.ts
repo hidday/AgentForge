@@ -98,4 +98,103 @@ END_STRUCTURED_OUTPUT`;
     expect(out.parsed.payload.value).toBe("ok");
     expect(logger.error).not.toHaveBeenCalled();
   });
+
+  it("prepends --model directly (no 'exec' insertion point) when baseArgs doesn't start with 'exec'", async () => {
+    const stdout = `BEGIN_STRUCTURED_OUTPUT
+{"success":true,"stage":"planner","payload":{"value":"ok"}}
+END_STRUCTURED_OUTPUT`;
+
+    const processRunner = makeMockProcessRunner({
+      stdout,
+      stderr: "",
+      exitCode: 0,
+      durationMs: 50,
+      timedOut: false,
+    });
+    const logger = makeMockLogger();
+    const runner = new CodexRunner(
+      processRunner as never,
+      "codex",
+      ["--verbose"],
+      "gpt-5.6-sol",
+      logger as never,
+    );
+
+    await runner.run({ prompt: "x", workingDirectory: "/tmp", timeoutMs: 1000 }, "planner", echoSchema);
+
+    expect(processRunner.execute).toHaveBeenCalledWith(
+      expect.objectContaining({
+        args: ["--model", "gpt-5.6-sol", "--verbose"],
+      }),
+    );
+  });
+
+  it("prepends the system prompt to the stdin payload (with a separator) when provided", async () => {
+    const stdout = `BEGIN_STRUCTURED_OUTPUT
+{"success":true,"stage":"planner","payload":{"value":"ok"}}
+END_STRUCTURED_OUTPUT`;
+
+    const processRunner = makeMockProcessRunner({
+      stdout,
+      stderr: "",
+      exitCode: 0,
+      durationMs: 50,
+      timedOut: false,
+    });
+    const logger = makeMockLogger();
+    const runner = new CodexRunner(
+      processRunner as never,
+      "codex",
+      ["exec", "-"],
+      "gpt-5.6-sol",
+      logger as never,
+    );
+
+    await runner.run(
+      {
+        prompt: "Implement the feature.",
+        systemPrompt: "You are the executor agent.",
+        workingDirectory: "/tmp",
+        timeoutMs: 1000,
+      },
+      "executor",
+      echoSchema,
+    );
+
+    const { stdinData } = processRunner.execute.mock.calls[0]![0] as { stdinData: string };
+    expect(stdinData).toBe("You are the executor agent.\n\n---\n\nImplement the feature.");
+  });
+
+  it("passes a runId context through to the process runner when provided", async () => {
+    const stdout = `BEGIN_STRUCTURED_OUTPUT
+{"success":true,"stage":"planner","payload":{"value":"ok"}}
+END_STRUCTURED_OUTPUT`;
+
+    const processRunner = makeMockProcessRunner({
+      stdout,
+      stderr: "",
+      exitCode: 0,
+      durationMs: 50,
+      timedOut: false,
+    });
+    const logger = makeMockLogger();
+    const runner = new CodexRunner(
+      processRunner as never,
+      "codex",
+      ["exec", "-"],
+      "gpt-5.6-sol",
+      logger as never,
+    );
+
+    await runner.run(
+      { prompt: "x", workingDirectory: "/tmp", timeoutMs: 1000, runId: "run-999" },
+      "planner",
+      echoSchema,
+    );
+
+    const call = processRunner.execute.mock.calls[0]![0] as {
+      context?: { runId: string; stage: string; runtime: string };
+    };
+    expect(call.context).toEqual({ runId: "run-999", stage: "planner", runtime: "codex" });
+  });
 });
