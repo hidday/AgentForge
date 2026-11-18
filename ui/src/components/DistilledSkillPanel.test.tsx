@@ -93,4 +93,67 @@ describe("DistilledSkillPanel", () => {
 
     expect(screen.getByText(/content could not be loaded/i)).toBeDefined();
   });
+
+  it("renders nothing when neither loading, error, decision, nor skill are provided", () => {
+    const { container } = render(
+      <DistilledSkillPanel distilledSkill={null} distillationDecision={null} />,
+    );
+    expect(container.firstChild).toBeNull();
+  });
+
+  it("prioritizes the loading indicator over an error when both are set", () => {
+    render(
+      <DistilledSkillPanel
+        distilledSkill={null}
+        distillationDecision={null}
+        loading={true}
+        error="Some error"
+      />,
+    );
+    expect(screen.getByText("Loading distilled skill...")).toBeDefined();
+    expect(screen.queryByText("Some error")).toBeNull();
+  });
+
+  it("shows the displaced skill id (truncated) when the decision carries one", () => {
+    render(
+      <DistilledSkillPanel
+        distilledSkill={skill}
+        distillationDecision={{
+          ...decision,
+          displacedSkillId: "abcdefgh-1234-5678",
+        }}
+      />,
+    );
+    expect(screen.getByText(/Displaced skill:/)).toBeDefined();
+    expect(screen.getByText(/abcdefgh/)).toBeDefined();
+  });
+
+  it("falls back to the skill's taskCategory for the heading when both names are null", () => {
+    render(
+      <DistilledSkillPanel
+        distilledSkill={{ ...skill, name: null }}
+        distillationDecision={{ ...decision, name: null }}
+      />,
+    );
+    // skillName falls back to distilledSkill.taskCategory; it's rendered both
+    // as the heading and (separately) as the subtitle, so expect 2 matches.
+    expect(screen.getAllByText(skill.taskCategory).length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("falls back to the generic 'distilled-skill' heading when no name or category is available", () => {
+    render(
+      <DistilledSkillPanel
+        distilledSkill={null}
+        distillationDecision={{
+          ...decision,
+          name: null,
+          taskCategory: null,
+          description: null,
+        }}
+      />,
+    );
+    expect(screen.getByText("distilled-skill")).toBeDefined();
+    // No skillDescription and no distilledSkill -> no export preview block
+    expect(screen.queryByText(/SKILL.md export preview/i)).toBeNull();
+  });
 });
