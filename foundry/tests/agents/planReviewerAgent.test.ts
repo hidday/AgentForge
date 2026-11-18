@@ -147,3 +147,26 @@ describe("PlanReviewerAgent.run() relatedContext rendering", () => {
     expect(prompt).not.toContain("{{relatedContextSection}}");
   });
 });
+
+describe("PlanReviewerAgent.run() operator note rendering", () => {
+  it("injects the operator note section into the prompt when an operator note is provided", async () => {
+    const { agent, getPrompt } = buildPlanReviewerAgent();
+
+    await agent.run(makePlan(), makeTaskBundle(), "run-1", {
+      operatorNote: "Focus on the rate-limiting edge cases.",
+    });
+
+    const prompt = getPrompt();
+    expect(prompt).toContain("## Operator Note");
+    expect(prompt).toContain("Focus on the rate-limiting edge cases.");
+  });
+
+  it("omits the operator note section when no operator note is provided", async () => {
+    const { agent, getPrompt } = buildPlanReviewerAgent();
+
+    await agent.run(makePlan(), makeTaskBundle(), "run-1");
+
+    const prompt = getPrompt();
+    expect(prompt).not.toContain("## Operator Note");
+  });
+});

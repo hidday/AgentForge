@@ -232,6 +232,90 @@ describe("buildChatSystemPrompt", () => {
     expect(result).not.toContain("x".repeat(4001));
   });
 
+  it("includes plan review findings when a PlanReview artifact is present", () => {
+    const artifact = makeArtifact({
+      type: "PlanReview",
+      version: 1,
+      payloadJson: {
+        summary: "Needs one change before approval.",
+        findings: [
+          {
+            id: "f1",
+            severity: "important",
+            title: "Missing error handling",
+            details: "The retry path swallows errors silently.",
+          },
+        ],
+        overallVerdict: "changes_requested",
+      },
+    });
+    const result = buildChatSystemPrompt(makeRun(), [artifact]);
+    expect(result).toContain("## Plan Review Findings");
+    expect(result).toContain("Needs one change before approval.");
+    expect(result).toContain("Missing error handling");
+    expect(result).toContain("The retry path swallows errors silently.");
+    expect(result).toContain("[important]");
+  });
+
+  it("omits the plan review summary line when the PlanReview artifact has no summary", () => {
+    const artifact = makeArtifact({
+      type: "PlanReview",
+      version: 1,
+      payloadJson: {
+        findings: [
+          { id: "f1", severity: "nit", title: "Nit", details: "Minor style issue." },
+        ],
+      },
+    });
+    const result = buildChatSystemPrompt(makeRun(), [artifact]);
+    expect(result).toContain("## Plan Review Findings");
+    expect(result).not.toContain("**Summary:** undefined");
+  });
+
+  it("omits the Plan Review Findings section entirely when summary and findings are both empty", () => {
+    const artifact = makeArtifact({
+      type: "PlanReview",
+      version: 1,
+      payloadJson: { findings: [] },
+    });
+    const result = buildChatSystemPrompt(makeRun(), [artifact]);
+    expect(result).not.toContain("## Plan Review Findings");
+  });
+
+  it("includes code review findings when a Review artifact is present", () => {
+    const artifact = makeArtifact({
+      type: "Review",
+      version: 1,
+      payloadJson: {
+        summary: "One blocking issue found.",
+        findings: [
+          {
+            id: "r1",
+            severity: "blocker",
+            title: "SQL injection risk",
+            details: "User input is concatenated directly into the query.",
+          },
+        ],
+      },
+    });
+    const result = buildChatSystemPrompt(makeRun(), [artifact]);
+    expect(result).toContain("## Code Review Findings");
+    expect(result).toContain("One blocking issue found.");
+    expect(result).toContain("SQL injection risk");
+    expect(result).toContain("User input is concatenated directly into the query.");
+    expect(result).toContain("[blocker]");
+  });
+
+  it("omits the Code Review Findings section entirely when summary and findings are both empty", () => {
+    const artifact = makeArtifact({
+      type: "Review",
+      version: 1,
+      payloadJson: { findings: [] },
+    });
+    const result = buildChatSystemPrompt(makeRun(), [artifact]);
+    expect(result).not.toContain("## Code Review Findings");
+  });
+
   it("uses the Plan artifact with the highest version when multiple exist", () => {
     const planV1 = makeArtifact({
       type: "Plan",
