@@ -374,6 +374,28 @@ describe("GitService", () => {
       );
       expect(buildWorktreeDirName("abcdefgh", "")).toBe("run-abcdefgh");
     });
+
+    it("drops the whole slug when even its first word exceeds the max length", () => {
+      const longWord = "x".repeat(31);
+      expect(buildWorktreeDirName("abcdefgh", `pry-42-${longWord}`)).toBe(
+        "run-abcdefgh-pry-42",
+      );
+    });
+
+    it("stops accumulating slug words once the combined length would exceed the max", () => {
+      const longWord = "x".repeat(28);
+      expect(buildWorktreeDirName("abcdefgh", `pry-42-short-${longWord}-more-parts`)).toBe(
+        "run-abcdefgh-pry-42-short",
+      );
+    });
+  });
+
+  describe("GitError", () => {
+    it("stringifies a non-Error cause in its message", () => {
+      const err = new GitError("fetch", "/tmp/repo", "a plain string failure");
+      expect(err.message).toBe("git fetch failed in /tmp/repo: a plain string failure");
+      expect(err.name).toBe("GitError");
+    });
   });
 
   describe("resolveMainRepoPath", () => {
@@ -389,6 +411,50 @@ describe("GitService", () => {
   describe("error handling", () => {
     it("throws GitError for invalid repo path", async () => {
       await expect(svc.currentBranch("/nonexistent")).rejects.toThrow(GitError);
+    });
+
+    it("fetch() throws GitError when the repo path is invalid", async () => {
+      await expect(svc.fetch("/nonexistent")).rejects.toThrow(GitError);
+    });
+
+    it("createWorktree() throws GitError when the repo path is invalid", async () => {
+      await expect(
+        svc.createWorktree("/nonexistent", "/nonexistent/wt", "feature/x", "main"),
+      ).rejects.toThrow(GitError);
+    });
+
+    it("pruneWorktrees() logs a warning but does not throw when the repo path is invalid", async () => {
+      const logger = spyLogger();
+      const service = new GitService(logger);
+      await expect(service.pruneWorktrees("/nonexistent")).resolves.toBeUndefined();
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.objectContaining({ repoPath: "/nonexistent" }),
+        "Failed to prune worktrees (best-effort cleanup)",
+      );
+    });
+
+    it("findWorktreeForBranch() throws GitError when the repo path is invalid", async () => {
+      await expect(svc.findWorktreeForBranch("/nonexistent", "main")).rejects.toThrow(GitError);
+    });
+
+    it("removeWorktree() logs a warning but does not throw when the worktree path is invalid", async () => {
+      const logger = spyLogger();
+      const service = new GitService(logger);
+      await expect(
+        service.removeWorktree(repoPath, "/nonexistent/worktree"),
+      ).resolves.toBeUndefined();
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.objectContaining({ worktreePath: "/nonexistent/worktree" }),
+        "Failed to remove worktree (best-effort cleanup)",
+      );
+    });
+
+    it("hasChanges() throws GitError when the worktree path is invalid", async () => {
+      await expect(svc.hasChanges("/nonexistent")).rejects.toThrow(GitError);
+    });
+
+    it("commitAll() throws GitError when the worktree path is invalid", async () => {
+      await expect(svc.commitAll("/nonexistent", "msg")).rejects.toThrow(GitError);
     });
   });
 });
