@@ -21,4 +21,14 @@ describe("skillNaming", () => {
       "dev-env-pause-resume",
     );
   });
+
+  it("slugifySkillName falls back to 'distilled-skill' when nothing alphanumeric remains", () => {
+    expect(slugifySkillName("!!!")).toBe("distilled-skill");
+    expect(slugifySkillName("")).toBe("distilled-skill");
+  });
+
+  it("normalizeSkillName falls back to the slugified fallback when name is undefined or blank", () => {
+    expect(normalizeSkillName(undefined, "some fallback label")).toBe("some-fallback-label");
+    expect(normalizeSkillName("   ", "another fallback")).toBe("another-fallback");
+  });
 });

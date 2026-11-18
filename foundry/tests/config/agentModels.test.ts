@@ -31,4 +31,15 @@ describe("agentModels", () => {
     expect(resolveAgentModel("plan-reviewer", env)).toBe("gpt-5.6-sol");
     expect(resolveAgentModel("reviewer", env)).toBe("gpt-5.6-sol");
   });
+
+  it("throws for a stage with no mapped tier (defensive exhaustiveness guard)", () => {
+    // STAGE_TIERS has no entry for an unknown stage, so tierForStage returns
+    // undefined and resolveAgentModel's switch falls through to its `default`
+    // case. This can't happen through the Stage union at compile time, but it
+    // guards against STAGE_TIERS drifting out of sync with the Stage type, so
+    // we force it at runtime via an invalid cast.
+    expect(() =>
+      resolveAgentModel("not-a-real-stage" as unknown as Parameters<typeof resolveAgentModel>[0], env),
+    ).toThrow("Unknown agent model tier: undefined");
+  });
 });

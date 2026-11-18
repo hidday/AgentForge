@@ -209,6 +209,40 @@ describe("RealLinearClient.getRelatedContext", () => {
     expect(ctx.blockers[0].id).toBe("blocker-id");
   });
 
+  it("logs a warning and drops a blocker whose relation.issue rejects", async () => {
+    const goodBlocker = makeFakeIssue({ id: "blocker-id", identifier: "PRY-101" });
+    const focus = makeFakeIssue({
+      id: "focus-id",
+      parent: Promise.resolve(null),
+      inverseRelations: () =>
+        Promise.resolve({
+          nodes: [
+            {
+              id: "rel-bad",
+              type: "blocks",
+              issue: Promise.reject(new Error("fetch failed")),
+            },
+            { id: "rel-good", type: "blocks", issue: Promise.resolve(goodBlocker) },
+          ],
+        }),
+    });
+
+    issuesById.set("focus-id", focus);
+    issuesById.set("blocker-id", goodBlocker);
+
+    const logger = makeLogger();
+    (client as unknown as { logger: unknown }).logger = logger;
+
+    const ctx = await client.getRelatedContext("focus-id");
+
+    expect(ctx.blockers).toHaveLength(1);
+    expect(ctx.blockers[0].id).toBe("blocker-id");
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.objectContaining({ relationId: "rel-bad", focusIssueId: "focus-id" }),
+      "Failed to hydrate blocker issue from relation",
+    );
+  });
+
   it("treats null description as empty string", async () => {
     const parent = makeFakeIssue({
       id: "parent-id",
@@ -226,5 +260,45 @@ describe("RealLinearClient.getRelatedContext", () => {
     const ctx = await client.getRelatedContext("focus-id");
 
     expect(ctx.parent?.description).toBe("");
+  });
+
+  it("treats a nullish inverseRelations connection as having no blockers", async () => {
+    const focus = makeFakeIssue({
+      id: "focus-id",
+      parent: Promise.resolve(null),
+      inverseRelations: () =>
+        Promise.resolve(
+          null as unknown as {
+            nodes: Array<{ id: string; type: string; issue: Promise<FakeIssue> }>;
+          },
+        ),
+    });
+
+    issuesById.set("focus-id", focus);
+
+    const ctx = await client.getRelatedContext("focus-id");
+
+    expect(ctx.blockers).toEqual([]);
+  });
+
+  it("falls back to 'Unknown' state and [] labels for a related issue with nullish connections", async () => {
+    const parent = makeFakeIssue({
+      id: "parent-id",
+      identifier: "PRY-100",
+      state: Promise.resolve(null) as unknown as FakeIssue["state"],
+      labels: () => Promise.resolve(null as unknown as { nodes: Array<{ id: string; name: string }> }),
+    });
+    const focus = makeFakeIssue({
+      id: "focus-id",
+      parent: Promise.resolve(parent),
+    });
+
+    issuesById.set("focus-id", focus);
+    issuesById.set("parent-id", parent);
+
+    const ctx = await client.getRelatedContext("focus-id");
+
+    expect(ctx.parent?.state).toBe("Unknown");
+    expect(ctx.parent?.labels).toEqual([]);
   });
 });

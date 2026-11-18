@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor, act } from "@testing-library/react";
+import { render, screen, waitFor, act, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { Artifact } from "@/api/client.ts";
 
@@ -44,6 +44,23 @@ const RUN_ID = "run-1";
 describe("ChatPanel", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    Element.prototype.scrollIntoView = vi.fn();
+  });
+
+  it("collapses the message list when the header is clicked, and expands it again", async () => {
+    render(
+      <ChatPanel
+        runId={RUN_ID}
+        artifacts={[makeArtifact("user", "Hello there", "a1", "2024-01-01T00:00:01Z")]}
+      />,
+    );
+    expect(screen.getByText("Hello there")).toBeDefined();
+
+    await userEvent.click(screen.getByText("Chat with Agent"));
+    expect(screen.queryByText("Hello there")).toBeNull();
+
+    await userEvent.click(screen.getByText("Chat with Agent"));
+    expect(screen.getByText("Hello there")).toBeDefined();
   });
 
   it("renders 'No messages yet' empty state when artifacts array is empty", () => {
@@ -214,6 +231,19 @@ describe("ChatPanel", () => {
     expect(screen.queryByText("Failing question")).toBeNull();
   });
 
+  it("shows a generic fallback error message when the rejection is not an Error instance", async () => {
+    mockApi.sendChatMessage.mockRejectedValue("not an Error object");
+
+    render(<ChatPanel runId={RUN_ID} artifacts={[]} />);
+    const input = screen.getByPlaceholderText(/ask the agent/i);
+    await userEvent.type(input, "Failing question");
+    await userEvent.click(screen.getByRole("button", { name: /send/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/chat request failed/i)).toBeDefined();
+    });
+  });
+
   it("message list does not change from artifact-derived count when only local state changes", async () => {
     let resolveRequest!: (v: { reply: string; durationMs: number }) => void;
     mockApi.sendChatMessage.mockReturnValue(
@@ -250,5 +280,81 @@ describe("ChatPanel", () => {
       // "New question" should NOT appear
       expect(screen.queryByText("New question")).toBeNull();
     });
+  });
+
+  it("pressing Enter in the input submits the message", async () => {
+    mockApi.sendChatMessage.mockResolvedValue({ reply: "Response", durationMs: 100 });
+
+    render(<ChatPanel runId={RUN_ID} artifacts={[]} />);
+    const input = screen.getByPlaceholderText(/ask the agent/i);
+    await userEvent.type(input, "Enter-submitted question{Enter}");
+
+    await waitFor(() => {
+      expect(mockApi.sendChatMessage).toHaveBeenCalledWith(RUN_ID, "Enter-submitted question");
+    });
+  });
+
+  it("does not call sendChatMessage when the form is submitted with only whitespace", () => {
+    render(<ChatPanel runId={RUN_ID} artifacts={[]} />);
+    const input = screen.getByPlaceholderText(/ask the agent/i) as HTMLInputElement;
+    // Bypass the (disabled) submit button and dispatch the submit event
+    // directly, so the `!trimmed` guard in handleSubmit is actually exercised
+    // even though the UI itself prevents a user from triggering it this way.
+    const form = input.closest("form")!;
+    fireEvent.change(input, { target: { value: "   " } });
+    fireEvent.submit(form);
+    expect(mockApi.sendChatMessage).not.toHaveBeenCalled();
+  });
+
+  it("does not call sendChatMessage again when the form is resubmitted while a request is already loading", async () => {
+    let resolveRequest!: (v: { reply: string; durationMs: number }) => void;
+    mockApi.sendChatMessage.mockReturnValue(
+      new Promise<{ reply: string; durationMs: number }>((res) => {
+        resolveRequest = res;
+      }),
+    );
+
+    render(<ChatPanel runId={RUN_ID} artifacts={[]} />);
+    const input = screen.getByPlaceholderText(/ask the agent/i) as HTMLInputElement;
+    await userEvent.type(input, "First question");
+    const form = input.closest("form")!;
+    fireEvent.submit(form);
+    expect(mockApi.sendChatMessage).toHaveBeenCalledTimes(1);
+
+    // Re-submit directly (bypassing the disabled input/button) while isLoading
+    // is still true — the `isLoading` half of the guard should prevent a
+    // second call.
+    fireEvent.submit(form);
+    expect(mockApi.sendChatMessage).toHaveBeenCalledTimes(1);
+
+    act(() => {
+      resolveRequest({ reply: "Done", durationMs: 100 });
+    });
+    await waitFor(() => expect(screen.queryByText(/agent is thinking/i)).toBeNull());
+  });
+
+  it("does not throw when scrollIntoView is unavailable on the ref (e.g. not implemented by jsdom)", () => {
+    // @ts-expect-error -- deliberately simulating an environment without scrollIntoView
+    delete Element.prototype.scrollIntoView;
+    expect(() => {
+      render(<ChatPanel runId={RUN_ID} artifacts={[]} />);
+    }).not.toThrow();
+  });
+
+  it("renders an assistant message with no content as an empty string (nullish payload.content)", () => {
+    const artifacts: Artifact[] = [
+      {
+        id: "a1",
+        runId: RUN_ID,
+        type: "ChatMessage",
+        version: 1,
+        payloadJson: { role: "assistant" },
+        rawText: "",
+        createdAt: "2024-01-01T00:00:01Z",
+      },
+    ];
+    render(<ChatPanel runId={RUN_ID} artifacts={artifacts} />);
+    const markdownEls = screen.getAllByTestId("markdown-content");
+    expect(markdownEls[0].textContent).toBe("");
   });
 });
