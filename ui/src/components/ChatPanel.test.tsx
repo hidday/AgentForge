@@ -44,6 +44,23 @@ const RUN_ID = "run-1";
 describe("ChatPanel", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    Element.prototype.scrollIntoView = vi.fn();
+  });
+
+  it("collapses the message list when the header is clicked, and expands it again", async () => {
+    render(
+      <ChatPanel
+        runId={RUN_ID}
+        artifacts={[makeArtifact("user", "Hello there", "a1", "2024-01-01T00:00:01Z")]}
+      />,
+    );
+    expect(screen.getByText("Hello there")).toBeDefined();
+
+    await userEvent.click(screen.getByText("Chat with Agent"));
+    expect(screen.queryByText("Hello there")).toBeNull();
+
+    await userEvent.click(screen.getByText("Chat with Agent"));
+    expect(screen.getByText("Hello there")).toBeDefined();
   });
 
   it("renders 'No messages yet' empty state when artifacts array is empty", () => {

@@ -32,6 +32,24 @@ const skill: SkillDocument = {
 };
 
 describe("DistilledSkillPanel", () => {
+  it("shows a loading indicator when loading is true", () => {
+    render(
+      <DistilledSkillPanel distilledSkill={null} distillationDecision={null} loading={true} />,
+    );
+    expect(screen.getByText("Loading distilled skill...")).toBeDefined();
+  });
+
+  it("shows an error message when error is set", () => {
+    render(
+      <DistilledSkillPanel
+        distilledSkill={null}
+        distillationDecision={null}
+        error="Failed to load skill"
+      />,
+    );
+    expect(screen.getByText("Failed to load skill")).toBeDefined();
+  });
+
   it("renders nothing when distillation did not persist a skill", () => {
     const { container } = render(
       <DistilledSkillPanel
