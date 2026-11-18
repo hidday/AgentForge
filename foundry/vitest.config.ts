@@ -13,7 +13,9 @@ export default defineConfig({
       // src/generated/** is Prisma-generated client code (gitignored, regenerated
       // by `prisma generate` on every install); it is not hand-written and is
       // exercised indirectly through mocked PrismaClient instances in tests.
-      exclude: ["src/server.ts", "src/generated/**"],
+      // src/runtime/runnerTypes.ts contains only TypeScript type/interface
+      // declarations with no runtime code to execute or test.
+      exclude: ["src/server.ts", "src/generated/**", "src/runtime/runnerTypes.ts"],
       reporter: ["text", "json-summary", "html"],
       reportsDirectory: "coverage",
     },
