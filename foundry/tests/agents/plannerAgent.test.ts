@@ -1,6 +1,8 @@
 import { describe, it, expect, vi } from "vitest";
 import { PlannerAgent } from "../../src/agents/plannerAgent.js";
 import type { TaskBundle } from "../../src/schemas/taskBundle.js";
+import type { Plan } from "../../src/schemas/plan.js";
+import type { SkillDocument } from "../../src/domain/types.js";
 
 function makeTaskBundle(): TaskBundle {
   return {
@@ -302,6 +304,186 @@ describe("PlannerAgent.run()", () => {
       expect(prompt).not.toContain("BEGIN BACKGROUND CONTEXT");
       expect(prompt).not.toContain("Background: Related Linear Context");
       expect(prompt).not.toContain("{{relatedContextSection}}");
+    });
+  });
+
+  describe("planReviewFindings injection", () => {
+    it("renders the AI Plan Review Findings section when planReviewFindings is provided", async () => {
+      const { agent, getPrompt } = buildPlannerAgent();
+      const bundle = makeTaskBundle();
+
+      await agent.run(bundle, "run-1", {
+        planReviewFindings: {
+          summary: "Mostly good, one gap.",
+          findings: [
+            {
+              id: "pf1",
+              severity: "important",
+              title: "Missing error handling",
+              details: "No handler for malformed input",
+            },
+          ],
+        },
+      });
+
+      const prompt = getPrompt();
+      expect(prompt).toContain("## AI Plan Review Findings (from previous plan)");
+      expect(prompt).toContain("Mostly good, one gap.");
+      expect(prompt).toContain("[important] Missing error handling** (pf1): No handler for malformed input");
+      expect(prompt).toContain("Incorporate these findings into the revised plan");
+    });
+
+    it("omits the planReviewFindings section when absent", async () => {
+      const { agent, getPrompt } = buildPlannerAgent();
+      const bundle = makeTaskBundle();
+
+      await agent.run(bundle, "run-1");
+
+      const prompt = getPrompt();
+      expect(prompt).not.toContain("## AI Plan Review Findings");
+    });
+  });
+
+  describe("previousPlan injection", () => {
+    function makePreviousPlan(overrides: Partial<Plan> = {}): Plan {
+      return {
+        planVersion: 3,
+        summary: "Previous summary",
+        requirementsTraceability: "",
+        assumptions: [],
+        openQuestions: [],
+        risks: [],
+        steps: [{ id: "s1", title: "Step 1", description: "Do something" }],
+        testPlan: "Run the old tests",
+        confidence: 0.75,
+        ...overrides,
+      };
+    }
+
+    it("renders the Previously Rejected Plan section with steps and confidence", async () => {
+      const { agent, getPrompt } = buildPlannerAgent();
+      const bundle = makeTaskBundle();
+
+      await agent.run(bundle, "run-1", {
+        previousPlan: makePreviousPlan(),
+      });
+
+      const prompt = getPrompt();
+      expect(prompt).toContain("## Previously Rejected Plan (v3)");
+      expect(prompt).toContain("**Confidence:** 75%");
+      expect(prompt).toContain("1. **Step 1** (s1): Do something");
+      expect(prompt).toContain("**Test Plan:** Run the old tests");
+      expect(prompt).toContain("Use this as the starting point for the new plan.");
+      // No risks/assumptions/questions provided, so those blocks should not render.
+      expect(prompt).not.toContain("**Risks:**");
+      expect(prompt).not.toContain("**Assumptions:**");
+      expect(prompt).not.toContain("**Open Questions:**");
+    });
+
+    it("renders risks, assumptions and open questions when present on the previous plan", async () => {
+      const { agent, getPrompt } = buildPlannerAgent();
+      const bundle = makeTaskBundle();
+
+      await agent.run(bundle, "run-1", {
+        previousPlan: makePreviousPlan({
+          risks: ["Could break backwards compatibility"],
+          assumptions: ["Users are on the latest client"],
+          openQuestions: [
+            { id: "q1", question: "Is this blocking?", requiredForExecution: true },
+            { id: "q2", question: "Nice to have?", requiredForExecution: false },
+          ],
+        }),
+      });
+
+      const prompt = getPrompt();
+      expect(prompt).toContain("**Risks:**\n- Could break backwards compatibility");
+      expect(prompt).toContain("**Assumptions:**\n- Users are on the latest client");
+      expect(prompt).toContain("**Open Questions:**");
+      expect(prompt).toContain("[q1] Is this blocking? *(blocks execution)*");
+      expect(prompt).toContain("[q2] Nice to have?");
+      expect(prompt).not.toContain("Nice to have? *(blocks execution)*");
+    });
+
+    it("omits the previousPlan section when absent", async () => {
+      const { agent, getPrompt } = buildPlannerAgent();
+      const bundle = makeTaskBundle();
+
+      await agent.run(bundle, "run-1");
+
+      const prompt = getPrompt();
+      expect(prompt).not.toContain("Previously Rejected Plan");
+    });
+  });
+
+  describe("priorSkills injection", () => {
+    function makeSkill(overrides: Partial<SkillDocument> = {}): SkillDocument {
+      return {
+        id: "skill-1",
+        repoSlug: "acme/backend-api",
+        name: "oauth-setup",
+        description: "How to wire up OAuth2 in this repo",
+        taskCategory: "auth",
+        skillMarkdown: "## OAuth Setup\n\nUse the shared client.",
+        utilityScore: 0.8,
+        lastUsedAt: new Date("2026-01-01T00:00:00Z"),
+        ...overrides,
+      };
+    }
+
+    it("renders a prior-skills section with name, taskCategory and description when present", async () => {
+      const { agent, getPrompt } = buildPlannerAgent();
+      const bundle = makeTaskBundle();
+
+      await agent.run(bundle, "run-1", {
+        priorSkills: [makeSkill()],
+      });
+
+      const prompt = getPrompt();
+      expect(prompt).toContain("## Prior Skills from Similar Tasks");
+      expect(prompt).toContain("### oauth-setup (auth)");
+      expect(prompt).toContain("How to wire up OAuth2 in this repo");
+      expect(prompt).toContain("## OAuth Setup");
+      expect(prompt).toContain("Use the shared client.");
+    });
+
+    it("falls back to taskCategory as the heading and omits intro when name/description are absent", async () => {
+      const { agent, getPrompt } = buildPlannerAgent();
+      const bundle = makeTaskBundle();
+
+      await agent.run(bundle, "run-1", {
+        priorSkills: [
+          makeSkill({ name: null, description: null, taskCategory: "infra" }),
+        ],
+      });
+
+      const prompt = getPrompt();
+      expect(prompt).toContain("### infra\n\n## OAuth Setup");
+    });
+
+    it("joins multiple prior skills with a blank line between blocks", async () => {
+      const { agent, getPrompt } = buildPlannerAgent();
+      const bundle = makeTaskBundle();
+
+      await agent.run(bundle, "run-1", {
+        priorSkills: [
+          makeSkill({ id: "s1", name: "skill-a", taskCategory: "catA" }),
+          makeSkill({ id: "s2", name: "skill-b", taskCategory: "catB" }),
+        ],
+      });
+
+      const prompt = getPrompt();
+      expect(prompt).toContain("### skill-a (catA)");
+      expect(prompt).toContain("### skill-b (catB)");
+    });
+
+    it("omits the priorSkills section when absent or empty", async () => {
+      const { agent, getPrompt } = buildPlannerAgent();
+      const bundle = makeTaskBundle();
+
+      await agent.run(bundle, "run-1", { priorSkills: [] });
+
+      const prompt = getPrompt();
+      expect(prompt).not.toContain("## Prior Skills from Similar Tasks");
     });
   });
 });
