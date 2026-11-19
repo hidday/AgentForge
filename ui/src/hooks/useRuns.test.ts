@@ -60,6 +60,25 @@ describe("useRuns", () => {
     expect(result.current.runs).toEqual([]);
   });
 
+  it("falls back to a generic error message for a non-Error rejection", async () => {
+    mockApi.getRuns.mockRejectedValue("boom");
+
+    const { result } = renderHook(() => useRuns());
+    await waitFor(() => expect(result.current.error).toBe("Failed to fetch runs"));
+  });
+
+  it("ignores SSE event types it does not handle", async () => {
+    mockApi.getRuns.mockResolvedValue({ runs: [{ id: "run-1", state: "Todo" }] });
+
+    const { result } = renderHook(() => useRuns());
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    act(() => sseCallback!({ type: "process:started", runId: "run-1" }));
+
+    expect(mockApi.getRuns).toHaveBeenCalledTimes(1);
+    expect(result.current.runs).toEqual([{ id: "run-1", state: "Todo" }]);
+  });
+
   it("refetches the full list on a run:created event", async () => {
     mockApi.getRuns.mockResolvedValue({ runs: [] });
 

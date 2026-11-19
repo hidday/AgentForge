@@ -48,6 +48,13 @@ describe("useRunSkills", () => {
     await waitFor(() => expect(result.current.error).toBe("skills unavailable"));
   });
 
+  it("falls back to a generic error message for a non-Error rejection", async () => {
+    mockApi.getRunSkills.mockRejectedValue("boom");
+
+    const { result } = renderHook(() => useRunSkills("run-1"));
+    await waitFor(() => expect(result.current.error).toBe("Failed to fetch run skills"));
+  });
+
   it("refetches only on run:state-changed or run:artifact-created events for this run", async () => {
     mockApi.getRunSkills.mockResolvedValue({
       injectedSkills: [],

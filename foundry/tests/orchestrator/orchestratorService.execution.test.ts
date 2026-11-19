@@ -21,9 +21,26 @@ function runInImplementing(overrides: Record<string, unknown> = {}) {
   });
 }
 
+/** assertCanExecute requires a Plan artifact whose version matches approvedPlanVersion. */
+function withApprovedPlanArtifact(
+  artifactRepo: { findLatestByType: ReturnType<typeof vi.fn> },
+  extra?: (runId: string, type: string) => unknown,
+) {
+  artifactRepo.findLatestByType.mockImplementation((runId: string, type: string) => {
+    if (type === "Plan") {
+      return Promise.resolve(makeArtifact({ type: "Plan", payloadJson: makePlan({ planVersion: 1 }) }));
+    }
+    return Promise.resolve(extra ? extra(runId, type) : null);
+  });
+}
+
 describe("OrchestratorService.runExecution", () => {
   it("runs the executor, records the PR, and proceeds to code review on success", async () => {
-    const { deps, runRepo, executorAgent, linearClient } = buildDeps({}, runInImplementing());
+    const { deps, runRepo, artifactRepo, executorAgent, linearClient } = buildDeps(
+      {},
+      runInImplementing(),
+    );
+    withApprovedPlanArtifact(artifactRepo);
     const svc = new OrchestratorService(deps as never);
     const reviewSpy = vi
       .spyOn(svc, "runReview")
@@ -42,7 +59,8 @@ describe("OrchestratorService.runExecution", () => {
   });
 
   it("checkpoints the branch before running the executor when one already exists", async () => {
-    const { deps, gitService } = buildDeps({}, runInImplementing());
+    const { deps, artifactRepo, gitService } = buildDeps({}, runInImplementing());
+    withApprovedPlanArtifact(artifactRepo);
     const svc = new OrchestratorService(deps as never);
     vi.spyOn(svc, "runReview").mockResolvedValue(makeRun());
 
