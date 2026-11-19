@@ -147,6 +147,18 @@ describe("RunDetailPage", () => {
     expect(screen.getByTestId("state-badge").textContent).toBe("Implementing");
   });
 
+  it("falls back to a truncated linearIssueId when neither title nor identifier is set", () => {
+    setHookDefaults({
+      run: makeRun({
+        linearIssueTitle: null,
+        linearIssueIdentifier: null,
+        linearIssueId: "abcdefgh12345",
+      }),
+    });
+    renderPage();
+    expect(screen.getByText("abcdefgh")).toBeDefined();
+  });
+
   it("renders a Linear link only when linearIssueUrl is present", () => {
     setHookDefaults({ run: makeRun({ linearIssueUrl: "https://linear.app/x" }) });
     renderPage();

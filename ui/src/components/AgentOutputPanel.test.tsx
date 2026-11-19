@@ -48,6 +48,12 @@ describe("AgentOutputPanel", () => {
     expect(screen.getByText("Planning")).toBeDefined();
   });
 
+  it("formats elapsed time in minutes and seconds once a process has run over a minute", () => {
+    const startedAt = new Date(Date.now() - 90_000).toISOString();
+    render(<AgentOutputPanel processes={[makeProcess({ startedAt })]} output="" />);
+    expect(screen.getByText("1m 30s")).toBeDefined();
+  });
+
   it("toggles collapsed state when the header is clicked", async () => {
     parseClaudeOutputMock.mockReturnValue([{ type: "text", content: "hello" }]);
     render(<AgentOutputPanel processes={[]} output="hello" />);
@@ -112,6 +118,12 @@ describe("AgentOutputPanel", () => {
     parseClaudeOutputMock.mockReturnValue([{ type: "raw", content: "unstructured line" }]);
     render(<AgentOutputPanel processes={[]} output="raw" />);
     expect(screen.getByText("unstructured line")).toBeDefined();
+  });
+
+  it("shows a waiting placeholder in raw mode when output is still empty", async () => {
+    render(<AgentOutputPanel processes={[makeProcess()]} output="" />);
+    await userEvent.click(screen.getByText("raw"));
+    expect(screen.getByText("Waiting for output...")).toBeDefined();
   });
 
   it("switches to raw mode and shows the unparsed output verbatim", async () => {

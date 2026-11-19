@@ -87,12 +87,13 @@ describe("DashboardPage", () => {
     expect(screen.getByText("Network error")).toBeDefined();
   });
 
-  it("renders stat counts per state category", () => {
+  it("renders stat counts per state category, treating an unmapped state as idle", () => {
     useRunsMock.mockReturnValue({
       runs: [
         makeRun({ id: "r1", state: "Implementing" }),
         makeRun({ id: "r2", state: "Done" }),
         makeRun({ id: "r3", state: "Done" }),
+        makeRun({ id: "r4", state: "SomeUnmappedState" }),
       ],
       loading: false,
       error: null,
@@ -100,7 +101,7 @@ describe("DashboardPage", () => {
     });
     const { container } = renderPage();
     const statsGrid = container.querySelector(".grid-cols-5") as HTMLElement;
-    expect(within(statsGrid).getByText("Total").previousElementSibling?.textContent).toBe("3");
+    expect(within(statsGrid).getByText("Total").previousElementSibling?.textContent).toBe("4");
     expect(within(statsGrid).getByText("Active").previousElementSibling?.textContent).toBe("1");
     expect(within(statsGrid).getByText("Done").previousElementSibling?.textContent).toBe("2");
   });

@@ -40,28 +40,8 @@ describe("OrchestratorService.rejectPlan blocking questions", () => {
 
 describe("OrchestratorService.updateSkillMetrics failure path", () => {
   it("decrements skill utility (incrementFailure) when a run with injected skills fails", async () => {
-    const { deps, eventRepo, agentSkillRepo } = buildDeps({}, makeRun({ state: RunState.Todo }));
-    eventRepo.findByRunId.mockResolvedValue([
-      {
-        id: "e1",
-        runId: "run-1",
-        eventType: "SKILL_INJECTION",
-        source: "orchestrator",
-        payloadJson: { skillIds: ["skill-1"] },
-        createdAt: new Date(),
-      },
-    ]);
-    const svc = new OrchestratorService(deps as never);
-    const spy = vi
-      .spyOn(svc as unknown as { transitionAndRecord: unknown } as never, "transitionAndRecord")
-      .mockImplementation(async () => {
-        throw new Error("unused");
-      });
-    spy.mockRestore();
-
-    // Drive the real failure path through handleCommand's pause/resume is not
-    // terminal; instead call the private path indirectly via answerQuestions'
-    // CLARIFICATION_EXHAUSTED transition, which lands on Failed.
+    // Drive the failure path via answerQuestions' CLARIFICATION_EXHAUSTED
+    // transition, which lands on Failed and triggers updateSkillMetrics(false).
     const run = makeRun({ state: RunState.HumanClarificationNeeded });
     const built = buildDeps({}, run);
     built.eventRepo.findByRunId.mockResolvedValue([
@@ -132,7 +112,6 @@ describe("OrchestratorService.updateSkillMetrics failure path", () => {
     const result = await svc2.answerQuestions("run-1", [{ questionId: "q1", answer: "y" }]);
 
     expect(result.state).toBe(RunState.Failed);
-    expect(agentSkillRepo.incrementFailure).not.toHaveBeenCalled(); // different agentSkillRepo instance
     expect(built.agentSkillRepo.incrementFailure).toHaveBeenCalledWith("skill-1");
     expect(built.agentSkillRepo.incrementSuccess).not.toHaveBeenCalled();
   });
