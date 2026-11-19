@@ -111,6 +111,26 @@ describe("ActionBar", () => {
     expect(mockApi.rejectPlan).toHaveBeenCalledWith("run-1", undefined, "fresh");
   });
 
+  it("closes the ConfirmDialog without calling the API when its Cancel button is clicked", async () => {
+    render(<ActionBar runId="run-1" state="ReadyForHumanReview" onAction={vi.fn()} />);
+    await userEvent.click(screen.getByText("Approve & Complete"));
+    expect(screen.getByText("Complete Run")).toBeDefined();
+
+    await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
+
+    expect(mockApi.approveReview).not.toHaveBeenCalled();
+    expect(screen.queryByText("Complete Run")).toBeNull();
+  });
+
+  it("re-selecting the already-active 'Revise plan' mode in the reject dialog keeps mode=iterate", async () => {
+    render(<ActionBar runId="run-1" state="AwaitingPlanApproval" onAction={vi.fn()} />);
+    await userEvent.click(screen.getByText("Reject Plan"));
+    await userEvent.click(screen.getByText("Revise plan"));
+    const rejectButtons = screen.getAllByRole("button", { name: "Reject Plan" });
+    await userEvent.click(rejectButtons[rejectButtons.length - 1]!);
+    expect(mockApi.rejectPlan).toHaveBeenCalledWith("run-1", undefined, "iterate");
+  });
+
   it("closes the reject dialog on cancel without calling the API", async () => {
     render(<ActionBar runId="run-1" state="AwaitingPlanApproval" onAction={vi.fn()} />);
 

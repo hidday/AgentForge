@@ -108,6 +108,12 @@ describe("AgentOutputPanel", () => {
     expect(screen.getByText("Something broke")).toBeDefined();
   });
 
+  it("renders a 'raw' typed block using the generic fallback renderer", () => {
+    parseClaudeOutputMock.mockReturnValue([{ type: "raw", content: "unstructured line" }]);
+    render(<AgentOutputPanel processes={[]} output="raw" />);
+    expect(screen.getByText("unstructured line")).toBeDefined();
+  });
+
   it("switches to raw mode and shows the unparsed output verbatim", async () => {
     parseClaudeOutputMock.mockReturnValue([{ type: "text", content: "parsed text" }]);
     render(<AgentOutputPanel processes={[]} output="the raw ndjson" />);

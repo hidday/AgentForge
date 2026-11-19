@@ -75,4 +75,30 @@ describe("WorkflowStepper", () => {
     expect(screen.queryByText("Revising Plan")).toBeNull();
     expect(screen.queryByText("Blocked")).toBeNull();
   });
+
+  it("shows the Addressing Review side-state banner for AddressingReview", () => {
+    render(<WorkflowStepper currentState="AddressingReview" events={[]} />);
+    expect(screen.getByText("Addressing Review")).toBeDefined();
+  });
+
+  it("ignores an event with no 'to' field (or a null payload) when building timestamps", () => {
+    const noToEvent = makeEvent("", "2024-01-01T00:00:00Z");
+    const nullPayloadEvent = { ...noToEvent, id: "ev-null", payloadJson: null };
+    render(
+      <WorkflowStepper currentState="Implementing" events={[noToEvent, nullPayloadEvent]} />,
+    );
+    // Should not throw and should still render the step labels normally.
+    expect(screen.getByText("Planning")).toBeDefined();
+  });
+
+  it("keeps only the earliest timestamp when two events report the same 'to' state", () => {
+    const events = [
+      makeEvent("Planning", "2024-01-01T00:00:00Z"),
+      makeEvent("Planning", "2024-06-01T00:00:00Z"),
+    ];
+    const { container } = render(<WorkflowStepper currentState="Implementing" events={events} />);
+    // Only one timestamp node should be attached to the Planning step despite two events.
+    const timestampNodes = container.querySelectorAll(".text-\\[10px\\].text-text-muted.mt-0\\.5");
+    expect(timestampNodes.length).toBe(1);
+  });
 });

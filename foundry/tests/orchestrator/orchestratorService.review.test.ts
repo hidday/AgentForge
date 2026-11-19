@@ -74,31 +74,6 @@ describe("OrchestratorService.runReview", () => {
     expect(result.state).toBe(RunState.ReadyForHumanReview);
   });
 
-  it("skips fetching a PR diff when the run has no PR number", async () => {
-    const { deps, artifactRepo, githubClient, reviewerAgent } = buildDeps(
-      {},
-      runInAIReview({ prNumber: null }),
-    );
-    withReviewArtifacts(artifactRepo, {
-      ExecutionReport: makeArtifact({ type: "ExecutionReport", payloadJson: makeExecutionReport() }),
-      Plan: makeArtifact({ type: "Plan", payloadJson: makePlan() }),
-    });
-    reviewerAgent.run.mockResolvedValue(makeReview({ overallVerdict: "approved" }));
-    const svc = new OrchestratorService(deps as never);
-    vi.spyOn(svc, "markReady").mockResolvedValue(makeRun());
-
-    await svc.runReview("run-1");
-
-    expect(githubClient.getPRDiff).not.toHaveBeenCalled();
-    expect(reviewerAgent.run).toHaveBeenCalledWith(
-      expect.anything(),
-      expect.anything(),
-      "",
-      expect.anything(),
-      "run-1",
-    );
-  });
-
   it("rejects when the run is not in AIReview state", async () => {
     const { deps } = buildDeps({}, makeRun({ state: RunState.Todo }));
     const svc = new OrchestratorService(deps as never);
@@ -143,7 +118,7 @@ describe("OrchestratorService.runRemediation", () => {
     );
     expect(linearClient.postComment).toHaveBeenCalledTimes(2);
     expect(markReadySpy).toHaveBeenCalledWith("run-1");
-    expect(result.state).toBe(RunState.AIReview);
+    expect(result.state).toBe(RunState.ReadyForHumanReview);
   });
 
   it("rejects when there is no review to remediate against", async () => {

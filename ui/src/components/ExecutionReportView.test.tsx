@@ -19,6 +19,16 @@ describe("ExecutionReportView", () => {
     expect(screen.getByText("All checks passed")).toBeDefined();
   });
 
+  it("renders the mid-range score percentage", () => {
+    render(<ExecutionReportView report={{ score: 0.5 }} />);
+    expect(screen.getByText("Score: 50%")).toBeDefined();
+  });
+
+  it("renders the low-range score percentage", () => {
+    render(<ExecutionReportView report={{ score: 0.1 }} />);
+    expect(screen.getByText("Score: 10%")).toBeDefined();
+  });
+
   it("does not render a score rationale when score is absent, even if scoreRationale is set", () => {
     render(<ExecutionReportView report={{ scoreRationale: "orphaned text" }} />);
     expect(screen.queryByText("orphaned text")).toBeNull();
@@ -45,6 +55,16 @@ describe("ExecutionReportView", () => {
     expect(screen.getByText("0 errors")).toBeDefined();
     expect(screen.getByText("tests")).toBeDefined();
     expect(screen.getByText("2 failing")).toBeDefined();
+  });
+
+  it("falls back to the neutral icon/styling for a check status that is neither pass nor fail", () => {
+    render(
+      <ExecutionReportView
+        report={{ checks: { typecheck: { status: "skipped", details: "n/a" } } }}
+      />,
+    );
+    expect(screen.getByText("typecheck")).toBeDefined();
+    expect(screen.getByText("n/a")).toBeDefined();
   });
 
   it("does not render a Checks section when checks is null", () => {

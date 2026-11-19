@@ -80,6 +80,25 @@ describe("ArtifactTabs", () => {
     expect(screen.getByText("Makes sense")).toBeDefined();
   });
 
+  it("styles dismissed, partially_incorporated, and unrecognized disposition statuses distinctly", () => {
+    render(
+      <ArtifactTabs
+        artifacts={[
+          makeArtifact("PlanRevision", {
+            dispositions: [
+              { findingId: "F1", status: "dismissed", rationale: "r1" },
+              { findingId: "F2", status: "partially_incorporated", rationale: "r2" },
+              { findingId: "F3", status: "other", rationale: "r3" },
+            ],
+          }),
+        ]}
+      />,
+    );
+    expect(screen.getByText("dismissed")).toBeDefined();
+    expect(screen.getByText("partially incorporated")).toBeDefined();
+    expect(screen.getByText("other")).toBeDefined();
+  });
+
   it("renders the ExecutionReport artifact under the Execution tab", () => {
     render(<ArtifactTabs artifacts={[makeArtifact("ExecutionReport", { executionVersion: 1 })]} />);
     expect(screen.getByText("v1")).toBeDefined();
@@ -100,6 +119,25 @@ describe("ArtifactTabs", () => {
     expect(screen.getByText("F2")).toBeDefined();
     expect(screen.getByText("Fixed null check")).toBeDefined();
     expect(screen.getByText(/v2 report/)).toBeDefined();
+  });
+
+  it("styles rejected and other remediation resolution statuses distinctly, and reflects a custom execution version", () => {
+    render(
+      <ArtifactTabs
+        artifacts={[
+          makeArtifact("Remediation", {
+            resolution: [
+              { findingId: "F3", status: "rejected", action: "a3", rationale: "r3" },
+              { findingId: "F4", status: "deferred", action: "a4", rationale: "r4" },
+            ],
+            executionReport: { executionVersion: 5 },
+          }),
+        ]}
+      />,
+    );
+    expect(screen.getByText("rejected")).toBeDefined();
+    expect(screen.getByText("deferred")).toBeDefined();
+    expect(screen.getByText(/v5 report/)).toBeDefined();
   });
 
   it("shows a 'no rejection feedback' message when the rejectionFeedback tab has no matching artifacts", () => {

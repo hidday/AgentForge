@@ -86,6 +86,16 @@ describe("RunsTable", () => {
     expect(link.getAttribute("href")).toBe("https://linear.app/issue/1");
   });
 
+  it("handles a click on the Linear link without throwing (stopPropagation guard)", async () => {
+    renderTable([makeRun({ linearIssueUrl: "https://linear.app/issue/1" })]);
+    const link = screen.getByTitle("Open in Linear");
+    await userEvent.click(link);
+    // The link stays in the document and keeps its href after the click handler runs.
+    expect(screen.getByTitle("Open in Linear").getAttribute("href")).toBe(
+      "https://linear.app/issue/1",
+    );
+  });
+
   it("shows Approve/Reject actions only for AwaitingPlanApproval runs and triggers approvePlan", async () => {
     mockApi.approvePlan.mockResolvedValue({ ok: true });
     const onAction = vi.fn();

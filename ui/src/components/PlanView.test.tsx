@@ -18,6 +18,16 @@ describe("PlanView", () => {
     expect(screen.getByText("85%")).toBeDefined();
   });
 
+  it("uses the mid-range (waiting) confidence style between 0.4 and 0.7", () => {
+    render(<PlanView plan={{ confidence: 0.5 }} />);
+    expect(screen.getByText("50%")).toBeDefined();
+  });
+
+  it("uses the low (blocked) confidence style below 0.4", () => {
+    render(<PlanView plan={{ confidence: 0.2 }} />);
+    expect(screen.getByText("20%")).toBeDefined();
+  });
+
   it("renders the summary as markdown", () => {
     render(<PlanView plan={{ summary: "This plan does X." }} />);
     expect(screen.getByText("This plan does X.")).toBeDefined();

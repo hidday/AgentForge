@@ -45,6 +45,31 @@ describe("Markdown", () => {
     expect(screen.getByText("1")).toBeDefined();
   });
 
+  it("renders an ordered list using the custom ol component", () => {
+    render(<Markdown>{"1. first\n2. second"}</Markdown>);
+    const items = screen.getAllByRole("listitem");
+    expect(items.length).toBe(2);
+    expect(items[0].closest("ol")).not.toBeNull();
+  });
+
+  it("renders all heading levels with their custom components", () => {
+    render(<Markdown>{"# H1\n## H2\n### H3\n#### H4"}</Markdown>);
+    expect(screen.getByText("H1").tagName).toBe("H1");
+    expect(screen.getByText("H2").tagName).toBe("H2");
+    expect(screen.getByText("H3").tagName).toBe("H3");
+    expect(screen.getByText("H4").tagName).toBe("H4");
+  });
+
+  it("renders a blockquote with the custom component", () => {
+    render(<Markdown>{"> quoted text"}</Markdown>);
+    expect(screen.getByText("quoted text").closest("blockquote")).not.toBeNull();
+  });
+
+  it("renders a horizontal rule with the custom component", () => {
+    const { container } = render(<Markdown>{"above\n\n---\n\nbelow"}</Markdown>);
+    expect(container.querySelector("hr")).not.toBeNull();
+  });
+
   it("applies the provided className to the wrapping div", () => {
     const { container } = render(<Markdown className="my-extra-class">text</Markdown>);
     expect(container.firstElementChild?.className).toContain("my-extra-class");

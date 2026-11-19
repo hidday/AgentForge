@@ -10,12 +10,21 @@ vi.mock("@/hooks/useRuns.ts", () => ({
 }));
 
 vi.mock("@/components/LinearSyncDialog.tsx", () => ({
-  LinearSyncDialog: ({ open, onIngestComplete }: { open: boolean; onIngestComplete: (s: { started: number; skipped: number }) => void }) =>
+  LinearSyncDialog: ({
+    open,
+    onClose,
+    onIngestComplete,
+  }: {
+    open: boolean;
+    onClose: () => void;
+    onIngestComplete: (s: { started: number; skipped: number }) => void;
+  }) =>
     open ? (
       <div data-testid="sync-dialog">
         <button onClick={() => onIngestComplete({ started: 2, skipped: 1 })}>
           finish-sync
         </button>
+        <button onClick={onClose}>close-sync</button>
       </div>
     ) : null,
 }));
@@ -125,5 +134,28 @@ describe("DashboardPage", () => {
 
     await userEvent.click(screen.getByText("finish-sync"));
     expect(screen.getByText(/2 run/i)).toBeDefined();
+  });
+
+  it("closes the sync dialog via its onClose callback", async () => {
+    useRunsMock.mockReturnValue({ runs: [], loading: false, error: null, refetch: vi.fn() });
+    renderPage();
+
+    await userEvent.click(screen.getByText("Sync from Linear"));
+    expect(screen.getByTestId("sync-dialog")).toBeDefined();
+
+    await userEvent.click(screen.getByText("close-sync"));
+    expect(screen.queryByTestId("sync-dialog")).toBeNull();
+  });
+
+  it("dismisses the ingest summary banner when its dismiss button is clicked", async () => {
+    useRunsMock.mockReturnValue({ runs: [], loading: false, error: null, refetch: vi.fn() });
+    renderPage();
+
+    await userEvent.click(screen.getByText("Sync from Linear"));
+    await userEvent.click(screen.getByText("finish-sync"));
+    expect(screen.getByText(/2 run/i)).toBeDefined();
+
+    await userEvent.click(screen.getByRole("button", { name: "Dismiss" }));
+    expect(screen.queryByText(/2 run/i)).toBeNull();
   });
 });
