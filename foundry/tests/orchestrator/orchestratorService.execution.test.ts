@@ -74,18 +74,15 @@ describe("OrchestratorService.runExecution", () => {
     const run = runInImplementing({ prNumber: 7 });
     const { deps, artifactRepo, eventRepo, executorAgent } = buildDeps({}, run);
     const report = makeExecutionReport();
-    artifactRepo.findLatestByType.mockImplementation((_runId: string, type: string) => {
-      if (type === "ExecutionReport") {
-        return Promise.resolve(
-          makeArtifact({
+    withApprovedPlanArtifact(artifactRepo, (_runId, type) =>
+      type === "ExecutionReport"
+        ? makeArtifact({
             type: "ExecutionReport",
             payloadJson: report,
             createdAt: new Date("2024-02-01T00:00:00Z"),
-          }),
-        );
-      }
-      return Promise.resolve(null);
-    });
+          })
+        : null,
+    );
     eventRepo.findByRunId.mockResolvedValue([
       {
         id: "e1",
@@ -111,18 +108,15 @@ describe("OrchestratorService.runExecution", () => {
   it("does not recover when EXECUTION_FINISHED already fired after the report", async () => {
     const run = runInImplementing({ prNumber: 7 });
     const { deps, artifactRepo, eventRepo, executorAgent } = buildDeps({}, run);
-    artifactRepo.findLatestByType.mockImplementation((_runId: string, type: string) => {
-      if (type === "ExecutionReport") {
-        return Promise.resolve(
-          makeArtifact({
+    withApprovedPlanArtifact(artifactRepo, (_runId, type) =>
+      type === "ExecutionReport"
+        ? makeArtifact({
             type: "ExecutionReport",
             payloadJson: makeExecutionReport(),
             createdAt: new Date("2024-01-01T00:00:00Z"),
-          }),
-        );
-      }
-      return Promise.resolve(null);
-    });
+          })
+        : null,
+    );
     eventRepo.findByRunId.mockResolvedValue([
       {
         id: "e1",

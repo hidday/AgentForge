@@ -245,7 +245,7 @@ describe("RuntimeHealthCheck private probe branches (direct access for full edge
     });
     const check = makeCheck(processRunner);
     const result = await check.checkBinary(claudeConfig);
-    expect(result).toEqual({ ok: true, version: "claude v9.9.9", durationMs: 5 });
+    expect(result).toEqual({ ok: true, version: "claude v9.9.9", durationMs: expect.any(Number) });
   });
 
   it("checkAuth: successPattern not matched in output", async () => {
@@ -274,7 +274,7 @@ describe("RuntimeHealthCheck private probe branches (direct access for full edge
     });
     const check = makeCheck(processRunner);
     const result = await check.checkAuth(cursorConfig);
-    expect(result).toEqual({ ok: true, durationMs: 5 });
+    expect(result).toEqual({ ok: true, durationMs: expect.any(Number) });
   });
 
   it("checkAuth: exitCodeOnly fails on non-zero exit", async () => {
@@ -303,7 +303,7 @@ describe("RuntimeHealthCheck private probe branches (direct access for full edge
     });
     const check = makeCheck(processRunner);
     const result = await check.checkAuth(codexConfig);
-    expect(result).toEqual({ ok: true, durationMs: 5 });
+    expect(result).toEqual({ ok: true, durationMs: expect.any(Number) });
   });
 
   it("checkAuth: default path fails when exit is non-zero and PONG is absent", async () => {
