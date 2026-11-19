@@ -257,9 +257,14 @@ describe("ProcessRunner — context tracking, manifests, and output retrieval", 
 
     await resultPromise;
 
+    // getProcessOutput caps every read (live or from disk) at 8KB, but the
+    // full write is persisted to the on-disk log file untruncated.
     const finalOutput = runner.getProcessOutput(active[0]!.id);
     expect(finalOutput).not.toBeNull();
-    expect(finalOutput!.length).toBe(bigWrite);
+    expect(finalOutput!.length).toBe(8 * 1024);
+
+    const logFile = join(spoolDir, `${active[0]!.id}.log`);
+    expect(readFileSync(logFile, "utf-8").length).toBe(bigWrite);
   });
 });
 

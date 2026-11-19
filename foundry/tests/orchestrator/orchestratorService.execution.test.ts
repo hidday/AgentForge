@@ -144,7 +144,11 @@ describe("OrchestratorService.runExecution", () => {
   });
 
   it("pauses the run and notifies Linear when the executor times out", async () => {
-    const { deps, executorAgent, eventRepo, linearClient } = buildDeps({}, runInImplementing());
+    const { deps, artifactRepo, executorAgent, eventRepo, linearClient } = buildDeps(
+      {},
+      runInImplementing(),
+    );
+    withApprovedPlanArtifact(artifactRepo);
     executorAgent.run.mockRejectedValue(new AgentTimeoutError("executor", 600_000));
     const svc = new OrchestratorService(deps as never);
     const reviewSpy = vi.spyOn(svc, "runReview");
@@ -163,7 +167,8 @@ describe("OrchestratorService.runExecution", () => {
   });
 
   it("propagates non-timeout executor errors", async () => {
-    const { deps, executorAgent } = buildDeps({}, runInImplementing());
+    const { deps, artifactRepo, executorAgent } = buildDeps({}, runInImplementing());
+    withApprovedPlanArtifact(artifactRepo);
     executorAgent.run.mockRejectedValue(new Error("boom"));
     const svc = new OrchestratorService(deps as never);
 
