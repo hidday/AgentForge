@@ -109,6 +109,18 @@ describe("DashboardPage", () => {
     expect(screen.getByText("3")).toBeDefined();
   });
 
+  it("falls back to the idle category when counting a run with an unrecognized state", () => {
+    useRunsMock.mockReturnValue({
+      runs: [makeRun({ id: "r1", state: "SomeUnknownState" })],
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+    renderPage();
+    // Total is 1, and it is not counted under active/waiting/blocked/done.
+    expect(screen.getByText("1")).toBeDefined();
+  });
+
   it("filters runs by category when a filter button is clicked", async () => {
     useRunsMock.mockReturnValue({
       runs: [

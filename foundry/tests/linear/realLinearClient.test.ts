@@ -199,6 +199,27 @@ describe("RealLinearClient", () => {
 
       expect(results).toEqual([]);
     });
+
+    it("maps optional project/team/cycle and a missing labels connection to undefined/empty", async () => {
+      const bareIssue = makeFakeIssue({
+        id: "i2",
+        labels: () => Promise.resolve({} as { nodes: Array<{ id: string; name: string }> }),
+        project: Promise.resolve(null),
+        cycle: Promise.resolve(null),
+        team: Promise.resolve(null),
+      });
+      sdk.issues.mockResolvedValue({ nodes: [bareIssue] });
+
+      const [result] = await client.searchIssues({ state: "Todo" });
+
+      expect(result).toMatchObject({
+        id: "i2",
+        labels: [],
+        project: undefined,
+        team: undefined,
+        cycle: undefined,
+      });
+    });
   });
 
   describe("postComment", () => {
@@ -440,6 +461,31 @@ describe("RealLinearClient", () => {
       sdk.issue.mockResolvedValue(fake);
 
       await expect(client.listLabels("issue-1")).resolves.toEqual([]);
+    });
+
+    it("tolerates a labels connection with no nodes field at all", async () => {
+      const fake = makeFakeIssue({
+        id: "issue-1",
+        labels: () => Promise.resolve({} as { nodes: Array<{ id: string; name: string }> }),
+      });
+      sdk.issue.mockResolvedValue(fake);
+
+      await expect(client.listLabels("issue-1")).resolves.toEqual([]);
+    });
+  });
+
+  describe("resolveStateId via updateIssueState", () => {
+    it("tolerates a states connection with no nodes field at all", async () => {
+      const fake = makeFakeIssue({ id: "issue-1", team: Promise.resolve({ id: "team-1", key: "PRY" }) });
+      sdk.issue.mockResolvedValue(fake);
+      sdk.team.mockResolvedValue({
+        states: () => Promise.resolve({} as { nodes: Array<{ id: string; name: string }> }),
+      });
+
+      await client.updateIssueState("issue-1", "Done");
+
+      expect(sdk.updateIssue).not.toHaveBeenCalled();
+      expect(logger.warn).toHaveBeenCalled();
     });
   });
 });

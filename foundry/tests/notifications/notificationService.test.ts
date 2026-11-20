@@ -313,4 +313,20 @@ describe("NotificationService.sendHumanRequest", () => {
     };
     expect(body.text).toContain("rejected by agent");
   });
+
+  it.each([
+    ["plan_low_confidence", "low confidence"],
+    ["impl_uncertain", "uncertain"],
+    ["other", "Human intervention requested"],
+  ] as const)("renders the correct label for reason %s", async (reason, expectedSubstring) => {
+    fetchMock.mockResolvedValue(okResponse());
+    const service = makeService({ slackWebhookUrl: "https://hooks.slack.com/x" });
+
+    await service.sendHumanRequest(makePayload({ reason }));
+
+    const body = JSON.parse((fetchMock.mock.calls[0] as [string, { body: string }])[1].body) as {
+      text: string;
+    };
+    expect(body.text).toContain(expectedSubstring);
+  });
 });

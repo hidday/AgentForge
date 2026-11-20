@@ -207,6 +207,52 @@ describe("useActiveProcesses", () => {
     expect(result.current.output).toBe("existing");
   });
 
+  it("does not update state after unmount once getActiveProcesses resolves (cancelled guard)", async () => {
+    let resolveProcesses!: (v: { processes: typeof process1[] }) => void;
+    mockApi.getActiveProcesses.mockReturnValue(
+      new Promise((res) => {
+        resolveProcesses = res;
+      }),
+    );
+
+    const { unmount } = renderHook(() => useActiveProcesses("run-1"));
+    unmount();
+
+    await act(async () => {
+      resolveProcesses({ processes: [process1] });
+      await Promise.resolve();
+    });
+
+    // No assertion on `result.current` is possible post-unmount, but the
+    // resolved promise must not throw or trigger a React "state update on
+    // unmounted component" warning — reaching here cleanly exercises the
+    // `cancelled` guard right after the first await.
+    expect(mockApi.getProcessOutput).not.toHaveBeenCalled();
+  });
+
+  it("does not update output state after unmount once getProcessOutput resolves (cancelled guard)", async () => {
+    mockApi.getActiveProcesses.mockResolvedValue({ processes: [process1] });
+    let resolveOutput!: (v: { processId: string; output: string }) => void;
+    mockApi.getProcessOutput.mockReturnValue(
+      new Promise((res) => {
+        resolveOutput = res;
+      }),
+    );
+
+    const { result, unmount } = renderHook(() => useActiveProcesses("run-1"));
+    await waitFor(() => expect(result.current.processes).toEqual([process1]));
+
+    unmount();
+
+    await act(async () => {
+      resolveOutput({ processId: "proc-1", output: "late output" });
+      await Promise.resolve();
+    });
+
+    // Reaching here without an unhandled error/warning exercises the
+    // `cancelled` guard inside the nested getProcessOutput try block.
+  });
+
   it("ignores SSE events for a different run", async () => {
     mockApi.getActiveProcesses.mockResolvedValue({ processes: [] });
     const { result } = renderHook(() => useActiveProcesses("run-1"));

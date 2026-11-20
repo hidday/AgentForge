@@ -91,7 +91,15 @@ function buildRejectFlowDeps(overrides: Record<string, unknown> = {}) {
   const newPlan = makePlan({ planVersion: 3 });
 
   const runRepo = {
-    findById: vi.fn().mockResolvedValueOnce(runInitial).mockResolvedValue(runPlanReviewState),
+    // 1st call: rejectPlan's own requireRun. 2nd: runPlanReview's requireRun
+    // (state should be PlanReview, after PLAN_CREATED). 3rd+: runPlanRevision's
+    // requireRun, when the changes_requested branch chains into it (state
+    // should be PlanRevision, after PLAN_REVIEW_CHANGES_REQUESTED).
+    findById: vi
+      .fn()
+      .mockResolvedValueOnce(runInitial)
+      .mockResolvedValueOnce(runPlanReviewState)
+      .mockResolvedValue(runPlanRevisionState),
     findActiveByIssueId: vi.fn(),
     findAll: vi.fn(),
     create: vi.fn(),
@@ -102,7 +110,14 @@ function buildRejectFlowDeps(overrides: Record<string, unknown> = {}) {
       .mockResolvedValueOnce(runPlanReviewState) // PLAN_CREATED
       .mockResolvedValueOnce(runPlanRevisionState) // PLAN_REVIEW_CHANGES_REQUESTED
       .mockResolvedValueOnce(runAwaitingApproval), // PLAN_REVISED
-    update: vi.fn().mockResolvedValue(runAfterUpdate),
+    // 1st update() call: rejectPlan's own re-plan version bump (state still
+    // Planning, before PLAN_CREATED). 2nd+: runPlanRevision's version bump
+    // (state PlanRevision, when the changes_requested branch reaches it) --
+    // update() only patches fields, it must not clobber state.
+    update: vi
+      .fn()
+      .mockResolvedValueOnce(runAfterUpdate)
+      .mockResolvedValue({ ...runPlanRevisionState, planVersion: 4 }),
   };
 
   const artifactRepo = {
@@ -300,10 +315,22 @@ describe("OrchestratorService -- buildTaskBundle default-branch resolution", () 
 describe("OrchestratorService -- loadReplanContext (rejectPlan iterate mode)", () => {
   it("omits previousPlan/humanAnswers/researchedAnswers/planReviewFindings when no such artifacts exist", async () => {
     const { deps, plannerAgent } = buildRejectFlowDeps();
-    // Force every artifact lookup (Plan, HumanAnswers, ResearchedAnswers, PlanReview,
-    // RejectionContext) to come back empty so loadReplanContext's optional fields
-    // all take their "missing" branch.
-    (deps.artifactRepo.findLatestByType as ReturnType<typeof vi.fn>).mockResolvedValue(null);
+    // loadReplanContext's "Plan" lookup (the first one made, for previousPlan)
+    // comes back empty; everything else (HumanAnswers, ResearchedAnswers,
+    // PlanReview, RejectionContext) is empty throughout. A later "Plan" lookup
+    // -- made by runPlanReview, after the (mocked) planner has "produced" a
+    // plan -- still needs to resolve, so only the first "Plan" call is nulled.
+    let planLookups = 0;
+    (deps.artifactRepo.findLatestByType as ReturnType<typeof vi.fn>).mockImplementation(
+      (_runId: string, type: string) => {
+        if (type !== "Plan") return Promise.resolve(null);
+        planLookups += 1;
+        if (planLookups === 1) return Promise.resolve(null);
+        return Promise.resolve(
+          asArtifact({ type: "Plan", version: 3, payloadJson: makePlan({ planVersion: 3 }) }),
+        );
+      },
+    );
 
     const svc = new OrchestratorService(deps as never);
     await svc.rejectPlan("run-1", undefined, "api", "iterate");
@@ -478,7 +505,14 @@ function buildExecDeps(store: TestStore, initialRun: Run, agentSkillRepo?: Recor
   };
 
   const plannerAgent = { run: vi.fn() };
-  const planReviewerAgent = { run: vi.fn() };
+  const planReviewerAgent = {
+    run: vi.fn().mockResolvedValue({
+      reviewId: "pr-1",
+      summary: "ok",
+      findings: [],
+      overallVerdict: "approved",
+    }),
+  };
   const planReviserAgent = { run: vi.fn() };
   const executorAgent = { run: vi.fn() };
   const reviewerAgent = {
@@ -609,7 +643,15 @@ describe("OrchestratorService -- formatExecutionReportComment branches (via runE
     });
 
     const svc = new OrchestratorService(deps as never);
-    await svc.runExecution("run-1");
+    // The crafted report has failing/skip checks, which means runReview's
+    // chained markReady call fails its own policy check further downstream.
+    // That is expected and irrelevant here: the Execution Report comment is
+    // posted earlier in runExecution, before runReview is even invoked.
+    try {
+      await svc.runExecution("run-1");
+    } catch {
+      // ignore -- see comment above
+    }
 
     const comments = linearClient.postComment.mock.calls.map((c: unknown[]) => c[1] as string);
     const execComment = comments.find((c) => c.includes("Execution Report"));
@@ -869,13 +911,32 @@ describe("OrchestratorService -- updateSkillMetrics (via transitionAndRecord Don
     };
     // Use the HumanClarificationNeeded -> Failed transition (CLARIFICATION_EXHAUSTED)
     // to reach a Failed terminal state without going through execution.
+    const planWithBlocker = makeExecutionPlan();
+    planWithBlocker.openQuestions = [{ id: "q1", question: "Still blocked?", requiredForExecution: true }];
     const store: TestStore = {
       runState: RunState.HumanClarificationNeeded,
       artifacts: [
         asArtifact({
           type: "Plan",
           version: 1,
-          payloadJson: makeExecutionPlan(),
+          payloadJson: planWithBlocker,
+        }),
+        asArtifact({
+          type: "TaskBundle",
+          version: 1,
+          payloadJson: {
+            issue: { id: "LIN-1", title: "title", description: "desc", labels: [], priority: 0 },
+            repo: {
+              name: "test-repo",
+              defaultBranch: "main",
+              workingBranch: "ai/run-1",
+              repoPath: "/tmp",
+              allowedPaths: ["src/"],
+              protectedPaths: [],
+            },
+            constraints: { requiredChecks: [], maxFilesChanged: 10, maxDiffLines: 500, forbiddenPatterns: [], mustNotTouch: [] },
+            definitionOfDone: [],
+          },
         }),
       ],
       events: [
