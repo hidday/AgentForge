@@ -379,6 +379,7 @@ describe("OrchestratorService -- formatPlanReviewComment via runPlanReview chang
       summary: "Needs more detail",
       findings: [
         { id: "f1", severity: "important", type: "scope", title: "Missing step", details: "Add a rollback step", affectedStepId: "s1" },
+        { id: "f2", severity: "nit", type: "style", title: "General nit", details: "No specific step" },
       ],
     });
 
@@ -392,6 +393,8 @@ describe("OrchestratorService -- formatPlanReviewComment via runPlanReview chang
     expect(reviewComment).toContain("[IMPORTANT]");
     expect(reviewComment).toContain("(step s1)");
     expect(reviewComment).toContain("Needs more detail");
+    // f2 has no affectedStepId, so its line must NOT carry a "(step ...)" suffix.
+    expect(reviewComment).toContain("[NIT]** General nit\n  No specific step");
 
     // Chained through PlanRevision back to AwaitingPlanApproval
     expect(result.state).toBe(RunState.AwaitingPlanApproval);

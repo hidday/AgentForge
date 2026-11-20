@@ -324,7 +324,11 @@ describe("OrchestratorService.runReview", () => {
     };
     const initialRun = makeRun({ state: RunState.AIReview, prNumber: 7 });
     const { deps, githubSync, linearClient, remediationAgent, artifactRepo } = buildDeps(store, initialRun);
-    const review = makeReview();
+    const review = makeReview({
+      findings: [
+        { id: "f1", severity: "important", type: "bug", file: "src/foo.ts", title: "Bug", details: "Real issue", lineHint: 42 },
+      ],
+    });
     (deps.reviewerAgent.run as ReturnType<typeof vi.fn>).mockImplementation(async () => {
       await artifactRepo.create({
         runId: "run-1",
@@ -360,6 +364,8 @@ describe("OrchestratorService.runReview", () => {
     const comments = linearClient.postComment.mock.calls.map((c: unknown[]) => c[1] as string);
     expect(comments.some((c) => c.includes("AI Code Review"))).toBe(true);
     expect(comments.some((c) => c.includes("Changes Requested"))).toBe(true);
+    // Finding carries a lineHint, which must be rendered as "file:line".
+    expect(comments.some((c) => c.includes("src/foo.ts:42"))).toBe(true);
 
     expect(remediationAgent.run).toHaveBeenCalledTimes(1);
   });
