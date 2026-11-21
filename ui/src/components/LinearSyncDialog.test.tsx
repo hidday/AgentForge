@@ -181,4 +181,52 @@ describe("LinearSyncDialog", () => {
     // can retry.
     expect(screen.getByRole("button", { name: /start 2 runs/i })).toBeDefined();
   });
+
+  it("does not auto-close from a stale deferred check once the ingest cycle's pending tracker is cleared", async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    const onClose = vi.fn();
+    const onIngestComplete = vi.fn();
+
+    let rejectIngest!: (e: unknown) => void;
+    mockApi.ingestIssues.mockReturnValue(new Promise((_resolve, reject) => (rejectIngest = reject)));
+
+    render(
+      <LinearSyncDialog
+        open={true}
+        onClose={onClose}
+        onIngested={vi.fn()}
+        onIngestComplete={onIngestComplete}
+      />,
+    );
+
+    await waitFor(() => expect(screen.getByText(issueA.title)).toBeDefined());
+
+    const startBtn = screen.getByRole("button", { name: /start 2 runs/i });
+    await user.click(startBtn);
+
+    // SSE delivers both issues almost immediately — well inside MIN_LOADER_MS —
+    // so maybeAutoClose schedules a deferred re-check instead of closing now.
+    fireSSE({ type: "run:created", runId: "run-a", issueId: issueA.id });
+    fireSSE({ type: "run:created", runId: "run-b", issueId: issueB.id });
+    expect(onClose).not.toHaveBeenCalled();
+
+    // Before that deferred check fires, the underlying HTTP request rejects.
+    // The catch handler resets the pending-ids tracker and leaves the dialog
+    // open with an error so the user can retry.
+    await act(async () => {
+      rejectIngest(new Error("Linear unreachable"));
+    });
+    await waitFor(() => expect(screen.getByText(/Linear unreachable/i)).toBeDefined());
+
+    // Now the deferred re-check fires with an empty pending-ids tracker: it
+    // must bail out instead of incorrectly auto-closing the (already-reset)
+    // dialog a second time.
+    await act(async () => {
+      vi.advanceTimersByTime(700);
+    });
+
+    expect(onClose).not.toHaveBeenCalled();
+    expect(onIngestComplete).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: /start 2 runs/i })).toBeDefined();
+  });
 });

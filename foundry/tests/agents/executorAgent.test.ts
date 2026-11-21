@@ -195,6 +195,44 @@ describe("ExecutorAgent.run()", () => {
     expect(githubClient.createDraftPR).not.toHaveBeenCalled();
   });
 
+  it("reuses an existing PR from retry context even when no existingBranch is given (falls back to the task bundle's working branch)", async () => {
+    const { agent, githubClient, gitService } = buildAgent();
+
+    const result = await agent.run(makePlan(), makeTaskBundle(), "run-1", {
+      existingPR: 777,
+    });
+
+    expect(result.prNumber).toBe(777);
+    expect(githubClient.createDraftPR).not.toHaveBeenCalled();
+    expect(gitService.commitAndPush).toHaveBeenCalledWith(
+      "/tmp",
+      "ai/lin-1",
+      expect.any(String),
+    );
+  });
+
+  it("renders the Operator Note section into the user prompt when operatorNote is provided", async () => {
+    const { agent, getUserPrompt } = buildAgent();
+
+    await agent.run(makePlan(), makeTaskBundle(), "run-1", undefined, {
+      operatorNote: "Please use feature flags for this rollout.",
+    });
+
+    const prompt = getUserPrompt();
+    expect(prompt).toContain("## Operator Note");
+    expect(prompt).toContain("Please use feature flags for this rollout.");
+  });
+
+  it("omits the Operator Note section when no operatorNote is provided", async () => {
+    const { agent, getUserPrompt } = buildAgent();
+
+    await agent.run(makePlan(), makeTaskBundle(), "run-1");
+
+    const prompt = getUserPrompt();
+    expect(prompt).not.toContain("## Operator Note");
+    expect(prompt).not.toContain("{{operatorNoteSection}}");
+  });
+
   it("logs the score and executionVersion in the completion event", async () => {
     const { agent, logger } = buildAgent({ score: 0.42 });
 

@@ -227,4 +227,57 @@ describe("RealLinearClient.getRelatedContext", () => {
 
     expect(ctx.parent?.description).toBe("");
   });
+
+  it("treats an inverseRelations result without a nodes array as having no blockers", async () => {
+    const focus = makeFakeIssue({
+      id: "focus-id",
+      parent: Promise.resolve(null),
+      // No `nodes` field at all, exercising the `inverse?.nodes ?? []` fallback.
+      inverseRelations: () => Promise.resolve({} as never),
+    });
+
+    issuesById.set("focus-id", focus);
+
+    const ctx = await client.getRelatedContext("focus-id");
+
+    expect(ctx.blockers).toEqual([]);
+  });
+
+  it("defaults parent/blocker labels to [] when labels() resolves without nodes", async () => {
+    const parent = makeFakeIssue({
+      id: "parent-id",
+      identifier: "PRY-100",
+      labels: () => Promise.resolve({} as never),
+    });
+    const focus = makeFakeIssue({
+      id: "focus-id",
+      parent: Promise.resolve(parent),
+    });
+
+    issuesById.set("focus-id", focus);
+    issuesById.set("parent-id", parent);
+
+    const ctx = await client.getRelatedContext("focus-id");
+
+    expect(ctx.parent?.labels).toEqual([]);
+  });
+
+  it("defaults parent/blocker state to 'Unknown' when state resolves to null", async () => {
+    const parent = makeFakeIssue({
+      id: "parent-id",
+      identifier: "PRY-100",
+      state: Promise.resolve(null as never),
+    });
+    const focus = makeFakeIssue({
+      id: "focus-id",
+      parent: Promise.resolve(parent),
+    });
+
+    issuesById.set("focus-id", focus);
+    issuesById.set("parent-id", parent);
+
+    const ctx = await client.getRelatedContext("focus-id");
+
+    expect(ctx.parent?.state).toBe("Unknown");
+  });
 });
