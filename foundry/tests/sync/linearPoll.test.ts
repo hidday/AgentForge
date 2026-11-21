@@ -199,4 +199,25 @@ describe("LinearPollService.startRunsForIssues", () => {
       "Failed to start run for issue",
     );
   });
+
+  it("stringifies a non-Error value thrown while starting the run", async () => {
+    const deps = makeDeps();
+    // eslint-disable-next-line @typescript-eslint/only-throw-error
+    deps.orchestrator.startRun.mockRejectedValue("raw failure");
+    const svc = new LinearPollService(
+      deps.linearClient as never,
+      deps.runRepo as never,
+      deps.orchestrator as never,
+      deps.repoRegistry as never,
+      deps.logger as never,
+    );
+
+    const result = await svc.startRunsForIssues(["issue-1"]);
+
+    expect(result).toEqual({ started: [], skipped: ["issue-1"] });
+    expect(deps.logger.error).toHaveBeenCalledWith(
+      expect.objectContaining({ issueId: "issue-1", error: "raw failure" }),
+      "Failed to start run for issue",
+    );
+  });
 });

@@ -178,6 +178,20 @@ describe("GitHubSyncService.postExecutionReportUpdate", () => {
     expect(body).toContain("Files changed (9)");
   });
 
+  it("renders the neutral icon for a check status that is neither pass nor fail", async () => {
+    const githubClient = makeGithubClient();
+    const svc = new GitHubSyncService(githubClient as never, makeLogger() as never);
+
+    await svc.postExecutionReportUpdate(
+      "test-repo",
+      7,
+      makeReport({ checks: { lint: { status: "pending", details: "queued" }, typecheck: { status: "pass", details: "clean" }, tests: { status: "pass", details: "ok" } } }),
+    );
+
+    const body = githubClient.commentOnPR.mock.calls[0][2] as string;
+    expect(body).toContain(":heavy_minus_sign: **Lint**");
+  });
+
   it("omits the files and notes sections when they are empty", async () => {
     const githubClient = makeGithubClient();
     const svc = new GitHubSyncService(githubClient as never, makeLogger() as never);
@@ -252,5 +266,22 @@ describe("GitHubSyncService.postRemediationResolutions", () => {
 
     const body = githubClient.replyToReviewComment.mock.calls[0][3] as string;
     expect(body).toContain(":warning:");
+  });
+
+  it("falls back to a question-mark icon for a genuinely unrecognized status, in both the reply and the summary row", async () => {
+    const githubClient = makeGithubClient();
+    const svc = new GitHubSyncService(githubClient as never, makeLogger() as never);
+
+    await svc.postRemediationResolutions(
+      "test-repo",
+      7,
+      [makeResolution({ status: "unknown_status" as never, findingId: "f1" })],
+      { f1: 101 },
+    );
+
+    const replyBody = githubClient.replyToReviewComment.mock.calls[0][3] as string;
+    expect(replyBody).toContain(":grey_question:");
+    const summaryBody = githubClient.commentOnPR.mock.calls[0][2] as string;
+    expect(summaryBody).toContain(":grey_question:");
   });
 });

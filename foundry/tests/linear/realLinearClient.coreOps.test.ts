@@ -80,6 +80,26 @@ describe("RealLinearClient.getIssue", () => {
     expect(issue.description).toBe("");
     expect(issue.state).toBe("Unknown");
   });
+
+  it("defaults labels to [] when labels() resolves without a nodes array", async () => {
+    const { client, sdk } = makeClient();
+    sdk.issue.mockResolvedValue(
+      makeSdkIssue({ labels: () => Promise.resolve({ nodes: undefined }) }),
+    );
+
+    const issue = await client.getIssue("issue-1");
+
+    expect(issue.labels).toEqual([]);
+  });
+
+  it("defaults team to undefined when the issue has no team", async () => {
+    const { client, sdk } = makeClient();
+    sdk.issue.mockResolvedValue(makeSdkIssue({ team: Promise.resolve(null) }));
+
+    const issue = await client.getIssue("issue-1");
+
+    expect(issue.team).toBeUndefined();
+  });
 });
 
 describe("RealLinearClient.searchIssues", () => {
@@ -127,6 +147,35 @@ describe("RealLinearClient.searchIssues", () => {
     const results = await client.searchIssues({ state: "Todo" });
 
     expect(results).toEqual([]);
+  });
+
+  it("maps a node's truthy project/cycle and null team, description, and labels", async () => {
+    const { client, sdk } = makeClient();
+    sdk.issues.mockResolvedValue({
+      nodes: [
+        makeSdkIssue({
+          id: "c",
+          description: null,
+          project: Promise.resolve({ name: "Backend" }),
+          cycle: Promise.resolve({ name: "Sprint 2" }),
+          team: Promise.resolve(null),
+          labels: () => Promise.resolve({ nodes: undefined }),
+        }),
+      ],
+    });
+
+    const results = await client.searchIssues({ state: "Todo" });
+
+    expect(results).toEqual([
+      expect.objectContaining({
+        id: "c",
+        description: "",
+        project: "Backend",
+        cycle: "Sprint 2",
+        team: undefined,
+        labels: [],
+      }),
+    ]);
   });
 });
 
@@ -176,6 +225,20 @@ describe("RealLinearClient.updateIssueState", () => {
     await client.updateIssueState("issue-1", "Done");
 
     expect(sdk.updateIssue).toHaveBeenCalledWith("issue-1", { stateId: "state-done" });
+  });
+
+  it("treats a states() result without a nodes array as having no workflow states", async () => {
+    const { client, sdk, logger } = makeClient();
+    sdk.issue.mockResolvedValue(makeSdkIssue());
+    sdk.team.mockResolvedValue({ states: () => Promise.resolve({} as never) });
+
+    await client.updateIssueState("issue-1", "Done");
+
+    expect(logger.warn).toHaveBeenCalledWith(
+      { issueId: "issue-1", stateName: "Done", teamId: "team-1" },
+      "Could not find workflow state by name",
+    );
+    expect(sdk.updateIssue).not.toHaveBeenCalled();
   });
 
   it("caches the team's state map across calls (team() fetched only once)", async () => {

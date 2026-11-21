@@ -181,6 +181,20 @@ describe("RunRepository", () => {
     expect(run?.linearIssueId).toBe("LIN-1");
   });
 
+  it("findByIssueId() returns null when no row matches", async () => {
+    const prisma = makePrisma();
+    prisma.aiRun.findFirst.mockResolvedValue(null);
+    const repo = new RunRepository(prisma as never);
+
+    const run = await repo.findByIssueId("LIN-missing");
+
+    expect(prisma.aiRun.findFirst).toHaveBeenCalledWith({
+      where: { linearIssueId: "LIN-missing" },
+      orderBy: { createdAt: "desc" },
+    });
+    expect(run).toBeNull();
+  });
+
   it("findActiveByIssueId() excludes terminal states (Done, Failed)", async () => {
     const prisma = makePrisma();
     prisma.aiRun.findFirst.mockResolvedValue(null);
@@ -196,6 +210,17 @@ describe("RunRepository", () => {
       orderBy: { createdAt: "desc" },
     });
     expect(run).toBeNull();
+  });
+
+  it("findActiveByIssueId() maps a found active run to a domain Run", async () => {
+    const prisma = makePrisma();
+    prisma.aiRun.findFirst.mockResolvedValue(makeRow({ id: "run-active", state: "Implementing" }));
+    const repo = new RunRepository(prisma as never);
+
+    const run = await repo.findActiveByIssueId("LIN-1");
+
+    expect(run?.id).toBe("run-active");
+    expect(run?.state).toBe(RunState.Implementing);
   });
 
   it("updateState() persists the new state and returns the mapped run", async () => {

@@ -1,5 +1,14 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
+
+vi.mock("node:fs", async () => {
+  const actual = await vi.importActual<typeof import("node:fs")>("node:fs");
+  return {
+    ...actual,
+    statSync: vi.fn(actual.statSync),
+    __actualStatSync: actual.statSync,
+  };
+});
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { RepoRegistry, loadRepoRegistry, type ReposConfig } from "../../src/config/repoRegistry.js";
@@ -174,6 +183,33 @@ describe("RepoRegistry", () => {
       writeFileSync(join(base, ".git"), "gitdir: /somewhere/else\n");
       const registry = new RepoRegistry("/root", makeConfig(), makeLogger() as never);
       expect(() => registry.validateWorkingDirectory(base)).not.toThrow();
+    });
+
+    it("throws when the working directory path itself does not resolve to a directory", async () => {
+      const base = mkdtempSync(join(tmpdir(), "repo-registry-"));
+      dirsToClean.push(base);
+      mkdirSync(join(base, ".git"));
+      const registry = new RepoRegistry("/root", makeConfig(), makeLogger() as never);
+
+      const fsMock = (await import("node:fs")) as unknown as {
+        statSync: ReturnType<typeof vi.fn>;
+        __actualStatSync: (...args: unknown[]) => unknown;
+      };
+      const actualStatSync = fsMock.__actualStatSync;
+      fsMock.statSync.mockImplementation((path: unknown, ...rest: unknown[]) => {
+        if (path === base) {
+          return { isDirectory: () => false, isFile: () => false };
+        }
+        return actualStatSync(path, ...rest);
+      });
+
+      try {
+        expect(() => registry.validateWorkingDirectory(base)).toThrow(
+          /Working directory path is not a directory/,
+        );
+      } finally {
+        fsMock.statSync.mockImplementation(actualStatSync);
+      }
     });
   });
 });

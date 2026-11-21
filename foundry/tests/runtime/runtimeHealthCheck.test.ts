@@ -1,7 +1,8 @@
 import { describe, it, expect, vi } from "vitest";
-import { RuntimeHealthCheck } from "../../src/runtime/runtimeHealthCheck.js";
+import { RuntimeHealthCheck, type RuntimeProbeResult } from "../../src/runtime/runtimeHealthCheck.js";
 import { PreflightError } from "../../src/utils/errors.js";
 import type { ProcessResult } from "../../src/runtime/runnerTypes.js";
+import type { AgentRuntime } from "../../src/domain/types.js";
 
 function makeLogger() {
   return { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
@@ -155,6 +156,54 @@ describe("RuntimeHealthCheck.runPreflight", () => {
     expect(claudeResult.binaryCheck.error).toBe("spawn failed");
   });
 
+  it("stringifies a non-Error value thrown by the binary check's execute() call", async () => {
+    const execute = vi.fn().mockImplementation(({ args }: { args: string[] }) => {
+      // eslint-disable-next-line @typescript-eslint/only-throw-error
+      if (args.includes("--version")) return Promise.reject("raw binary failure");
+      return Promise.resolve(makeResult());
+    });
+    const health = new RuntimeHealthCheck({ execute } as never, makeConfigs(), makeLogger() as never);
+
+    let caught: PreflightError | undefined;
+    try {
+      await health.runPreflight();
+    } catch (err) {
+      caught = err as PreflightError;
+    }
+
+    const claudeResult = caught!.result.results.find((r) => r.runtime === "claude-code")!;
+    expect(claudeResult.binaryCheck.error).toBe("raw binary failure");
+  });
+
+  it("computes authError as undefined in the failure summary when a failing result's auth check itself passed", async () => {
+    const logger = makeLogger();
+    const health = new RuntimeHealthCheck({ execute: vi.fn() } as never, makeConfigs(), logger as never);
+    // probeRuntime enforces that authCheck is only ever `{ok:false, ...}` when
+    // binaryCheck fails; spy on it directly to exercise the failure-summary
+    // logic's authError branch for a result shape probeRuntime itself cannot
+    // actually produce (binaryCheck failed, but authCheck still reports ok).
+    vi.spyOn(
+      health as unknown as { probeRuntime: (r: AgentRuntime) => Promise<RuntimeProbeResult> },
+      "probeRuntime",
+    ).mockImplementation(async (runtime: AgentRuntime) => ({
+      runtime,
+      command: runtime,
+      binaryCheck: { ok: false, error: "binary down", durationMs: 1 },
+      authCheck: { ok: true, durationMs: 1 },
+    }));
+
+    await expect(health.runPreflight()).rejects.toThrow(PreflightError);
+
+    expect(logger.error).toHaveBeenCalledWith(
+      expect.objectContaining({
+        failures: expect.arrayContaining([
+          expect.objectContaining({ binaryError: "binary down", authError: undefined }),
+        ]),
+      }),
+      "Preflight FAILED: one or more agent runtimes are not ready",
+    );
+  });
+
   describe("auth check variants", () => {
     it("fails the successPattern auth check when the pattern is not found in output", async () => {
       const execute = vi.fn().mockImplementation(({ command, args }: { command: string; args: string[] }) => {
@@ -291,6 +340,31 @@ describe("RuntimeHealthCheck.runPreflight", () => {
       expect(result.authCheck.error).toContain("Exit code 2");
     });
 
+    it("falls back to stdout in the exitCodeOnly error message when stderr is empty", async () => {
+      const execute = vi.fn().mockImplementation(({ args }: { args: string[] }) => {
+        if (args.includes("--version")) return Promise.resolve(makeResult({ stdout: "1.0.0" }));
+        if (args.includes("status")) {
+          return Promise.resolve(makeResult({ exitCode: 3, stderr: "", stdout: "not authenticated" }));
+        }
+        return Promise.resolve(makeResult());
+      });
+      const configs = makeConfigs();
+      const health = new RuntimeHealthCheck(
+        { execute } as never,
+        { "claude-code": configs.cursor, codex: configs.codex, cursor: configs.cursor } as never,
+        makeLogger() as never,
+      );
+
+      let caught: PreflightError | undefined;
+      try {
+        await health.runPreflight();
+      } catch (err) {
+        caught = err as PreflightError;
+      }
+      const result = caught!.result.results.find((r) => r.runtime === "claude-code")!;
+      expect(result.authCheck.error).toBe("Exit code 3: not authenticated");
+    });
+
     it("reports a thrown error from the auth probe itself", async () => {
       const execute = vi.fn().mockImplementation(({ command, args }: { command: string; args: string[] }) => {
         if (args.includes("--version")) return Promise.resolve(makeResult({ stdout: "1.0.0" }));
@@ -308,6 +382,26 @@ describe("RuntimeHealthCheck.runPreflight", () => {
       }
       const claudeResult = caught!.result.results.find((r) => r.runtime === "claude-code")!;
       expect(claudeResult.authCheck.error).toBe("auth probe crashed");
+    });
+
+    it("stringifies a non-Error value thrown by the auth probe itself", async () => {
+      const execute = vi.fn().mockImplementation(({ command, args }: { command: string; args: string[] }) => {
+        if (args.includes("--version")) return Promise.resolve(makeResult({ stdout: "1.0.0" }));
+        // eslint-disable-next-line @typescript-eslint/only-throw-error
+        if (command === "claude") return Promise.reject("raw auth failure");
+        if (command === "codex") return Promise.resolve(makeResult({ stdout: "PONG" }));
+        return Promise.resolve(makeResult());
+      });
+      const health = new RuntimeHealthCheck({ execute } as never, makeConfigs(), makeLogger() as never);
+
+      let caught: PreflightError | undefined;
+      try {
+        await health.runPreflight();
+      } catch (err) {
+        caught = err as PreflightError;
+      }
+      const claudeResult = caught!.result.results.find((r) => r.runtime === "claude-code")!;
+      expect(claudeResult.authCheck.error).toBe("raw auth failure");
     });
   });
 });

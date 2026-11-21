@@ -141,6 +141,74 @@ describe("NotificationService", () => {
       expect(result.slack.error).toBe("network down");
     });
 
+    it("stringifies a non-Error slack rejection instead of reading .message", async () => {
+      fetchMock.mockRejectedValue("connection reset");
+      const svc = new NotificationService(
+        { slackWebhookUrl: "https://hooks.slack.com/x", emailFrom: "from@b.com" },
+        makeLogger() as never,
+      );
+
+      const result = await svc.sendHumanRequest(makePayload());
+
+      expect(result.slack.ok).toBe(false);
+      expect(result.slack.error).toBe("connection reset");
+    });
+
+    it("stringifies a non-Error email rejection instead of reading .message", async () => {
+      fetchMock.mockRejectedValue({ reason: "dns failure" });
+      const logger = makeLogger();
+      const svc = new NotificationService(
+        { emailTo: "a@b.com", emailFrom: "from@b.com", resendApiKey: "key-123" },
+        logger as never,
+      );
+
+      const result = await svc.sendHumanRequest(makePayload());
+
+      expect(result.email.ok).toBe(false);
+      expect(result.email.error).toBe("[object Object]");
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.objectContaining({ runId: "run-1", error: "[object Object]" }),
+        "Email notification failed",
+      );
+    });
+
+    it("falls back to issue id and '(untitled)' in the email subject, html, and text", async () => {
+      const svc = new NotificationService(
+        { emailTo: "a@b.com", emailFrom: "from@b.com", resendApiKey: "key-123" },
+        makeLogger() as never,
+      );
+
+      await svc.sendHumanRequest(
+        makePayload({ linearIssue: { id: "issue-raw-id", title: null, url: null } }),
+      );
+
+      const body = JSON.parse(fetchMock.mock.calls[0][1].body as string);
+      expect(body.subject).toContain("issue-raw-id");
+      expect(body.html).toContain("(untitled)");
+      expect(body.text).toContain("issue-raw-id");
+      expect(body.text).toContain("(untitled)");
+      // No Linear issue URL: the email should not render an "Open Linear issue" link.
+      expect(body.html).not.toContain("Open Linear issue");
+      expect(body.text).not.toContain("Linear:");
+    });
+
+    it.each([
+      ["plan_low_confidence", "Plan needs review (low confidence)"],
+      ["impl_rejected", "Implementation needs review (rejected by agent)"],
+      ["impl_uncertain", "Implementation needs review (uncertain)"],
+      ["other", "Human intervention requested"],
+    ] as const)("renders the correct label for reason %s", async (reason, label) => {
+      const svc = new NotificationService(
+        { slackWebhookUrl: "https://hooks.slack.com/x", emailFrom: "from@b.com" },
+        makeLogger() as never,
+      );
+
+      await svc.sendHumanRequest(makePayload({ reason }));
+
+      const body = JSON.parse(fetchMock.mock.calls[0][1].body as string);
+      expect(body.text).toContain(label);
+    });
+
     it("posts to Resend and reports email.ok:true on success, splitting multiple recipients", async () => {
       const svc = new NotificationService(
         { emailTo: "a@b.com, c@d.com", emailFrom: "from@b.com", resendApiKey: "key-123" },
@@ -233,6 +301,29 @@ describe("NotificationService", () => {
       expect(JSON.stringify(slackBody).length).toBeLessThan(longContext.length + 2000);
       const emailBody = JSON.parse(fetchMock.mock.calls[1][1].body as string);
       expect(emailBody.text).toContain("…");
+    });
+
+    it("includes plan confidence and open questions in the plain-text email body", async () => {
+      const svc = new NotificationService(
+        { emailTo: "a@b.com", emailFrom: "from@b.com", resendApiKey: "key-123" },
+        makeLogger() as never,
+      );
+
+      await svc.sendHumanRequest(
+        makePayload({
+          planConfidence: 0.75,
+          openQuestions: [
+            { id: "q1", question: "What auth provider?", requiredForExecution: true },
+            { id: "q2", question: "Which region?", requiredForExecution: false },
+          ],
+        }),
+      );
+
+      const body = JSON.parse(fetchMock.mock.calls[0][1].body as string);
+      expect(body.text).toContain("Plan confidence: 0.75");
+      expect(body.text).toContain("Open questions:");
+      expect(body.text).toContain("- [required] What auth provider?");
+      expect(body.text).toContain("- Which region?");
     });
 
     it("falls back to issue id and '(untitled)' when identifier/title are absent", async () => {

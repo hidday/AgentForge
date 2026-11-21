@@ -230,3 +230,28 @@ describe("ActionBar reject dialog", () => {
     expect(onAction).not.toHaveBeenCalled();
   });
 });
+
+describe("ActionBar defensive guard", () => {
+  it("no-ops instead of calling onAction when confirm fires with no active dialog", async () => {
+    // ConfirmDialog only renders its confirm button while `open` (i.e. a dialog is set),
+    // and disables it while loading, so normal UI interaction can never invoke
+    // ActionBar's onConfirm handler while its internal `dialog` state is null. Load a
+    // fresh module graph with a stub ConfirmDialog that exposes onConfirm unconditionally,
+    // so we can exercise that defensive `if (!dialog) return;` guard directly.
+    vi.resetModules();
+    vi.doMock("./ConfirmDialog.tsx", () => ({
+      ConfirmDialog: (props: { onConfirm: (note?: string) => void }) => (
+        <button onClick={() => props.onConfirm("ignored")}>raw-confirm</button>
+      ),
+    }));
+    const { ActionBar: PatchedActionBar } = await import("./ActionBar.tsx");
+    const onAction = vi.fn();
+    render(<PatchedActionBar runId="run-42" state="AIBlocked" onAction={onAction} />);
+    // No action button was clicked, so ActionBar's `dialog` state is still null here.
+    fireEvent.click(screen.getByRole("button", { name: "raw-confirm" }));
+    expect(onAction).not.toHaveBeenCalled();
+    expect(mockApi.resumeRun).not.toHaveBeenCalled();
+    vi.doUnmock("./ConfirmDialog.tsx");
+    vi.resetModules();
+  });
+});

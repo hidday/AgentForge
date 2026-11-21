@@ -10,6 +10,19 @@ import {
   buildWorktreeDirName,
 } from "../../src/git/gitService.js";
 
+// Only `execFile` is replaced (with a pass-through default so real git
+// commands still run); `execFileSync` used by the test helpers below stays
+// untouched because it is spread from the actual module.
+vi.mock("node:child_process", async () => {
+  const actual = await vi.importActual<typeof import("node:child_process")>(
+    "node:child_process",
+  );
+  return {
+    ...actual,
+    execFile: vi.fn(actual.execFile),
+  };
+});
+
 // Companion to gitService.test.ts covering failure paths, push /
 // commitAndPush, and the setupRunWorktree recovery warnings. Uses real temp
 // repos (same convention as the main test file) plus a bare "origin".
@@ -122,6 +135,40 @@ describe("GitService failure paths outside a git repository", () => {
         repoPath: notRepo,
         worktreePath: join(notRepo, "wt"),
         error: expect.any(String),
+      }),
+      "Failed to remove worktree (best-effort cleanup)",
+    );
+  });
+
+  it("pruneWorktrees stringifies a non-Error thrown by the underlying exec call", async () => {
+    const { execFile } = await import("node:child_process");
+    const mockedExecFile = execFile as unknown as ReturnType<typeof vi.fn>;
+    mockedExecFile.mockImplementationOnce(() => {
+      // Simulate execFile throwing synchronously with a non-Error value
+      // (e.g. a plain string), exercising the `String(err)` fallback branch.
+      throw "boom";
+    });
+
+    await expect(svc.pruneWorktrees(notRepo)).resolves.toBeUndefined();
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.objectContaining({ repoPath: notRepo, error: "boom" }),
+      "Failed to prune worktrees (best-effort cleanup)",
+    );
+  });
+
+  it("removeWorktree stringifies a non-Error thrown by the underlying exec call", async () => {
+    const { execFile } = await import("node:child_process");
+    const mockedExecFile = execFile as unknown as ReturnType<typeof vi.fn>;
+    mockedExecFile.mockImplementationOnce(() => {
+      throw "boom";
+    });
+
+    await expect(svc.removeWorktree(notRepo, join(notRepo, "wt"))).resolves.toBeUndefined();
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        repoPath: notRepo,
+        worktreePath: join(notRepo, "wt"),
+        error: "boom",
       }),
       "Failed to remove worktree (best-effort cleanup)",
     );

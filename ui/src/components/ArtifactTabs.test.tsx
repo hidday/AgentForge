@@ -116,6 +116,44 @@ describe("ArtifactTabs", () => {
     expect(screen.getByText(/open it to see the v\s*2/)).toBeTruthy();
   });
 
+  it("shows 'No data available' if the active tab's artifact disappears on rerender", () => {
+    const { rerender } = render(
+      <ArtifactTabs
+        artifacts={[
+          art("Plan", { summary: "The plan summary" }),
+          art("Review", { overallVerdict: "approved" }),
+        ]}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Code Review" }));
+    expect(screen.getByText("Approved")).toBeTruthy();
+    // The Review artifact is gone, but Plan keeps the tab bar (and the now-stale
+    // "review" activeTab, which no longer has a matching button) alive, so
+    // activeArtifact resolves to undefined.
+    rerender(<ArtifactTabs artifacts={[art("Plan", { summary: "The plan summary" })]} />);
+    expect(screen.queryByRole("button", { name: "Code Review" })).toBeNull();
+    expect(screen.getByText("No data available")).toBeTruthy();
+  });
+
+  it("shows 'No rejection feedback recorded' if rejection artifacts disappear on rerender", () => {
+    const { rerender } = render(
+      <ArtifactTabs
+        artifacts={[
+          art("RejectionContext", { planVersion: 1, feedback: "first rejection", source: "api" }),
+          art("Review", { overallVerdict: "approved" }),
+        ]}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Rejection Feedback" }));
+    expect(screen.getByText("first rejection")).toBeTruthy();
+    // The rejection artifact is gone, but Review keeps the tab bar (and the now-stale
+    // "rejectionFeedback" activeTab, which no longer has a matching button) alive, so
+    // activeArtifacts is now empty.
+    rerender(<ArtifactTabs artifacts={[art("Review", { overallVerdict: "approved" })]} />);
+    expect(screen.queryByRole("button", { name: "Rejection Feedback" })).toBeNull();
+    expect(screen.getByText("No rejection feedback recorded")).toBeTruthy();
+  });
+
   it("lists rejection feedback newest version first", () => {
     render(
       <ArtifactTabs

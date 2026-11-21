@@ -387,6 +387,51 @@ describe("OrchestratorService.runRemediation", () => {
     expect(h.linearClient.postComment).not.toHaveBeenCalled();
     expect(h.store.run?.remediationRuntime).toBeNull();
   });
+
+  it("completes end-to-end and returns the run when markReady's preconditions are satisfied", async () => {
+    const h = remediationHarness();
+    // Every other runRemediation test above ends with markReady throwing
+    // (the Review artifact is never re-approved by the default harness), so
+    // the function's final `return run` is never reached. Here the
+    // remediation step itself also produces a fresh, approved Review
+    // artifact with no outstanding blockers alongside the green execution
+    // report, which is what lets markReady's checks pass and the run
+    // actually transition through REVIEW_APPROVED to ReadyForHumanReview.
+    h.remediationAgent.run.mockImplementationOnce(async (review, prev) => {
+      const executionReport = makeExecutionReport({
+        executionVersion: prev.executionVersion + 1,
+        summary: "Addressed review findings",
+        score: 0.95,
+        scoreRationale: "All findings fixed",
+      });
+      h.addArtifact("ExecutionReport", executionReport.executionVersion, executionReport);
+      h.addArtifact(
+        "Review",
+        2,
+        makeReview({ reviewId: review.reviewId, overallVerdict: "approved", findings: [] }),
+      );
+      return {
+        reviewId: review.reviewId,
+        resolution: review.findings.map((f) => ({
+          findingId: f.id,
+          status: "accepted" as const,
+          action: `Fixed ${f.title}`,
+          rationale: "Valid finding",
+        })),
+        readyForHumanReview: true,
+        executionReport,
+      };
+    });
+
+    const run = await h.svc.runRemediation("run-1", { f1: 501 });
+
+    expect(run.state).toBe(RunState.ReadyForHumanReview);
+    expect(h.recordedEventTypes()).toEqual([
+      RunEvent.REMEDIATION_FINISHED,
+      RunEvent.REVIEW_APPROVED,
+    ]);
+    expect(h.comments().at(-1)).toBe(READY_COMMENT);
+  });
 });
 
 // ---------------------------------------------------------------------------

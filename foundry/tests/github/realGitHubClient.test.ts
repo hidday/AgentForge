@@ -60,6 +60,15 @@ describe("RealGitHubClient", () => {
         /cannot access repo "org\/repo".*Not Found/,
       );
     });
+
+    it("stringifies a non-Error rejection when wrapping the access failure", async () => {
+      octokit.repos.get.mockRejectedValue("rate limited by proxy");
+      const client = new RealGitHubClient("token", makeLogger() as never);
+
+      await expect(client.verifyRepoAccess("org/repo")).rejects.toThrow(
+        /cannot access repo "org\/repo".*rate limited by proxy/,
+      );
+    });
   });
 
   describe("getDefaultBranch", () => {
@@ -76,6 +85,15 @@ describe("RealGitHubClient", () => {
 
       await expect(client.getDefaultBranch("org/repo")).rejects.toThrow(
         /GitHub getDefaultBranch failed for "org\/repo": boom/,
+      );
+    });
+
+    it("stringifies a non-Error rejection when wrapping the failure", async () => {
+      octokit.repos.get.mockRejectedValue({ message: "not an Error instance" });
+      const client = new RealGitHubClient("token", makeLogger() as never);
+
+      await expect(client.getDefaultBranch("org/repo")).rejects.toThrow(
+        /GitHub getDefaultBranch failed for "org\/repo": \[object Object\]/,
       );
     });
   });
@@ -177,6 +195,16 @@ describe("RealGitHubClient", () => {
       await expect(client.createDraftPR("org/repo", "head", "main", "T", "B")).rejects.toThrow(
         /network down/,
       );
+    });
+
+    it("falls back to the existing-PR lookup on a 422 non-Error rejection", async () => {
+      octokit.pulls.create.mockRejectedValue({ status: 422 });
+      octokit.pulls.list.mockResolvedValue({ data: [{ number: 88 }] });
+      const client = new RealGitHubClient("token", makeLogger() as never);
+
+      const num = await client.createDraftPR("org/repo", "head", "main", "T", "B");
+
+      expect(num).toBe(88);
     });
   });
 
@@ -388,6 +416,23 @@ describe("RealGitHubClient", () => {
         "Failed to reply to PR review comment, skipping",
       );
     });
+
+    it("stringifies a non-Error rejection in the swallowed warning", async () => {
+      octokit.pulls.createReplyForReviewComment.mockRejectedValue("transient failure");
+      const logger = makeLogger();
+      const client = new RealGitHubClient("token", logger as never);
+
+      await expect(client.replyToReviewComment("org/repo", 7, 501, "ack")).resolves.toBeUndefined();
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.objectContaining({
+          repo: "org/repo",
+          prNumber: 7,
+          commentId: 501,
+          error: "transient failure",
+        }),
+        "Failed to reply to PR review comment, skipping",
+      );
+    });
   });
 
   describe("submitPRReview", () => {
@@ -436,6 +481,16 @@ describe("RealGitHubClient", () => {
       const client = new RealGitHubClient("token", makeLogger() as never);
 
       await expect(client.submitPRReview("org/repo", 7, "body", "COMMENT")).rejects.toThrow();
+      expect(octokit.pulls.createReview).toHaveBeenCalledTimes(1);
+    });
+
+    it("wraps a non-Error rejection without matching the own-PR fallback pattern", async () => {
+      octokit.pulls.createReview.mockRejectedValue("totally unexpected failure");
+      const client = new RealGitHubClient("token", makeLogger() as never);
+
+      await expect(client.submitPRReview("org/repo", 7, "body", "REQUEST_CHANGES")).rejects.toThrow(
+        /GitHub submitPRReview failed.*totally unexpected failure/,
+      );
       expect(octokit.pulls.createReview).toHaveBeenCalledTimes(1);
     });
   });
