@@ -1,0 +1,156 @@
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { api } from "./client.ts";
+
+function jsonResponse(body: unknown, ok = true, status = 200) {
+  return {
+    ok,
+    status,
+    json: vi.fn().mockResolvedValue(body),
+  } as unknown as Response;
+}
+
+describe("api client", () => {
+  beforeEach(() => {
+    vi.stubGlobal("fetch", vi.fn());
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("GETs the runs list without a query string when no filter is given", async () => {
+    (fetch as ReturnType<typeof vi.fn>).mockResolvedValue(jsonResponse({ runs: [] }));
+    await api.getRuns();
+    expect(fetch).toHaveBeenCalledWith("/api/runs", expect.objectContaining({ headers: {} }));
+  });
+
+  it("GETs the runs list with a state query string when a filter is given", async () => {
+    (fetch as ReturnType<typeof vi.fn>).mockResolvedValue(jsonResponse({ runs: [] }));
+    await api.getRuns("Done");
+    expect(fetch).toHaveBeenCalledWith("/api/runs?state=Done", expect.anything());
+  });
+
+  it("GETs a single run by id", async () => {
+    const payload = { run: {}, artifacts: [], events: [] };
+    (fetch as ReturnType<typeof vi.fn>).mockResolvedValue(jsonResponse(payload));
+    const result = await api.getRun("run-1");
+    expect(fetch).toHaveBeenCalledWith("/api/runs/run-1", expect.anything());
+    expect(result).toEqual(payload);
+  });
+
+  it("POSTs JSON bodies with a Content-Type header for mutating actions", async () => {
+    (fetch as ReturnType<typeof vi.fn>).mockResolvedValue(jsonResponse({ ok: true, state: "Done" }));
+    await api.approvePlan("run-1", "looks good");
+
+    expect(fetch).toHaveBeenCalledWith("/api/runs/run-1/actions/approve-plan", {
+      headers: { "Content-Type": "application/json" },
+      method: "POST",
+      body: JSON.stringify({ note: "looks good" }),
+    });
+  });
+
+  it("omits the note field when approving a plan with no note", async () => {
+    (fetch as ReturnType<typeof vi.fn>).mockResolvedValue(jsonResponse({ ok: true, state: "Done" }));
+    await api.approvePlan("run-1");
+
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/runs/run-1/actions/approve-plan",
+      expect.objectContaining({ body: JSON.stringify({ note: undefined }) }),
+    );
+  });
+
+  it("defaults rejectPlan's mode to 'iterate'", async () => {
+    (fetch as ReturnType<typeof vi.fn>).mockResolvedValue(jsonResponse({ ok: true, state: "Planning" }));
+    await api.rejectPlan("run-1", "needs work");
+
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/runs/run-1/actions/reject-plan",
+      expect.objectContaining({
+        body: JSON.stringify({ context: "needs work", mode: "iterate" }),
+      }),
+    );
+  });
+
+  it("sends POST requests with no body for parameterless actions", async () => {
+    (fetch as ReturnType<typeof vi.fn>).mockResolvedValue(jsonResponse({ ok: true }));
+    await api.pauseRun("run-1");
+
+    expect(fetch).toHaveBeenCalledWith("/api/runs/run-1/actions/pause", {
+      headers: {},
+      method: "POST",
+    });
+  });
+
+  it("sends the chat message body on sendChatMessage", async () => {
+    (fetch as ReturnType<typeof vi.fn>).mockResolvedValue(
+      jsonResponse({ reply: "hi", durationMs: 10 }),
+    );
+    const result = await api.sendChatMessage("run-1", "hello agent");
+
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/runs/run-1/chat",
+      expect.objectContaining({ body: JSON.stringify({ message: "hello agent" }) }),
+    );
+    expect(result).toEqual({ reply: "hi", durationMs: 10 });
+  });
+
+  it("throws the server-provided error message when a request fails", async () => {
+    (fetch as ReturnType<typeof vi.fn>).mockResolvedValue(
+      jsonResponse({ error: "Run not found" }, false, 404),
+    );
+
+    await expect(api.getRun("missing")).rejects.toThrow("Run not found");
+  });
+
+  it("falls back to an HTTP status message when the error body has no error field", async () => {
+    (fetch as ReturnType<typeof vi.fn>).mockResolvedValue(jsonResponse({}, false, 500));
+
+    await expect(api.getRun("run-1")).rejects.toThrow("HTTP 500");
+  });
+
+  it("falls back to an HTTP status message when the error body fails to parse", async () => {
+    const res = {
+      ok: false,
+      status: 503,
+      json: vi.fn().mockRejectedValue(new Error("not json")),
+    } as unknown as Response;
+    (fetch as ReturnType<typeof vi.fn>).mockResolvedValue(res);
+
+    await expect(api.getRun("run-1")).rejects.toThrow("HTTP 503");
+  });
+
+  it("includes issueIds in the ingestIssues request body", async () => {
+    (fetch as ReturnType<typeof vi.fn>).mockResolvedValue(
+      jsonResponse({ ok: true, started: ["a"], skipped: [] }),
+    );
+    await api.ingestIssues(["a", "b"]);
+
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/linear/ingest",
+      expect.objectContaining({ body: JSON.stringify({ issueIds: ["a", "b"] }) }),
+    );
+  });
+
+  it("includes answers in the answerQuestions request body", async () => {
+    (fetch as ReturnType<typeof vi.fn>).mockResolvedValue(jsonResponse({ ok: true, run: {} }));
+    const answers = [{ questionId: "q1", answer: "42" }];
+    await api.answerQuestions("run-1", answers);
+
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/runs/run-1/actions/answer-questions",
+      expect.objectContaining({ body: JSON.stringify({ answers }) }),
+    );
+  });
+
+  it("GETs active processes scoped to a runId when provided", async () => {
+    (fetch as ReturnType<typeof vi.fn>).mockResolvedValue(jsonResponse({ processes: [] }));
+    await api.getActiveProcesses("run-1");
+    expect(fetch).toHaveBeenCalledWith("/api/processes?runId=run-1", expect.anything());
+  });
+
+  it("GETs all active processes when no runId is provided", async () => {
+    (fetch as ReturnType<typeof vi.fn>).mockResolvedValue(jsonResponse({ processes: [] }));
+    await api.getActiveProcesses();
+    expect(fetch).toHaveBeenCalledWith("/api/processes", expect.anything());
+  });
+});
