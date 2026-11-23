@@ -27,6 +27,21 @@ describe("ExecutionReportView", () => {
     expect(screen.getByText("Solid implementation")).toBeDefined();
   });
 
+  it("uses the mid-range waiting color for a middling score", () => {
+    const { container } = render(<ExecutionReportView report={{ score: 0.5 }} />);
+    expect(container.querySelector(".bg-state-waiting")).not.toBeNull();
+  });
+
+  it("uses the blocked color for a low score", () => {
+    const { container } = render(<ExecutionReportView report={{ score: 0.1 }} />);
+    expect(container.querySelector(".bg-state-blocked")).not.toBeNull();
+  });
+
+  it("renders the summary through Markdown when present", () => {
+    render(<ExecutionReportView report={{ summary: "Implemented the feature end to end." }} />);
+    expect(screen.getByTestId("md").textContent).toBe("Implemented the feature end to end.");
+  });
+
   it("does not render rationale when score is absent even if rationale is set", () => {
     render(<ExecutionReportView report={{ scoreRationale: "orphan rationale" }} />);
     expect(screen.queryByText("orphan rationale")).toBeNull();
