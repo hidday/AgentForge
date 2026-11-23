@@ -114,6 +114,53 @@ describe("OpenQuestionsPanel", () => {
     });
   });
 
+  it("omits unanswered optional questions from the submit payload", async () => {
+    mockApi.answerQuestions.mockResolvedValue({ ok: true, run: {} });
+
+    render(
+      <OpenQuestionsPanel
+        questions={[requiredQuestion, optionalQuestion]}
+        runId="run-1"
+      />,
+    );
+
+    // Only fill the required question; leave the optional one untouched so
+    // its entry in `answers` is undefined.
+    const textareas = screen.getAllByRole("textbox") as HTMLTextAreaElement[];
+    await userEvent.type(textareas[0], "Prod target");
+
+    const submitBtn = screen.getByRole("button", { name: /submit answers/i });
+    await userEvent.click(submitBtn);
+
+    await waitFor(() => {
+      expect(mockApi.answerQuestions).toHaveBeenCalledWith("run-1", [
+        { questionId: "q1", answer: "Prod target" },
+      ]);
+    });
+  });
+
+  it("falls back to a generic error message when the rejection is not an Error instance", async () => {
+    mockApi.answerQuestions.mockRejectedValue("network down");
+
+    render(
+      <OpenQuestionsPanel
+        questions={[requiredQuestion]}
+        runId="run-1"
+      />,
+    );
+
+    const textarea = screen.getAllByRole("textbox")[0] as HTMLTextAreaElement;
+    await userEvent.type(textarea, "My answer");
+
+    const submitBtn = screen.getByRole("button", { name: /submit answers/i });
+    await userEvent.click(submitBtn);
+
+    await waitFor(() => {
+      const alert = screen.getByRole("alert");
+      expect(alert.textContent).toContain("Failed to submit answers");
+    });
+  });
+
   it("calls onSubmitted callback on successful submission", async () => {
     mockApi.answerQuestions.mockResolvedValue({ ok: true, run: {} });
     const onSubmitted = vi.fn();

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor, act } from "@testing-library/react";
+import { render, screen, waitFor, act, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { Artifact } from "@/api/client.ts";
 
@@ -91,10 +91,47 @@ describe("ChatPanel", () => {
     expect(screen.getByText("Plain user message")).toBeDefined();
   });
 
+  it("renders an empty-string message body when an artifact has no content field", () => {
+    const artifacts: Artifact[] = [
+      { ...makeArtifact("user", "unused", "a1", "2024-01-01T00:00:01Z"), payloadJson: { role: "user" } },
+    ];
+    const { container } = render(<ChatPanel runId={RUN_ID} artifacts={artifacts} />);
+    // No "No messages yet" empty state — one message bubble rendered with empty content
+    expect(screen.queryByText(/No messages yet/i)).toBeNull();
+    const bubble = container.querySelector("span.whitespace-pre-wrap");
+    expect(bubble).not.toBeNull();
+    expect(bubble?.textContent).toBe("");
+  });
+
+  it("shows a generic error message when sendChatMessage rejects with a non-Error value", async () => {
+    mockApi.sendChatMessage.mockRejectedValue("some string failure");
+
+    render(<ChatPanel runId={RUN_ID} artifacts={[]} />);
+    const input = screen.getByPlaceholderText(/ask the agent/i);
+    await userEvent.type(input, "Failing question");
+    await userEvent.click(screen.getByRole("button", { name: /send/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText("Chat request failed")).toBeDefined();
+    });
+  });
+
   it("Send button is disabled when input is empty", () => {
     render(<ChatPanel runId={RUN_ID} artifacts={[]} />);
     const sendBtn = screen.getByRole("button", { name: /send/i });
     expect((sendBtn as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("submitting the form with whitespace-only input is a no-op", async () => {
+    render(<ChatPanel runId={RUN_ID} artifacts={[]} />);
+    const input = screen.getByPlaceholderText(/ask the agent/i);
+    await userEvent.type(input, "   ");
+
+    // Bypass the disabled Send button by submitting the form directly.
+    fireEvent.submit(input.closest("form")!);
+
+    expect(mockApi.sendChatMessage).not.toHaveBeenCalled();
+    expect(screen.queryByText(/agent is thinking/i)).toBeNull();
   });
 
   it("Send button becomes enabled when input has text", async () => {
@@ -212,6 +249,46 @@ describe("ChatPanel", () => {
 
     // No message should have been added to the list
     expect(screen.queryByText("Failing question")).toBeNull();
+  });
+
+  it("auto-scrolls the message list to the bottom anchor when a new message arrives", () => {
+    const scrollSpy = vi.fn();
+    // jsdom does not implement scrollIntoView; ChatPanel feature-detects it.
+    HTMLElement.prototype.scrollIntoView = scrollSpy;
+
+    const { rerender } = render(<ChatPanel runId={RUN_ID} artifacts={[]} />);
+    expect(scrollSpy).toHaveBeenCalledWith({ behavior: "smooth" });
+    scrollSpy.mockClear();
+
+    rerender(
+      <ChatPanel
+        runId={RUN_ID}
+        artifacts={[makeArtifact("user", "New message", "a1", "2024-01-01T00:00:01Z")]}
+      />,
+    );
+    expect(scrollSpy).toHaveBeenCalledWith({ behavior: "smooth" });
+  });
+
+  it("collapses and re-expands the panel when the header button is clicked", async () => {
+    render(
+      <ChatPanel
+        runId={RUN_ID}
+        artifacts={[makeArtifact("user", "Hello", "a1", "2024-01-01T00:00:01Z")]}
+      />,
+    );
+
+    const toggleBtn = screen.getByRole("button", { name: /chat with agent/i });
+    // Open by default: the message and input are visible.
+    expect(screen.getByText("Hello")).toBeDefined();
+    expect(screen.getByPlaceholderText(/ask the agent/i)).toBeDefined();
+
+    await userEvent.click(toggleBtn);
+    expect(screen.queryByText("Hello")).toBeNull();
+    expect(screen.queryByPlaceholderText(/ask the agent/i)).toBeNull();
+
+    await userEvent.click(toggleBtn);
+    expect(screen.getByText("Hello")).toBeDefined();
+    expect(screen.getByPlaceholderText(/ask the agent/i)).toBeDefined();
   });
 
   it("message list does not change from artifact-derived count when only local state changes", async () => {
