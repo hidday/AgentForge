@@ -164,6 +164,41 @@ describe("LinearSyncDialog", () => {
     });
   });
 
+  it("falls back to a generic message when the initial fetch rejects with a non-Error", async () => {
+    mockApi.fetchPendingIssues.mockRejectedValueOnce("network down");
+
+    render(<LinearSyncDialog open={true} onClose={vi.fn()} onIngested={vi.fn()} />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Failed to fetch issues")).toBeDefined();
+    });
+  });
+
+  it("falls back to a generic message when ingestIssues rejects with a non-Error", async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    mockApi.ingestIssues.mockRejectedValue("network down");
+
+    render(<LinearSyncDialog open={true} onClose={vi.fn()} onIngested={vi.fn()} />);
+
+    await waitFor(() => expect(screen.getByText(issueA.title)).toBeDefined());
+    await user.click(screen.getByRole("button", { name: /start 2 runs/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText("Failed to ingest issues")).toBeDefined();
+    });
+  });
+
+  it("falls back to the 'None' priority label for an issue with an unmapped priority", async () => {
+    mockApi.fetchPendingIssues.mockResolvedValue({
+      issues: [{ ...issueA, priority: 99 }],
+    });
+
+    render(<LinearSyncDialog open={true} onClose={vi.fn()} onIngested={vi.fn()} />);
+
+    await waitFor(() => expect(screen.getByText(issueA.title)).toBeDefined());
+    expect(screen.getByText("None")).toBeDefined();
+  });
+
   it("toggleAll deselects then reselects every issue", async () => {
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     render(<LinearSyncDialog open={true} onClose={vi.fn()} onIngested={vi.fn()} />);
