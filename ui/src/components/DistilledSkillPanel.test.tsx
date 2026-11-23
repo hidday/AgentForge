@@ -65,6 +65,26 @@ describe("DistilledSkillPanel", () => {
     expect(screen.getByText(/name: dev-env-pause-resume-footguns/)).toBeDefined();
   });
 
+  it("shows a loading indicator when loading is true, regardless of decision", () => {
+    render(
+      <DistilledSkillPanel distilledSkill={null} distillationDecision={null} loading={true} />,
+    );
+    expect(screen.getByText(/loading distilled skill/i)).toBeDefined();
+  });
+
+  it("shows an error message and skips the loading/skill UI when error is set", () => {
+    render(
+      <DistilledSkillPanel
+        distilledSkill={skill}
+        distillationDecision={decision}
+        error="Failed to fetch skill"
+      />,
+    );
+    expect(screen.getByText("Failed to fetch skill")).toBeDefined();
+    expect(screen.queryByText("Distilled Skill")).toBeNull();
+    expect(screen.queryByText(/loading distilled skill/i)).toBeNull();
+  });
+
   it("shows a fallback message when persistence succeeded but content is missing", () => {
     render(
       <DistilledSkillPanel

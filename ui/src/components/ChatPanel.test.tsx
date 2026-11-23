@@ -214,6 +214,46 @@ describe("ChatPanel", () => {
     expect(screen.queryByText("Failing question")).toBeNull();
   });
 
+  it("auto-scrolls the message list to the bottom anchor when a new message arrives", () => {
+    const scrollSpy = vi.fn();
+    // jsdom does not implement scrollIntoView; ChatPanel feature-detects it.
+    HTMLElement.prototype.scrollIntoView = scrollSpy;
+
+    const { rerender } = render(<ChatPanel runId={RUN_ID} artifacts={[]} />);
+    expect(scrollSpy).toHaveBeenCalledWith({ behavior: "smooth" });
+    scrollSpy.mockClear();
+
+    rerender(
+      <ChatPanel
+        runId={RUN_ID}
+        artifacts={[makeArtifact("user", "New message", "a1", "2024-01-01T00:00:01Z")]}
+      />,
+    );
+    expect(scrollSpy).toHaveBeenCalledWith({ behavior: "smooth" });
+  });
+
+  it("collapses and re-expands the panel when the header button is clicked", async () => {
+    render(
+      <ChatPanel
+        runId={RUN_ID}
+        artifacts={[makeArtifact("user", "Hello", "a1", "2024-01-01T00:00:01Z")]}
+      />,
+    );
+
+    const toggleBtn = screen.getByRole("button", { name: /chat with agent/i });
+    // Open by default: the message and input are visible.
+    expect(screen.getByText("Hello")).toBeDefined();
+    expect(screen.getByPlaceholderText(/ask the agent/i)).toBeDefined();
+
+    await userEvent.click(toggleBtn);
+    expect(screen.queryByText("Hello")).toBeNull();
+    expect(screen.queryByPlaceholderText(/ask the agent/i)).toBeNull();
+
+    await userEvent.click(toggleBtn);
+    expect(screen.getByText("Hello")).toBeDefined();
+    expect(screen.getByPlaceholderText(/ask the agent/i)).toBeDefined();
+  });
+
   it("message list does not change from artifact-derived count when only local state changes", async () => {
     let resolveRequest!: (v: { reply: string; durationMs: number }) => void;
     mockApi.sendChatMessage.mockReturnValue(
