@@ -24,10 +24,8 @@ type SyncDialogProps = {
   onIngestComplete?: (s: { started: number; skipped: number }) => void;
 };
 
-let latestSyncDialogProps: SyncDialogProps | null = null;
 vi.mock("@/components/LinearSyncDialog.tsx", () => ({
   LinearSyncDialog: (props: SyncDialogProps) => {
-    latestSyncDialogProps = props;
     if (!props.open) return null;
     return (
       <div data-testid="sync-dialog">
@@ -89,7 +87,6 @@ function makeRun(overrides: Partial<Run>): Run {
 describe("DashboardPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    latestSyncDialogProps = null;
   });
 
   afterEach(() => {

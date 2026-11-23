@@ -74,7 +74,6 @@ describe("RunsTable", () => {
     const rowClickSpy = vi.fn();
     render(
       <MemoryRouter>
-        {/* eslint-disable-next-line jsx-a11y/no-static-element-interactions */}
         <div onClick={rowClickSpy}>
           <RunsTable runs={[makeRun()]} />
         </div>
