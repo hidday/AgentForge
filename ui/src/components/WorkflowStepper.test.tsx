@@ -37,6 +37,39 @@ describe("WorkflowStepper", () => {
     expect(screen.getByText("1m ago")).toBeDefined();
   });
 
+  it("keeps the earliest timestamp for a state and ignores events with no 'to' field", () => {
+    const events: RunEventRecord[] = [
+      {
+        id: "e1",
+        runId: "r1",
+        eventType: "PLAN_CREATED",
+        source: "system",
+        payloadJson: { to: "Planning" },
+        createdAt: new Date(Date.now() - 60_000).toISOString(),
+      },
+      {
+        id: "e2",
+        runId: "r1",
+        eventType: "PLAN_CREATED",
+        source: "system",
+        payloadJson: { to: "Planning" },
+        createdAt: new Date(Date.now() - 10_000).toISOString(),
+      },
+      {
+        id: "e3",
+        runId: "r1",
+        eventType: "SOMETHING_ELSE",
+        source: "system",
+        payloadJson: null,
+        createdAt: new Date().toISOString(),
+      },
+    ];
+    render(<WorkflowStepper currentState="Implementing" events={events} />);
+    // The first (older) event's timestamp should win — "1m ago", not "10s ago".
+    expect(screen.getByText("1m ago")).toBeDefined();
+    expect(screen.queryByText("10s ago")).toBeNull();
+  });
+
   it("highlights the current state distinctly from completed/upcoming states", () => {
     render(<WorkflowStepper currentState="Implementing" events={[]} />);
     const current = screen.getByText("Implementing");

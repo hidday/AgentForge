@@ -25,6 +25,11 @@ describe("PlanView", () => {
     expect(screen.getByText("10%")).toBeDefined();
   });
 
+  it("uses the mid-range waiting color for a middling confidence", () => {
+    const { container } = render(<PlanView plan={{ confidence: 0.5 }} />);
+    expect(container.querySelector(".bg-state-waiting")).not.toBeNull();
+  });
+
   it("renders the summary and requirements traceability through Markdown", () => {
     render(
       <PlanView

@@ -70,6 +70,22 @@ describe("RunsTable", () => {
     expect(linearLink.getAttribute("href")).toBe("https://linear.app/team/issue/ENG-1");
   });
 
+  it("clicking the Linear link stops the click from bubbling up to an ancestor React handler", async () => {
+    const rowClickSpy = vi.fn();
+    render(
+      <MemoryRouter>
+        {/* eslint-disable-next-line jsx-a11y/no-static-element-interactions */}
+        <div onClick={rowClickSpy}>
+          <RunsTable runs={[makeRun()]} />
+        </div>
+      </MemoryRouter>,
+    );
+
+    await userEvent.click(screen.getByTitle("Open in Linear"));
+
+    expect(rowClickSpy).not.toHaveBeenCalled();
+  });
+
   it("falls back to the identifier when title is missing", () => {
     const { unmount } = renderWithRouter(
       <RunsTable runs={[makeRun({ linearIssueTitle: null })]} />,
