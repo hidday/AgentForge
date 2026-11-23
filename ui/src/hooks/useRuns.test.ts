@@ -102,6 +102,20 @@ describe("useRuns", () => {
     expect(result.current.runs.find((r) => r.id === "r2")!.state).toBe("Todo");
   });
 
+  it("ignores SSE events that are neither run:created nor run:state-changed", async () => {
+    mockApi.getRuns.mockResolvedValue({ runs: [run("r1", "Todo")] });
+    const { result } = renderHook(() => useRuns());
+    await waitFor(() => expect(result.current.runs).toHaveLength(1));
+
+    const handler = mockUseSSE.mock.calls[0]![0] as (e: DashboardEvent) => void;
+    act(() => {
+      handler({ type: "process:started", runId: "r1" });
+    });
+
+    expect(mockApi.getRuns).toHaveBeenCalledTimes(1);
+    expect(result.current.runs).toEqual([run("r1", "Todo")]);
+  });
+
   it("refetch() re-invokes the API", async () => {
     mockApi.getRuns.mockResolvedValue({ runs: [] });
     const { result } = renderHook(() => useRuns());

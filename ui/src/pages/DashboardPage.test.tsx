@@ -141,6 +141,27 @@ describe("DashboardPage", () => {
     expect(statValue("Done")).toBe("1");
   });
 
+  it("buckets a run with an unrecognized state as idle, not into any displayed category", () => {
+    const runs = [
+      makeRun({ id: "r1", state: "SomeFutureState" }),
+      makeRun({ id: "r2", state: "Implementing" }), // active
+    ];
+    useRunsMock.mockReturnValue({ runs, loading: false, error: null, refetch: vi.fn() });
+    render(<DashboardPage />);
+
+    function statValue(label: string): string | null | undefined {
+      const el = screen
+        .getAllByText(label)
+        .find((n) => n.tagName === "DIV" && n.className.includes("text-text-muted mt-0.5"));
+      return el?.previousSibling?.textContent;
+    }
+    expect(statValue("Total")).toBe("2");
+    expect(statValue("Active")).toBe("1");
+    expect(statValue("Awaiting")).toBe("0");
+    expect(statValue("Blocked")).toBe("0");
+    expect(statValue("Done")).toBe("0");
+  });
+
   it("filters the runs passed to RunsTable when a filter button is clicked", async () => {
     const runs = [
       makeRun({ id: "r1", state: "Implementing" }), // active

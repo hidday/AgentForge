@@ -85,6 +85,58 @@ describe("DistilledSkillPanel", () => {
     expect(screen.queryByText(/loading distilled skill/i)).toBeNull();
   });
 
+  it("falls back to the decision's taskCategory for the skill name when no name is available", () => {
+    render(
+      <DistilledSkillPanel
+        distilledSkill={null}
+        distillationDecision={{ ...decision, name: null }}
+      />,
+    );
+    expect(screen.getAllByText("dev-env pause/resume tooling").length).toBeGreaterThan(0);
+  });
+
+  it("falls back to the literal 'distilled-skill' name when nothing names the skill", () => {
+    render(
+      <DistilledSkillPanel
+        distilledSkill={null}
+        distillationDecision={{ ...decision, name: null, taskCategory: null }}
+      />,
+    );
+    expect(screen.getByText("distilled-skill")).toBeDefined();
+  });
+
+  it("falls back to the decision's description when the distilled skill has none", () => {
+    render(
+      <DistilledSkillPanel
+        distilledSkill={{ ...skill, description: null }}
+        distillationDecision={decision}
+      />,
+    );
+    expect(
+      screen.getAllByText(/Use when changing prysmic dev-env pause\/resume/i).length,
+    ).toBeGreaterThan(0);
+  });
+
+  it("omits the description block entirely when neither source has a description", () => {
+    render(
+      <DistilledSkillPanel
+        distilledSkill={{ ...skill, description: null }}
+        distillationDecision={{ ...decision, description: null }}
+      />,
+    );
+    expect(screen.queryByText(/Use when changing prysmic/i)).toBeNull();
+  });
+
+  it("shows the displaced skill id when the distillation displaced an existing skill", () => {
+    render(
+      <DistilledSkillPanel
+        distilledSkill={skill}
+        distillationDecision={{ ...decision, displacedSkillId: "skill-old-12345678" }}
+      />,
+    );
+    expect(screen.getByText(/Displaced skill: skill-ol/)).toBeDefined();
+  });
+
   it("shows a fallback message when persistence succeeded but content is missing", () => {
     render(
       <DistilledSkillPanel

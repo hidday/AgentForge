@@ -184,6 +184,22 @@ describe("RunDetailPage", () => {
     expect(screen.queryByRole("link", { name: /linear/i })).toBeNull();
   });
 
+  it("falls back to the sliced issue id when neither title nor identifier is set", () => {
+    const run = makeRun({
+      linearIssueTitle: null,
+      linearIssueIdentifier: null,
+      linearIssueUrl: null,
+    });
+    useRunMock.mockReturnValue({
+      data: { run, artifacts: [], events: [] },
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+    renderPage();
+    expect(screen.getByText(run.linearIssueId.slice(0, 8))).toBeDefined();
+  });
+
   it("does not render branch/PR/editor links when branchName or workingDirectory is missing", () => {
     const run = makeRun({ branchName: null, prNumber: null });
     useRunMock.mockReturnValue({

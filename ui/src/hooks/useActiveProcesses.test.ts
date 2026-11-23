@@ -93,6 +93,63 @@ describe("useActiveProcesses", () => {
     expect(result.current.output).toBe("");
   });
 
+  it("does not update state from the initial fetch after unmounting before it resolves", async () => {
+    let resolveFetch!: (v: { processes: ActiveProcess[] }) => void;
+    mockApi.getActiveProcesses.mockReturnValue(
+      new Promise((res) => {
+        resolveFetch = res;
+      }),
+    );
+
+    const { result, unmount } = renderHook(() => useActiveProcesses("run-1"));
+    unmount();
+
+    await act(async () => {
+      resolveFetch({ processes: [proc("p1")] });
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(mockApi.getProcessOutput).not.toHaveBeenCalled();
+    expect(result.current.processes).toEqual([]);
+  });
+
+  it("does not update output from getProcessOutput after unmounting before it resolves", async () => {
+    mockApi.getActiveProcesses.mockResolvedValue({ processes: [proc("p1")] });
+    let resolveOutput!: (v: { processId: string; output: string }) => void;
+    mockApi.getProcessOutput.mockReturnValue(
+      new Promise((res) => {
+        resolveOutput = res;
+      }),
+    );
+
+    const { result, unmount } = renderHook(() => useActiveProcesses("run-1"));
+    await waitFor(() => expect(mockApi.getProcessOutput).toHaveBeenCalled());
+    unmount();
+
+    await act(async () => {
+      resolveOutput({ processId: "p1", output: "late output" });
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(result.current.output).toBe("");
+  });
+
+  it("defaults processId and command to empty strings when the SSE event omits them", async () => {
+    mockApi.getActiveProcesses.mockResolvedValue({ processes: [] });
+    const { result } = renderHook(() => useActiveProcesses("run-1"));
+    await waitFor(() => expect(mockApi.getActiveProcesses).toHaveBeenCalled());
+
+    const handler = mockUseSSE.mock.calls[0]![0] as (e: DashboardEvent) => void;
+    act(() => {
+      handler({ type: "process:started", runId: "run-1" });
+    });
+
+    expect(result.current.activeProcessId).toBe("");
+    expect(result.current.processes[0]!.command).toBe("");
+  });
+
   it("adds a process and clears output on process:started", async () => {
     mockApi.getActiveProcesses.mockResolvedValue({ processes: [] });
     const { result } = renderHook(() => useActiveProcesses("run-1"));

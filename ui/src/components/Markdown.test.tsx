@@ -45,6 +45,51 @@ describe("Markdown", () => {
     expect(screen.getAllByRole("listitem")).toHaveLength(2);
   });
 
+  it("renders an ordered list with list items", () => {
+    render(<Markdown>{"1. one\n2. two"}</Markdown>);
+    const ol = screen.getByText("one").closest("ol");
+    expect(ol).not.toBeNull();
+    expect(ol!.className).toContain("list-decimal");
+    expect(screen.getAllByRole("listitem")).toHaveLength(2);
+  });
+
+  it("renders headings h1 through h4 with their expected tag and styling", () => {
+    render(
+      <Markdown>
+        {"# Heading 1\n\n## Heading 2\n\n### Heading 3\n\n#### Heading 4"}
+      </Markdown>,
+    );
+    const h1 = screen.getByText("Heading 1");
+    expect(h1.tagName).toBe("H1");
+    expect(h1.className).toContain("text-sm");
+
+    const h2 = screen.getByText("Heading 2");
+    expect(h2.tagName).toBe("H2");
+    expect(h2.className).toContain("text-sm");
+
+    const h3 = screen.getByText("Heading 3");
+    expect(h3.tagName).toBe("H3");
+    expect(h3.className).toContain("text-xs");
+
+    const h4 = screen.getByText("Heading 4");
+    expect(h4.tagName).toBe("H4");
+    expect(h4.className).toContain("text-xs");
+  });
+
+  it("renders a blockquote with the expected styling", () => {
+    render(<Markdown>{"> quoted text"}</Markdown>);
+    const quote = screen.getByText("quoted text").closest("blockquote");
+    expect(quote).not.toBeNull();
+    expect(quote!.className).toContain("border-l-2");
+  });
+
+  it("renders a horizontal rule", () => {
+    const { container } = render(<Markdown>{"above\n\n---\n\nbelow"}</Markdown>);
+    const hr = container.querySelector("hr");
+    expect(hr).not.toBeNull();
+    expect(hr!.className).toContain("border-border-subtle");
+  });
+
   it("renders a GFM table (via remark-gfm) with headers and cells", () => {
     render(
       <Markdown>

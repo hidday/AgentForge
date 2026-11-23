@@ -91,6 +91,33 @@ describe("ActionBar", () => {
     });
   });
 
+  it("Cancel on the generic confirm dialog closes it without calling the API", async () => {
+    render(<ActionBar runId={RUN_ID} state="AwaitingPlanApproval" onAction={vi.fn()} />);
+
+    await userEvent.click(screen.getByText("Approve Plan"));
+    expect(screen.getByText("Approve & Start")).toBeDefined();
+
+    await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
+
+    expect(screen.queryByText("Approve & Start")).toBeNull();
+    expect(mockApi.approvePlan).not.toHaveBeenCalled();
+  });
+
+  it("switching reject mode back to 'iterate' after selecting 'fresh' sends mode 'iterate'", async () => {
+    render(<ActionBar runId={RUN_ID} state="AwaitingPlanApproval" onAction={vi.fn()} />);
+
+    await userEvent.click(screen.getByText("Reject Plan"));
+    await userEvent.click(screen.getByText("Start fresh"));
+    await userEvent.click(screen.getByText("Revise plan"));
+
+    const rejectButtons = screen.getAllByRole("button", { name: "Reject Plan" });
+    await userEvent.click(rejectButtons[rejectButtons.length - 1]);
+
+    await waitFor(() => {
+      expect(mockApi.rejectPlan).toHaveBeenCalledWith(RUN_ID, undefined, "iterate");
+    });
+  });
+
   it("Reject dialog cancel button closes without calling the API", async () => {
     render(<ActionBar runId={RUN_ID} state="AwaitingPlanApproval" onAction={vi.fn()} />);
     await userEvent.click(screen.getByText("Reject Plan"));

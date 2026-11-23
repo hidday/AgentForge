@@ -93,6 +93,13 @@ describe("EventTimeline", () => {
     expect(screen.getByText("ai-agent")).toBeDefined();
   });
 
+  it("falls back to the default icon for an unrecognized event type", () => {
+    render(
+      <EventTimeline events={[makeEvent({ eventType: "SOME_UNKNOWN_EVENT" })]} />,
+    );
+    expect(screen.getByText("Some Unknown Event")).toBeDefined();
+  });
+
   it("renders the human source label for human-sourced events", () => {
     render(<EventTimeline events={[makeEvent({ source: "human" })]} />);
     expect(screen.getByText("human")).toBeDefined();
