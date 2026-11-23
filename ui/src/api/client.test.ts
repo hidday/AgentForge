@@ -184,6 +184,16 @@ describe("api client", () => {
     );
   });
 
+  it("omits the note field when re-reviewing a plan with no note", async () => {
+    (fetch as ReturnType<typeof vi.fn>).mockResolvedValue(jsonResponse({ ok: true, runId: "run-1" }));
+    await api.reReviewPlan("run-1");
+
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/runs/run-1/actions/re-review-plan",
+      expect.objectContaining({ body: JSON.stringify({ note: undefined }) }),
+    );
+  });
+
   it("sends the note body on revisePlan", async () => {
     (fetch as ReturnType<typeof vi.fn>).mockResolvedValue(jsonResponse({ ok: true, runId: "run-1" }));
     await api.revisePlan("run-1", "revise this");
@@ -191,6 +201,16 @@ describe("api client", () => {
     expect(fetch).toHaveBeenCalledWith(
       "/api/runs/run-1/actions/revise-plan",
       expect.objectContaining({ body: JSON.stringify({ note: "revise this" }) }),
+    );
+  });
+
+  it("omits the note field when revising a plan with no note", async () => {
+    (fetch as ReturnType<typeof vi.fn>).mockResolvedValue(jsonResponse({ ok: true, runId: "run-1" }));
+    await api.revisePlan("run-1");
+
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/runs/run-1/actions/revise-plan",
+      expect.objectContaining({ body: JSON.stringify({ note: undefined }) }),
     );
   });
 
