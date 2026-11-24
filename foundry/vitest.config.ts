@@ -12,7 +12,9 @@ export default defineConfig({
       // it is exercised by running the app, not by unit tests.
       // src/generated/** is Prisma-generated code ("Do not edit directly",
       // @ts-nocheck); it has no authored logic to test.
-      exclude: ["src/server.ts", "src/generated/**"],
+      // runnerTypes.ts is a type-only module (interfaces only, no runtime
+      // value exports); v8 cannot instrument it, so it always reports 0%.
+      exclude: ["src/server.ts", "src/generated/**", "src/runtime/runnerTypes.ts"],
       reporter: ["text", "json-summary", "html"],
       reportsDirectory: "coverage",
     },

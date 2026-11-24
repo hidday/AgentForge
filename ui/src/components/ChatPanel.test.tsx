@@ -214,6 +214,69 @@ describe("ChatPanel", () => {
     expect(screen.queryByText("Failing question")).toBeNull();
   });
 
+  it("falls back to an empty string when a ChatMessage artifact payload has no content field", () => {
+    const artifacts: Artifact[] = [
+      {
+        id: "a1",
+        runId: RUN_ID,
+        type: "ChatMessage",
+        version: 1,
+        payloadJson: { role: "user" },
+        rawText: "",
+        createdAt: "2024-01-01T00:00:01Z",
+      },
+    ];
+    const { container } = render(<ChatPanel runId={RUN_ID} artifacts={artifacts} />);
+    // One message bubble rendered, but with no content text — no crash either way.
+    expect(screen.queryByText(/No messages yet/i)).toBeNull();
+    expect(container.querySelector(".whitespace-pre-wrap")?.textContent).toBe("");
+  });
+
+  it("collapses the panel when the header is clicked, and expands it again on a second click", async () => {
+    render(<ChatPanel runId={RUN_ID} artifacts={[]} />);
+    expect(screen.getByText(/No messages yet/i)).toBeDefined();
+
+    await userEvent.click(screen.getByText("Chat with Agent"));
+    expect(screen.queryByText(/No messages yet/i)).toBeNull();
+
+    await userEvent.click(screen.getByText("Chat with Agent"));
+    expect(screen.getByText(/No messages yet/i)).toBeDefined();
+  });
+
+  it("calls scrollIntoView on the bottom anchor when it is available", async () => {
+    const scrollIntoView = vi.fn();
+    Element.prototype.scrollIntoView = scrollIntoView;
+    mockApi.sendChatMessage.mockResolvedValue({ reply: "ok", durationMs: 1 });
+
+    render(<ChatPanel runId={RUN_ID} artifacts={[]} />);
+    const input = screen.getByPlaceholderText(/ask the agent/i);
+    await userEvent.type(input, "Hello");
+    await userEvent.click(screen.getByRole("button", { name: /send/i }));
+
+    await waitFor(() => expect(scrollIntoView).toHaveBeenCalledWith({ behavior: "smooth" }));
+  });
+
+  it("shows a generic error message when sendChatMessage rejects with a non-Error value", async () => {
+    mockApi.sendChatMessage.mockRejectedValue("plain string failure");
+
+    render(<ChatPanel runId={RUN_ID} artifacts={[]} />);
+    const input = screen.getByPlaceholderText(/ask the agent/i);
+    await userEvent.type(input, "Question");
+    await userEvent.click(screen.getByRole("button", { name: /send/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText("Chat request failed")).toBeDefined();
+    });
+  });
+
+  it("ignores a form submission whose trimmed input is blank (submitted via Enter, bypassing the disabled button)", async () => {
+    render(<ChatPanel runId={RUN_ID} artifacts={[]} />);
+    const input = screen.getByPlaceholderText(/ask the agent/i);
+    await userEvent.type(input, "   {enter}");
+
+    expect(mockApi.sendChatMessage).not.toHaveBeenCalled();
+  });
+
   it("message list does not change from artifact-derived count when only local state changes", async () => {
     let resolveRequest!: (v: { reply: string; durationMs: number }) => void;
     mockApi.sendChatMessage.mockReturnValue(
