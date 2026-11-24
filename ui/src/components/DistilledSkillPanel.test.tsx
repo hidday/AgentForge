@@ -32,6 +32,72 @@ const skill: SkillDocument = {
 };
 
 describe("DistilledSkillPanel", () => {
+  it("shows a loading indicator when loading is true", () => {
+    render(
+      <DistilledSkillPanel
+        distilledSkill={null}
+        distillationDecision={null}
+        loading={true}
+      />,
+    );
+    expect(screen.getByText("Loading distilled skill...")).toBeDefined();
+  });
+
+  it("shows an error message when error is set", () => {
+    render(
+      <DistilledSkillPanel
+        distilledSkill={null}
+        distillationDecision={null}
+        error="Failed to load skill"
+      />,
+    );
+    expect(screen.getByText("Failed to load skill")).toBeDefined();
+  });
+
+  it("falls back through the name chain to the distillation decision's taskCategory", () => {
+    render(
+      <DistilledSkillPanel
+        distilledSkill={null}
+        distillationDecision={{
+          ...decision,
+          name: null,
+          taskCategory: "fallback-category",
+        }}
+      />,
+    );
+    expect(screen.getAllByText("fallback-category").length).toBeGreaterThan(0);
+  });
+
+  it("falls back to 'distilled-skill' when no name or taskCategory is available anywhere", () => {
+    render(
+      <DistilledSkillPanel
+        distilledSkill={null}
+        distillationDecision={{ ...decision, name: null, taskCategory: null }}
+      />,
+    );
+    expect(screen.getByText("distilled-skill")).toBeDefined();
+  });
+
+  it("shows the displaced skill id, truncated to 8 characters", () => {
+    render(
+      <DistilledSkillPanel
+        distilledSkill={skill}
+        distillationDecision={{ ...decision, displacedSkillId: "abcdefgh12345" }}
+      />,
+    );
+    expect(screen.getByText(/Displaced skill: abcdefgh/)).toBeDefined();
+  });
+
+  it("renders without a description or export preview when neither source provides one", () => {
+    render(
+      <DistilledSkillPanel
+        distilledSkill={{ ...skill, description: null }}
+        distillationDecision={{ ...decision, description: null }}
+      />,
+    );
+    expect(screen.queryByText(/SKILL.md export preview/i)).toBeNull();
+  });
+
   it("renders nothing when distillation did not persist a skill", () => {
     const { container } = render(
       <DistilledSkillPanel
