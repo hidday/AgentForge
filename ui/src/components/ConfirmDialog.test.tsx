@@ -211,6 +211,23 @@ describe("ConfirmDialog", () => {
     );
   });
 
+  it("applies destructive styling to the confirm button when variant is destructive", () => {
+    render(
+      <ConfirmDialog
+        open={true}
+        title="Reject Plan"
+        description="Desc"
+        confirmLabel="Reject"
+        variant="destructive"
+        onConfirm={vi.fn()}
+        onCancel={vi.fn()}
+      />,
+    );
+
+    const confirmBtn = screen.getByRole("button", { name: "Reject" });
+    expect(confirmBtn.className).toContain("bg-state-blocked");
+  });
+
   it("disables the notes textarea while loading", () => {
     render(
       <ConfirmDialog

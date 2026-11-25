@@ -56,7 +56,6 @@ describe("AgentOutputPanel", () => {
   });
 
   it("shows the active process runtime/stage and an elapsed timer when a process is running", async () => {
-    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     render(
       <AgentOutputPanel
         processes={[makeProcess({ runtime: "claude-code", stage: "Implementing" })]}

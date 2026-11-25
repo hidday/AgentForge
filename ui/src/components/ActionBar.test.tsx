@@ -191,6 +191,24 @@ describe("ActionBar", () => {
         "bg-accent",
       );
     });
+
+    it("can switch back to iterate mode after selecting fresh", async () => {
+      render(<ActionBar runId="run-1" state="AwaitingPlanApproval" onAction={vi.fn()} />);
+
+      await userEvent.click(screen.getByRole("button", { name: "Reject Plan" }));
+      await userEvent.click(screen.getByText("Start fresh"));
+      expect(screen.getByText("Start fresh").closest("button")?.className).toContain(
+        "bg-accent",
+      );
+
+      await userEvent.click(screen.getByText("Revise plan"));
+      expect(screen.getByText("Revise plan").closest("button")?.className).toContain(
+        "bg-accent",
+      );
+      expect(screen.getByText("Start fresh").closest("button")?.className).not.toContain(
+        "bg-accent",
+      );
+    });
   });
 
   it("ReadyForHumanReview: approves & completes the run (no notes field)", async () => {

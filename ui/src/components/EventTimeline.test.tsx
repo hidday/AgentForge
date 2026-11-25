@@ -89,9 +89,22 @@ describe("EventTimeline", () => {
     expect(screen.queryByText("should not show")).toBeNull();
   });
 
+  it("uses the 'done' icon styling for APPROVED/EXECUTION_FINISHED/REMEDIATION_FINISHED events", () => {
+    const { container } = render(
+      <EventTimeline events={[makeEvent({ eventType: "EXECUTION_FINISHED" })]} />,
+    );
+    const icon = container.querySelector("svg.text-state-done");
+    expect(icon).not.toBeNull();
+  });
+
   it("renders the event source label", () => {
     render(<EventTimeline events={[makeEvent({ source: "user-command" })]} />);
     expect(screen.getByText("user-command")).toBeDefined();
+  });
+
+  it("falls back to the Bot icon for an unmapped event source", () => {
+    render(<EventTimeline events={[makeEvent({ source: "ai-agent" })]} />);
+    expect(screen.getByText("ai-agent")).toBeDefined();
   });
 
   it("falls back to the Zap icon mapping for an unknown event type without crashing", () => {
