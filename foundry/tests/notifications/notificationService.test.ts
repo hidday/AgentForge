@@ -5,6 +5,14 @@ import {
   type NotificationPayload,
 } from "../../src/notifications/notificationService.js";
 
+// CodeQL flags `url.includes("some.host")` as an incomplete substring check
+// (a host could be spoofed by putting the substring elsewhere in the URL).
+// These mocks only ever see the two fixed URLs the service itself constructs,
+// but match on the actual hostname anyway to keep the dispatch precise.
+function isHost(url: string, host: string): boolean {
+  return new URL(url).hostname === host;
+}
+
 function makeLogger() {
   return {
     info: vi.fn(),
@@ -138,7 +146,7 @@ describe("NotificationService", () => {
 
     it("records a slack failure (non-ok response) and logs a warning, without failing email", async () => {
       fetchMock.mockImplementation((url: string) => {
-        if (url.includes("hooks.slack.com")) {
+        if (isHost(url, "hooks.slack.com")) {
           return Promise.resolve({ ok: false, status: 500, text: () => Promise.resolve("server error") });
         }
         return Promise.resolve({ ok: true, text: () => Promise.resolve("") });
@@ -158,7 +166,7 @@ describe("NotificationService", () => {
 
     it("records an email failure (non-ok response) and logs a warning", async () => {
       fetchMock.mockImplementation((url: string) => {
-        if (url.includes("resend.com")) {
+        if (isHost(url, "api.resend.com")) {
           return Promise.resolve({ ok: false, status: 422, text: () => Promise.resolve("bad request") });
         }
         return Promise.resolve({ ok: true, text: () => Promise.resolve("") });
@@ -340,7 +348,7 @@ describe("NotificationService", () => {
 
     it("records a thrown Error during the email send as its message", async () => {
       fetchMock.mockImplementation((url: string) => {
-        if (url.includes("resend.com")) {
+        if (isHost(url, "api.resend.com")) {
           return Promise.reject(new Error("smtp relay unreachable"));
         }
         return Promise.resolve({ ok: true, text: () => Promise.resolve("") });
@@ -357,7 +365,7 @@ describe("NotificationService", () => {
 
     it("records a stringified non-Error thrown during the email send", async () => {
       fetchMock.mockImplementation((url: string) => {
-        if (url.includes("resend.com")) {
+        if (isHost(url, "api.resend.com")) {
           return Promise.reject("email rejection string");
         }
         return Promise.resolve({ ok: true, text: () => Promise.resolve("") });
