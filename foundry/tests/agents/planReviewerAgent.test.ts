@@ -87,7 +87,7 @@ function buildPlanReviewerAgent() {
     logger as never,
   );
 
-  return { agent, getPrompt: () => capturedPrompt };
+  return { agent, logger, getPrompt: () => capturedPrompt };
 }
 
 describe("PlanReviewerAgent.run() relatedContext rendering", () => {
@@ -145,5 +145,58 @@ describe("PlanReviewerAgent.run() relatedContext rendering", () => {
     expect(prompt).not.toContain("BEGIN BACKGROUND CONTEXT");
     expect(prompt).not.toContain("Background: Related Linear Context");
     expect(prompt).not.toContain("{{relatedContextSection}}");
+  });
+});
+
+describe("PlanReviewerAgent.run() operator note", () => {
+  it("injects the operator note into the rendered prompt and logs hasOperatorNote=true", async () => {
+    const { agent, getPrompt, logger } = buildPlanReviewerAgent();
+    const bundle = makeTaskBundle();
+
+    await agent.run(makePlan(), bundle, "run-1", {
+      operatorNote: "Watch out for the rate limiter.",
+    });
+
+    const prompt = getPrompt();
+    expect(prompt).toContain("## Operator Note");
+    expect(prompt).toContain("Watch out for the rate limiter.");
+    expect(prompt).toContain("prefer `changes_requested`");
+
+    const startLog = logger.info.mock.calls.find(
+      (c: unknown[]) => c[1] === "Starting plan reviewer agent (Codex CLI)",
+    );
+    expect((startLog?.[0] as Record<string, unknown>).hasOperatorNote).toBe(true);
+  });
+
+  it("omits the operator note section and logs hasOperatorNote=false when absent", async () => {
+    const { agent, getPrompt, logger } = buildPlanReviewerAgent();
+    const bundle = makeTaskBundle();
+
+    await agent.run(makePlan(), bundle, "run-1");
+
+    const prompt = getPrompt();
+    expect(prompt).not.toContain("## Operator Note");
+    expect(prompt).not.toContain("{{operatorNoteSection}}");
+
+    const startLog = logger.info.mock.calls.find(
+      (c: unknown[]) => c[1] === "Starting plan reviewer agent (Codex CLI)",
+    );
+    expect((startLog?.[0] as Record<string, unknown>).hasOperatorNote).toBe(false);
+  });
+
+  it("logs the review verdict and findings count in the completion event", async () => {
+    const { agent, logger } = buildPlanReviewerAgent();
+    const bundle = makeTaskBundle();
+
+    await agent.run(makePlan(), bundle, "run-1");
+
+    const completionLog = logger.info.mock.calls.find(
+      (c: unknown[]) => c[1] === "Plan review completed",
+    );
+    expect(completionLog).toBeDefined();
+    const payload = completionLog?.[0] as Record<string, unknown> | undefined;
+    expect(payload?.verdict).toBe("approved");
+    expect(payload?.findingsCount).toBe(0);
+    expect(payload?.reviewId).toBe("plan-rev-001");
   });
 });
