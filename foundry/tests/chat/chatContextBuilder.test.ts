@@ -468,4 +468,72 @@ describe("buildChatSystemPrompt", () => {
     expect(result).toContain("New summary");
     expect(result).not.toContain("Old summary");
   });
+
+  it("keeps the current-best artifact when a later one in the list has a lower version", () => {
+    // Exercises the `cur.version > best.version` false branch of findLatest's
+    // reduce (the other test only ever sees the true branch).
+    const planV2 = makeArtifact({
+      type: "Plan",
+      version: 2,
+      payloadJson: { summary: "Newest summary" },
+    });
+    const planV1 = makeArtifact({
+      type: "Plan",
+      version: 1,
+      payloadJson: { summary: "Older summary" },
+    });
+    const result = buildChatSystemPrompt(makeRun(), [planV2, planV1]);
+    expect(result).toContain("Newest summary");
+    expect(result).not.toContain("Older summary");
+  });
+
+  it("falls back to empty-string placeholders for missing optional sub-fields across every section", () => {
+    const run = makeRun();
+    const planArtifact = makeArtifact({
+      type: "Plan",
+      payloadJson: {
+        summary: "s",
+        steps: [{}], // missing id/title/description
+        risks: [{ nested: "risk-object" }], // non-string risk
+        assumptions: [{ nested: "assumption-object" }], // non-string assumption
+      },
+    });
+    const humanAnswersArtifact = makeArtifact({
+      type: "HumanAnswers",
+      payloadJson: { answers: [{}] }, // missing questionId/answer
+    });
+    const researchedAnswersArtifact = makeArtifact({
+      type: "ResearchedAnswers",
+      payloadJson: { answers: [{}] }, // missing questionId/answer/confidence, no sources
+    });
+    const planReviewArtifact = makeArtifact({
+      type: "PlanReview",
+      payloadJson: { findings: [{}] }, // missing id/severity/title/details
+    });
+    const execReportArtifact = makeArtifact({
+      type: "ExecutionReport",
+      payloadJson: { checks: { lint: {} } }, // status/details both missing
+    });
+    const reviewArtifact = makeArtifact({
+      type: "Review",
+      payloadJson: { findings: [{}] }, // missing id/severity/title/details
+    });
+
+    const result = buildChatSystemPrompt(run, [
+      planArtifact,
+      humanAnswersArtifact,
+      researchedAnswersArtifact,
+      planReviewArtifact,
+      execReportArtifact,
+      reviewArtifact,
+    ]);
+
+    expect(result).toContain("  - **** : ");
+    expect(result).toContain(JSON.stringify({ nested: "risk-object" }));
+    expect(result).toContain(JSON.stringify({ nested: "assumption-object" }));
+    expect(result).toContain("**[]:** ");
+    expect(result).toContain("**[] ():** ");
+    expect(result).toContain("**[] ** (): ");
+    expect(result).toContain("**Lint:** ?");
+  });
 });
