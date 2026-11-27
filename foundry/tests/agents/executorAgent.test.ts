@@ -208,4 +208,102 @@ describe("ExecutorAgent.run()", () => {
     expect(payload?.score).toBe(0.42);
     expect(payload?.executionVersion).toBe(1);
   });
+
+  it("injects the operator note into the rendered prompt when provided", async () => {
+    const { agent, getSystemPrompt, getUserPrompt } = buildAgent();
+
+    await agent.run(makePlan(), makeTaskBundle(), "run-1", undefined, {
+      operatorNote: "Please double-check the auth flow.",
+    });
+
+    const systemPrompt = getSystemPrompt();
+    const userPrompt = getUserPrompt();
+    expect(systemPrompt + userPrompt).toContain("## Operator Note");
+    expect(systemPrompt + userPrompt).toContain("Please double-check the auth flow.");
+    expect(systemPrompt + userPrompt).toContain("high-priority clarification");
+  });
+
+  it("omits the operator note section when no operator note is provided", async () => {
+    const { agent, getSystemPrompt, getUserPrompt } = buildAgent();
+
+    await agent.run(makePlan(), makeTaskBundle(), "run-1");
+
+    const systemPrompt = getSystemPrompt();
+    const userPrompt = getUserPrompt();
+    expect(systemPrompt + userPrompt).not.toContain("## Operator Note");
+    expect(systemPrompt + userPrompt).not.toContain("{{operatorNoteSection}}");
+  });
+
+  it("logs hasOperatorNote=true when an operator note is present, false otherwise", async () => {
+    const { agent, logger } = buildAgent();
+
+    await agent.run(makePlan(), makeTaskBundle(), "run-1", undefined, {
+      operatorNote: "note",
+    });
+    const withNote = logger.info.mock.calls.find(
+      (c: unknown[]) => c[1] === "Starting executor agent",
+    );
+    expect((withNote?.[0] as Record<string, unknown>).hasOperatorNote).toBe(true);
+
+    logger.info.mockClear();
+    await agent.run(makePlan(), makeTaskBundle(), "run-1");
+    const withoutNote = logger.info.mock.calls.find(
+      (c: unknown[]) => c[1] === "Starting executor agent",
+    );
+    expect((withoutNote?.[0] as Record<string, unknown>).hasOperatorNote).toBe(false);
+  });
+
+  it("logs checksPass=false when any check does not pass", async () => {
+    const { agent, logger } = buildAgent({
+      checks: {
+        lint: { status: "pass", details: "ok" },
+        typecheck: { status: "pass", details: "ok" },
+        tests: { status: "fail", details: "1 failing" },
+      },
+    });
+
+    await agent.run(makePlan(), makeTaskBundle(), "run-1");
+
+    const completionLog = logger.info.mock.calls.find(
+      (c: unknown[]) => c[1] === "Execution completed",
+    );
+    const payload = completionLog?.[0] as Record<string, unknown> | undefined;
+    expect(payload?.checksPass).toBe(false);
+  });
+
+  it("commits and pushes using the retry's existing branch when provided, else the default working branch", async () => {
+    const { agent, gitService } = buildAgent();
+
+    await agent.run(makePlan(), makeTaskBundle(), "run-1", { existingBranch: "ai/retry-branch" });
+    expect(gitService.commitAndPush).toHaveBeenCalledWith(
+      "/tmp",
+      "ai/retry-branch",
+      expect.stringContaining("[AI] Implement:"),
+    );
+
+    gitService.commitAndPush.mockClear();
+    await agent.run(makePlan(), makeTaskBundle(), "run-1");
+    expect(gitService.commitAndPush).toHaveBeenCalledWith(
+      "/tmp",
+      "ai/lin-1",
+      expect.stringContaining("[AI] Implement:"),
+    );
+  });
+
+  it("marks isRetry true only when retry has an existingBranch or existingPR", async () => {
+    const { agent, logger } = buildAgent();
+
+    await agent.run(makePlan(), makeTaskBundle(), "run-1", { existingPR: 5 });
+    const withRetry = logger.info.mock.calls.find(
+      (c: unknown[]) => c[1] === "Starting executor agent",
+    );
+    expect((withRetry?.[0] as Record<string, unknown>).isRetry).toBe(true);
+
+    logger.info.mockClear();
+    await agent.run(makePlan(), makeTaskBundle(), "run-1");
+    const withoutRetry = logger.info.mock.calls.find(
+      (c: unknown[]) => c[1] === "Starting executor agent",
+    );
+    expect((withoutRetry?.[0] as Record<string, unknown>).isRetry).toBe(false);
+  });
 });

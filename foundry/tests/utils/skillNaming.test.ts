@@ -21,4 +21,24 @@ describe("skillNaming", () => {
       "dev-env-pause-resume",
     );
   });
+
+  it("normalizeSkillName falls back to slugifying when name is undefined", () => {
+    expect(normalizeSkillName(undefined, "dev-env pause/resume")).toBe("dev-env-pause-resume");
+  });
+
+  it("normalizeSkillName falls back to slugifying when name is an empty/whitespace-only string", () => {
+    expect(normalizeSkillName("   ", "dev-env pause/resume")).toBe("dev-env-pause-resume");
+    expect(normalizeSkillName("", "fallback label")).toBe("fallback-label");
+  });
+
+  it("slugifySkillName falls back to 'distilled-skill' when the slug is empty after stripping", () => {
+    expect(slugifySkillName("!!!")).toBe("distilled-skill");
+    expect(slugifySkillName("")).toBe("distilled-skill");
+  });
+
+  it("slugifySkillName truncates to 64 characters", () => {
+    const longLabel = "a".repeat(100);
+    const slug = slugifySkillName(longLabel);
+    expect(slug.length).toBe(64);
+  });
 });

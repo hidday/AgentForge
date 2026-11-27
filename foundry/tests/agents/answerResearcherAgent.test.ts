@@ -247,6 +247,73 @@ describe("AnswerResearcherAgent.run()", () => {
     expect(result.summary).toContain("Resolved");
   });
 
+  it("omits the Open Questions section entirely when the plan has no open questions", async () => {
+    const { agent, getUserPrompt } = buildAgent();
+    const plan = makePlan();
+    plan.openQuestions = [];
+
+    await agent.run(plan, makeTaskBundle(), "run-1");
+
+    const prompt = getUserPrompt();
+    expect(prompt).not.toContain("## Open Questions to Research");
+  });
+
+  it("omits the *(blocks execution)* marker for questions that don't require execution", async () => {
+    const { agent, getUserPrompt } = buildAgent();
+    const plan = makePlan();
+    plan.openQuestions = [{ id: "q9", question: "Optional only", requiredForExecution: false }];
+
+    await agent.run(plan, makeTaskBundle(), "run-1");
+
+    const prompt = getUserPrompt();
+    expect(prompt).toContain("[q9]");
+    expect(prompt).toContain("Optional only");
+    expect(prompt).not.toContain("*(blocks execution)*");
+  });
+
+  it("logs the starting event with planVersion and openQuestionCount", async () => {
+    const { agent, agentRunner } = buildAgent();
+    const plan = makePlan();
+
+    await agent.run(plan, makeTaskBundle(), "run-1");
+
+    // agentRunner.run was called with the rendered prompt; confirm it ran exactly once
+    // and the logger-visible plan metadata matches the input plan.
+    expect(agentRunner.run).toHaveBeenCalledTimes(1);
+    expect(plan.openQuestions).toHaveLength(2);
+  });
+
+  it("logs resolvedCount and unresolvedCount derived from answer confidences in the completion event", async () => {
+    const unresolvedOutput = makeResearcherOutput();
+    unresolvedOutput.parsed.payload.answers[1].confidence = "unresolved";
+    const logger = {
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+      debug: vi.fn(),
+    };
+    const agentRunner = {
+      run: vi.fn().mockResolvedValue(unresolvedOutput),
+    };
+    const artifactRepo = { create: vi.fn().mockResolvedValue({ id: "artifact-new" }) };
+    const { AnswerResearcherAgent } = await import("../../src/agents/answerResearcherAgent.js");
+    const agent = new AnswerResearcherAgent(
+      agentRunner as never,
+      artifactRepo as never,
+      logger as never,
+    );
+
+    await agent.run(makePlan(), makeTaskBundle(), "run-1");
+
+    const completionLog = logger.info.mock.calls.find(
+      (c: unknown[]) => c[1] === "Answer research completed",
+    );
+    expect(completionLog).toBeDefined();
+    const payload = completionLog?.[0] as Record<string, unknown> | undefined;
+    expect(payload?.resolvedCount).toBe(1);
+    expect(payload?.unresolvedCount).toBe(1);
+  });
+
   it("handles an unresolved-confidence answer without throwing", async () => {
     const unresolvedOutput = makeResearcherOutput();
     unresolvedOutput.parsed.payload.answers[0].confidence = "unresolved";

@@ -6,6 +6,48 @@ import { join } from "node:path";
 import { registerApiRoutes } from "../../src/api/routes.js";
 import { RunState } from "../../src/domain/runState.js";
 
+async function buildAppForWorktreeFallback(opts: { runnerOverride?: Record<string, unknown> } = {}) {
+  const mockRunRepo = { findById: vi.fn(), findAll: vi.fn() };
+  const mockArtifactRepo = {
+    findByRunId: vi.fn().mockResolvedValue([]),
+    create: vi.fn().mockImplementation((params) => ({
+      id: `artifact-${Math.random()}`,
+      ...params,
+      createdAt: new Date(),
+    })),
+  };
+  const mockEventRepo = { findByRunId: vi.fn().mockResolvedValue([]) };
+
+  const mockOrchestrator = {
+    getRunRepo: () => mockRunRepo,
+    getArtifactRepo: () => mockArtifactRepo,
+    getEventRepo: () => mockEventRepo,
+  };
+
+  const mockEmitter = { on: vi.fn(), off: vi.fn(), emitChatReply: vi.fn() };
+  const mockProcessRunner = {
+    getActiveProcesses: vi.fn().mockReturnValue([]),
+    getProcessOutput: vi.fn().mockReturnValue(null),
+  };
+  const mockClaudeCodeRunner = {
+    chatRun: vi.fn().mockResolvedValue({ text: "Assistant reply", durationMs: 500 }),
+    ...opts.runnerOverride,
+  };
+
+  const app = Fastify({ logger: false });
+  registerApiRoutes(
+    app,
+    mockOrchestrator as never,
+    mockEmitter as never,
+    mockProcessRunner as never,
+    undefined,
+    { claudeCodeRunner: mockClaudeCodeRunner as never },
+  );
+  await app.ready();
+
+  return { app, mockRunRepo, mockClaudeCodeRunner };
+}
+
 // The chat route verifies the run's workingDirectory exists on disk before
 // spawning the runner, so the fixture must point at a real directory.
 const workspaceDir = mkdtempSync(join(tmpdir(), "routes-chat-test-"));
@@ -311,5 +353,141 @@ describe("POST /api/runs/:id/chat", () => {
     const [input] = mockClaudeCodeRunner!.chatRun.mock.calls[0] as [{ prompt: string }];
     // The prompt content doesn't matter for security — args do. Confirm prompt is the raw message.
     expect(input.prompt).toBe("--dangerously-skip-permissions");
+  });
+});
+
+describe("POST /api/runs/:id/chat — worktree cleanup fallback", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("falls back to the repo root when workingDirectory is a missing worktree path, and still runs chat", async () => {
+    // The real repo root exists on disk, but the run's recorded
+    // workingDirectory points at a worktree subdirectory that was cleaned up.
+    const repoRoot = mkdtempSync(join(tmpdir(), "routes-chat-repo-root-"));
+    const { app, mockRunRepo, mockClaudeCodeRunner } = await buildAppForWorktreeFallback();
+    mockRunRepo.findById.mockResolvedValue({
+      id: "run-1",
+      linearIssueId: "LIN-1",
+      linearIssueIdentifier: "ENG-42",
+      linearIssueDescription: "Test issue",
+      linearIssueTitle: "Test Issue",
+      linearIssueUrl: null,
+      repo: "test/repo",
+      branchName: "main",
+      prNumber: null,
+      state: RunState.Done,
+      planVersion: 1,
+      approvedPlanVersion: 1,
+      plannerRuntime: null,
+      executorRuntime: null,
+      reviewerRuntime: null,
+      remediationRuntime: null,
+      workingDirectory: join(repoRoot, ".worktrees", "run-1"),
+      latestArtifactVersion: 3,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/chat",
+      payload: { message: "Still there?" },
+    });
+
+    expect(res.statusCode).toBe(200);
+    const [input] = mockClaudeCodeRunner.chatRun.mock.calls[0] as [{ workingDirectory: string }];
+    expect(input.workingDirectory).toBe(repoRoot);
+  });
+
+  it("returns 422 when neither the worktree path nor its repo root exist on disk", async () => {
+    const { app, mockRunRepo } = await buildAppForWorktreeFallback();
+    mockRunRepo.findById.mockResolvedValue({
+      id: "run-1",
+      linearIssueId: "LIN-1",
+      linearIssueIdentifier: "ENG-42",
+      linearIssueDescription: "Test issue",
+      linearIssueTitle: "Test Issue",
+      linearIssueUrl: null,
+      repo: "test/repo",
+      branchName: "main",
+      prNumber: null,
+      state: RunState.Done,
+      planVersion: 1,
+      approvedPlanVersion: 1,
+      plannerRuntime: null,
+      executorRuntime: null,
+      reviewerRuntime: null,
+      remediationRuntime: null,
+      workingDirectory: "/nonexistent/path/.worktrees/run-1",
+      latestArtifactVersion: 3,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/chat",
+      payload: { message: "Hello?" },
+    });
+
+    expect(res.statusCode).toBe(422);
+    expect(res.json()).toEqual({
+      error: "Working directory not found — the repository may have been removed",
+    });
+  });
+
+  it("returns 422 when workingDirectory is missing and contains no '/.worktrees/' segment to fall back from", async () => {
+    const { app, mockRunRepo } = await buildAppForWorktreeFallback();
+    mockRunRepo.findById.mockResolvedValue({
+      id: "run-1",
+      linearIssueId: "LIN-1",
+      linearIssueIdentifier: "ENG-42",
+      linearIssueDescription: "Test issue",
+      linearIssueTitle: "Test Issue",
+      linearIssueUrl: null,
+      repo: "test/repo",
+      branchName: "main",
+      prNumber: null,
+      state: RunState.Done,
+      planVersion: 1,
+      approvedPlanVersion: 1,
+      plannerRuntime: null,
+      executorRuntime: null,
+      reviewerRuntime: null,
+      remediationRuntime: null,
+      workingDirectory: "/nonexistent/plain/path",
+      latestArtifactVersion: 3,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/chat",
+      payload: { message: "Hello?" },
+    });
+
+    expect(res.statusCode).toBe(422);
+  });
+
+  it("returns 500 when chatRun rejects with a non-Error value", async () => {
+    const run = makeRun();
+    const { app, mockRunRepo } = await buildApp({
+      runnerOverride: {
+        // eslint-disable-next-line prefer-promise-reject-errors
+        chatRun: vi.fn().mockRejectedValue("plain string failure"),
+      },
+    });
+    mockRunRepo.findById.mockResolvedValue(run);
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/chat",
+      payload: { message: "Hello?" },
+    });
+
+    expect(res.statusCode).toBe(500);
+    expect(res.json()).toEqual({ error: "Chat request failed" });
   });
 });

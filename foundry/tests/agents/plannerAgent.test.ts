@@ -84,7 +84,7 @@ function buildPlannerAgent() {
     logger as never,
   );
 
-  return { agent, agentRunner, artifactRepo, getPrompt: () => capturedPrompt };
+  return { agent, agentRunner, artifactRepo, logger, getPrompt: () => capturedPrompt };
 }
 
 describe("PlannerAgent.run()", () => {
@@ -303,5 +303,216 @@ describe("PlannerAgent.run()", () => {
       expect(prompt).not.toContain("Background: Related Linear Context");
       expect(prompt).not.toContain("{{relatedContextSection}}");
     });
+  });
+
+  describe("planReviewFindings injection", () => {
+    it("renders '## AI Plan Review Findings' section with summary and finding lines when provided", async () => {
+      const { agent, getPrompt } = buildPlannerAgent();
+      const bundle = makeTaskBundle();
+
+      await agent.run(bundle, "run-1", {
+        planReviewFindings: {
+          summary: "Plan is missing error handling detail.",
+          findings: [
+            {
+              id: "pf1",
+              severity: "important",
+              title: "No error handling step",
+              details: "Malformed JSON bodies are not addressed.",
+            },
+          ],
+        },
+      });
+
+      const prompt = getPrompt();
+      expect(prompt).toContain("## AI Plan Review Findings (from previous plan)");
+      expect(prompt).toContain("Plan is missing error handling detail.");
+      expect(prompt).toContain("- **[important] No error handling step** (pf1): Malformed JSON bodies are not addressed.");
+      expect(prompt).toContain("Incorporate these findings into the revised plan");
+    });
+
+    it("omits the plan review findings section when not provided", async () => {
+      const { agent, getPrompt } = buildPlannerAgent();
+      const bundle = makeTaskBundle();
+
+      await agent.run(bundle, "run-1");
+
+      const prompt = getPrompt();
+      expect(prompt).not.toContain("## AI Plan Review Findings");
+      expect(prompt).not.toContain("{{planReviewSection}}");
+    });
+  });
+
+  describe("previousPlan injection", () => {
+    it("renders '## Previously Rejected Plan' with steps, risks, assumptions and open questions", async () => {
+      const { agent, getPrompt } = buildPlannerAgent();
+      const bundle = makeTaskBundle();
+
+      await agent.run(bundle, "run-1", {
+        previousPlan: {
+          planVersion: 2,
+          summary: "Old plan summary",
+          requirementsTraceability: "",
+          assumptions: ["Assumed Postgres"],
+          openQuestions: [
+            { id: "q1", question: "Use OAuth2?", requiredForExecution: true },
+          ],
+          risks: ["Might break legacy clients"],
+          steps: [{ id: "s1", title: "Step One", description: "Do the thing" }],
+          testPlan: "Run the suite",
+          confidence: 0.75,
+        },
+      });
+
+      const prompt = getPrompt();
+      expect(prompt).toContain("## Previously Rejected Plan (v2)");
+      expect(prompt).toContain("**Summary:** Old plan summary");
+      expect(prompt).toContain("**Confidence:** 75%");
+      expect(prompt).toContain("1. **Step One** (s1): Do the thing");
+      expect(prompt).toContain("**Risks:**\n- Might break legacy clients");
+      expect(prompt).toContain("**Assumptions:**\n- Assumed Postgres");
+      expect(prompt).toContain("[q1] Use OAuth2? *(blocks execution)*");
+      expect(prompt).toContain("**Test Plan:** Run the suite");
+      expect(prompt).toContain("Use this as the starting point for the new plan");
+    });
+
+    it("omits risks/assumptions/open-questions sub-sections when previousPlan has none of them", async () => {
+      const { agent, getPrompt } = buildPlannerAgent();
+      const bundle = makeTaskBundle();
+
+      await agent.run(bundle, "run-1", {
+        previousPlan: {
+          planVersion: 1,
+          summary: "Bare plan",
+          requirementsTraceability: "",
+          assumptions: [],
+          openQuestions: [],
+          risks: [],
+          steps: [{ id: "s1", title: "Step One", description: "Do the thing" }],
+          testPlan: "Run the suite",
+          confidence: 0.5,
+        },
+      });
+
+      const prompt = getPrompt();
+      expect(prompt).toContain("## Previously Rejected Plan (v1)");
+      expect(prompt).not.toContain("**Risks:**");
+      expect(prompt).not.toContain("**Assumptions:**");
+      expect(prompt).not.toContain("**Open Questions:**");
+    });
+
+    it("omits the previous plan section when not provided", async () => {
+      const { agent, getPrompt } = buildPlannerAgent();
+      const bundle = makeTaskBundle();
+
+      await agent.run(bundle, "run-1");
+
+      const prompt = getPrompt();
+      expect(prompt).not.toContain("## Previously Rejected Plan");
+      expect(prompt).not.toContain("{{previousPlanSection}}");
+    });
+  });
+
+  describe("priorSkills injection", () => {
+    it("renders '## Prior Skills from Similar Tasks' with name, taskCategory, description and markdown", async () => {
+      const { agent, getPrompt } = buildPlannerAgent();
+      const bundle = makeTaskBundle();
+
+      await agent.run(bundle, "run-1", {
+        priorSkills: [
+          {
+            id: "skill-1",
+            repoSlug: "acme/backend-api",
+            name: "zod-validation-middleware",
+            taskCategory: "api-validation",
+            description: "How to add Zod validation to Fastify routes.",
+            skillMarkdown: "## Steps\n1. Create middleware\n2. Apply to routes",
+            utilityScore: 0.9,
+            lastUsedAt: new Date("2024-01-01"),
+          },
+        ],
+      });
+
+      const prompt = getPrompt();
+      expect(prompt).toContain("## Prior Skills from Similar Tasks");
+      expect(prompt).toContain("### zod-validation-middleware (api-validation)");
+      expect(prompt).toContain("How to add Zod validation to Fastify routes.");
+      expect(prompt).toContain("## Steps\n1. Create middleware\n2. Apply to routes");
+    });
+
+    it("falls back to taskCategory as the heading when a prior skill has no name", async () => {
+      const { agent, getPrompt } = buildPlannerAgent();
+      const bundle = makeTaskBundle();
+
+      await agent.run(bundle, "run-1", {
+        priorSkills: [
+          {
+            id: "skill-2",
+            repoSlug: "acme/backend-api",
+            name: null,
+            description: null,
+            taskCategory: "api-validation",
+            skillMarkdown: "## Steps\nDo the thing",
+            utilityScore: 0.5,
+            lastUsedAt: new Date("2024-01-01"),
+          },
+        ],
+      });
+
+      const prompt = getPrompt();
+      expect(prompt).toContain("### api-validation");
+      expect(prompt).not.toContain("### api-validation (api-validation)");
+    });
+
+    it("omits the prior skills section when priorSkills is empty or absent", async () => {
+      const { agent, getPrompt } = buildPlannerAgent();
+      const bundle = makeTaskBundle();
+
+      await agent.run(bundle, "run-1", { priorSkills: [] });
+
+      const prompt = getPrompt();
+      expect(prompt).not.toContain("## Prior Skills from Similar Tasks");
+      expect(prompt).not.toContain("{{priorSkillsSection}}");
+    });
+  });
+
+  describe("planVersionOverride", () => {
+    it("overrides the model-returned planVersion with the provided value", async () => {
+      const { agent, artifactRepo } = buildPlannerAgent();
+      const bundle = makeTaskBundle();
+
+      const plan = await agent.run(bundle, "run-1", { planVersionOverride: 7 });
+
+      expect(plan.planVersion).toBe(7);
+      const calls = artifactRepo.create.mock.calls.map((c: unknown[]) => c[0]) as {
+        type: string;
+        version: number;
+      }[];
+      const planArtifact = calls.find((a) => a.type === "Plan");
+      expect(planArtifact?.version).toBe(7);
+    });
+
+    it("keeps the model-returned planVersion when no override is provided", async () => {
+      const { agent } = buildPlannerAgent();
+      const bundle = makeTaskBundle();
+
+      const plan = await agent.run(bundle, "run-1");
+
+      expect(plan.planVersion).toBe(2);
+    });
+  });
+
+  it("logs the completion event with planVersion, confidence and step count", async () => {
+    const { agent, logger } = buildPlannerAgent();
+    const bundle = makeTaskBundle();
+
+    await agent.run(bundle, "run-1");
+
+    const completionLog = logger.info.mock.calls.find((c: unknown[]) => c[1] === "Plan created");
+    expect(completionLog).toBeDefined();
+    const payload = completionLog?.[0] as Record<string, unknown> | undefined;
+    expect(payload?.planVersion).toBe(2);
+    expect(payload?.confidence).toBe(0.9);
+    expect(payload?.steps).toBe(1);
   });
 });

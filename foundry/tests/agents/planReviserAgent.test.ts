@@ -103,7 +103,7 @@ function buildPlanReviserAgent() {
     logger as never,
   );
 
-  return { agent, getPrompt: () => capturedPrompt };
+  return { agent, logger, getPrompt: () => capturedPrompt };
 }
 
 describe("PlanReviserAgent.run() relatedContext rendering", () => {
@@ -149,5 +149,71 @@ describe("PlanReviserAgent.run() relatedContext rendering", () => {
     expect(prompt).not.toContain("BEGIN BACKGROUND CONTEXT");
     expect(prompt).not.toContain("Background: Related Linear Context");
     expect(prompt).not.toContain("{{relatedContextSection}}");
+  });
+});
+
+describe("PlanReviserAgent.run() operator note", () => {
+  it("injects the operator note into the rendered prompt and logs hasOperatorNote=true", async () => {
+    const { agent, getPrompt, logger } = buildPlanReviserAgent();
+    const bundle = makeTaskBundle();
+
+    await agent.run(makePlan(), makePlanReview(), bundle, "run-1", {
+      operatorNote: "Keep the migration step first.",
+    });
+
+    const prompt = getPrompt();
+    expect(prompt).toContain("## Operator Note");
+    expect(prompt).toContain("Keep the migration step first.");
+    expect(prompt).toContain("do not drop the findings in favor of the note");
+
+    const startLog = logger.info.mock.calls.find(
+      (c: unknown[]) => c[1] === "Starting plan reviser agent (Claude CLI, boss mode)",
+    );
+    expect((startLog?.[0] as Record<string, unknown>).hasOperatorNote).toBe(true);
+  });
+
+  it("omits the operator note section and logs hasOperatorNote=false when absent", async () => {
+    const { agent, getPrompt, logger } = buildPlanReviserAgent();
+    const bundle = makeTaskBundle();
+
+    await agent.run(makePlan(), makePlanReview(), bundle, "run-1");
+
+    const prompt = getPrompt();
+    expect(prompt).not.toContain("## Operator Note");
+    expect(prompt).not.toContain("{{operatorNoteSection}}");
+
+    const startLog = logger.info.mock.calls.find(
+      (c: unknown[]) => c[1] === "Starting plan reviser agent (Claude CLI, boss mode)",
+    );
+    expect((startLog?.[0] as Record<string, unknown>).hasOperatorNote).toBe(false);
+  });
+
+  it("logs accepted/dismissed/partial disposition counts in the completion event", async () => {
+    const { agent, logger } = buildPlanReviserAgent();
+    const bundle = makeTaskBundle();
+
+    await agent.run(makePlan(), makePlanReview(), bundle, "run-1");
+
+    const completionLog = logger.info.mock.calls.find(
+      (c: unknown[]) => c[1] === "Plan revision completed",
+    );
+    expect(completionLog).toBeDefined();
+    const payload = completionLog?.[0] as Record<string, unknown> | undefined;
+    expect(payload?.originalVersion).toBe(1);
+    expect(payload?.revisedVersion).toBe(2);
+    expect(payload?.accepted).toBe(0);
+    expect(payload?.dismissed).toBe(0);
+    expect(payload?.partial).toBe(0);
+  });
+
+  it("returns both the revision and the revised plan from the agent runner's payload", async () => {
+    const { agent } = buildPlanReviserAgent();
+    const bundle = makeTaskBundle();
+
+    const result = await agent.run(makePlan(), makePlanReview(), bundle, "run-1");
+
+    expect(result.revision.originalPlanVersion).toBe(1);
+    expect(result.revision.revisedPlanVersion).toBe(2);
+    expect(result.revisedPlan.planVersion).toBe(2);
   });
 });

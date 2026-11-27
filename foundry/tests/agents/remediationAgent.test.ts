@@ -250,4 +250,69 @@ describe("RemediationAgent.run()", () => {
     expect(result.executionReport.score).toBe(0.85);
     expect(result.executionReport.executionVersion).toBe(2);
   });
+
+  it("counts accepted/rejected/partially_addressed resolutions correctly in the completion log", async () => {
+    const mixedRemediation = makeRemediation(undefined, {
+      resolution: [
+        { findingId: "f1", status: "accepted", action: "Fixed", rationale: "Real bug" },
+        { findingId: "f2", status: "rejected", action: "No changes", rationale: "Not valid" },
+        {
+          findingId: "f3",
+          status: "partially_addressed",
+          action: "Partially fixed",
+          rationale: "Fixed the main case but not the edge case",
+        },
+      ],
+    });
+    const { agent, logger } = buildAgent(mixedRemediation);
+
+    await agent.run(makeReview(), makePrevReport(), "/tmp/repo", "run-1");
+
+    const completionLog = logger.info.mock.calls.find(
+      (c: unknown[]) => c[1] === "Remediation completed",
+    );
+    expect(completionLog).toBeDefined();
+    const payload = completionLog?.[0] as Record<string, unknown> | undefined;
+    expect(payload?.accepted).toBe(1);
+    expect(payload?.rejected).toBe(1);
+    expect(payload?.partial).toBe(1);
+  });
+
+  it("logs the starting event with runId, reviewId and finding count before running", async () => {
+    const { agent, logger } = buildAgent();
+    const review = makeReview();
+
+    await agent.run(review, makePrevReport(), "/tmp/repo", "run-42");
+
+    const startLog = logger.info.mock.calls.find(
+      (c: unknown[]) => c[1] === "Starting remediation agent",
+    );
+    expect(startLog).toBeDefined();
+    const payload = startLog?.[0] as Record<string, unknown> | undefined;
+    expect(payload?.runId).toBe("run-42");
+    expect(payload?.reviewId).toBe("rev-001");
+    expect(payload?.findings).toBe(2);
+    expect(payload?.prevExecutionVersion).toBe(1);
+    expect(payload?.nextExecutionVersion).toBe(2);
+  });
+
+  it("does not log a warning when the model's executionVersion already matches the expected value", async () => {
+    const correctlyNumbered = makeRemediation({ executionVersion: 2 });
+    const { agent, logger } = buildAgent(correctlyNumbered);
+
+    await agent.run(makeReview(), makePrevReport(), "/tmp/repo", "run-1");
+
+    expect(logger.warn).not.toHaveBeenCalled();
+  });
+
+  it("passes the review and executionReport through to the rendered prompt vars", async () => {
+    const { agent, getUserPrompt } = buildAgent();
+    const review = makeReview();
+    const report = makePrevReport();
+
+    await agent.run(review, report, "/tmp/repo", "run-1");
+
+    const userPrompt = getUserPrompt();
+    expect(userPrompt).toContain("rev-001");
+  });
 });

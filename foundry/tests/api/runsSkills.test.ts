@@ -367,4 +367,42 @@ describe("GET /api/runs/:id/skills", () => {
       expect(body.distillationDecision?.displacedSkillId).toBe("xyz");
     });
   });
+
+  describe("(p) Defaults: SKILL_INJECTION without skillIds, SKILL_DISTILLATION without shouldPersist/reason", () => {
+    it("treats a missing skillIds field as an empty list and defaults shouldPersist/reason", async () => {
+      const events = [
+        {
+          id: "event-1",
+          runId: "run-1",
+          eventType: "SKILL_INJECTION",
+          source: "orchestrator",
+          // payloadJson intentionally omits `skillIds` entirely.
+          payloadJson: {},
+          createdAt: new Date(),
+        },
+        {
+          id: "event-2",
+          runId: "run-1",
+          eventType: "SKILL_DISTILLATION",
+          source: "distillation-agent",
+          // payloadJson intentionally omits `shouldPersist` and `reason`.
+          payloadJson: { taskCategory: null, displacedSkillId: null },
+          createdAt: new Date(),
+        },
+      ];
+
+      const { app } = await buildApp({ events });
+
+      const response = await app.inject({ method: "GET", url: "/api/runs/run-1/skills" });
+
+      expect(response.statusCode).toBe(200);
+      const body = response.json() as {
+        injectedSkills: unknown[];
+        distillationDecision: { shouldPersist: boolean; reason: string } | null;
+      };
+      expect(body.injectedSkills).toEqual([]);
+      expect(body.distillationDecision?.shouldPersist).toBe(false);
+      expect(body.distillationDecision?.reason).toBe("");
+    });
+  });
 });

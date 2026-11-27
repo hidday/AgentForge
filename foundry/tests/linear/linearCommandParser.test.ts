@@ -64,5 +64,29 @@ describe("parseLinearCommand", () => {
       const result = parseLinearCommand("/unknown-command");
       expect(result).toEqual({ type: "unknown", raw: "/unknown-command" });
     });
+
+    it("returns null for an empty string (boundary: first line is the empty string itself)", () => {
+      // Exercises the `trimmed.split("\n")[0]?.trim() ?? ""` boundary where
+      // the first line is "" rather than undefined.
+      const result = parseLinearCommand("");
+      expect(result).toBeNull();
+    });
+
+    it("returns null for whitespace-only input", () => {
+      const result = parseLinearCommand("   \n\n   ");
+      expect(result).toBeNull();
+    });
+
+    it("matches a command prefix even when followed by multiple spaces before the body", () => {
+      const result = parseLinearCommand("/reject-plan    spaced body");
+      expect(result).toEqual({ type: "reject-plan", body: "spaced body" });
+    });
+
+    it("does not match a prefix that merely starts with the command text (no space boundary)", () => {
+      // "/approve-plan-extra" starts with "/approve-plan" but isn't equal to
+      // it and isn't followed by a space, so it must fall through to unknown.
+      const result = parseLinearCommand("/approve-plan-extra");
+      expect(result).toEqual({ type: "unknown", raw: "/approve-plan-extra" });
+    });
   });
 });
