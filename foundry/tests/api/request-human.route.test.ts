@@ -218,6 +218,48 @@ describe("POST /api/runs/:id/actions/request-human", () => {
     expect(sendHumanRequest).toHaveBeenCalledTimes(1);
   });
 
+  it("does not debounce on a prior event of a different eventType, even with a matching reason payload and timestamp", async () => {
+    const recentTs = new Date(Date.now() - 60 * 60 * 1000); // 1h ago, within the window
+    const { app, sendHumanRequest } = await buildApp({
+      existingEvents: [
+        {
+          eventType: "PLAN_CREATED",
+          createdAt: recentTs,
+          payloadJson: { reason: "plan_ambiguous" },
+        },
+      ],
+    });
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/actions/request-human",
+      payload: { reason: "plan_ambiguous", summary: "Not a HUMAN_REQUESTED event" },
+    });
+    expect(response.statusCode).toBe(200);
+    expect(JSON.parse(response.body).debounced).toBe(false);
+    expect(sendHumanRequest).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not debounce on a matching-reason HUMAN_REQUESTED event that is older than the debounce window", async () => {
+    const staleTs = new Date(Date.now() - 7 * 60 * 60 * 1000); // 7h ago; debounceHours defaults to 6
+    const { app, sendHumanRequest } = await buildApp({
+      existingEvents: [
+        {
+          eventType: RunEvent.HUMAN_REQUESTED,
+          createdAt: staleTs,
+          payloadJson: { reason: "plan_ambiguous" },
+        },
+      ],
+    });
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/actions/request-human",
+      payload: { reason: "plan_ambiguous", summary: "Old matching event" },
+    });
+    expect(response.statusCode).toBe(200);
+    expect(JSON.parse(response.body).debounced).toBe(false);
+    expect(sendHumanRequest).toHaveBeenCalledTimes(1);
+  });
+
   it("records event even when no channels configured (notified all false)", async () => {
     const { app, mockEventRepo, sendHumanRequest } = await buildApp({
       isConfigured: false,
@@ -233,5 +275,100 @@ describe("POST /api/runs/:id/actions/request-human", () => {
     expect(body.notified).toEqual({ slack: false, email: false });
     expect(sendHumanRequest).not.toHaveBeenCalled();
     expect(mockEventRepo.create).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("POST /api/runs/:id/actions/request-human — defaults and edge cases", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  async function buildAppWithDefaults(opts: {
+    run?: ReturnType<typeof makeRun> | null;
+  } = {}) {
+    const run = opts.run === undefined ? makeRun() : opts.run;
+    const mockRunRepo = { findById: vi.fn().mockResolvedValue(run), findAll: vi.fn() };
+    const mockArtifactRepo = {
+      findByRunId: vi.fn().mockResolvedValue([]),
+      findLatestByType: vi.fn().mockResolvedValue(null),
+    };
+    const mockEventRepo = {
+      findByRunId: vi.fn().mockResolvedValue([]),
+      create: vi.fn().mockResolvedValue({}),
+    };
+    const mockOrchestrator = {
+      getRunRepo: () => mockRunRepo,
+      getArtifactRepo: () => mockArtifactRepo,
+      getEventRepo: () => mockEventRepo,
+    };
+    const mockEmitter = { on: vi.fn(), off: vi.fn() };
+    const mockProcessRunner = {
+      getActiveProcesses: vi.fn().mockReturnValue([]),
+      getProcessOutput: vi.fn().mockReturnValue(null),
+    };
+    const sendHumanRequest = vi.fn().mockResolvedValue({
+      slack: { attempted: true, ok: true },
+      email: { attempted: false, ok: false },
+    });
+    const notificationService = { isConfigured: () => true, sendHumanRequest };
+
+    const app = Fastify({ logger: false });
+    // No `uiBaseUrl`/`debounceHours` passed here, exercising the route's own
+    // `options.uiBaseUrl ?? "http://localhost:5173"` and
+    // `options.debounceHours ?? 6` default fallbacks.
+    registerApiRoutes(
+      app,
+      mockOrchestrator as never,
+      mockEmitter as never,
+      mockProcessRunner as never,
+      undefined,
+      { notificationService: notificationService as never },
+    );
+    await app.ready();
+    return { app, sendHumanRequest };
+  }
+
+  it("returns 404 when the run is not found", async () => {
+    const { app } = await buildAppWithDefaults({ run: null });
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/actions/request-human",
+      payload: { reason: "other", summary: "Anything" },
+    });
+
+    expect(res.statusCode).toBe(404);
+    expect(res.json()).toEqual({ error: "Run not found" });
+  });
+
+  it("falls back to the default uiBaseUrl/debounceHours when options omit them", async () => {
+    const { app, sendHumanRequest } = await buildAppWithDefaults();
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/actions/request-human",
+      payload: { reason: "other", summary: "Default options" },
+    });
+
+    expect(res.statusCode).toBe(200);
+    const payload = sendHumanRequest.mock.calls[0]![0] as { runUrl: string };
+    expect(payload.runUrl).toBe("http://localhost:5173/runs/run-1");
+  });
+
+  it("falls back linearIssue.identifier to undefined when the run has no linearIssueIdentifier", async () => {
+    const run = { ...makeRun(), linearIssueIdentifier: null };
+    const { app, sendHumanRequest } = await buildAppWithDefaults({ run });
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/actions/request-human",
+      payload: { reason: "other", summary: "No identifier" },
+    });
+
+    expect(res.statusCode).toBe(200);
+    const payload = sendHumanRequest.mock.calls[0]![0] as {
+      linearIssue: { identifier?: string };
+    };
+    expect(payload.linearIssue.identifier).toBeUndefined();
   });
 });

@@ -209,4 +209,35 @@ describe("POST /api/runs/:id/actions/answer-questions", () => {
     const body = JSON.parse(response.body) as { error: string };
     expect(body.error).toContain("Wrong state");
   });
+
+  it("returns 400 with err.message for a plain Error that is neither PolicyError nor ValidationError", async () => {
+    const { app, mockOrchestrator } = await buildApp();
+    mockOrchestrator.answerQuestions.mockRejectedValue(new Error("Unexpected failure"));
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/actions/answer-questions",
+      payload: { answers: [{ questionId: "q1", answer: "yes" }] },
+    });
+
+    expect(response.statusCode).toBe(400);
+    const body = JSON.parse(response.body) as { error: string };
+    expect(body.error).toBe("Unexpected failure");
+  });
+
+  it("returns 400 and stringifies a non-Error value rejected by the orchestrator", async () => {
+    const { app, mockOrchestrator } = await buildApp();
+    // eslint-disable-next-line prefer-promise-reject-errors
+    mockOrchestrator.answerQuestions.mockRejectedValue("plain string failure");
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/runs/run-1/actions/answer-questions",
+      payload: { answers: [{ questionId: "q1", answer: "yes" }] },
+    });
+
+    expect(response.statusCode).toBe(400);
+    const body = JSON.parse(response.body) as { error: string };
+    expect(body.error).toBe("plain string failure");
+  });
 });
