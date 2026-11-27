@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor, act } from "@testing-library/react";
+import { render, screen, waitFor, act, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { Artifact } from "@/api/client.ts";
 
@@ -249,6 +249,148 @@ describe("ChatPanel", () => {
       // After resolution, still only artifact-derived messages (2 from props)
       // "New question" should NOT appear
       expect(screen.queryByText("New question")).toBeNull();
+    });
+  });
+
+  it("collapses the message list and input form when the header is clicked, and expands again on a second click", async () => {
+    const artifacts: Artifact[] = [
+      makeArtifact("user", "Visible when expanded", "a1", "2024-01-01T00:00:01Z"),
+    ];
+    render(<ChatPanel runId={RUN_ID} artifacts={artifacts} />);
+
+    // Expanded by default
+    expect(screen.getByText("Visible when expanded")).toBeDefined();
+    expect(screen.getByPlaceholderText(/ask the agent/i)).toBeDefined();
+
+    const header = screen.getByRole("button", { name: /chat with agent/i });
+    await userEvent.click(header);
+
+    expect(screen.queryByText("Visible when expanded")).toBeNull();
+    expect(screen.queryByPlaceholderText(/ask the agent/i)).toBeNull();
+
+    await userEvent.click(header);
+
+    expect(screen.getByText("Visible when expanded")).toBeDefined();
+    expect(screen.getByPlaceholderText(/ask the agent/i)).toBeDefined();
+  });
+
+  it("shows the message count badge in the header once there are messages, and omits it when empty", () => {
+    const { rerender } = render(<ChatPanel runId={RUN_ID} artifacts={[]} />);
+    const header = () => screen.getByRole("button", { name: /chat with agent/i });
+    expect(header().textContent).not.toMatch(/\d/);
+
+    const artifacts: Artifact[] = [
+      makeArtifact("user", "One", "a1", "2024-01-01T00:00:01Z"),
+      makeArtifact("assistant", "Two", "a2", "2024-01-01T00:00:02Z"),
+    ];
+    rerender(<ChatPanel runId={RUN_ID} artifacts={artifacts} />);
+    expect(header().textContent).toContain("2");
+  });
+
+  it("scrolls the bottom anchor into view when scrollIntoView is available (jsdom does not implement it by default)", async () => {
+    const scrollIntoViewMock = vi.fn();
+    // Patch HTMLDivElement.prototype so the bottomRef's div picks it up.
+    HTMLDivElement.prototype.scrollIntoView = scrollIntoViewMock;
+
+    try {
+      mockApi.sendChatMessage.mockResolvedValue({ reply: "ok", durationMs: 1 });
+      render(<ChatPanel runId={RUN_ID} artifacts={[]} />);
+
+      // Mount already triggers the effect once (messages.length/isLoading initial values)
+      expect(scrollIntoViewMock).toHaveBeenCalledWith({ behavior: "smooth" });
+
+      scrollIntoViewMock.mockClear();
+
+      const input = screen.getByPlaceholderText(/ask the agent/i);
+      await userEvent.type(input, "Hi");
+      await userEvent.click(screen.getByRole("button", { name: /send/i }));
+
+      // isLoading flips true then false, each a dependency change that
+      // should re-trigger the auto-scroll effect.
+      await waitFor(() => {
+        expect(scrollIntoViewMock).toHaveBeenCalledWith({ behavior: "smooth" });
+      });
+    } finally {
+      // @ts-expect-error -- cleanup the jsdom prototype patch
+      delete HTMLDivElement.prototype.scrollIntoView;
+    }
+  });
+
+  it("shows a generic error message when sendChatMessage rejects with a non-Error value", async () => {
+    mockApi.sendChatMessage.mockRejectedValue("network down");
+
+    render(<ChatPanel runId={RUN_ID} artifacts={[]} />);
+    const input = screen.getByPlaceholderText(/ask the agent/i);
+    await userEvent.type(input, "Question");
+    await userEvent.click(screen.getByRole("button", { name: /send/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText("Chat request failed")).toBeDefined();
+    });
+  });
+
+  it("renders an empty string when a ChatMessage artifact's payload has no content field", () => {
+    const artifacts: Artifact[] = [
+      {
+        id: "a1",
+        runId: RUN_ID,
+        type: "ChatMessage",
+        version: 1,
+        payloadJson: { role: "user" },
+        rawText: "",
+        createdAt: "2024-01-01T00:00:01Z",
+      },
+    ];
+    const { container } = render(<ChatPanel runId={RUN_ID} artifacts={artifacts} />);
+
+    // The message bubble renders, just with empty text content.
+    const bubble = container.querySelector(".whitespace-pre-wrap");
+    expect(bubble).not.toBeNull();
+    expect(bubble!.textContent).toBe("");
+  });
+
+  it("ignores a form submit with only whitespace input, bypassing the disabled Send button", () => {
+    render(<ChatPanel runId={RUN_ID} artifacts={[]} />);
+    const input = screen.getByPlaceholderText(/ask the agent/i) as HTMLInputElement;
+    const form = input.closest("form")!;
+
+    // Directly set a whitespace-only value and submit the form; the native
+    // disabled-button guard would normally prevent this, but fireEvent.submit
+    // bypasses it so we can exercise the `!trimmed` early-return branch.
+    fireEvent.change(input, { target: { value: "   " } });
+    fireEvent.submit(form);
+
+    expect(mockApi.sendChatMessage).not.toHaveBeenCalled();
+  });
+
+  it("ignores a second form submit while a request is already loading", async () => {
+    let resolveRequest!: (v: { reply: string; durationMs: number }) => void;
+    mockApi.sendChatMessage.mockReturnValue(
+      new Promise<{ reply: string; durationMs: number }>((res) => {
+        resolveRequest = res;
+      }),
+    );
+
+    render(<ChatPanel runId={RUN_ID} artifacts={[]} />);
+    const input = screen.getByPlaceholderText(/ask the agent/i) as HTMLInputElement;
+    const form = input.closest("form")!;
+
+    await userEvent.type(input, "First question");
+    await userEvent.click(screen.getByRole("button", { name: /send/i }));
+    expect(mockApi.sendChatMessage).toHaveBeenCalledTimes(1);
+
+    // While the first request is still pending (isLoading = true), force a
+    // second submit directly on the form, bypassing the disabled input/button,
+    // to exercise the `isLoading` early-return branch.
+    fireEvent.submit(form);
+    expect(mockApi.sendChatMessage).toHaveBeenCalledTimes(1);
+
+    act(() => {
+      resolveRequest({ reply: "Done", durationMs: 1 });
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByText(/agent is thinking/i)).toBeNull();
     });
   });
 });
